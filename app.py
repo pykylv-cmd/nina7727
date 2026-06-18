@@ -58,7 +58,7 @@ Atbildi kā sarunu biedrs, nevis asistents.
 Galvenais mērķis:
 lai cilvēkam šķiet, ka viņš runā ar dzīvu sarunu biedreni, nevis programmu.
 """
-
+memory = {}
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
      user_text = update.message.text
     user_id = str(update.effective_user.id)
