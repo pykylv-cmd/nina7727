@@ -60,14 +60,26 @@ lai cilvēkam šķiet, ka viņš runā ar dzīvu sarunu biedreni, nevis programm
 """
 
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text
+     user_text = update.message.text
+    user_id = str(update.effective_user.id)
+
+    if user_id not in memory:
+        memory[user_id] = []
+
+    memory[user_id].append(f"Lietotājs: {user_text}")
+    memory[user_id] = memory[user_id][-12:]
+
+    conversation = "\n".join(memory[user_id])
 
     response = client.responses.create(
         model="gpt-4.1-mini",
-        input=f"{NINA_PROMPT}\n\nLietotājs: {user_text}"
+        input=f"{NINA_PROMPT}\n\nSarunas vēsture:\n{conversation}\n\nAtbildi uz pēdējo lietotāja ziņu dabiski."
     )
 
     answer = response.output_text
+
+    memory[user_id].append(f"Nina: {answer}")
+    memory[user_id] = memory[user_id][-12:]
 
     await update.message.reply_text(answer)
 
