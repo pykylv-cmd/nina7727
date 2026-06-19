@@ -12,6 +12,7 @@ TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 
 DB_FILE = "nina_memory.db"
 
+
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -39,6 +40,7 @@ def init_db():
     conn.commit()
     conn.close()
 
+
 def get_user(user_id):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -63,36 +65,16 @@ def get_user(user_id):
         "facts": row[3] or ""
     }
 
-def save_message(user_id, role, text):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO messages (user_id, role, text) VALUES (?, ?, ?)",
-        (user_id, role, text)
-    )
-    conn.commit()
-    conn.close()
 
-def get_recent_messages(user_id, limit=16):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
+def add_unique(old_text, new_item):
+    items = [x.strip() for x in old_text.split(",") if x.strip()]
+    if new_item and new_item not in items:
+        items.append(new_item)
+    return ", ".join(items)
 
-    c.execute(
-        "SELECT role, text FROM messages WHERE user_id = ? ORDER BY id DESC LIMIT ?",
-        (user_id, limit)
-    )
-
-    rows = c.fetchall()
-    conn.close()
-
-    rows.reverse()
-    return "\n".join([f"{role}: {text}" for role, text in rows])
 
 def update_profile_from_text(user_id, text):
     lower = text.lower()
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-
     user = get_user(user_id)
 
     name = user["name"]
@@ -108,71 +90,91 @@ def update_profile_from_text(user_id, text):
 
     if "man patīk " in lower:
         hobby = text.split("man patīk", 1)[1].strip()
-        if hobby and hobby not in hobbies:
-            hobbies = (hobbies + ", " + hobby).strip(", ")
+        hobbies = add_unique(hobbies, hobby)
 
-    if lower.startswith("atceries ka ") or "man svarīgi" in lower or "svarīgi" in lower:
-        if text not in facts:
-            facts = (facts + " | " + text).strip(" | ")
+    if lower.startswith("atceries ka ") or "man svarīgi" in lower:
+        facts = add_unique(facts, text)
 
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
     c.execute(
         "UPDATE users SET name = ?, city = ?, hobbies = ?, facts = ? WHERE user_id = ?",
         (name, city, hobbies, facts, user_id)
     )
-
     conn.commit()
     conn.close()
 
+
+def save_message(user_id, role, text):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO messages (user_id, role, text) VALUES (?, ?, ?)",
+        (user_id, role, text)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_recent_messages(user_id, limit=20):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute(
+        "SELECT role, text FROM messages WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+        (user_id, limit)
+    )
+    rows = c.fetchall()
+    conn.close()
+    rows.reverse()
+    return "\n".join([f"{role}: {text}" for role, text in rows])
+
+
 def profile_answer(user):
-    atbilde = "Es par tevi atceros:\n"
-    has_data = False
+    lines = []
 
     if user["name"]:
-        atbilde += f"• Vārds: {user['name']}\n"
-        has_data = True
-
+        lines.append(f"• Vārds: {user['name']}")
     if user["city"]:
-        atbilde += f"• Pilsēta: {user['city']}\n"
-        has_data = True
-
+        lines.append(f"• Pilsēta: {user['city']}")
     if user["hobbies"]:
-        atbilde += f"• Hobiji: {user['hobbies']}\n"
-        has_data = True
-
+        lines.append(f"• Patīk: {user['hobbies']}")
     if user["facts"]:
-        atbilde += f"• Svarīgi fakti: {user['facts']}\n"
-        has_data = True
+        lines.append(f"• Svarīgi fakti: {user['facts']}")
 
-    if not has_data:
-        atbilde += "Pagaidām vēl neko daudz neesmu saglabājusi. Pastāsti man kaut ko par sevi. 😊"
+    if not lines:
+        return "Pagaidām vēl maz zinu par tevi. Pastāsti, kas tev patīk vai kas tev svarīgs. 😊"
 
-    return atbilde
+    return "Es par tevi atceros:\n" + "\n".join(lines)
+
 
 NINA_PROMPT = """
 Tu esi Nina 7727.
 
-Tu esi silta, gudra un dabiska sarunu biedrene.
+Tu esi silta, gudra, interesanta un dabiska sarunu biedrene.
+Tu neesi parasts bots. Tu esi sajūta, pie kuras cilvēkam gribas atgriezties.
 
 Raksturs:
-- 70% draudzene
-- 20% viegls humors
-- 10% intuīcija un pašizziņa
+- 65% silta draudzene;
+- 20% viegls humors;
+- 10% intuīcija un pašizziņa;
+- 5% elegants koķetums pieaugušu cilvēku sarunās.
 
 Noteikumi:
 - Vienmēr runā latviešu valodā.
-- Nerunā kā asistents.
-- Nerunā kā robots.
+- Nerunā kā robots vai klientu atbalsts.
 - Neatkārto "Sveiks!" katrā atbildē.
-- Sveicienu lieto tikai sarunas sākumā.
-- Neuzrunā lietotāju sieviešu vai vīriešu dzimtē, ja dzimums nav zināms.
-- Nemin numeroloģiju, ja lietotājs to neprasa.
-- Ja lietotājs saka "vēl", "jā", "turpini", izmanto sarunas vēsturi.
-- Ja zini lietotāja vārdu, vari to reizēm izmantot dabiski.
+- Neuzrunā lietotāju sieviešu/vīriešu dzimtē, ja dzimums nav zināms.
+- Nemin numeroloģiju, ja cilvēks to neprasa.
 - Neizdomā faktus par lietotāju.
-- Ja runā par lietotāju, balsties tikai uz profilu vai sarunas vēsturi.
-- Atbildi īsi, silti, dzīvi un cilvēciski.
-- Galvenais: lai cilvēkam ir sajūta, ka viņš runā ar dzīvu sarunu biedreni.
+- Ja runā par lietotāju, balsties uz profilu un sarunas vēsturi.
+- Ja lietotājs saka "vēl", "jā", "turpini", saproti no konteksta, ko viņš turpina.
+- Atbildi īsi, dzīvi, sirsnīgi.
+- Ja cilvēkam ir stress, nomierini.
+- Vari runāt par attiecībām, pievilcību un seksualitāti cieņpilni, silti un eleganti.
+- Neraksti vulgāri vai pornogrāfiski.
+- Tavs galvenais mērķis: lai cilvēkam pēc sarunas ar tevi kļūst vieglāk un patīkamāk.
 """
+
 
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
@@ -217,7 +219,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Lietotāja profils:
 Vārds: {user["name"]}
 Pilsēta: {user["city"]}
-Hobiji: {user["hobbies"]}
+Patīk: {user["hobbies"]}
 Svarīgi fakti: {user["facts"]}
 """
 
@@ -228,10 +230,9 @@ Svarīgi fakti: {user["facts"]}
                 f"{NINA_PROMPT}\n\n"
                 f"{profile_info}\n\n"
                 f"Sarunas vēsture:\n{conversation}\n\n"
-                f"Atbildi uz pēdējo lietotāja ziņu, ņemot vērā profilu un sarunas vēsturi."
+                f"Atbildi uz pēdējo ziņu dabiski, ņemot vērā profilu un sarunas vēsturi."
             )
         )
-
         answer = response.output_text
 
     except Exception as e:
@@ -241,6 +242,21 @@ Svarīgi fakti: {user["facts"]}
     save_message(user_id, "Nina", answer)
 
     await update.message.reply_text(answer)
+
+
+@app.route("/")
+def home():
+    return "Nina7727 darbojas!"
+
+
+init_db()
+
+telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
+telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
+
+if __name__ == "__main__":
+    print("Nina7727 Memory v2.2 darbojas...")
+    telegram_app.run_polling()
 
 @app.route("/")
 def home():
