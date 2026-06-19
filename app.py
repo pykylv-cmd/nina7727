@@ -151,9 +151,29 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     user_id = str(update.effective_user.id)
 
-    update_profile_from_text(user_id, user_text)
+lower = user_text.lower()
 
-    user = get_user(user_id)
+if "ko tu par mani zini" in lower or "ko tu atceries" in lower:
+
+    atbilde = "Es par tevi atceros:\n"
+
+    if user["name"]:
+        atbilde += f"• Vārds: {user['name']}\n"
+
+    if user["city"]:
+        atbilde += f"• Pilsēta: {user['city']}\n"
+
+    if user["hobbies"]:
+        atbilde += f"• Hobiji: {user['hobbies']}\n"
+
+    if user["facts"]:
+        atbilde += f"• Svarīgi fakti: {user['facts']}\n"
+
+    if atbilde == "Es par tevi atceros:\n":
+        atbilde += "Pagaidām vēl neko neesmu saglabājusi."
+
+    await update.message.reply_text(atbilde)
+    return
     save_message(user_id, "Lietotājs", user_text)
 
     conversation = get_recent_messages(user_id)
