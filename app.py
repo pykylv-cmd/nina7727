@@ -123,6 +123,32 @@ def update_profile_from_text(user_id, text):
     conn.commit()
     conn.close()
 
+def profile_answer(user):
+    atbilde = "Es par tevi atceros:\n"
+
+    has_data = False
+
+    if user["name"]:
+        atbilde += f"• Vārds: {user['name']}\n"
+        has_data = True
+
+    if user["city"]:
+        atbilde += f"• Pilsēta: {user['city']}\n"
+        has_data = True
+
+    if user["hobbies"]:
+        atbilde += f"• Hobiji: {user['hobbies']}\n"
+        has_data = True
+
+    if user["facts"]:
+        atbilde += f"• Svarīgi fakti: {user['facts']}\n"
+        has_data = True
+
+    if not has_data:
+        atbilde += "Pagaidām vēl neko daudz neesmu saglabājusi. Pastāsti man kaut ko par sevi. 😊"
+
+    return atbilde
+
 NINA_PROMPT = """
 Tu esi Nina 7727.
 
@@ -143,6 +169,8 @@ Noteikumi:
 - Nemin numeroloģiju, ja lietotājs to neprasa.
 - Ja lietotājs saka "vēl", "jā", "turpini", izmanto sarunas vēsturi.
 - Ja zini lietotāja vārdu, vari to reizēm izmantot dabiski.
+- Neizdomā faktus par lietotāju.
+- Ja runā par lietotāju, balsties tikai uz profilu vai sarunas vēsturi.
 - Atbildi īsi, silti, dzīvi un cilvēciski.
 - Galvenais: lai cilvēkam ir sajūta, ka viņš runā ar dzīvu sarunu biedreni.
 """
@@ -150,30 +178,20 @@ Noteikumi:
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     user_id = str(update.effective_user.id)
+    lower = user_text.lower()
 
-lower = user_text.lower()
+    update_profile_from_text(user_id, user_text)
+    user = get_user(user_id)
 
-if "ko tu par mani zini" in lower or "ko tu atceries" in lower:
+    if (
+        "ko tu par mani zini" in lower
+        or "ko tu atceries" in lower
+        or "kas man patīk" in lower
+        or "ko par mani zini" in lower
+    ):
+        await update.message.reply_text(profile_answer(user))
+        return
 
-    atbilde = "Es par tevi atceros:\n"
-
-    if user["name"]:
-        atbilde += f"• Vārds: {user['name']}\n"
-
-    if user["city"]:
-        atbilde += f"• Pilsēta: {user['city']}\n"
-
-    if user["hobbies"]:
-        atbilde += f"• Hobiji: {user['hobbies']}\n"
-
-    if user["facts"]:
-        atbilde += f"• Svarīgi fakti: {user['facts']}\n"
-
-    if atbilde == "Es par tevi atceros:\n":
-        atbilde += "Pagaidām vēl neko neesmu saglabājusi."
-
-    await update.message.reply_text(atbilde)
-    return
     save_message(user_id, "Lietotājs", user_text)
 
     conversation = get_recent_messages(user_id)
@@ -220,5 +238,5 @@ telegram_app.add_handler(
 )
 
 if __name__ == "__main__":
-    print("Nina7727 SQLite Memory darbojas...")
+    print("Nina7727 Memory v1.5 darbojas...")
     telegram_app.run_polling()
