@@ -73,7 +73,7 @@ def save_message(user_id, role, text):
     conn.commit()
     conn.close()
 
-def get_recent_messages(user_id, limit=14):
+def get_recent_messages(user_id, limit=16):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
@@ -111,7 +111,7 @@ def update_profile_from_text(user_id, text):
         if hobby and hobby not in hobbies:
             hobbies = (hobbies + ", " + hobby).strip(", ")
 
-    if any(word in lower for word in ["atceries", "man svarīgi", "svarīgi"]):
+    if lower.startswith("atceries ka ") or "man svarīgi" in lower or "svarīgi" in lower:
         if text not in facts:
             facts = (facts + " | " + text).strip(" | ")
 
@@ -125,7 +125,6 @@ def update_profile_from_text(user_id, text):
 
 def profile_answer(user):
     atbilde = "Es par tevi atceros:\n"
-
     has_data = False
 
     if user["name"]:
@@ -183,11 +182,29 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     update_profile_from_text(user_id, user_text)
     user = get_user(user_id)
 
+    if "kā mani sauc" in lower:
+        if user["name"]:
+            await update.message.reply_text(f"Tevi sauc {user['name']}. 😊")
+        else:
+            await update.message.reply_text("Tu vēl neesi pateicis savu vārdu. 😊")
+        return
+
+    if "kur es dzīvoju" in lower:
+        if user["city"]:
+            await update.message.reply_text(f"Tu dzīvo: {user['city']}.")
+        else:
+            await update.message.reply_text("Tu vēl neesi pateicis, kur dzīvo. 😊")
+        return
+
     if (
         "ko tu par mani zini" in lower
+        or "ko tu par manīm zini" in lower
+        or "ko tu par mani atceries" in lower
+        or "ko tu par manīm atceries" in lower
         or "ko tu atceries" in lower
         or "kas man patīk" in lower
         or "ko par mani zini" in lower
+        or "ko par manīm zini" in lower
     ):
         await update.message.reply_text(profile_answer(user))
         return
@@ -238,5 +255,5 @@ telegram_app.add_handler(
 )
 
 if __name__ == "__main__":
-    print("Nina7727 Memory v1.5 darbojas...")
+    print("Nina7727 Memory v2.1 darbojas...")
     telegram_app.run_polling()
