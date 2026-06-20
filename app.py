@@ -68,8 +68,8 @@ def get_user(user_id):
 
 def split_items(text):
     text = text.replace("\n", ",")
-    text = text.replace(" un ", ",")
     text = text.replace(" arī", "")
+    text = re.sub(r"\s+un\s+", ",", text, flags=re.IGNORECASE)
     parts = [x.strip(" .,!?:;") for x in text.split(",")]
     return [x for x in parts if x]
 
@@ -83,6 +83,18 @@ def add_unique(old_text, new_items):
             items.append(item)
 
     return ", ".join(items)
+
+
+def remove_item(old_text, item_to_remove):
+    items = [x.strip() for x in old_text.split(",") if x.strip()]
+    item_to_remove = item_to_remove.strip(" .,!?:;").lower()
+
+    cleaned = []
+    for item in items:
+        if item.lower() != item_to_remove:
+            cleaned.append(item)
+
+    return ", ".join(cleaned)
 
 
 def clean_fact(text):
@@ -104,6 +116,17 @@ def split_facts(text):
             facts.append(part)
 
     return facts
+
+
+def update_user(user_id, name, city, hobbies, facts):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute(
+        "UPDATE users SET name = ?, city = ?, hobbies = ?, facts = ? WHERE user_id = ?",
+        (name, city, hobbies, facts, user_id)
+    )
+    conn.commit()
+    conn.close()
 
 
 def update_profile_from_text(user_id, text):
@@ -131,6 +154,10 @@ def update_profile_from_text(user_id, text):
 
     found_hobbies = []
     for match in hobby_matches:
+        # neļaujam jautājumiem par profilu kļūt par hobiju
+        match = re.sub(r"ko\s+tu\s+par\s+mani.*", "", match, flags=re.IGNORECASE).strip()
+        match = re.sub(r"ko\s+par\s+mani.*", "", match, flags=re.IGNORECASE).strip()
+        match = re.sub(r"kas\s+man\s+patīk.*", "", match, flags=re.IGNORECASE).strip()
         found_hobbies.extend(split_items(match))
 
     if found_hobbies:
@@ -140,14 +167,33 @@ def update_profile_from_text(user_id, text):
         found_facts = split_facts(text)
         facts = add_unique(facts, found_facts)
 
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute(
-        "UPDATE users SET name = ?, city = ?, hobbies = ?, facts = ? WHERE user_id = ?",
-        (name, city, hobbies, facts, user_id)
-    )
-    conn.commit()
-    conn.close()
+    update_user(user_id, name, city, hobbies, facts)
+
+
+def forget_from_profile(user_id, text):
+    lower = text.lower()
+    user = get_user(user_id)
+
+    name = user["name"]
+    city = user["city"]
+    hobbies = user["hobbies"]
+    facts = user["facts"]
+
+    phrase = lower.replace("aizmirsti", "", 1).strip(" .,!?:;")
+
+    phrase = phrase.replace("ka man patīk", "").strip(" .,!?:;")
+    phrase = phrase.replace("man patīk", "").strip(" .,!?:;")
+    phrase = phrase.replace("ka", "").strip(" .,!?:;")
+
+    if not phrase:
+        return "Pasaki, ko tieši lai aizmirstu. Piemēram: aizmirsti ko tu par mani zini"
+
+    hobbies = remove_item(hobbies, phrase)
+    facts = remove_item(facts, phrase)
+
+    update_user(user_id, name, city, hobbies, facts)
+
+    return f"Labi, izdzēsu no atmiņas: {phrase}"
 
 
 def save_message(user_id, role, text):
@@ -183,7 +229,8 @@ def profile_answer(user):
         lines.append(f"• Pilsēta: {user['city']}")
     if user["hobbies"]:
         hobbies = [x.strip() for x in user["hobbies"].split(",") if x.strip()]
-        lines.append("• Patīk: " + ", ".join(hobbies))
+        if hobbies:
+            lines.append("• Patīk: " + ", ".join(hobbies))
     if user["facts"]:
         facts = [x.strip() for x in user["facts"].split(",") if x.strip()]
         if facts:
@@ -230,6 +277,11 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     user_id = str(update.effective_user.id)
     lower = user_text.lower()
+
+    if lower.startswith("aizmirsti"):
+        answer = forget_from_profile(user_id, user_text)
+        await update.message.reply_text(answer)
+        return
 
     update_profile_from_text(user_id, user_text)
     user = get_user(user_id)
@@ -305,5 +357,5 @@ telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 Memory v2.5 darbojas...")
+    print("Nina7727 Memory v2.6 darbojas...")
     telegram_app.run_polling()
