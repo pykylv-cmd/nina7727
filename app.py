@@ -1,4 +1,5 @@
 import os
+import re
 import sqlite3
 from flask import Flask
 from telegram import Update
@@ -66,10 +67,21 @@ def get_user(user_id):
     }
 
 
-def add_unique(old_text, new_item):
+def split_items(text):
+    text = text.replace("\n", ",")
+    text = text.replace(" un ", ",")
+    text = text.replace(" arī", "")
+    parts = [x.strip(" .,!?:;") for x in text.split(",")]
+    return [x for x in parts if x]
+
+
+def add_unique(old_text, new_items):
     items = [x.strip() for x in old_text.split(",") if x.strip()]
-    if new_item and new_item not in items:
-        items.append(new_item)
+
+    for item in new_items:
+        if item and item not in items:
+            items.append(item)
+
     return ", ".join(items)
 
 
@@ -82,18 +94,30 @@ def update_profile_from_text(user_id, text):
     hobbies = user["hobbies"]
     facts = user["facts"]
 
-    if "mani sauc " in lower:
-        name = text.split("mani sauc", 1)[1].strip().split()[0]
+    name_match = re.search(r"mani sauc\s+([A-Za-zĀČĒĢĪĶĻŅŠŪŽāčēģīķļņšūž]+)", text, re.IGNORECASE)
+    if name_match:
+        name = name_match.group(1).strip(" .,!?:;")
 
-    if "es dzīvoju " in lower:
-        city = text.split("es dzīvoju", 1)[1].strip().split()[0]
+    city_match = re.search(r"es dzīvoju\s+([A-Za-zĀČĒĢĪĶĻŅŠŪŽāčēģīķļņšūž]+)", text, re.IGNORECASE)
+    if city_match:
+        city = city_match.group(1).strip(" .,!?:;")
 
-    if "man patīk " in lower:
-        hobby = text.split("man patīk", 1)[1].strip()
-        hobbies = add_unique(hobbies, hobby)
+    hobby_matches = re.findall(
+        r"man patīk\s+(.+?)(?=(?:\nman patīk|\.|!|\?|$))",
+        text,
+        re.IGNORECASE | re.DOTALL
+    )
+
+    found_hobbies = []
+    for match in hobby_matches:
+        found_hobbies.extend(split_items(match))
+
+    if found_hobbies:
+        hobbies = add_unique(hobbies, found_hobbies)
 
     if lower.startswith("atceries ka ") or "man svarīgi" in lower:
-        facts = add_unique(facts, text)
+        fact = text.strip(" .,!?:;")
+        facts = add_unique(facts, [fact])
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -166,7 +190,7 @@ Noteikumi:
 - Neuzrunā lietotāju sieviešu/vīriešu dzimtē, ja dzimums nav zināms.
 - Nemin numeroloģiju, ja cilvēks to neprasa.
 - Neizdomā faktus par lietotāju.
-- Ja runā par lietotāju, balsties uz profilu un sarunas vēsturi.
+- Ja runā par lietotāju, balsties tikai uz profilu un sarunas vēsturi.
 - Ja lietotājs saka "vēl", "jā", "turpini", saproti no konteksta, ko viņš turpina.
 - Atbildi īsi, dzīvi, sirsnīgi.
 - Ja cilvēkam ir stress, nomierini.
@@ -255,21 +279,5 @@ telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 Memory v2.2 darbojas...")
-    telegram_app.run_polling()
-
-@app.route("/")
-def home():
-    return "Nina7727 darbojas!"
-
-init_db()
-
-telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
-
-telegram_app.add_handler(
-    MessageHandler(filters.TEXT & ~filters.COMMAND, reply)
-)
-
-if __name__ == "__main__":
-    print("Nina7727 Memory v2.1 darbojas...")
+    print("Nina7727 Memory v2.3 darbojas...")
     telegram_app.run_polling()
