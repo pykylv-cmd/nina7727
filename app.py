@@ -45,7 +45,6 @@ def init_db():
 def get_user(user_id):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-
     c.execute("SELECT name, city, hobbies, facts FROM users WHERE user_id = ?", (user_id,))
     row = c.fetchone()
 
@@ -79,10 +78,32 @@ def add_unique(old_text, new_items):
     items = [x.strip() for x in old_text.split(",") if x.strip()]
 
     for item in new_items:
+        item = item.strip(" .,!?:;")
         if item and item not in items:
             items.append(item)
 
     return ", ".join(items)
+
+
+def clean_fact(text):
+    text = text.strip(" .,!?:;")
+    text = re.sub(r"^atceries ka\s+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^man svarīgi\s*", "", text, flags=re.IGNORECASE)
+    text = text.strip(" .,!?:;")
+    return text
+
+
+def split_facts(text):
+    text = clean_fact(text)
+    parts = re.split(r"\s+un\s+|\n|,", text)
+    facts = []
+
+    for part in parts:
+        part = clean_fact(part)
+        if part:
+            facts.append(part)
+
+    return facts
 
 
 def update_profile_from_text(user_id, text):
@@ -116,8 +137,8 @@ def update_profile_from_text(user_id, text):
         hobbies = add_unique(hobbies, found_hobbies)
 
     if lower.startswith("atceries ka ") or "man svarīgi" in lower:
-        fact = text.strip(" .,!?:;")
-        facts = add_unique(facts, [fact])
+        found_facts = split_facts(text)
+        facts = add_unique(facts, found_facts)
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -161,9 +182,14 @@ def profile_answer(user):
     if user["city"]:
         lines.append(f"• Pilsēta: {user['city']}")
     if user["hobbies"]:
-        lines.append(f"• Patīk: {user['hobbies']}")
+        hobbies = [x.strip() for x in user["hobbies"].split(",") if x.strip()]
+        lines.append("• Patīk: " + ", ".join(hobbies))
     if user["facts"]:
-        lines.append(f"• Svarīgi fakti: {user['facts']}")
+        facts = [x.strip() for x in user["facts"].split(",") if x.strip()]
+        if facts:
+            lines.append("• Svarīgi fakti:")
+            for fact in facts:
+                lines.append(f"  - {fact}")
 
     if not lines:
         return "Pagaidām vēl maz zinu par tevi. Pastāsti, kas tev patīk vai kas tev svarīgs. 😊"
@@ -279,5 +305,5 @@ telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 Memory v2.3 darbojas...")
+    print("Nina7727 Memory v2.5 darbojas...")
     telegram_app.run_polling()
