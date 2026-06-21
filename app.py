@@ -26,8 +26,8 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 DB_FILE = "nina_memory.db"
 USE_POSTGRES = bool(DATABASE_URL and psycopg2)
 
-FREE_BACKUP_LIMIT = 10
-FREE_REMINDER_LIMIT = 20
+FREE_BACKUP_LIMIT = 5
+FREE_REMINDER_LIMIT = 5
 FREE_SUMMARY_LIMIT_PER_DAY = 1
 
 
@@ -1553,7 +1553,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 V9 Premium Business darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V9.1 Premium Business darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -1568,5 +1568,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V9 Premium Business darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V9.1 Premium Business darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
