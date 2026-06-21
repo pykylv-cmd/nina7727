@@ -738,11 +738,10 @@ def restore_backup(user_id, text):
     conn = get_db()
     c = conn.cursor()
 
-    # Meklējam tikai šī Telegram lietotāja backup.
     db_execute(
         c,
         """
-        SELECT id, backup_text, source, created_at
+        SELECT backup_text
         FROM memory_backups
         WHERE id = %s AND user_id = %s
         """,
@@ -752,42 +751,16 @@ def restore_backup(user_id, text):
     row = c.fetchone()
 
     if not row:
-        # Diagnostikai pārbaudām, vai tāds backup ID vispār eksistē citam user_id.
-        db_execute(
-            c,
-            """
-            SELECT id, user_id
-            FROM memory_backups
-            WHERE id = %s
-            """,
-            (backup_id,)
-        )
-        other = c.fetchone()
         c.close()
         conn.close()
+        return "Tādu backup neatradu."
 
-        if other:
-            return f"Backup #{backup_id} eksistē, bet tas nepieder šim Telegram lietotājam. Drošības dēļ to neatjaunoju."
-
-        return "Tādu backup neatradu. Pārbaudi ar komandu: backup saraksts"
-
-    found_id, backup_text, source, created_at = row
-    c.close()
-    conn.close()
+    backup_text = row[0]
 
     try:
-        if "JSON kopija:" not in backup_text:
-            return "Backup nesatur JSON kopiju, tāpēc to nevar droši atjaunot."
-
-        json_part = backup_text.split("JSON kopija:", 1)[1].strip()
+        json_part = backup_text.split("JSON kopija:\n", 1)[1]
         data = json.loads(json_part)
-        profile = data.get("profile")
-
-        if not isinstance(profile, dict):
-            return "Backup JSON nesatur profilu. Atjaunošana apturēta."
-
-        # Drošības backup pirms atjaunošanas.
-        save_memory_backup(user_id, f"before_restore_{backup_id}")
+        profile = data.get("profile", {})
 
         user = get_user(user_id)
 
@@ -802,18 +775,126 @@ def restore_backup(user_id, text):
             if field in profile:
                 user[field] = profile[field]
 
-        # Minimāla aizsardzība, lai timezone nekad nepaliek tukšs vai nederīgs.
-        if not user.get("timezone") or not valid_timezone(user.get("timezone")):
-            user["timezone"] = DEFAULT_TIMEZONE
-
         update_user(user_id, user)
         save_memory_backup(user_id, f"restore_from_{backup_id}")
+
+        c.close()
+        conn.close()
 
         return f"✅ Atjaunoju profilu no backup #{backup_id}."
 
     except Exception as e:
+        c.close()
+        conn.close()
         print("Restore kļūda:", e)
-        return "Backup ir bojāts vai nav nolasāms. Atjaunošana apturēta."
+        return "Backup ir bojāts vai nav nolasāms."
+
+
+def backup_count(user_id):
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(c, "SELECT COUNT(*) FROM memory_backups WHERE user_id = %s", (user_id,))
+    count = c.fetchone()[0]
+    c.close()
+    conn.close()
+
+    return f"📦 Tev ir {count} backup."
+
+
+def backup_stats(user_id):
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(
+        c,
+        """
+        SELECT COUNT(*), MIN(created_at), MAX(created_at)
+        FROM memory_backups
+        WHERE user_id = %s
+        """,
+        (user_id,)
+    )
+    count, first_created, last_created = c.fetchone()
+    c.close()
+    conn.close()
+
+    if not count:
+        return "Backup vēl nav izveidoti."
+
+    return (
+        f"📦 Backup kopā: {count}\n"
+        f"📅 Pirmais: {first_created}\n"
+        f"📅 Pēdējais: {last_created}"
+    )
+
+
+def latest_backup_info(user_id):
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(
+        c,
+        """
+        SELECT id, source, created_at
+        FROM memory_backups
+        WHERE user_id = %s
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (user_id,)
+    )
+    row = c.fetchone()
+    c.close()
+    conn.close()
+
+    if not row:
+        return "Backup vēl nav izveidots."
+
+    backup_id, source, created_at = row
+    return (
+        f"📦 Jaunākais backup #{backup_id}\n"
+        f"Avots: {source}\n"
+        f"Laiks: {created_at}"
+    )
+
+
+def delete_backup(user_id, text):
+    m = re.search(r"(\d+)", text)
+    if not m:
+        return "Norādi backup numuru. Piemērs: dzēs backup 3"
+
+    backup_id = int(m.group(1))
+
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(
+        c,
+        "DELETE FROM memory_backups WHERE id = %s AND user_id = %s",
+        (backup_id, user_id)
+    )
+    deleted = c.rowcount
+    conn.commit()
+    c.close()
+    conn.close()
+
+    if deleted:
+        return f"🗑️ Backup #{backup_id} izdzēsts."
+
+    return "Tādu backup neatradu."
+
+
+def delete_all_backups(user_id):
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(
+        c,
+        "DELETE FROM memory_backups WHERE user_id = %s",
+        (user_id,)
+    )
+    deleted = c.rowcount
+    conn.commit()
+    c.close()
+    conn.close()
+
+    return f"⚠️ Izdzēsti {deleted} backup."
 
 
 def premium_status(user_id):
@@ -1033,6 +1114,8 @@ COMMAND_LINES = {
     "backup", "izveido backup", "rezerves kopija", "izveido rezerves kopiju",
     "pēdējais backup", "parādi backup", "mans backup", "pēdējā rezerves kopija",
     "backup saraksts", "parādi backup sarakstu", "mani backup",
+    "cik man ir backup", "backup statistika", "jaunākais backup",
+    "dzēs backup", "izdzēs backup", "dzēs visus backup", "izdzēs visus backup",
     "mani atgādinājumi", "parādi atgādinājumus", "atgādinājumi",
     "atjauno kopsavilkumu", "izveido kopsavilkumu", "atjauno atmiņu",
     "mans kopsavilkums", "parādi kopsavilkumu", "ilgtermiņa atmiņa",
@@ -1052,6 +1135,8 @@ def is_command_line(line):
         or lower.startswith("aizmirsti atgādinājumu")
         or lower.startswith("aizmirsti")
         or lower.startswith("atjauno no backup")
+        or lower.startswith("dzēs backup")
+        or lower.startswith("izdzēs backup")
     )
 
 
@@ -1094,6 +1179,21 @@ def command_answer(user_id, command_text):
 
     if lower in ["backup saraksts", "parādi backup sarakstu", "mani backup"]:
         return list_backups(user_id)
+
+    if lower in ["cik man ir backup"]:
+        return backup_count(user_id)
+
+    if lower in ["backup statistika"]:
+        return backup_stats(user_id)
+
+    if lower in ["jaunākais backup"]:
+        return latest_backup_info(user_id)
+
+    if lower in ["dzēs visus backup", "izdzēs visus backup"]:
+        return delete_all_backups(user_id)
+
+    if lower.startswith("dzēs backup") or lower.startswith("izdzēs backup"):
+        return delete_backup(user_id, command_text)
 
     if lower.startswith("atjauno no backup"):
         return restore_backup(user_id, command_text)
@@ -1173,6 +1273,26 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower in ["backup saraksts", "parādi backup sarakstu", "mani backup"]:
         await update.message.reply_text(list_backups(user_id))
+        return
+
+    if lower in ["cik man ir backup"]:
+        await update.message.reply_text(backup_count(user_id))
+        return
+
+    if lower in ["backup statistika"]:
+        await update.message.reply_text(backup_stats(user_id))
+        return
+
+    if lower in ["jaunākais backup"]:
+        await update.message.reply_text(latest_backup_info(user_id))
+        return
+
+    if lower in ["dzēs visus backup", "izdzēs visus backup"]:
+        await update.message.reply_text(delete_all_backups(user_id))
+        return
+
+    if lower.startswith("dzēs backup") or lower.startswith("izdzēs backup"):
+        await update.message.reply_text(delete_backup(user_id, user_text))
         return
 
     if lower.startswith("atjauno no backup"):
@@ -1282,7 +1402,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 V8.2.1 Restore Fix darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V8.3 Memory Manager darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -1297,5 +1417,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V8.2.1 Restore Fix darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V8.3 Memory Manager darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
