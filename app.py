@@ -1,6 +1,7 @@
 import os
 import re
 import sqlite3
+import asyncio
 from datetime import datetime, timedelta
 from flask import Flask
 from telegram import Update
@@ -88,25 +89,17 @@ def split_items(text):
 
 def add_unique(old_text, new_items):
     items = [x.strip() for x in old_text.split(",") if x.strip()]
-
     for item in new_items:
         item = item.strip(" .,!?:;")
         if item and item not in items:
             items.append(item)
-
     return ", ".join(items)
 
 
 def remove_item(old_text, item_to_remove):
     items = [x.strip() for x in old_text.split(",") if x.strip()]
     item_to_remove = item_to_remove.strip(" .,!?:;").lower()
-
-    cleaned = []
-    for item in items:
-        if item.lower() != item_to_remove:
-            cleaned.append(item)
-
-    return ", ".join(cleaned)
+    return ", ".join([item for item in items if item.lower() != item_to_remove])
 
 
 def clean_fact(text):
@@ -245,7 +238,6 @@ def parse_reminder(user_text):
 
     remind_date = None
     remind_time = None
-
     now = datetime.now()
 
     if "rīt" in lower:
@@ -255,6 +247,10 @@ def parse_reminder(user_text):
     elif "parīt" in lower:
         remind_date = now + timedelta(days=2)
         task = re.sub(r"\bparīt\b", "", task, flags=re.IGNORECASE).strip()
+
+    elif "šodien" in lower:
+        remind_date = now
+        task = re.sub(r"\bšodien\b", "", task, flags=re.IGNORECASE).strip()
 
     date_match = re.search(r"(\d{1,2})\.\s*datumā", lower)
     if date_match:
@@ -363,6 +359,53 @@ def delete_reminder(user_id, user_text):
     return "Tādu aktīvu atgādinājumu neatradu."
 
 
+async def reminder_worker(application):
+    while True:
+        try:
+            now_text = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            c.execute(
+                """
+                SELECT id, user_id, text, remind_at
+                FROM reminders
+                WHERE status = 'active'
+                AND remind_at != ''
+                AND remind_at <= ?
+                """,
+                (now_text,)
+            )
+            rows = c.fetchall()
+
+            for reminder_id, user_id, text, remind_at in rows:
+                try:
+                    await application.bot.send_message(
+                        chat_id=int(user_id),
+                        text=f"🌷 Atgādinājums:\n{text}"
+                    )
+
+                    c.execute(
+                        "UPDATE reminders SET status = 'sent' WHERE id = ?",
+                        (reminder_id,)
+                    )
+                    conn.commit()
+
+                except Exception as e:
+                    print("Atgādinājuma sūtīšanas kļūda:", e)
+
+            conn.close()
+
+        except Exception as e:
+            print("Reminder worker kļūda:", e)
+
+        await asyncio.sleep(30)
+
+
+async def post_init(application):
+    asyncio.create_task(reminder_worker(application))
+
+
 NINA_PROMPT = """
 Tu esi Nina 7727.
 
@@ -403,6 +446,80 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(delete_reminder(user_id, user_text))
         return
 
+    if lower.startswith("aizmirsti"):
+        await update.message.reply_text(forget_from_profile(user_id, user_text))
+        return
+
+    update_profile_from_text(user_id, user_text)
+    user = get_user(user_id)
+
+    if "kā mani sauc" in lower:
+        await update.message.reply_text(f"Tevi sauc {user['name']}. 😊" if user["name"] else "Tu vēl neesi pateicis savu vārdu. 😊")
+        return
+
+    if (
+        "ko tu par mani zini" in lower
+        or "ko tu par manīm zini" in lower
+        or "ko tu par mani atceries" in lower
+        or "ko tu par manīm atceries" in lower
+        or "ko tu atceries" in lower
+        or "kas man patīk" in lower
+        or "ko par mani zini" in lower
+        or "ko par manīm zini" in lower
+    ):
+        await update.message.reply_text(profile_answer(user))
+        return
+
+    save_message(user_id, "Lietotājs", user_text)
+    conversation = get_recent_messages(user_id)
+
+    profile_info = f"""
+Lietotāja profils:
+Vārds: {user["name"]}
+Pilsēta: {user["city"]}
+Patīk: {user["hobbies"]}
+Svarīgi fakti: {user["facts"]}
+"""
+
+    try:
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=(
+                f"{NINA_PROMPT}\n\n"
+                f"{profile_info}\n\n"
+                f"Sarunas vēsture:\n{conversation}\n\n"
+                f"Atbildi uz pēdējo ziņu dabiski."
+            )
+        )
+        answer = response.output_text
+
+    except Exception as e:
+        print("Kļūda:", e)
+        answer = "Piedod, man šobrīd kaut kas aizķērās. Pamēģini vēlreiz pēc brīža. 🌷"
+
+    save_message(user_id, "Nina", answer)
+    await update.message.reply_text(answer)
+
+
+@app.route("/")
+def home():
+    return "Nina7727 darbojas!"
+
+
+init_db()
+
+telegram_app = (
+    Application.builder()
+    .token(TELEGRAM_TOKEN)
+    .post_init(post_init)
+    .build()
+)
+
+telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
+
+if __name__ == "__main__":
+    print("Nina7727 Memory V4 automātiskie atgādinājumi darbojas...")
+    telegram_app.run_polling()
     if lower.startswith("aizmirsti"):
         await update.message.reply_text(forget_from_profile(user_id, user_text))
         return
