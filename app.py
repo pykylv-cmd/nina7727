@@ -950,9 +950,10 @@ def summaries_used_today(user_id):
 def premium_features(user_id=None):
     return (
         "💎 Premium funkcijas:\n"
-        "• vairāk backup / rezerves kopiju\n"
-        "• vairāk aktīvu atgādinājumu\n"
-        "• neierobežoti kopsavilkumi\n"
+        "• backup / rezerves kopijas bez limita\n"
+        "• aktīvi atgādinājumi bez limita\n"
+        "• kopsavilkumi bez limita\n"
+        "• vairāk vietas ilgtermiņa atmiņai\n"
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         "Bezmaksas režīms ir labs testēšanai. Premium ir domāts nopietnai ikdienas lietošanai."
@@ -986,16 +987,25 @@ def memory_usage(user_id):
     return premium_limits(user_id)
 
 
+def premium_paywall(title, used_text, premium_value):
+    return (
+        f"💎 {title}\n\n"
+        f"Bezmaksas režīmā: {used_text}.\n"
+        f"Premium režīmā: {premium_value}.\n\n"
+        "Ja Nina tev jau palīdz ikdienā, Premium noņem ierobežojumus un ļauj lietot viņu nopietnāk.\n"
+        "Raksti: aktivizē premium"
+    )
+
+
 def can_create_backup(user_id):
     if is_premium_user(user_id):
         return True, ""
     count = backup_count_number(user_id)
     if count >= FREE_BACKUP_LIMIT:
-        return False, (
-            "💎 Sasniegts bezmaksas backup limits.\n\n"
-            f"Bezmaksas režīmā: {FREE_BACKUP_LIMIT} backup.\n"
-            "Premium lietotājiem backup limits nav.\n\n"
-            "Raksti: aktivizē premium"
+        return False, premium_paywall(
+            "Backup limits sasniegts",
+            f"{FREE_BACKUP_LIMIT} backup",
+            "backup bez limita"
         )
     return True, ""
 
@@ -1005,11 +1015,10 @@ def can_create_reminder(user_id):
         return True, ""
     count = active_reminder_count(user_id)
     if count >= FREE_REMINDER_LIMIT:
-        return False, (
-            "💎 Sasniegts bezmaksas atgādinājumu limits.\n\n"
-            f"Bezmaksas režīmā: {FREE_REMINDER_LIMIT} aktīvi atgādinājumi.\n"
-            "Premium lietotājiem atgādinājumu limits nav.\n\n"
-            "Raksti: aktivizē premium"
+        return False, premium_paywall(
+            "Atgādinājumu limits sasniegts",
+            f"{FREE_REMINDER_LIMIT} aktīvi atgādinājumi",
+            "atgādinājumi bez limita"
         )
     return True, ""
 
@@ -1019,10 +1028,10 @@ def can_create_summary(user_id):
         return True, ""
     used = summaries_used_today(user_id)
     if used >= FREE_SUMMARY_LIMIT_PER_DAY:
-        return False, (
-            "💎 Bezmaksas kopsavilkums šodien jau izmantots.\n\n"
-            "Premium lietotājiem kopsavilkumu limits nav.\n\n"
-            "Raksti: aktivizē premium"
+        return False, premium_paywall(
+            "Šodienas kopsavilkuma limits izmantots",
+            f"{FREE_SUMMARY_LIMIT_PER_DAY} kopsavilkums dienā",
+            "kopsavilkumi bez limita"
         )
     return True, ""
 
@@ -1553,7 +1562,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 V9.1 Premium Business darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V9.2 Premium Paywall Texts darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -1568,5 +1577,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V9.1 Premium Business darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V9.2 Premium Paywall Texts darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
