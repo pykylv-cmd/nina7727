@@ -1028,6 +1028,77 @@ def memory_usage(user_id):
     return premium_limits(user_id)
 
 
+def memory_fill_percent(user_id):
+    user = get_user(user_id)
+    fields = [
+        "name", "city", "hobbies", "facts", "goals", "projects", "dreams",
+        "important_dates", "pets", "family", "profession", "favorite_car",
+        "favorite_color", "favorite_music", "summary"
+    ]
+    filled = sum(1 for field in fields if user.get(field))
+    total = len(fields)
+    return int((filled / total) * 100) if total else 0
+
+
+def premium_dashboard(user_id):
+    user = get_user(user_id)
+
+    backups = backup_count_number(user_id)
+    active_reminders = active_reminder_count(user_id)
+    summaries_today = summaries_used_today(user_id)
+    memory_percent = memory_fill_percent(user_id)
+
+    conn = get_db()
+    c = conn.cursor()
+
+    db_execute(c, "SELECT COUNT(*) FROM messages WHERE user_id = %s", (user_id,))
+    messages_count = int(c.fetchone()[0] or 0)
+
+    db_execute(
+        c,
+        "SELECT COUNT(*) FROM reminders WHERE user_id = %s",
+        (user_id,)
+    )
+    total_reminders = int(c.fetchone()[0] or 0)
+
+    c.close()
+    conn.close()
+
+    if user.get("premium"):
+        status = "Premium aktīvs"
+        expires = user.get("premium_until") or "bez beigu datuma"
+        return (
+            "💎 Nina Premium Dashboard\n\n"
+            f"Statuss: {status}\n"
+            f"Beidzas: {expires}\n\n"
+            "Limiti:\n"
+            "📦 Backup: bez limita\n"
+            "⏰ Atgādinājumi: bez limita\n"
+            "🧠 Kopsavilkumi: bez limita\n\n"
+            "Lietošana:\n"
+            f"💬 Ziņas: {messages_count}\n"
+            f"📦 Backup: {backups}\n"
+            f"⏰ Aktīvie atgādinājumi: {active_reminders}\n"
+            f"⏱️ Atgādinājumi kopā: {total_reminders}\n"
+            f"🧠 Atmiņas aizpildījums: {memory_percent}%"
+        )
+
+    return (
+        "💎 Nina Premium Dashboard\n\n"
+        "Statuss: Free režīms\n\n"
+        "Limiti:\n"
+        f"📦 Backup: {backups}/{FREE_BACKUP_LIMIT}\n"
+        f"⏰ Aktīvie atgādinājumi: {active_reminders}/{FREE_REMINDER_LIMIT}\n"
+        f"🧠 Kopsavilkumi šodien: {summaries_today}/{FREE_SUMMARY_LIMIT_PER_DAY}\n\n"
+        "Lietošana:\n"
+        f"💬 Ziņas: {messages_count}\n"
+        f"📦 Backup: {backups}\n"
+        f"⏱️ Atgādinājumi kopā: {total_reminders}\n"
+        f"🧠 Atmiņas aizpildījums: {memory_percent}%\n\n"
+        "Lai noņemtu limitus, raksti: aktivizē premium"
+    )
+
+
 def user_statistics(user_id):
     user = get_user(user_id)
 
@@ -1442,6 +1513,7 @@ Noteikumi:
 COMMAND_LINES = {
     "mans premium statuss", "premium statuss", "premium",
     "premium funkcijas", "premium limiti", "cik atmiņas man palicis", "premium beidzas",
+    "premium panelis", "mans panelis", "dashboard",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
     "aktivizē premium", "aktivize premium", "ieslēdz premium",
     "izslēdz premium", "atslēdz premium",
@@ -1505,6 +1577,9 @@ def command_answer(user_id, command_text):
 
     if lower == "premium beidzas":
         return premium_expiration_info(user_id)
+
+    if lower in ["premium panelis", "mans panelis", "dashboard"]:
+        return premium_dashboard(user_id)
 
     if lower == "mana statistika":
         return user_statistics(user_id)
@@ -1614,6 +1689,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower == "premium beidzas":
         await update.message.reply_text(premium_expiration_info(user_id))
+        return
+
+    if lower in ["premium panelis", "mans panelis", "dashboard"]:
+        await update.message.reply_text(premium_dashboard(user_id))
         return
 
     if lower == "mana statistika":
@@ -1779,7 +1858,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 V9.4.1 Premium Expiration Fix darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V9.5 Premium Dashboard darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -1794,5 +1873,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V9.4.1 Premium Expiration Fix darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V9.5 Premium Dashboard darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
