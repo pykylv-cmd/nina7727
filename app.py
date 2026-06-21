@@ -62,7 +62,10 @@ def init_db():
         ("important_dates", "TEXT DEFAULT ''"),
         ("summary", "TEXT DEFAULT ''"),
         ("premium", "INTEGER DEFAULT 0"),
-        ("premium_until", "TEXT DEFAULT ''")
+        ("premium_until", "TEXT DEFAULT ''"),
+        ("pets", "TEXT DEFAULT ''"),
+        ("family", "TEXT DEFAULT ''"),
+        ("profession", "TEXT DEFAULT ''")
     ]:
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col[0]} {col[1]}")
@@ -82,7 +85,7 @@ def get_user(user_id):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("""
-        SELECT name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until
+        SELECT name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until, pets, family, profession
         FROM users WHERE user_id = ?
     """, (user_id,))
     row = c.fetchone()
@@ -90,11 +93,11 @@ def get_user(user_id):
     if not row:
         c.execute("""
             INSERT INTO users
-            (user_id, name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (user_id, "", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, ""))
+            (user_id, name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until, pets, family, profession)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, "", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, "", "", "", ""))
         conn.commit()
-        row = ("", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, "")
+        row = ("", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, "", "", "", "")
 
     conn.close()
 
@@ -110,7 +113,10 @@ def get_user(user_id):
         "important_dates": row[8] or "",
         "summary": row[9] or "",
         "premium": row[10] or 0,
-        "premium_until": row[11] or ""
+        "premium_until": row[11] or "",
+        "pets": row[12] or "",
+        "family": row[13] or "",
+        "profession": row[14] or ""
     }
 
 
@@ -121,12 +127,12 @@ def update_user(user_id, user):
         UPDATE users SET
         name = ?, city = ?, hobbies = ?, facts = ?, timezone = ?,
         goals = ?, projects = ?, dreams = ?, important_dates = ?, summary = ?,
-        premium = ?, premium_until = ?
+        premium = ?, premium_until = ?, pets = ?, family = ?, profession = ?
         WHERE user_id = ?
     """, (
         user["name"], user["city"], user["hobbies"], user["facts"], user["timezone"],
         user["goals"], user["projects"], user["dreams"], user["important_dates"], user["summary"],
-        user["premium"], user["premium_until"],
+        user["premium"], user["premium_until"], user["pets"], user["family"], user["profession"],
         user_id
     ))
     conn.commit()
@@ -259,6 +265,35 @@ def update_profile_from_text(user_id, text):
     if important_date:
         user["important_dates"] = add_unique(user["important_dates"], [important_date])
 
+    pet_match = re.search(r"man ir\s+(suns|kaķis|kakis|papagailis|trusis)\s+(.+)", text, re.IGNORECASE)
+    if pet_match:
+        pet_type = clean_text(pet_match.group(1))
+        pet_name = clean_text(pet_match.group(2))
+        pet_name = re.sub(r"\s+un\s+.*", "", pet_name, flags=re.IGNORECASE).strip()
+        if pet_name:
+            user["pets"] = add_unique(user["pets"], [f"{pet_name} ({pet_type})"])
+
+    wife_match = re.search(r"man ir\s+(sieva|vīrs|virs)\s+(.+)", text, re.IGNORECASE)
+    if wife_match:
+        role = clean_text(wife_match.group(1))
+        person = clean_text(wife_match.group(2))
+        person = re.sub(r"\s+un\s+.*", "", person, flags=re.IGNORECASE).strip()
+        if person:
+            user["family"] = add_unique(user["family"], [f"{person} ({role})"])
+
+    child_matches = re.findall(r"man ir\s+(meita|dēls|dels)\s+([^\n.,!?]+)", text, re.IGNORECASE)
+    for role, person in child_matches:
+        person = clean_text(person)
+        if person:
+            user["family"] = add_unique(user["family"], [f"{person} ({clean_text(role)})"])
+
+    profession_match = re.search(r"es esmu\s+([^\n.,!?]+)", text, re.IGNORECASE)
+    if profession_match:
+        profession = clean_text(profession_match.group(1))
+        # neglabā pārāk garas frāzes kā profesiju
+        if profession and len(profession) <= 40:
+            user["profession"] = profession
+
     update_user(user_id, user)
 
 
@@ -273,7 +308,7 @@ def forget_from_profile(user_id, text):
     if not phrase:
         return "Pasaki, ko tieši lai aizmirstu."
 
-    for key in ["hobbies", "facts", "goals", "projects", "dreams", "important_dates"]:
+    for key in ["hobbies", "facts", "goals", "projects", "dreams", "important_dates", "pets", "family", "profession"]:
         user[key] = remove_item(user[key], phrase)
 
     update_user(user_id, user)
@@ -324,6 +359,12 @@ def profile_answer(user):
         lines.append("• Sapņi: " + user["dreams"])
     if user["important_dates"]:
         lines.append("• Svarīgi datumi: " + user["important_dates"])
+    if user["pets"]:
+        lines.append("• Mājdzīvnieki: " + user["pets"])
+    if user["family"]:
+        lines.append("• Ģimene: " + user["family"])
+    if user["profession"]:
+        lines.append("• Profesija: " + user["profession"])
     if user["summary"]:
         lines.append("\nĪsais kopsavilkums:\n" + user["summary"])
 
@@ -351,6 +392,9 @@ Mērķi: {user["goals"]}
 Projekti: {user["projects"]}
 Sapņi: {user["dreams"]}
 Svarīgi datumi: {user["important_dates"]}
+Mājdzīvnieki: {user["pets"]}
+Ģimene: {user["family"]}
+Profesija: {user["profession"]}
 
 Iepriekšējais kopsavilkums:
 {user["summary"]}
@@ -656,6 +700,9 @@ Mērķi: {user["goals"]}
 Projekti: {user["projects"]}
 Sapņi: {user["dreams"]}
 Svarīgi datumi: {user["important_dates"]}
+Mājdzīvnieki: {user["pets"]}
+Ģimene: {user["family"]}
+Profesija: {user["profession"]}
 Premium: {user["premium"]}
 Premium līdz: {user["premium_until"]}
 
@@ -700,5 +747,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V7.1 Premium Core darbojas...")
+    print("Nina7727 V7.4.1 Pets Family Profession darbojas...")
     telegram_app.run_polling()
