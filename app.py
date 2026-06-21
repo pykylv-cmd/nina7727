@@ -695,6 +695,100 @@ def latest_backup_answer(user_id):
     backup_id, backup_text, source, created_at = row
     return f"Pēdējais backup #{backup_id} ({source}, {created_at}):\n\n{backup_text}"
 
+
+
+def list_backups(user_id):
+    conn = get_db()
+    c = conn.cursor()
+
+    db_execute(
+        c,
+        """
+        SELECT id, source, created_at
+        FROM memory_backups
+        WHERE user_id = %s
+        ORDER BY id DESC
+        LIMIT 20
+        """,
+        (user_id,)
+    )
+
+    rows = c.fetchall()
+    c.close()
+    conn.close()
+
+    if not rows:
+        return "Backup nav atrasti."
+
+    lines = ["Tavi backup:"]
+    for bid, source, created_at in rows:
+        lines.append(f"• #{bid} — {source} ({created_at})")
+
+    return "\n".join(lines)
+
+
+def restore_backup(user_id, text):
+    m = re.search(r"(\d+)", text)
+
+    if not m:
+        return "Norādi backup numuru. Piemērs: atjauno no backup 2"
+
+    backup_id = int(m.group(1))
+
+    conn = get_db()
+    c = conn.cursor()
+
+    db_execute(
+        c,
+        """
+        SELECT backup_text
+        FROM memory_backups
+        WHERE id = %s AND user_id = %s
+        """,
+        (backup_id, user_id)
+    )
+
+    row = c.fetchone()
+
+    if not row:
+        c.close()
+        conn.close()
+        return "Tādu backup neatradu."
+
+    backup_text = row[0]
+
+    try:
+        json_part = backup_text.split("JSON kopija:\n", 1)[1]
+        data = json.loads(json_part)
+        profile = data.get("profile", {})
+
+        user = get_user(user_id)
+
+        fields = [
+            "name", "city", "timezone", "hobbies", "facts", "goals", "projects",
+            "dreams", "important_dates", "pets", "family", "profession",
+            "favorite_car", "favorite_color", "favorite_music", "premium",
+            "premium_until", "summary", "summary_updated_at"
+        ]
+
+        for field in fields:
+            if field in profile:
+                user[field] = profile[field]
+
+        update_user(user_id, user)
+        save_memory_backup(user_id, f"restore_from_{backup_id}")
+
+        c.close()
+        conn.close()
+
+        return f"✅ Atjaunoju profilu no backup #{backup_id}."
+
+    except Exception as e:
+        c.close()
+        conn.close()
+        print("Restore kļūda:", e)
+        return "Backup ir bojāts vai nav nolasāms."
+
 def premium_status(user_id):
     user = get_user(user_id)
 
@@ -911,6 +1005,7 @@ COMMAND_LINES = {
     "eksportē atmiņu", "atmiņas eksports", "export memory", "eksports",
     "backup", "izveido backup", "rezerves kopija", "izveido rezerves kopiju",
     "pēdējais backup", "parādi backup", "mans backup", "pēdējā rezerves kopija",
+    "backup saraksts", "parādi backup sarakstu", "mani backup",
     "mani atgādinājumi", "parādi atgādinājumus", "atgādinājumi",
     "atjauno kopsavilkumu", "izveido kopsavilkumu", "atjauno atmiņu",
     "mans kopsavilkums", "parādi kopsavilkumu", "ilgtermiņa atmiņa",
@@ -929,6 +1024,7 @@ def is_command_line(line):
         or lower.startswith("izdzēs atgādinājumu")
         or lower.startswith("aizmirsti atgādinājumu")
         or lower.startswith("aizmirsti")
+        or lower.startswith("atjauno no backup")
     )
 
 
@@ -968,6 +1064,12 @@ def command_answer(user_id, command_text):
 
     if lower in ["pēdējais backup", "parādi backup", "mans backup", "pēdējā rezerves kopija"]:
         return latest_backup_answer(user_id)
+
+    if lower in ["backup saraksts", "parādi backup sarakstu", "mani backup"]:
+        return list_backups(user_id)
+
+    if lower.startswith("atjauno no backup"):
+        return restore_backup(user_id, command_text)
 
     if lower.startswith("atgādini man"):
         return add_reminder(user_id, command_text)
@@ -1040,6 +1142,14 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower in ["pēdējais backup", "parādi backup", "mans backup", "pēdējā rezerves kopija"]:
         await update.message.reply_text(latest_backup_answer(user_id))
+        return
+
+    if lower in ["backup saraksts", "parādi backup sarakstu", "mani backup"]:
+        await update.message.reply_text(list_backups(user_id))
+        return
+
+    if lower.startswith("atjauno no backup"):
+        await update.message.reply_text(restore_backup(user_id, user_text))
         return
 
     if lower.startswith("atgādini man"):
@@ -1145,7 +1255,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 V8.1 Backup darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V8.2 Restore Backup darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -1160,5 +1270,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V8.1 Auto Backup + Export darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V8.2 Restore Backup darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
