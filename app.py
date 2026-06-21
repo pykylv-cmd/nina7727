@@ -1,10 +1,15 @@
 import os
 import re
+import sqlite3
 import asyncio
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-import psycopg2
+try:
+    import psycopg2
+except Exception:
+    psycopg2 = None
+
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -17,21 +22,35 @@ TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 
 DEFAULT_TIMEZONE = "Europe/Riga"
 DATABASE_URL = os.environ.get("DATABASE_URL")
+DB_FILE = "nina_memory.db"
+USE_POSTGRES = bool(DATABASE_URL and psycopg2)
 
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL nav atrasts. Railway jāpievieno PostgreSQL un jābūt DATABASE_URL mainīgajam.")
+
+def db_sql(sql):
+    if USE_POSTGRES:
+        return sql
+    return sql.replace("%s", "?").replace("SERIAL PRIMARY KEY", "INTEGER PRIMARY KEY AUTOINCREMENT")
+
+
+def db_execute(cursor, sql, params=None):
+    if params is None:
+        return cursor.execute(db_sql(sql))
+    return cursor.execute(db_sql(sql), params)
 
 
 def get_db():
-    return psycopg2.connect(DATABASE_URL)
+    if USE_POSTGRES:
+        return psycopg2.connect(DATABASE_URL)
+    return sqlite3.connect(DB_FILE)
 
 
 def init_db():
     conn = get_db()
-    conn.autocommit = True
+    if USE_POSTGRES:
+        conn.autocommit = True
     c = conn.cursor()
 
-    c.execute("""
+    db_execute(c, """
         CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
             name TEXT DEFAULT '',
@@ -56,7 +75,7 @@ def init_db():
         )
     """)
 
-    c.execute("""
+    db_execute(c, """
         CREATE TABLE IF NOT EXISTS messages (
             id SERIAL PRIMARY KEY,
             user_id TEXT,
@@ -66,7 +85,7 @@ def init_db():
         )
     """)
 
-    c.execute("""
+    db_execute(c, """
         CREATE TABLE IF NOT EXISTS reminders (
             id SERIAL PRIMARY KEY,
             user_id TEXT,
@@ -97,12 +116,12 @@ def init_db():
         ("summary_updated_at", "TEXT DEFAULT ''"),
     ]:
         try:
-            c.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
+            db_execute(c, f"ALTER TABLE users ADD COLUMN {col} {col_type}")
         except Exception:
             pass
 
     try:
-        c.execute("ALTER TABLE reminders ADD COLUMN local_time TEXT")
+        db_execute(c, "ALTER TABLE reminders ADD COLUMN local_time TEXT")
     except Exception:
         pass
 
@@ -113,7 +132,7 @@ def init_db():
 def get_user(user_id):
     conn = get_db()
     c = conn.cursor()
-    c.execute("""
+    db_execute(c, """
         SELECT name, city, hobbies, facts, timezone, goals, projects, dreams,
                important_dates, summary, premium, premium_until, pets, family,
                profession, favorite_car, favorite_color, favorite_music,
@@ -123,7 +142,7 @@ def get_user(user_id):
     row = c.fetchone()
 
     if not row:
-        c.execute("""
+        db_execute(c, """
             INSERT INTO users
             (user_id, name, city, hobbies, facts, timezone, goals, projects, dreams,
              important_dates, summary, premium, premium_until, pets, family,
@@ -165,7 +184,7 @@ def get_user(user_id):
 def update_user(user_id, user):
     conn = get_db()
     c = conn.cursor()
-    c.execute("""
+    db_execute(c, """
         UPDATE users SET
         name = %s, city = %s, hobbies = %s, facts = %s, timezone = %s,
         goals = %s, projects = %s, dreams = %s, important_dates = %s,
@@ -387,7 +406,7 @@ def forget_from_profile(user_id, text):
 def save_message(user_id, role, text):
     conn = get_db()
     c = conn.cursor()
-    c.execute("INSERT INTO messages (user_id, role, text) VALUES (%s, %s, %s)", (user_id, role, text))
+    db_execute(c, "INSERT INTO messages (user_id, role, text) VALUES (%s, %s, %s)", (user_id, role, text))
     conn.commit()
     c.close()
     conn.close()
@@ -396,7 +415,7 @@ def save_message(user_id, role, text):
 def get_recent_messages(user_id, limit=24):
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT role, text FROM messages WHERE user_id = %s ORDER BY id DESC LIMIT %s", (user_id, limit))
+    db_execute(c, "SELECT role, text FROM messages WHERE user_id = %s ORDER BY id DESC LIMIT %s", (user_id, limit))
     rows = c.fetchall()
     c.close()
     conn.close()
@@ -636,11 +655,18 @@ def add_reminder(user_id, user_text):
 
     conn = get_db()
     c = conn.cursor()
-    c.execute(
-        "INSERT INTO reminders (user_id, text, remind_at, local_time, status) VALUES (%s, %s, %s, %s, %s) RETURNING id",
-        (user_id, task, remind_at_utc, local_time_text, "active")
-    )
-    reminder_id = c.fetchone()[0]
+    if USE_POSTGRES:
+        db_execute(c,
+            "INSERT INTO reminders (user_id, text, remind_at, local_time, status) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (user_id, task, remind_at_utc, local_time_text, "active")
+        )
+        reminder_id = c.fetchone()[0]
+    else:
+        db_execute(c,
+            "INSERT INTO reminders (user_id, text, remind_at, local_time, status) VALUES (%s, %s, %s, %s, %s)",
+            (user_id, task, remind_at_utc, local_time_text, "active")
+        )
+        reminder_id = c.lastrowid
     conn.commit()
     c.close()
     conn.close()
@@ -654,7 +680,7 @@ def list_reminders(user_id):
     user = get_user(user_id)
     conn = get_db()
     c = conn.cursor()
-    c.execute(
+    db_execute(c, 
         "SELECT id, text, local_time, remind_at FROM reminders WHERE user_id = %s AND status = 'active' ORDER BY id DESC",
         (user_id,)
     )
@@ -680,7 +706,7 @@ def delete_reminder(user_id, user_text):
     reminder_id = int(match.group(1))
     conn = get_db()
     c = conn.cursor()
-    c.execute("UPDATE reminders SET status = 'deleted' WHERE id = %s AND user_id = %s", (reminder_id, user_id))
+    db_execute(c, "UPDATE reminders SET status = 'deleted' WHERE id = %s AND user_id = %s", (reminder_id, user_id))
     changed = c.rowcount
     conn.commit()
     c.close()
@@ -695,7 +721,7 @@ async def reminder_worker(application):
             now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
             conn = get_db()
             c = conn.cursor()
-            c.execute("""
+            db_execute(c, """
                 SELECT id, user_id, text FROM reminders
                 WHERE status = 'active' AND remind_at != '' AND remind_at <= %s
             """, (now_utc,))
@@ -704,7 +730,7 @@ async def reminder_worker(application):
             for reminder_id, user_id, text in rows:
                 try:
                     await application.bot.send_message(chat_id=int(user_id), text=f"🌷 Atgādinājums:\n{text}")
-                    c.execute("UPDATE reminders SET status = 'sent' WHERE id = %s", (reminder_id,))
+                    db_execute(c, "UPDATE reminders SET status = 'sent' WHERE id = %s", (reminder_id,))
                     conn.commit()
                 except Exception as e:
                     print("Atgādinājuma sūtīšanas kļūda:", e)
@@ -862,7 +888,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 darbojas ar PostgreSQL!"
+    return "Nina7727 V8.0.1 darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -877,5 +903,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V8.0 PostgreSQL Memory darbojas...")
+    print("Nina7727 V8.0.1 DB Safe darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
