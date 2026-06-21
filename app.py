@@ -1503,6 +1503,9 @@ def command_answer(user_id, command_text):
     if lower in ["premium limiti", "cik atmiņas man palicis"]:
         return premium_limits(user_id)
 
+    if lower == "premium beidzas":
+        return premium_expiration_info(user_id)
+
     if lower == "mana statistika":
         return user_statistics(user_id)
 
@@ -1607,6 +1610,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower in ["premium limiti", "cik atmiņas man palicis"]:
         await update.message.reply_text(premium_limits(user_id))
+        return
+
+    if lower == "premium beidzas":
+        await update.message.reply_text(premium_expiration_info(user_id))
         return
 
     if lower == "mana statistika":
@@ -1772,7 +1779,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 V9.4 Premium Expiration darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V9.4.1 Premium Expiration Fix darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -1787,5 +1794,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V9.4 Premium Expiration darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V9.4.1 Premium Expiration Fix darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
