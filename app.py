@@ -29,6 +29,8 @@ USE_POSTGRES = bool(DATABASE_URL and psycopg2)
 FREE_BACKUP_LIMIT = 5
 FREE_REMINDER_LIMIT = 5
 FREE_SUMMARY_LIMIT_PER_DAY = 1
+XP_PER_LEVEL = 100
+
 
 
 def db_sql(sql):
@@ -76,7 +78,9 @@ def init_db():
             favorite_car TEXT DEFAULT '',
             favorite_color TEXT DEFAULT '',
             favorite_music TEXT DEFAULT '',
-            summary_updated_at TEXT DEFAULT ''
+            summary_updated_at TEXT DEFAULT '',
+            xp INTEGER DEFAULT 0,
+            level INTEGER DEFAULT 1
         )
     """)
 
@@ -129,6 +133,8 @@ def init_db():
         ("favorite_color", "TEXT DEFAULT ''"),
         ("favorite_music", "TEXT DEFAULT ''"),
         ("summary_updated_at", "TEXT DEFAULT ''"),
+        ("xp", "INTEGER DEFAULT 0"),
+        ("level", "INTEGER DEFAULT 1"),
     ]:
         try:
             db_execute(c, f"ALTER TABLE users ADD COLUMN {col} {col_type}")
@@ -151,7 +157,7 @@ def get_user(user_id):
         SELECT name, city, hobbies, facts, timezone, goals, projects, dreams,
                important_dates, summary, premium, premium_until, pets, family,
                profession, favorite_car, favorite_color, favorite_music,
-               summary_updated_at
+               summary_updated_at, xp, level
         FROM users WHERE user_id = %s
     """, (user_id,))
     row = c.fetchone()
@@ -161,14 +167,14 @@ def get_user(user_id):
             INSERT INTO users
             (user_id, name, city, hobbies, facts, timezone, goals, projects, dreams,
              important_dates, summary, premium, premium_until, pets, family,
-             profession, favorite_car, favorite_color, favorite_music, summary_updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             profession, favorite_car, favorite_color, favorite_music, summary_updated_at, xp, level)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             user_id, "", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "",
-            0, "", "", "", "", "", "", "", ""
+            0, "", "", "", "", "", "", "", "", 0, 1
         ))
         conn.commit()
-        row = ("", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, "", "", "", "", "", "", "", "")
+        row = ("", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, "", "", "", "", "", "", "", "", 0, 1)
 
     c.close()
     conn.close()
@@ -193,6 +199,8 @@ def get_user(user_id):
         "favorite_color": row[16] or "",
         "favorite_music": row[17] or "",
         "summary_updated_at": row[18] or "",
+        "xp": int(row[19] or 0) if len(row) > 19 else 0,
+        "level": int(row[20] or 1) if len(row) > 20 else 1,
     }
 
     return apply_premium_expiration(user_id, user)
@@ -207,13 +215,14 @@ def update_user(user_id, user):
         goals = %s, projects = %s, dreams = %s, important_dates = %s,
         summary = %s, premium = %s, premium_until = %s, pets = %s,
         family = %s, profession = %s, favorite_car = %s, favorite_color = %s,
-        favorite_music = %s, summary_updated_at = %s
+        favorite_music = %s, summary_updated_at = %s, xp = %s, level = %s
         WHERE user_id = %s
     """, (
         user["name"], user["city"], user["hobbies"], user["facts"], user["timezone"],
         user["goals"], user["projects"], user["dreams"], user["important_dates"], user["summary"],
         user["premium"], user["premium_until"], user["pets"], user["family"], user["profession"],
         user["favorite_car"], user["favorite_color"], user["favorite_music"], user.get("summary_updated_at", ""),
+        int(user.get("xp", 0) or 0), int(user.get("level", 1) or 1),
         user_id
     ))
     conn.commit()
@@ -258,6 +267,57 @@ def premium_expiration_info(user_id):
         return f"💎 Premium aktīvs līdz {user['premium_until']}."
 
     return "💎 Premium aktīvs bez beigu datuma."
+
+
+def calculate_level(xp):
+    try:
+        xp = int(xp or 0)
+    except Exception:
+        xp = 0
+    return max(1, xp // XP_PER_LEVEL + 1)
+
+
+def xp_for_next_level(xp):
+    try:
+        xp = int(xp or 0)
+    except Exception:
+        xp = 0
+    next_level_xp = calculate_level(xp) * XP_PER_LEVEL
+    return max(0, next_level_xp - xp)
+
+
+def add_xp(user_id, amount):
+    try:
+        user = get_user(user_id)
+        current_xp = int(user.get("xp", 0) or 0)
+        new_xp = max(0, current_xp + int(amount or 0))
+        user["xp"] = new_xp
+        user["level"] = calculate_level(new_xp)
+        update_user(user_id, user)
+        return new_xp, user["level"]
+    except Exception as e:
+        print("XP kļūda:", e)
+        return None, None
+
+
+def user_level_info(user_id):
+    user = get_user(user_id)
+    xp = int(user.get("xp", 0) or 0)
+    level = calculate_level(xp)
+
+    if level != int(user.get("level", 1) or 1):
+        user["level"] = level
+        update_user(user_id, user)
+
+    next_level = level + 1
+    left = xp_for_next_level(xp)
+
+    return (
+        f"🏆 Tavs līmenis: {level}\n\n"
+        f"⭐ XP: {xp}\n\n"
+        f"Nākamais līmenis: {next_level}\n"
+        f"Vēl vajag: {left} XP"
+    )
 
 
 def valid_timezone(tz_name):
@@ -609,6 +669,7 @@ Iepriekšējais ilgtermiņa kopsavilkums:
         user["summary_updated_at"] = datetime.now(ZoneInfo(user["timezone"])).strftime("%Y-%m-%d %H:%M")
         update_user(user_id, user)
         save_memory_backup(user_id, "auto_summary")
+        add_xp(user_id, 10)
 
         return "Atjaunoju Long-Term Memory Pro kopsavilkumu. 🧠\n\n" + summary
 
@@ -728,6 +789,7 @@ def create_backup_answer(user_id):
     backup_id, backup_text = save_memory_backup(user_id, "manual")
     if not backup_id:
         return backup_text
+    add_xp(user_id, 5)
     return f"✅ Backup #{backup_id} izveidots.\n\n" + backup_text
 
 
@@ -1028,77 +1090,6 @@ def memory_usage(user_id):
     return premium_limits(user_id)
 
 
-def memory_fill_percent(user_id):
-    user = get_user(user_id)
-    fields = [
-        "name", "city", "hobbies", "facts", "goals", "projects", "dreams",
-        "important_dates", "pets", "family", "profession", "favorite_car",
-        "favorite_color", "favorite_music", "summary"
-    ]
-    filled = sum(1 for field in fields if user.get(field))
-    total = len(fields)
-    return int((filled / total) * 100) if total else 0
-
-
-def premium_dashboard(user_id):
-    user = get_user(user_id)
-
-    backups = backup_count_number(user_id)
-    active_reminders = active_reminder_count(user_id)
-    summaries_today = summaries_used_today(user_id)
-    memory_percent = memory_fill_percent(user_id)
-
-    conn = get_db()
-    c = conn.cursor()
-
-    db_execute(c, "SELECT COUNT(*) FROM messages WHERE user_id = %s", (user_id,))
-    messages_count = int(c.fetchone()[0] or 0)
-
-    db_execute(
-        c,
-        "SELECT COUNT(*) FROM reminders WHERE user_id = %s",
-        (user_id,)
-    )
-    total_reminders = int(c.fetchone()[0] or 0)
-
-    c.close()
-    conn.close()
-
-    if user.get("premium"):
-        status = "Premium aktīvs"
-        expires = user.get("premium_until") or "bez beigu datuma"
-        return (
-            "💎 Nina Premium Dashboard\n\n"
-            f"Statuss: {status}\n"
-            f"Beidzas: {expires}\n\n"
-            "Limiti:\n"
-            "📦 Backup: bez limita\n"
-            "⏰ Atgādinājumi: bez limita\n"
-            "🧠 Kopsavilkumi: bez limita\n\n"
-            "Lietošana:\n"
-            f"💬 Ziņas: {messages_count}\n"
-            f"📦 Backup: {backups}\n"
-            f"⏰ Aktīvie atgādinājumi: {active_reminders}\n"
-            f"⏱️ Atgādinājumi kopā: {total_reminders}\n"
-            f"🧠 Atmiņas aizpildījums: {memory_percent}%"
-        )
-
-    return (
-        "💎 Nina Premium Dashboard\n\n"
-        "Statuss: Free režīms\n\n"
-        "Limiti:\n"
-        f"📦 Backup: {backups}/{FREE_BACKUP_LIMIT}\n"
-        f"⏰ Aktīvie atgādinājumi: {active_reminders}/{FREE_REMINDER_LIMIT}\n"
-        f"🧠 Kopsavilkumi šodien: {summaries_today}/{FREE_SUMMARY_LIMIT_PER_DAY}\n\n"
-        "Lietošana:\n"
-        f"💬 Ziņas: {messages_count}\n"
-        f"📦 Backup: {backups}\n"
-        f"⏱️ Atgādinājumi kopā: {total_reminders}\n"
-        f"🧠 Atmiņas aizpildījums: {memory_percent}%\n\n"
-        "Lai noņemtu limitus, raksti: aktivizē premium"
-    )
-
-
 def user_statistics(user_id):
     user = get_user(user_id)
 
@@ -1148,7 +1139,9 @@ def user_statistics(user_id):
         f"⏰ Aktīvie atgādinājumi: {active_reminders}\n"
         f"⏱️ Atgādinājumi kopā: {total_reminders}\n"
         f"📅 Pirmā saruna: {account_text}\n"
-        f"💎 Premium: {premium_text}"
+        f"💎 Premium: {premium_text}\n"
+        f"🏆 Līmenis: {calculate_level(user.get('xp', 0))}\n"
+        f"⭐ XP: {int(user.get('xp', 0) or 0)}"
     )
 
 
@@ -1245,6 +1238,81 @@ def user_memory_stats(user_id):
 
     return "\n".join(lines)
 
+
+
+
+def memory_fill_percent(user_id):
+    user = get_user(user_id)
+    fields = [
+        "name", "city", "hobbies", "facts", "goals", "projects", "dreams",
+        "important_dates", "pets", "family", "profession", "favorite_car",
+        "favorite_color", "favorite_music", "summary"
+    ]
+    filled = sum(1 for key in fields if user.get(key))
+    total = len(fields)
+    return int((filled / total) * 100) if total else 0
+
+
+def premium_dashboard(user_id):
+    user = get_user(user_id)
+    xp = int(user.get("xp", 0) or 0)
+    level = calculate_level(xp)
+    backups = backup_count_number(user_id)
+    active_reminders = active_reminder_count(user_id)
+    summaries_today = summaries_used_today(user_id)
+    memory_percent = memory_fill_percent(user_id)
+
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(c, "SELECT COUNT(*) FROM messages WHERE user_id = %s", (user_id,))
+    messages_count = int(c.fetchone()[0] or 0)
+    db_execute(c, "SELECT COUNT(*) FROM reminders WHERE user_id = %s", (user_id,))
+    reminders_total = int(c.fetchone()[0] or 0)
+    c.close()
+    conn.close()
+
+    lines = ["💎 Nina Premium Dashboard", ""]
+
+    if user.get("premium"):
+        lines.append("Statuss: Premium aktīvs")
+        if user.get("premium_until"):
+            lines.append(f"Beidzas: {user['premium_until']}")
+        lines.extend([
+            "",
+            "Limiti:",
+            "📦 Backup: bez limita",
+            "⏰ Atgādinājumi: bez limita",
+            "🧠 Kopsavilkumi: bez limita",
+        ])
+    else:
+        lines.extend([
+            "Statuss: Free režīms",
+            "",
+            "Limiti:",
+            f"📦 Backup: {backups}/{FREE_BACKUP_LIMIT}",
+            f"⏰ Aktīvie atgādinājumi: {active_reminders}/{FREE_REMINDER_LIMIT}",
+            f"🧠 Kopsavilkumi šodien: {summaries_today}/{FREE_SUMMARY_LIMIT_PER_DAY}",
+        ])
+
+    lines.extend([
+        "",
+        "Lojalitāte:",
+        f"🏆 Līmenis: {level}",
+        f"⭐ XP: {xp}",
+        f"➡️ Līdz nākamajam līmenim: {xp_for_next_level(xp)} XP",
+        "",
+        "Lietošana:",
+        f"💬 Ziņas: {messages_count}",
+        f"📦 Backup: {backups}",
+        f"⏰ Aktīvie atgādinājumi: {active_reminders}",
+        f"⏱️ Atgādinājumi kopā: {reminders_total}",
+        f"🧠 Atmiņas aizpildījums: {memory_percent}%",
+    ])
+
+    if not user.get("premium"):
+        lines.extend(["", "Lai noņemtu limitus, raksti: aktivizē premium"])
+
+    return "\n".join(lines)
 
 def premium_paywall(title, used_text, premium_value):
     return (
@@ -1413,6 +1481,8 @@ def add_reminder(user_id, user_text):
     c.close()
     conn.close()
 
+    add_xp(user_id, 3)
+
     if local_time_text:
         return f"Pierakstīju atgādinājumu #{reminder_id}: {task}\nLaiks: {local_time_text} ({user['timezone']})"
     return f"Pierakstīju atgādinājumu #{reminder_id}: {task}"
@@ -1513,8 +1583,9 @@ Noteikumi:
 COMMAND_LINES = {
     "mans premium statuss", "premium statuss", "premium",
     "premium funkcijas", "premium limiti", "cik atmiņas man palicis", "premium beidzas",
-    "premium panelis", "mans panelis", "dashboard",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
+    "premium panelis", "mans panelis", "dashboard",
+    "mans līmenis", "mana pieredze", "xp",
     "aktivizē premium", "aktivize premium", "ieslēdz premium",
     "izslēdz premium", "atslēdz premium",
     "eksportē atmiņu", "atmiņas eksports", "export memory", "eksports",
@@ -1580,6 +1651,9 @@ def command_answer(user_id, command_text):
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
         return premium_dashboard(user_id)
+
+    if lower in ["mans līmenis", "mana pieredze", "xp"]:
+        return user_level_info(user_id)
 
     if lower == "mana statistika":
         return user_statistics(user_id)
@@ -1695,6 +1769,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(premium_dashboard(user_id))
         return
 
+    if lower in ["mans līmenis", "mana pieredze", "xp"]:
+        await update.message.reply_text(user_level_info(user_id))
+        return
+
     if lower == "mana statistika":
         await update.message.reply_text(user_statistics(user_id))
         return
@@ -1808,6 +1886,8 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     save_message(user_id, "Lietotājs", user_text)
+    add_xp(user_id, 1)
+    user = get_user(user_id)
     conversation = get_recent_messages(user_id)
 
     profile_info = f"""
@@ -1858,7 +1938,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 V9.5 Premium Dashboard darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V9.6 User Levels & Loyalty darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -1873,5 +1953,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V9.5 Premium Dashboard darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V9.6 User Levels & Loyalty darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
