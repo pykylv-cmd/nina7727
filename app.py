@@ -1,9 +1,10 @@
 import os
 import re
-import sqlite3
 import asyncio
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+
+import psycopg2
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -14,27 +15,50 @@ app = Flask(__name__)
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 
-DB_FILE = "nina_memory.db"
 DEFAULT_TIMEZONE = "Europe/Riga"
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL nav atrasts. Railway jāpievieno PostgreSQL un jābūt DATABASE_URL mainīgajam.")
+
+
+def get_db():
+    return psycopg2.connect(DATABASE_URL)
 
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db()
+    conn.autocommit = True
     c = conn.cursor()
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
-            name TEXT,
-            city TEXT,
-            hobbies TEXT,
-            facts TEXT
+            name TEXT DEFAULT '',
+            city TEXT DEFAULT '',
+            hobbies TEXT DEFAULT '',
+            facts TEXT DEFAULT '',
+            timezone TEXT DEFAULT 'Europe/Riga',
+            goals TEXT DEFAULT '',
+            projects TEXT DEFAULT '',
+            dreams TEXT DEFAULT '',
+            important_dates TEXT DEFAULT '',
+            summary TEXT DEFAULT '',
+            premium INTEGER DEFAULT 0,
+            premium_until TEXT DEFAULT '',
+            pets TEXT DEFAULT '',
+            family TEXT DEFAULT '',
+            profession TEXT DEFAULT '',
+            favorite_car TEXT DEFAULT '',
+            favorite_color TEXT DEFAULT '',
+            favorite_music TEXT DEFAULT '',
+            summary_updated_at TEXT DEFAULT ''
         )
     """)
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             user_id TEXT,
             role TEXT,
             text TEXT,
@@ -44,16 +68,18 @@ def init_db():
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS reminders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             user_id TEXT,
             text TEXT,
             remind_at TEXT,
+            local_time TEXT,
             status TEXT DEFAULT 'active',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    for col in [
+    # Ja tabulas jau eksistēja no vecākas versijas, pievieno trūkstošās kolonnas.
+    for col, col_type in [
         ("timezone", "TEXT DEFAULT 'Europe/Riga'"),
         ("goals", "TEXT DEFAULT ''"),
         ("projects", "TEXT DEFAULT ''"),
@@ -68,40 +94,49 @@ def init_db():
         ("favorite_car", "TEXT DEFAULT ''"),
         ("favorite_color", "TEXT DEFAULT ''"),
         ("favorite_music", "TEXT DEFAULT ''"),
-        ("summary_updated_at", "TEXT DEFAULT ''")
+        ("summary_updated_at", "TEXT DEFAULT ''"),
     ]:
         try:
-            c.execute(f"ALTER TABLE users ADD COLUMN {col[0]} {col[1]}")
-        except sqlite3.OperationalError:
+            c.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
+        except Exception:
             pass
 
     try:
         c.execute("ALTER TABLE reminders ADD COLUMN local_time TEXT")
-    except sqlite3.OperationalError:
+    except Exception:
         pass
 
-    conn.commit()
+    c.close()
     conn.close()
 
 
 def get_user(user_id):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db()
     c = conn.cursor()
     c.execute("""
-        SELECT name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until, pets, family, profession, favorite_car, favorite_color, favorite_music, summary_updated_at
-        FROM users WHERE user_id = ?
+        SELECT name, city, hobbies, facts, timezone, goals, projects, dreams,
+               important_dates, summary, premium, premium_until, pets, family,
+               profession, favorite_car, favorite_color, favorite_music,
+               summary_updated_at
+        FROM users WHERE user_id = %s
     """, (user_id,))
     row = c.fetchone()
 
     if not row:
         c.execute("""
             INSERT INTO users
-            (user_id, name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until, pets, family, profession, favorite_car, favorite_color, favorite_music, summary_updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (user_id, "", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, "", "", "", "", "", "", "", ""))
+            (user_id, name, city, hobbies, facts, timezone, goals, projects, dreams,
+             important_dates, summary, premium, premium_until, pets, family,
+             profession, favorite_car, favorite_color, favorite_music, summary_updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            user_id, "", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "",
+            0, "", "", "", "", "", "", "", ""
+        ))
         conn.commit()
         row = ("", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, "", "", "", "", "", "", "", "")
 
+    c.close()
     conn.close()
 
     return {
@@ -123,20 +158,21 @@ def get_user(user_id):
         "favorite_car": row[15] or "",
         "favorite_color": row[16] or "",
         "favorite_music": row[17] or "",
-        "summary_updated_at": row[18] or ""
+        "summary_updated_at": row[18] or "",
     }
 
 
 def update_user(user_id, user):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db()
     c = conn.cursor()
     c.execute("""
         UPDATE users SET
-        name = ?, city = ?, hobbies = ?, facts = ?, timezone = ?,
-        goals = ?, projects = ?, dreams = ?, important_dates = ?, summary = ?,
-        premium = ?, premium_until = ?, pets = ?, family = ?, profession = ?,
-        favorite_car = ?, favorite_color = ?, favorite_music = ?, summary_updated_at = ?
-        WHERE user_id = ?
+        name = %s, city = %s, hobbies = %s, facts = %s, timezone = %s,
+        goals = %s, projects = %s, dreams = %s, important_dates = %s,
+        summary = %s, premium = %s, premium_until = %s, pets = %s,
+        family = %s, profession = %s, favorite_car = %s, favorite_color = %s,
+        favorite_music = %s, summary_updated_at = %s
+        WHERE user_id = %s
     """, (
         user["name"], user["city"], user["hobbies"], user["facts"], user["timezone"],
         user["goals"], user["projects"], user["dreams"], user["important_dates"], user["summary"],
@@ -145,6 +181,7 @@ def update_user(user_id, user):
         user_id
     ))
     conn.commit()
+    c.close()
     conn.close()
 
 
@@ -299,10 +336,8 @@ def update_profile_from_text(user_id, text):
     profession_match = re.search(r"es esmu\s+([^\n.,!?]+)", text, re.IGNORECASE)
     if profession_match:
         profession = clean_text(profession_match.group(1))
-        # neglabā pārāk garas frāzes kā profesiju
         if profession and len(profession) <= 40:
             user["profession"] = profession
-
 
     favorite_car = extract_after(text, [
         r"mans mīļākais auto ir\s+(.+)",
@@ -350,18 +385,20 @@ def forget_from_profile(user_id, text):
 
 
 def save_message(user_id, role, text):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db()
     c = conn.cursor()
-    c.execute("INSERT INTO messages (user_id, role, text) VALUES (?, ?, ?)", (user_id, role, text))
+    c.execute("INSERT INTO messages (user_id, role, text) VALUES (%s, %s, %s)", (user_id, role, text))
     conn.commit()
+    c.close()
     conn.close()
 
 
 def get_recent_messages(user_id, limit=24):
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT role, text FROM messages WHERE user_id = ? ORDER BY id DESC LIMIT ?", (user_id, limit))
+    c.execute("SELECT role, text FROM messages WHERE user_id = %s ORDER BY id DESC LIMIT %s", (user_id, limit))
     rows = c.fetchall()
+    c.close()
     conn.close()
     rows.reverse()
     return "\n".join([f"{role}: {text}" for role, text in rows])
@@ -419,7 +456,6 @@ def profile_answer(user):
 def build_summary(user_id):
     user = get_user(user_id)
 
-    # Premium lietotājam dodam vairāk sarunas konteksta un dziļāku kopsavilkumu.
     if user.get("premium"):
         recent = get_recent_messages(user_id, limit=80)
         line_instruction = "Raksti 10-14 īsas rindas. Iekļauj projektus, mērķus, ģimeni, intereses, motivāciju un nākamos soļus."
@@ -427,7 +463,6 @@ def build_summary(user_id):
         recent = get_recent_messages(user_id, limit=35)
         line_instruction = "Raksti 5-8 īsas rindas. Fokusējies uz svarīgāko."
 
-    # V7.5: ja sarunu vēstures vēl nav daudz, kopsavilkumu veidojam arī no profila.
     has_profile_data = any([
         user["name"], user["city"], user["hobbies"], user["facts"], user["goals"],
         user["projects"], user["dreams"], user["important_dates"], user["pets"],
@@ -505,7 +540,6 @@ def show_summary(user_id):
     return "Ilgtermiņa kopsavilkums:\n\n" + user["summary"]
 
 
-
 def premium_status(user_id):
     user = get_user(user_id)
 
@@ -539,6 +573,7 @@ def deactivate_premium(user_id):
     user["premium_until"] = ""
     update_user(user_id, user)
     return "Premium izslēgts testa režīmā."
+
 
 def parse_reminder(user_text, user_tz_name):
     text = user_text.strip()
@@ -599,14 +634,15 @@ def add_reminder(user_id, user_text):
     user = get_user(user_id)
     task, remind_at_utc, local_time_text = parse_reminder(user_text, user["timezone"])
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db()
     c = conn.cursor()
     c.execute(
-        "INSERT INTO reminders (user_id, text, remind_at, local_time, status) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO reminders (user_id, text, remind_at, local_time, status) VALUES (%s, %s, %s, %s, %s) RETURNING id",
         (user_id, task, remind_at_utc, local_time_text, "active")
     )
-    reminder_id = c.lastrowid
+    reminder_id = c.fetchone()[0]
     conn.commit()
+    c.close()
     conn.close()
 
     if local_time_text:
@@ -616,13 +652,14 @@ def add_reminder(user_id, user_text):
 
 def list_reminders(user_id):
     user = get_user(user_id)
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db()
     c = conn.cursor()
     c.execute(
-        "SELECT id, text, local_time, remind_at FROM reminders WHERE user_id = ? AND status = 'active' ORDER BY id DESC",
+        "SELECT id, text, local_time, remind_at FROM reminders WHERE user_id = %s AND status = 'active' ORDER BY id DESC",
         (user_id,)
     )
     rows = c.fetchall()
+    c.close()
     conn.close()
 
     if not rows:
@@ -641,11 +678,12 @@ def delete_reminder(user_id, user_text):
         return "Pasaki atgādinājuma numuru. Piemēram: dzēs atgādinājumu 3"
 
     reminder_id = int(match.group(1))
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db()
     c = conn.cursor()
-    c.execute("UPDATE reminders SET status = 'deleted' WHERE id = ? AND user_id = ?", (reminder_id, user_id))
-    conn.commit()
+    c.execute("UPDATE reminders SET status = 'deleted' WHERE id = %s AND user_id = %s", (reminder_id, user_id))
     changed = c.rowcount
+    conn.commit()
+    c.close()
     conn.close()
 
     return f"Izdzēsu atgādinājumu #{reminder_id}." if changed else "Tādu aktīvu atgādinājumu neatradu."
@@ -655,22 +693,23 @@ async def reminder_worker(application):
     while True:
         try:
             now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-            conn = sqlite3.connect(DB_FILE)
+            conn = get_db()
             c = conn.cursor()
             c.execute("""
                 SELECT id, user_id, text FROM reminders
-                WHERE status = 'active' AND remind_at != '' AND remind_at <= ?
+                WHERE status = 'active' AND remind_at != '' AND remind_at <= %s
             """, (now_utc,))
             rows = c.fetchall()
 
             for reminder_id, user_id, text in rows:
                 try:
                     await application.bot.send_message(chat_id=int(user_id), text=f"🌷 Atgādinājums:\n{text}")
-                    c.execute("UPDATE reminders SET status = 'sent' WHERE id = ?", (reminder_id,))
+                    c.execute("UPDATE reminders SET status = 'sent' WHERE id = %s", (reminder_id,))
                     conn.commit()
                 except Exception as e:
                     print("Atgādinājuma sūtīšanas kļūda:", e)
 
+            c.close()
             conn.close()
         except Exception as e:
             print("Reminder worker kļūda:", e)
@@ -823,7 +862,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 darbojas!"
+    return "Nina7727 darbojas ar PostgreSQL!"
 
 
 init_db()
@@ -838,5 +877,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V7.5.1 Long-Term Memory Pro darbojas...")
+    print("Nina7727 V8.0 PostgreSQL Memory darbojas...")
     telegram_app.run_polling()
