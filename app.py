@@ -173,7 +173,7 @@ def get_user(user_id):
     c.close()
     conn.close()
 
-    return {
+    user = {
         "name": row[0] or "",
         "city": row[1] or "",
         "hobbies": row[2] or "",
@@ -194,6 +194,8 @@ def get_user(user_id):
         "favorite_music": row[17] or "",
         "summary_updated_at": row[18] or "",
     }
+
+    return apply_premium_expiration(user_id, user)
 
 
 def update_user(user_id, user):
@@ -217,6 +219,45 @@ def update_user(user_id, user):
     conn.commit()
     c.close()
     conn.close()
+
+
+def apply_premium_expiration(user_id, user):
+    """V9.4: automātiski izslēdz Premium, ja premium_until datums ir pagājis."""
+    if not user.get("premium"):
+        return user
+
+    premium_until = (user.get("premium_until") or "").strip()
+    if not premium_until:
+        return user
+
+    try:
+        until_date = datetime.strptime(premium_until, "%Y-%m-%d").date()
+        user_tz = ZoneInfo(user.get("timezone") or DEFAULT_TIMEZONE)
+        today = datetime.now(user_tz).date()
+
+        # Premium ir aktīvs līdz norādītās dienas beigām.
+        # Nākamajā dienā pēc premium_until tas automātiski izslēdzas.
+        if until_date < today:
+            user["premium"] = 0
+            user["premium_until"] = ""
+            update_user(user_id, user)
+
+    except Exception as e:
+        print("Premium expiration pārbaudes kļūda:", e)
+
+    return user
+
+
+def premium_expiration_info(user_id):
+    user = get_user(user_id)
+
+    if not user.get("premium"):
+        return "Premium šobrīd nav aktīvs."
+
+    if user.get("premium_until"):
+        return f"💎 Premium aktīvs līdz {user['premium_until']}."
+
+    return "💎 Premium aktīvs bez beigu datuma."
 
 
 def valid_timezone(tz_name):
@@ -1400,7 +1441,7 @@ Noteikumi:
 
 COMMAND_LINES = {
     "mans premium statuss", "premium statuss", "premium",
-    "premium funkcijas", "premium limiti", "cik atmiņas man palicis",
+    "premium funkcijas", "premium limiti", "cik atmiņas man palicis", "premium beidzas",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
     "aktivizē premium", "aktivize premium", "ieslēdz premium",
     "izslēdz premium", "atslēdz premium",
@@ -1731,7 +1772,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 V9.3 Premium Analytics darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V9.4 Premium Expiration darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -1746,5 +1787,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V9.3 Premium Analytics darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V9.4 Premium Expiration darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
