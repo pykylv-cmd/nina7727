@@ -58,7 +58,8 @@ def init_db():
         ("goals", "TEXT DEFAULT ''"),
         ("projects", "TEXT DEFAULT ''"),
         ("dreams", "TEXT DEFAULT ''"),
-        ("important_dates", "TEXT DEFAULT ''")
+        ("important_dates", "TEXT DEFAULT ''"),
+        ("summary", "TEXT DEFAULT ''")
     ]:
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col[0]} {col[1]}")
@@ -78,7 +79,7 @@ def get_user(user_id):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("""
-        SELECT name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates
+        SELECT name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary
         FROM users WHERE user_id = ?
     """, (user_id,))
     row = c.fetchone()
@@ -86,11 +87,11 @@ def get_user(user_id):
     if not row:
         c.execute("""
             INSERT INTO users
-            (user_id, name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (user_id, "", "", "", "", DEFAULT_TIMEZONE, "", "", "", ""))
+            (user_id, name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, "", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", ""))
         conn.commit()
-        row = ("", "", "", "", DEFAULT_TIMEZONE, "", "", "", "")
+        row = ("", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "")
 
     conn.close()
 
@@ -103,7 +104,8 @@ def get_user(user_id):
         "goals": row[5] or "",
         "projects": row[6] or "",
         "dreams": row[7] or "",
-        "important_dates": row[8] or ""
+        "important_dates": row[8] or "",
+        "summary": row[9] or ""
     }
 
 
@@ -113,11 +115,11 @@ def update_user(user_id, user):
     c.execute("""
         UPDATE users SET
         name = ?, city = ?, hobbies = ?, facts = ?, timezone = ?,
-        goals = ?, projects = ?, dreams = ?, important_dates = ?
+        goals = ?, projects = ?, dreams = ?, important_dates = ?, summary = ?
         WHERE user_id = ?
     """, (
         user["name"], user["city"], user["hobbies"], user["facts"], user["timezone"],
-        user["goals"], user["projects"], user["dreams"], user["important_dates"],
+        user["goals"], user["projects"], user["dreams"], user["important_dates"], user["summary"],
         user_id
     ))
     conn.commit()
@@ -142,8 +144,8 @@ def detect_timezone(text):
     zones = {
         "latvijā": "Europe/Riga",
         "rīgā": "Europe/Riga",
-        "amerika": "America/New_York",
         "amerikā": "America/New_York",
+        "amerika": "America/New_York",
         "new york": "America/New_York",
         "los angeles": "America/Los_Angeles",
         "krievijā": "Europe/Moscow",
@@ -161,6 +163,10 @@ def detect_timezone(text):
     return None
 
 
+def clean_text(text):
+    return text.strip(" .,!?:;")
+
+
 def split_items(text):
     text = text.replace("\n", ",")
     text = text.replace(" arī", "")
@@ -172,7 +178,7 @@ def split_items(text):
 def add_unique(old_text, new_items):
     items = [x.strip() for x in old_text.split(",") if x.strip()]
     for item in new_items:
-        item = item.strip(" .,!?:;")
+        item = clean_text(item)
         if item and item not in items:
             items.append(item)
     return ", ".join(items)
@@ -180,12 +186,8 @@ def add_unique(old_text, new_items):
 
 def remove_item(old_text, item_to_remove):
     items = [x.strip() for x in old_text.split(",") if x.strip()]
-    item_to_remove = item_to_remove.strip(" .,!?:;").lower()
+    item_to_remove = clean_text(item_to_remove).lower()
     return ", ".join([item for item in items if item.lower() != item_to_remove])
-
-
-def clean_text(text):
-    return text.strip(" .,!?:;")
 
 
 def extract_after(text, patterns):
@@ -234,33 +236,19 @@ def update_profile_from_text(user_id, text):
         fact = re.sub(r"^man svarīgi\s*", "", fact, flags=re.IGNORECASE)
         user["facts"] = add_unique(user["facts"], split_items(fact))
 
-    goal = extract_after(text, [
-        r"mans mērķis ir\s+(.+)",
-        r"mērķis ir\s+(.+)"
-    ])
+    goal = extract_after(text, [r"mans mērķis ir\s+(.+)", r"mērķis ir\s+(.+)"])
     if goal:
         user["goals"] = add_unique(user["goals"], [goal])
 
-    project = extract_after(text, [
-        r"mans projekts ir\s+(.+)",
-        r"es būvēju\s+(.+)",
-        r"es taisu\s+(.+)"
-    ])
+    project = extract_after(text, [r"mans projekts ir\s+(.+)", r"es būvēju\s+(.+)", r"es taisu\s+(.+)"])
     if project:
         user["projects"] = add_unique(user["projects"], [project])
 
-    dream = extract_after(text, [
-        r"mans sapnis ir\s+(.+)",
-        r"es sapņoju par\s+(.+)"
-    ])
+    dream = extract_after(text, [r"mans sapnis ir\s+(.+)", r"es sapņoju par\s+(.+)"])
     if dream:
         user["dreams"] = add_unique(user["dreams"], [dream])
 
-    important_date = extract_after(text, [
-        r"svarīgs datums ir\s+(.+)",
-        r"mana dzimšanas diena ir\s+(.+)",
-        r"dzimšanas diena ir\s+(.+)"
-    ])
+    important_date = extract_after(text, [r"svarīgs datums ir\s+(.+)", r"mana dzimšanas diena ir\s+(.+)", r"dzimšanas diena ir\s+(.+)"])
     if important_date:
         user["important_dates"] = add_unique(user["important_dates"], [important_date])
 
@@ -293,7 +281,7 @@ def save_message(user_id, role, text):
     conn.close()
 
 
-def get_recent_messages(user_id, limit=20):
+def get_recent_messages(user_id, limit=24):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("SELECT role, text FROM messages WHERE user_id = ? ORDER BY id DESC LIMIT ?", (user_id, limit))
@@ -324,11 +312,60 @@ def profile_answer(user):
         lines.append("• Sapņi: " + user["dreams"])
     if user["important_dates"]:
         lines.append("• Svarīgi datumi: " + user["important_dates"])
+    if user["summary"]:
+        lines.append("\nĪsais kopsavilkums:\n" + user["summary"])
 
     if not lines:
         return "Pagaidām vēl maz zinu par tevi. Pastāsti, kas tev patīk vai kas tev svarīgs. 😊"
 
     return "Es par tevi atceros:\n" + "\n".join(lines)
+
+
+def build_summary(user_id):
+    user = get_user(user_id)
+    recent = get_recent_messages(user_id, limit=40)
+
+    if not recent.strip():
+        return "Vēl nav pietiekami daudz sarunu, lai izveidotu kopsavilkumu."
+
+    profile = f"""
+Esošais profils:
+Vārds: {user["name"]}
+Pilsēta: {user["city"]}
+Laika zona: {user["timezone"]}
+Patīk: {user["hobbies"]}
+Fakti: {user["facts"]}
+Mērķi: {user["goals"]}
+Projekti: {user["projects"]}
+Sapņi: {user["dreams"]}
+Svarīgi datumi: {user["important_dates"]}
+
+Iepriekšējais kopsavilkums:
+{user["summary"]}
+"""
+
+    try:
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=(
+                "Izveido īsu, praktisku ilgtermiņa atmiņas kopsavilkumu par lietotāju latviešu valodā.\n"
+                "Neraksti izdomājumus. Izmanto tikai profilu un sarunu vēsturi.\n"
+                "Raksti 5-8 īsas rindas. Fokusējies uz mērķiem, projektiem, interesēm un svarīgām lietām.\n\n"
+                f"{profile}\n\n"
+                f"Sarunas vēsture:\n{recent}"
+            )
+        )
+
+        summary = response.output_text.strip()
+
+        user["summary"] = summary
+        update_user(user_id, user)
+
+        return "Atjaunoju ilgtermiņa kopsavilkumu. 🧠\n\n" + summary
+
+    except Exception as e:
+        print("Kopsavilkuma kļūda:", e)
+        return "Kopsavilkumu šobrīd neizdevās izveidot. Pamēģini vēlreiz pēc brīža."
 
 
 def parse_reminder(user_text, user_tz_name):
@@ -484,7 +521,7 @@ Noteikumi:
 - Nerunā kā robots vai klientu atbalsts.
 - Neatkārto "Sveiks!" katrā atbildē.
 - Neizdomā faktus par lietotāju.
-- Ja runā par lietotāju, balsties tikai uz profilu un sarunas vēsturi.
+- Ja runā par lietotāju, balsties tikai uz profilu, kopsavilkumu un sarunas vēsturi.
 - Atbildi īsi, dzīvi, sirsnīgi.
 - Ja cilvēkam ir stress, nomierini.
 - Vari būt viegli asprātīga un silta.
@@ -515,6 +552,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower.startswith("aizmirsti"):
         await update.message.reply_text(forget_from_profile(user_id, user_text))
+        return
+
+    if lower in ["atjauno kopsavilkumu", "izveido kopsavilkumu", "atjauno atmiņu"]:
+        await update.message.reply_text(build_summary(user_id))
         return
 
     update_profile_from_text(user_id, user_text)
@@ -555,6 +596,9 @@ Mērķi: {user["goals"]}
 Projekti: {user["projects"]}
 Sapņi: {user["dreams"]}
 Svarīgi datumi: {user["important_dates"]}
+
+Ilgtermiņa kopsavilkums:
+{user["summary"]}
 """
 
     try:
@@ -594,5 +638,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V5 Premium Profile darbojas...")
+    print("Nina7727 V6 Long-Term Memory darbojas...")
     telegram_app.run_polling()
