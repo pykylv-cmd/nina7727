@@ -1,4 +1,3 @@
-
 import os
 import re
 import sqlite3
@@ -65,7 +64,10 @@ def init_db():
         ("premium_until", "TEXT DEFAULT ''"),
         ("pets", "TEXT DEFAULT ''"),
         ("family", "TEXT DEFAULT ''"),
-        ("profession", "TEXT DEFAULT ''")
+        ("profession", "TEXT DEFAULT ''"),
+        ("favorite_car", "TEXT DEFAULT ''"),
+        ("favorite_color", "TEXT DEFAULT ''"),
+        ("favorite_music", "TEXT DEFAULT ''")
     ]:
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col[0]} {col[1]}")
@@ -85,7 +87,7 @@ def get_user(user_id):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("""
-        SELECT name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until, pets, family, profession
+        SELECT name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until, pets, family, profession, favorite_car, favorite_color, favorite_music
         FROM users WHERE user_id = ?
     """, (user_id,))
     row = c.fetchone()
@@ -93,11 +95,11 @@ def get_user(user_id):
     if not row:
         c.execute("""
             INSERT INTO users
-            (user_id, name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until, pets, family, profession)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (user_id, "", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, "", "", "", ""))
+            (user_id, name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until, pets, family, profession, favorite_car, favorite_color, favorite_music)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, "", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, "", "", "", "", "", ""))
         conn.commit()
-        row = ("", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, "", "", "", "")
+        row = ("", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, "", "", "", "", "", "")
 
     conn.close()
 
@@ -116,7 +118,10 @@ def get_user(user_id):
         "premium_until": row[11] or "",
         "pets": row[12] or "",
         "family": row[13] or "",
-        "profession": row[14] or ""
+        "profession": row[14] or "",
+        "favorite_car": row[15] or "",
+        "favorite_color": row[16] or "",
+        "favorite_music": row[17] or ""
     }
 
 
@@ -127,12 +132,14 @@ def update_user(user_id, user):
         UPDATE users SET
         name = ?, city = ?, hobbies = ?, facts = ?, timezone = ?,
         goals = ?, projects = ?, dreams = ?, important_dates = ?, summary = ?,
-        premium = ?, premium_until = ?, pets = ?, family = ?, profession = ?
+        premium = ?, premium_until = ?, pets = ?, family = ?, profession = ?,
+        favorite_car = ?, favorite_color = ?, favorite_music = ?
         WHERE user_id = ?
     """, (
         user["name"], user["city"], user["hobbies"], user["facts"], user["timezone"],
         user["goals"], user["projects"], user["dreams"], user["important_dates"], user["summary"],
         user["premium"], user["premium_until"], user["pets"], user["family"], user["profession"],
+        user["favorite_car"], user["favorite_color"], user["favorite_music"],
         user_id
     ))
     conn.commit()
@@ -294,6 +301,31 @@ def update_profile_from_text(user_id, text):
         if profession and len(profession) <= 40:
             user["profession"] = profession
 
+
+    favorite_car = extract_after(text, [
+        r"mans mīļākais auto ir\s+(.+)",
+        r"milakais auto ir\s+(.+)",
+        r"mīļākais auto ir\s+(.+)"
+    ])
+    if favorite_car:
+        user["favorite_car"] = favorite_car
+
+    favorite_color = extract_after(text, [
+        r"mana mīļākā krāsa ir\s+(.+)",
+        r"milaka krasa ir\s+(.+)",
+        r"mīļākā krāsa ir\s+(.+)"
+    ])
+    if favorite_color:
+        user["favorite_color"] = favorite_color
+
+    favorite_music = extract_after(text, [
+        r"mana mīļākā mūzika ir\s+(.+)",
+        r"milaka muzika ir\s+(.+)",
+        r"mīļākā mūzika ir\s+(.+)"
+    ])
+    if favorite_music:
+        user["favorite_music"] = favorite_music
+
     update_user(user_id, user)
 
 
@@ -308,7 +340,7 @@ def forget_from_profile(user_id, text):
     if not phrase:
         return "Pasaki, ko tieši lai aizmirstu."
 
-    for key in ["hobbies", "facts", "goals", "projects", "dreams", "important_dates", "pets", "family", "profession"]:
+    for key in ["hobbies", "facts", "goals", "projects", "dreams", "important_dates", "pets", "family", "profession", "favorite_car", "favorite_color", "favorite_music"]:
         user[key] = remove_item(user[key], phrase)
 
     update_user(user_id, user)
@@ -365,6 +397,12 @@ def profile_answer(user):
         lines.append("• Ģimene: " + user["family"])
     if user["profession"]:
         lines.append("• Profesija: " + user["profession"])
+    if user["favorite_car"]:
+        lines.append("• Mīļākais auto: " + user["favorite_car"])
+    if user["favorite_color"]:
+        lines.append("• Mīļākā krāsa: " + user["favorite_color"])
+    if user["favorite_music"]:
+        lines.append("• Mīļākā mūzika: " + user["favorite_music"])
     if user["summary"]:
         lines.append("\nĪsais kopsavilkums:\n" + user["summary"])
 
@@ -395,6 +433,9 @@ Svarīgi datumi: {user["important_dates"]}
 Mājdzīvnieki: {user["pets"]}
 Ģimene: {user["family"]}
 Profesija: {user["profession"]}
+Mīļākais auto: {user["favorite_car"]}
+Mīļākā krāsa: {user["favorite_color"]}
+Mīļākā mūzika: {user["favorite_music"]}
 
 Iepriekšējais kopsavilkums:
 {user["summary"]}
@@ -703,6 +744,9 @@ Svarīgi datumi: {user["important_dates"]}
 Mājdzīvnieki: {user["pets"]}
 Ģimene: {user["family"]}
 Profesija: {user["profession"]}
+Mīļākais auto: {user["favorite_car"]}
+Mīļākā krāsa: {user["favorite_color"]}
+Mīļākā mūzika: {user["favorite_music"]}
 Premium: {user["premium"]}
 Premium līdz: {user["premium_until"]}
 
@@ -747,5 +791,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V7.4.1 Pets Family Profession darbojas...")
+    print("Nina7727 V7.4.2 Favorites darbojas...")
     telegram_app.run_polling()
