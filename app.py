@@ -904,10 +904,119 @@ Noteikumi:
 """
 
 
+COMMAND_LINES = {
+    "mans premium statuss", "premium statuss", "premium",
+    "aktivizē premium", "aktivize premium", "ieslēdz premium",
+    "izslēdz premium", "atslēdz premium",
+    "eksportē atmiņu", "atmiņas eksports", "export memory", "eksports",
+    "backup", "izveido backup", "rezerves kopija", "izveido rezerves kopiju",
+    "pēdējais backup", "parādi backup", "mans backup", "pēdējā rezerves kopija",
+    "mani atgādinājumi", "parādi atgādinājumus", "atgādinājumi",
+    "atjauno kopsavilkumu", "izveido kopsavilkumu", "atjauno atmiņu",
+    "mans kopsavilkums", "parādi kopsavilkumu", "ilgtermiņa atmiņa",
+    "ko tu par mani zini", "ko tu par manīm zini", "ko tu par mani atceries",
+    "ko tu par manīm atceries", "ko tu atceries", "kas man patīk",
+    "ko par mani zini", "ko par manīm zini",
+}
+
+
+def is_command_line(line):
+    lower = line.strip().lower()
+    return (
+        lower in COMMAND_LINES
+        or lower.startswith("atgādini man")
+        or lower.startswith("dzēs atgādinājumu")
+        or lower.startswith("izdzēs atgādinājumu")
+        or lower.startswith("aizmirsti atgādinājumu")
+        or lower.startswith("aizmirsti")
+    )
+
+
+def split_profile_and_commands(text):
+    profile_lines = []
+    command_lines = []
+
+    for line in text.splitlines():
+        clean_line = line.strip()
+        if not clean_line:
+            continue
+        if is_command_line(clean_line):
+            command_lines.append(clean_line)
+        else:
+            profile_lines.append(clean_line)
+
+    return "\n".join(profile_lines), command_lines
+
+
+def command_answer(user_id, command_text):
+    lower = command_text.strip().lower()
+
+    if lower in ["mans premium statuss", "premium statuss", "premium"]:
+        return premium_status(user_id)
+
+    if lower in ["aktivizē premium", "aktivize premium", "ieslēdz premium"]:
+        return activate_premium(user_id)
+
+    if lower in ["izslēdz premium", "atslēdz premium"]:
+        return deactivate_premium(user_id)
+
+    if lower in ["eksportē atmiņu", "atmiņas eksports", "export memory", "eksports"]:
+        return build_memory_export(user_id)
+
+    if lower in ["backup", "izveido backup", "rezerves kopija", "izveido rezerves kopiju"]:
+        return create_backup_answer(user_id)
+
+    if lower in ["pēdējais backup", "parādi backup", "mans backup", "pēdējā rezerves kopija"]:
+        return latest_backup_answer(user_id)
+
+    if lower.startswith("atgādini man"):
+        return add_reminder(user_id, command_text)
+
+    if lower in ["mani atgādinājumi", "parādi atgādinājumus", "atgādinājumi"]:
+        return list_reminders(user_id)
+
+    if lower.startswith("dzēs atgādinājumu") or lower.startswith("izdzēs atgādinājumu"):
+        return delete_reminder(user_id, command_text)
+
+    if lower.startswith("aizmirsti atgādinājumu"):
+        return delete_reminder(user_id, command_text)
+
+    if lower.startswith("aizmirsti"):
+        return forget_from_profile(user_id, command_text)
+
+    if lower in ["atjauno kopsavilkumu", "izveido kopsavilkumu", "atjauno atmiņu"]:
+        return build_summary(user_id)
+
+    if lower in ["mans kopsavilkums", "parādi kopsavilkumu", "ilgtermiņa atmiņa"]:
+        return show_summary(user_id)
+
+    if lower in [
+        "ko tu par mani zini", "ko tu par manīm zini",
+        "ko tu par mani atceries", "ko tu par manīm atceries",
+        "ko tu atceries", "kas man patīk",
+        "ko par mani zini", "ko par manīm zini"
+    ]:
+        return profile_answer(get_user(user_id))
+
+    return None
+
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     user_id = str(update.effective_user.id)
-    lower = user_text.lower()
+    lower = user_text.strip().lower()
+
+    profile_text, command_lines = split_profile_and_commands(user_text)
+    if command_lines and profile_text.strip():
+        update_profile_from_text(user_id, profile_text)
+        answers = []
+        for command in command_lines:
+            answer = command_answer(user_id, command)
+            if answer:
+                answers.append(answer)
+        if answers:
+            await update.message.reply_text("\n\n".join(answers))
+            return
 
     if lower in ["mans premium statuss", "premium statuss", "premium"]:
         await update.message.reply_text(premium_status(user_id))
