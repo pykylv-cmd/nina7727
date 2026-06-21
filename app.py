@@ -987,6 +987,153 @@ def memory_usage(user_id):
     return premium_limits(user_id)
 
 
+def user_statistics(user_id):
+    user = get_user(user_id)
+
+    conn = get_db()
+    c = conn.cursor()
+
+    db_execute(c, "SELECT COUNT(*) FROM messages WHERE user_id = %s", (user_id,))
+    messages_count = int(c.fetchone()[0] or 0)
+
+    db_execute(c, "SELECT COUNT(*) FROM memory_backups WHERE user_id = %s", (user_id,))
+    backups_count = int(c.fetchone()[0] or 0)
+
+    db_execute(
+        c,
+        "SELECT COUNT(*) FROM reminders WHERE user_id = %s AND status = 'active'",
+        (user_id,)
+    )
+    active_reminders = int(c.fetchone()[0] or 0)
+
+    db_execute(
+        c,
+        "SELECT COUNT(*) FROM reminders WHERE user_id = %s",
+        (user_id,)
+    )
+    total_reminders = int(c.fetchone()[0] or 0)
+
+    db_execute(
+        c,
+        "SELECT MIN(created_at) FROM messages WHERE user_id = %s",
+        (user_id,)
+    )
+    first_message_at = c.fetchone()[0]
+
+    c.close()
+    conn.close()
+
+    premium_text = "aktīvs" if user.get("premium") else "neaktīvs"
+    if user.get("premium") and user.get("premium_until"):
+        premium_text += f" līdz {user['premium_until']}"
+
+    account_text = str(first_message_at) if first_message_at else "vēl nav sarunu vēstures"
+
+    return (
+        "📊 Tava Nina statistika\n\n"
+        f"💬 Ziņas: {messages_count}\n"
+        f"📦 Backup: {backups_count}\n"
+        f"⏰ Aktīvie atgādinājumi: {active_reminders}\n"
+        f"⏱️ Atgādinājumi kopā: {total_reminders}\n"
+        f"📅 Pirmā saruna: {account_text}\n"
+        f"💎 Premium: {premium_text}"
+    )
+
+
+def user_activity(user_id):
+    since_24h = (datetime.utcnow() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+
+    conn = get_db()
+    c = conn.cursor()
+
+    db_execute(
+        c,
+        "SELECT COUNT(*) FROM messages WHERE user_id = %s AND created_at >= %s",
+        (user_id, since_24h)
+    )
+    messages_24h = int(c.fetchone()[0] or 0)
+
+    db_execute(
+        c,
+        "SELECT COUNT(*) FROM messages WHERE user_id = %s",
+        (user_id,)
+    )
+    messages_total = int(c.fetchone()[0] or 0)
+
+    db_execute(
+        c,
+        "SELECT COUNT(*) FROM memory_backups WHERE user_id = %s",
+        (user_id,)
+    )
+    backups_total = int(c.fetchone()[0] or 0)
+
+    db_execute(
+        c,
+        "SELECT COUNT(*) FROM reminders WHERE user_id = %s AND status = 'active'",
+        (user_id,)
+    )
+    active_reminders = int(c.fetchone()[0] or 0)
+
+    c.close()
+    conn.close()
+
+    if messages_24h >= 10:
+        note = "Tu Ninu šodien lieto aktīvi. 🚀"
+    elif messages_total > 0:
+        note = "Tu Ninu jau sāc lietot regulāri. 🌷"
+    else:
+        note = "Sarunu vēsture vēl tikai sākas. 🌱"
+
+    return (
+        "📈 Tava aktivitāte\n\n"
+        f"Ziņas pēdējās 24h: {messages_24h}\n"
+        f"Ziņas kopā: {messages_total}\n"
+        f"Backup kopā: {backups_total}\n"
+        f"Aktīvie atgādinājumi: {active_reminders}\n\n"
+        f"{note}"
+    )
+
+
+def user_memory_stats(user_id):
+    user = get_user(user_id)
+
+    fields = [
+        ("Vārds", "name"),
+        ("Pilsēta", "city"),
+        ("Patīk", "hobbies"),
+        ("Svarīgi fakti", "facts"),
+        ("Mērķi", "goals"),
+        ("Projekti", "projects"),
+        ("Sapņi", "dreams"),
+        ("Svarīgi datumi", "important_dates"),
+        ("Mājdzīvnieki", "pets"),
+        ("Ģimene", "family"),
+        ("Profesija", "profession"),
+        ("Mīļākais auto", "favorite_car"),
+        ("Mīļākā krāsa", "favorite_color"),
+        ("Mīļākā mūzika", "favorite_music"),
+        ("Kopsavilkums", "summary"),
+    ]
+
+    filled = sum(1 for _, key in fields if user.get(key))
+    total = len(fields)
+    percent = int((filled / total) * 100) if total else 0
+
+    lines = [
+        "🧠 Atmiņas pārskats",
+        "",
+        f"Aizpildīti lauki: {filled}/{total}",
+        f"Atmiņas aizpildījums: {percent}%",
+        ""
+    ]
+
+    for label, key in fields:
+        mark = "✅" if user.get(key) else "❌"
+        lines.append(f"• {label}: {mark}")
+
+    return "\n".join(lines)
+
+
 def premium_paywall(title, used_text, premium_value):
     return (
         f"💎 {title}\n\n"
@@ -1254,6 +1401,7 @@ Noteikumi:
 COMMAND_LINES = {
     "mans premium statuss", "premium statuss", "premium",
     "premium funkcijas", "premium limiti", "cik atmiņas man palicis",
+    "mana statistika", "mana aktivitāte", "mana atmiņa",
     "aktivizē premium", "aktivize premium", "ieslēdz premium",
     "izslēdz premium", "atslēdz premium",
     "eksportē atmiņu", "atmiņas eksports", "export memory", "eksports",
@@ -1313,6 +1461,15 @@ def command_answer(user_id, command_text):
 
     if lower in ["premium limiti", "cik atmiņas man palicis"]:
         return premium_limits(user_id)
+
+    if lower == "mana statistika":
+        return user_statistics(user_id)
+
+    if lower == "mana aktivitāte":
+        return user_activity(user_id)
+
+    if lower == "mana atmiņa":
+        return user_memory_stats(user_id)
 
     if lower in ["aktivizē premium", "aktivize premium", "ieslēdz premium"]:
         return activate_premium(user_id)
@@ -1409,6 +1566,18 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower in ["premium limiti", "cik atmiņas man palicis"]:
         await update.message.reply_text(premium_limits(user_id))
+        return
+
+    if lower == "mana statistika":
+        await update.message.reply_text(user_statistics(user_id))
+        return
+
+    if lower == "mana aktivitāte":
+        await update.message.reply_text(user_activity(user_id))
+        return
+
+    if lower == "mana atmiņa":
+        await update.message.reply_text(user_memory_stats(user_id))
         return
 
     if lower in ["aktivizē premium", "aktivize premium", "ieslēdz premium"]:
@@ -1562,7 +1731,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 V9.2 Premium Paywall Texts darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V9.3 Premium Analytics darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -1577,5 +1746,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V9.2 Premium Paywall Texts darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V9.3 Premium Analytics darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
