@@ -67,7 +67,8 @@ def init_db():
         ("profession", "TEXT DEFAULT ''"),
         ("favorite_car", "TEXT DEFAULT ''"),
         ("favorite_color", "TEXT DEFAULT ''"),
-        ("favorite_music", "TEXT DEFAULT ''")
+        ("favorite_music", "TEXT DEFAULT ''"),
+        ("summary_updated_at", "TEXT DEFAULT ''")
     ]:
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col[0]} {col[1]}")
@@ -87,7 +88,7 @@ def get_user(user_id):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("""
-        SELECT name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until, pets, family, profession, favorite_car, favorite_color, favorite_music
+        SELECT name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until, pets, family, profession, favorite_car, favorite_color, favorite_music, summary_updated_at
         FROM users WHERE user_id = ?
     """, (user_id,))
     row = c.fetchone()
@@ -95,11 +96,11 @@ def get_user(user_id):
     if not row:
         c.execute("""
             INSERT INTO users
-            (user_id, name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until, pets, family, profession, favorite_car, favorite_color, favorite_music)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (user_id, name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until, pets, family, profession, favorite_car, favorite_color, favorite_music, summary_updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (user_id, "", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, "", "", "", "", "", "", ""))
         conn.commit()
-        row = ("", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, "", "", "", "", "", "")
+        row = ("", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, "", "", "", "", "", "", "")
 
     conn.close()
 
@@ -121,7 +122,8 @@ def get_user(user_id):
         "profession": row[14] or "",
         "favorite_car": row[15] or "",
         "favorite_color": row[16] or "",
-        "favorite_music": row[17] or ""
+        "favorite_music": row[17] or "",
+        "summary_updated_at": row[18] or ""
     }
 
 
@@ -133,13 +135,13 @@ def update_user(user_id, user):
         name = ?, city = ?, hobbies = ?, facts = ?, timezone = ?,
         goals = ?, projects = ?, dreams = ?, important_dates = ?, summary = ?,
         premium = ?, premium_until = ?, pets = ?, family = ?, profession = ?,
-        favorite_car = ?, favorite_color = ?, favorite_music = ?
+        favorite_car = ?, favorite_color = ?, favorite_music = ?, summary_updated_at = ?
         WHERE user_id = ?
     """, (
         user["name"], user["city"], user["hobbies"], user["facts"], user["timezone"],
         user["goals"], user["projects"], user["dreams"], user["important_dates"], user["summary"],
         user["premium"], user["premium_until"], user["pets"], user["family"], user["profession"],
-        user["favorite_car"], user["favorite_color"], user["favorite_music"],
+        user["favorite_car"], user["favorite_color"], user["favorite_music"], user.get("summary_updated_at", ""),
         user_id
     ))
     conn.commit()
@@ -404,7 +406,9 @@ def profile_answer(user):
     if user["favorite_music"]:
         lines.append("• Mīļākā mūzika: " + user["favorite_music"])
     if user["summary"]:
-        lines.append("\nĪsais kopsavilkums:\n" + user["summary"])
+        if user.get("summary_updated_at"):
+            lines.append("• Kopsavilkums atjaunots: " + user["summary_updated_at"])
+        lines.append("\nIlgtermiņa kopsavilkums:\n" + user["summary"])
 
     if not lines:
         return "Pagaidām vēl maz zinu par tevi. Pastāsti, kas tev patīk vai kas tev svarīgs. 😊"
@@ -414,10 +418,25 @@ def profile_answer(user):
 
 def build_summary(user_id):
     user = get_user(user_id)
-    recent = get_recent_messages(user_id, limit=40)
 
-    if not recent.strip():
-        return "Vēl nav pietiekami daudz sarunu, lai izveidotu kopsavilkumu."
+    # Premium lietotājam dodam vairāk sarunas konteksta un dziļāku kopsavilkumu.
+    if user.get("premium"):
+        recent = get_recent_messages(user_id, limit=80)
+        line_instruction = "Raksti 10-14 īsas rindas. Iekļauj projektus, mērķus, ģimeni, intereses, motivāciju un nākamos soļus."
+    else:
+        recent = get_recent_messages(user_id, limit=35)
+        line_instruction = "Raksti 5-8 īsas rindas. Fokusējies uz svarīgāko."
+
+    # V7.5: ja sarunu vēstures vēl nav daudz, kopsavilkumu veidojam arī no profila.
+    has_profile_data = any([
+        user["name"], user["city"], user["hobbies"], user["facts"], user["goals"],
+        user["projects"], user["dreams"], user["important_dates"], user["pets"],
+        user["family"], user["profession"], user["favorite_car"], user["favorite_color"],
+        user["favorite_music"]
+    ])
+
+    if not recent.strip() and not has_profile_data:
+        return "Vēl nav pietiekami daudz informācijas, lai izveidotu kopsavilkumu."
 
     profile = f"""
 Esošais profils:
@@ -436,8 +455,10 @@ Profesija: {user["profession"]}
 Mīļākais auto: {user["favorite_car"]}
 Mīļākā krāsa: {user["favorite_color"]}
 Mīļākā mūzika: {user["favorite_music"]}
+Premium: {user["premium"]}
+Premium līdz: {user["premium_until"]}
 
-Iepriekšējais kopsavilkums:
+Iepriekšējais ilgtermiņa kopsavilkums:
 {user["summary"]}
 """
 
@@ -445,9 +466,12 @@ Iepriekšējais kopsavilkums:
         response = client.responses.create(
             model="gpt-4.1-mini",
             input=(
-                "Izveido īsu, praktisku ilgtermiņa atmiņas kopsavilkumu par lietotāju latviešu valodā.\n"
+                "Tu veido Nina 7727 ilgtermiņa atmiņas kopsavilkumu par lietotāju.\n"
+                "Raksti latviešu valodā.\n"
                 "Neraksti izdomājumus. Izmanto tikai profilu un sarunu vēsturi.\n"
-                "Raksti 5-8 īsas rindas. Fokusējies uz mērķiem, projektiem, interesēm un svarīgām lietām.\n\n"
+                "Kopsavilkumam jāpalīdz Ninai nākamajās sarunās atcerēties cilvēka dzīvi, mērķus, projektu un personīgās lietas.\n"
+                "Neraksti pārāk saldi. Raksti praktiski, skaidri un cilvēciski.\n"
+                f"{line_instruction}\n\n"
                 f"{profile}\n\n"
                 f"Sarunas vēsture:\n{recent}"
             )
@@ -456,14 +480,26 @@ Iepriekšējais kopsavilkums:
         summary = response.output_text.strip()
 
         user["summary"] = summary
+        user["summary_updated_at"] = datetime.now(ZoneInfo(user["timezone"])).strftime("%Y-%m-%d %H:%M")
         update_user(user_id, user)
 
-        return "Atjaunoju ilgtermiņa kopsavilkumu. 🧠\n\n" + summary
+        return "Atjaunoju Long-Term Memory Pro kopsavilkumu. 🧠\n\n" + summary
 
     except Exception as e:
         print("Kopsavilkuma kļūda:", e)
         return "Kopsavilkumu šobrīd neizdevās izveidot. Pamēģini vēlreiz pēc brīža."
 
+
+def show_summary(user_id):
+    user = get_user(user_id)
+
+    if not user["summary"]:
+        return "Kopsavilkums vēl nav izveidots. Raksti: atjauno kopsavilkumu"
+
+    if user.get("summary_updated_at"):
+        return f"Ilgtermiņa kopsavilkums ({user['summary_updated_at']}):\n\n{user['summary']}"
+
+    return "Ilgtermiņa kopsavilkums:\n\n" + user["summary"]
 
 
 
@@ -654,7 +690,9 @@ Noteikumi:
 - Nerunā kā robots vai klientu atbalsts.
 - Neatkārto "Sveiks!" katrā atbildē.
 - Neizdomā faktus par lietotāju.
-- Ja runā par lietotāju, balsties tikai uz profilu, kopsavilkumu un sarunas vēsturi.
+- Ja runā par lietotāju, balsties tikai uz profilu, ilgtermiņa kopsavilkumu un sarunas vēsturi.
+- Ja profilā ir mērķi/projekti/sapņi, vari tos dabiski izmantot sarunā.
+- Neatkārto visu profilu katrā atbildē.
 - Atbildi īsi, dzīvi, sirsnīgi.
 - Ja cilvēkam ir stress, nomierini.
 - Vari būt viegli asprātīga un silta.
@@ -701,6 +739,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower in ["atjauno kopsavilkumu", "izveido kopsavilkumu", "atjauno atmiņu"]:
         await update.message.reply_text(build_summary(user_id))
+        return
+
+    if lower in ["mans kopsavilkums", "parādi kopsavilkumu", "ilgtermiņa atmiņa"]:
+        await update.message.reply_text(show_summary(user_id))
         return
 
     update_profile_from_text(user_id, user_text)
@@ -752,6 +794,8 @@ Premium līdz: {user["premium_until"]}
 
 Ilgtermiņa kopsavilkums:
 {user["summary"]}
+Kopsavilkums atjaunots:
+{user.get("summary_updated_at", "")}
 """
 
     try:
@@ -791,5 +835,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V7.4.2 Favorites darbojas...")
+    print("Nina7727 V7.5 Long-Term Memory Pro darbojas...")
     telegram_app.run_polling()
