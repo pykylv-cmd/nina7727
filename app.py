@@ -469,6 +469,9 @@ Iepriekšējais ilgtermiņa kopsavilkums:
                 "Tu veido Nina 7727 ilgtermiņa atmiņas kopsavilkumu par lietotāju.\n"
                 "Raksti latviešu valodā.\n"
                 "Neraksti izdomājumus. Izmanto tikai profilu un sarunu vēsturi.\n"
+                "Neraksti par informāciju, kas nav zināma.\n"
+                "Neizmanto frāzes: nav norādīts, nav zināms, nav pieejams.\n"
+                "Raksti tikai par to, ko tiešām zini par lietotāju.\n"
                 "Kopsavilkumam jāpalīdz Ninai nākamajās sarunās atcerēties cilvēka dzīvi, mērķus, projektu un personīgās lietas.\n"
                 "Neraksti pārāk saldi. Raksti praktiski, skaidri un cilvēciski.\n"
                 f"{line_instruction}\n\n"
@@ -835,5 +838,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V7.5 Long-Term Memory Pro darbojas...")
+    print("Nina7727 V7.5.1 Long-Term Memory Pro darbojas...")
     telegram_app.run_polling()
