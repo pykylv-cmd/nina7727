@@ -26,6 +26,10 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 DB_FILE = "nina_memory.db"
 USE_POSTGRES = bool(DATABASE_URL and psycopg2)
 
+FREE_BACKUP_LIMIT = 10
+FREE_REMINDER_LIMIT = 20
+FREE_SUMMARY_LIMIT_PER_DAY = 1
+
 
 def db_sql(sql):
     if USE_POSTGRES:
@@ -495,6 +499,10 @@ def profile_answer(user):
 def build_summary(user_id):
     user = get_user(user_id)
 
+    allowed, message = can_create_summary(user_id)
+    if not allowed:
+        return message
+
     if user.get("premium"):
         recent = get_recent_messages(user_id, limit=80)
         line_instruction = "Raksti 10-14 īsas rindas. Iekļauj projektus, mērķus, ģimeni, intereses, motivāciju un nākamos soļus."
@@ -672,6 +680,10 @@ def save_memory_backup(user_id, source="manual"):
 
 
 def create_backup_answer(user_id):
+    allowed, message = can_create_backup(user_id)
+    if not allowed:
+        return message
+
     backup_id, backup_text = save_memory_backup(user_id, "manual")
     if not backup_id:
         return backup_text
@@ -897,6 +909,124 @@ def delete_all_backups(user_id):
     return f"⚠️ Izdzēsti {deleted} backup."
 
 
+def is_premium_user(user_id):
+    user = get_user(user_id)
+    return bool(user.get("premium"))
+
+
+def backup_count_number(user_id):
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(c, "SELECT COUNT(*) FROM memory_backups WHERE user_id = %s", (user_id,))
+    count = c.fetchone()[0]
+    c.close()
+    conn.close()
+    return int(count or 0)
+
+
+def active_reminder_count(user_id):
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(
+        c,
+        "SELECT COUNT(*) FROM reminders WHERE user_id = %s AND status = 'active'",
+        (user_id,)
+    )
+    count = c.fetchone()[0]
+    c.close()
+    conn.close()
+    return int(count or 0)
+
+
+def summaries_used_today(user_id):
+    user = get_user(user_id)
+    updated = user.get("summary_updated_at", "")
+    if not updated:
+        return 0
+    today = datetime.now(ZoneInfo(user["timezone"])).strftime("%Y-%m-%d")
+    return 1 if updated.startswith(today) else 0
+
+
+def premium_features(user_id=None):
+    return (
+        "💎 Premium funkcijas:\n"
+        "• vairāk backup / rezerves kopiju\n"
+        "• vairāk aktīvu atgādinājumu\n"
+        "• neierobežoti kopsavilkumi\n"
+        "• prioritāras nākotnes funkcijas\n"
+        "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
+        "Bezmaksas režīms ir labs testēšanai. Premium ir domāts nopietnai ikdienas lietošanai."
+    )
+
+
+def premium_limits(user_id):
+    user = get_user(user_id)
+    backups = backup_count_number(user_id)
+    reminders = active_reminder_count(user_id)
+    summaries_today = summaries_used_today(user_id)
+
+    if user.get("premium"):
+        return (
+            "💎 Tavs Premium režīms:\n"
+            "• Backup: bez limita\n"
+            "• Atgādinājumi: bez limita\n"
+            "• Kopsavilkumi: bez limita"
+        )
+
+    return (
+        "Bezmaksas limiti:\n"
+        f"• Backup: {backups}/{FREE_BACKUP_LIMIT}\n"
+        f"• Aktīvie atgādinājumi: {reminders}/{FREE_REMINDER_LIMIT}\n"
+        f"• Kopsavilkumi šodien: {summaries_today}/{FREE_SUMMARY_LIMIT_PER_DAY}\n\n"
+        "Lai noņemtu limitus, raksti: aktivizē premium"
+    )
+
+
+def memory_usage(user_id):
+    return premium_limits(user_id)
+
+
+def can_create_backup(user_id):
+    if is_premium_user(user_id):
+        return True, ""
+    count = backup_count_number(user_id)
+    if count >= FREE_BACKUP_LIMIT:
+        return False, (
+            "💎 Sasniegts bezmaksas backup limits.\n\n"
+            f"Bezmaksas režīmā: {FREE_BACKUP_LIMIT} backup.\n"
+            "Premium lietotājiem backup limits nav.\n\n"
+            "Raksti: aktivizē premium"
+        )
+    return True, ""
+
+
+def can_create_reminder(user_id):
+    if is_premium_user(user_id):
+        return True, ""
+    count = active_reminder_count(user_id)
+    if count >= FREE_REMINDER_LIMIT:
+        return False, (
+            "💎 Sasniegts bezmaksas atgādinājumu limits.\n\n"
+            f"Bezmaksas režīmā: {FREE_REMINDER_LIMIT} aktīvi atgādinājumi.\n"
+            "Premium lietotājiem atgādinājumu limits nav.\n\n"
+            "Raksti: aktivizē premium"
+        )
+    return True, ""
+
+
+def can_create_summary(user_id):
+    if is_premium_user(user_id):
+        return True, ""
+    used = summaries_used_today(user_id)
+    if used >= FREE_SUMMARY_LIMIT_PER_DAY:
+        return False, (
+            "💎 Bezmaksas kopsavilkums šodien jau izmantots.\n\n"
+            "Premium lietotājiem kopsavilkumu limits nav.\n\n"
+            "Raksti: aktivizē premium"
+        )
+    return True, ""
+
+
 def premium_status(user_id):
     user = get_user(user_id)
 
@@ -908,7 +1038,9 @@ def premium_status(user_id):
     return (
         "Premium: neaktīvs\n\n"
         "Bezmaksas režīmā Nina darbojas pamata līmenī.\n"
-        "Premium vēlāk dos vairāk atmiņas, vairāk atgādinājumu un gudrākus kopsavilkumus."
+        f"Limiti: {FREE_BACKUP_LIMIT} backup, {FREE_REMINDER_LIMIT} aktīvi atgādinājumi, "
+        f"{FREE_SUMMARY_LIMIT_PER_DAY} kopsavilkums dienā.\n"
+        "Premium dod vairāk atmiņas, vairāk atgādinājumu un gudrākus kopsavilkumus."
     )
 
 
@@ -988,6 +1120,10 @@ def parse_reminder(user_text, user_tz_name):
 
 
 def add_reminder(user_id, user_text):
+    allowed, message = can_create_reminder(user_id)
+    if not allowed:
+        return message
+
     user = get_user(user_id)
     task, remind_at_utc, local_time_text = parse_reminder(user_text, user["timezone"])
 
@@ -1108,6 +1244,7 @@ Noteikumi:
 
 COMMAND_LINES = {
     "mans premium statuss", "premium statuss", "premium",
+    "premium funkcijas", "premium limiti", "cik atmiņas man palicis",
     "aktivizē premium", "aktivize premium", "ieslēdz premium",
     "izslēdz premium", "atslēdz premium",
     "eksportē atmiņu", "atmiņas eksports", "export memory", "eksports",
@@ -1161,6 +1298,12 @@ def command_answer(user_id, command_text):
 
     if lower in ["mans premium statuss", "premium statuss", "premium"]:
         return premium_status(user_id)
+
+    if lower in ["premium funkcijas"]:
+        return premium_features(user_id)
+
+    if lower in ["premium limiti", "cik atmiņas man palicis"]:
+        return premium_limits(user_id)
 
     if lower in ["aktivizē premium", "aktivize premium", "ieslēdz premium"]:
         return activate_premium(user_id)
@@ -1249,6 +1392,14 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower in ["mans premium statuss", "premium statuss", "premium"]:
         await update.message.reply_text(premium_status(user_id))
+        return
+
+    if lower in ["premium funkcijas"]:
+        await update.message.reply_text(premium_features(user_id))
+        return
+
+    if lower in ["premium limiti", "cik atmiņas man palicis"]:
+        await update.message.reply_text(premium_limits(user_id))
         return
 
     if lower in ["aktivizē premium", "aktivize premium", "ieslēdz premium"]:
@@ -1402,7 +1553,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 V8.3 Memory Manager darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V9 Premium Business darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -1417,5 +1568,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V8.3 Memory Manager darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V9 Premium Business darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
