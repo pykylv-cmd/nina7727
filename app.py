@@ -738,10 +738,11 @@ def restore_backup(user_id, text):
     conn = get_db()
     c = conn.cursor()
 
+    # Meklējam tikai šī Telegram lietotāja backup.
     db_execute(
         c,
         """
-        SELECT backup_text
+        SELECT id, backup_text, source, created_at
         FROM memory_backups
         WHERE id = %s AND user_id = %s
         """,
@@ -751,16 +752,42 @@ def restore_backup(user_id, text):
     row = c.fetchone()
 
     if not row:
+        # Diagnostikai pārbaudām, vai tāds backup ID vispār eksistē citam user_id.
+        db_execute(
+            c,
+            """
+            SELECT id, user_id
+            FROM memory_backups
+            WHERE id = %s
+            """,
+            (backup_id,)
+        )
+        other = c.fetchone()
         c.close()
         conn.close()
-        return "Tādu backup neatradu."
 
-    backup_text = row[0]
+        if other:
+            return f"Backup #{backup_id} eksistē, bet tas nepieder šim Telegram lietotājam. Drošības dēļ to neatjaunoju."
+
+        return "Tādu backup neatradu. Pārbaudi ar komandu: backup saraksts"
+
+    found_id, backup_text, source, created_at = row
+    c.close()
+    conn.close()
 
     try:
-        json_part = backup_text.split("JSON kopija:\n", 1)[1]
+        if "JSON kopija:" not in backup_text:
+            return "Backup nesatur JSON kopiju, tāpēc to nevar droši atjaunot."
+
+        json_part = backup_text.split("JSON kopija:", 1)[1].strip()
         data = json.loads(json_part)
-        profile = data.get("profile", {})
+        profile = data.get("profile")
+
+        if not isinstance(profile, dict):
+            return "Backup JSON nesatur profilu. Atjaunošana apturēta."
+
+        # Drošības backup pirms atjaunošanas.
+        save_memory_backup(user_id, f"before_restore_{backup_id}")
 
         user = get_user(user_id)
 
@@ -775,19 +802,19 @@ def restore_backup(user_id, text):
             if field in profile:
                 user[field] = profile[field]
 
+        # Minimāla aizsardzība, lai timezone nekad nepaliek tukšs vai nederīgs.
+        if not user.get("timezone") or not valid_timezone(user.get("timezone")):
+            user["timezone"] = DEFAULT_TIMEZONE
+
         update_user(user_id, user)
         save_memory_backup(user_id, f"restore_from_{backup_id}")
-
-        c.close()
-        conn.close()
 
         return f"✅ Atjaunoju profilu no backup #{backup_id}."
 
     except Exception as e:
-        c.close()
-        conn.close()
         print("Restore kļūda:", e)
-        return "Backup ir bojāts vai nav nolasāms."
+        return "Backup ir bojāts vai nav nolasāms. Atjaunošana apturēta."
+
 
 def premium_status(user_id):
     user = get_user(user_id)
@@ -1255,7 +1282,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 V8.2 Restore Backup darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V8.2.1 Restore Fix darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -1270,5 +1297,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V8.2 Restore Backup darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V8.2.1 Restore Fix darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
