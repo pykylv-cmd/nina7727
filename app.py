@@ -1,6 +1,7 @@
 import os
 import re
 import sqlite3
+from datetime import datetime, timedelta
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -34,6 +35,17 @@ def init_db():
             user_id TEXT,
             role TEXT,
             text TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            text TEXT,
+            remind_at TEXT,
+            status TEXT DEFAULT 'active',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -101,21 +113,13 @@ def clean_fact(text):
     text = text.strip(" .,!?:;")
     text = re.sub(r"^atceries ka\s+", "", text, flags=re.IGNORECASE)
     text = re.sub(r"^man svarīgi\s*", "", text, flags=re.IGNORECASE)
-    text = text.strip(" .,!?:;")
-    return text
+    return text.strip(" .,!?:;")
 
 
 def split_facts(text):
     text = clean_fact(text)
     parts = re.split(r"\s+un\s+|\n|,", text)
-    facts = []
-
-    for part in parts:
-        part = clean_fact(part)
-        if part:
-            facts.append(part)
-
-    return facts
+    return [clean_fact(p) for p in parts if clean_fact(p)]
 
 
 def update_user(user_id, name, city, hobbies, facts):
@@ -154,7 +158,6 @@ def update_profile_from_text(user_id, text):
 
     found_hobbies = []
     for match in hobby_matches:
-        # neļaujam jautājumiem par profilu kļūt par hobiju
         match = re.sub(r"ko\s+tu\s+par\s+mani.*", "", match, flags=re.IGNORECASE).strip()
         match = re.sub(r"ko\s+par\s+mani.*", "", match, flags=re.IGNORECASE).strip()
         match = re.sub(r"kas\s+man\s+patīk.*", "", match, flags=re.IGNORECASE).strip()
@@ -164,34 +167,26 @@ def update_profile_from_text(user_id, text):
         hobbies = add_unique(hobbies, found_hobbies)
 
     if lower.startswith("atceries ka ") or "man svarīgi" in lower:
-        found_facts = split_facts(text)
-        facts = add_unique(facts, found_facts)
+        facts = add_unique(facts, split_facts(text))
 
     update_user(user_id, name, city, hobbies, facts)
 
 
 def forget_from_profile(user_id, text):
-    lower = text.lower()
     user = get_user(user_id)
 
-    name = user["name"]
-    city = user["city"]
-    hobbies = user["hobbies"]
-    facts = user["facts"]
-
-    phrase = lower.replace("aizmirsti", "", 1).strip(" .,!?:;")
-
+    phrase = text.lower().replace("aizmirsti", "", 1).strip(" .,!?:;")
     phrase = phrase.replace("ka man patīk", "").strip(" .,!?:;")
     phrase = phrase.replace("man patīk", "").strip(" .,!?:;")
     phrase = phrase.replace("ka", "").strip(" .,!?:;")
 
     if not phrase:
-        return "Pasaki, ko tieši lai aizmirstu. Piemēram: aizmirsti ko tu par mani zini"
+        return "Pasaki, ko tieši lai aizmirstu."
 
-    hobbies = remove_item(hobbies, phrase)
-    facts = remove_item(facts, phrase)
+    hobbies = remove_item(user["hobbies"], phrase)
+    facts = remove_item(user["facts"], phrase)
 
-    update_user(user_id, name, city, hobbies, facts)
+    update_user(user_id, user["name"], user["city"], hobbies, facts)
 
     return f"Labi, izdzēsu no atmiņas: {phrase}"
 
@@ -228,9 +223,7 @@ def profile_answer(user):
     if user["city"]:
         lines.append(f"• Pilsēta: {user['city']}")
     if user["hobbies"]:
-        hobbies = [x.strip() for x in user["hobbies"].split(",") if x.strip()]
-        if hobbies:
-            lines.append("• Patīk: " + ", ".join(hobbies))
+        lines.append("• Patīk: " + user["hobbies"])
     if user["facts"]:
         facts = [x.strip() for x in user["facts"].split(",") if x.strip()]
         if facts:
@@ -244,32 +237,148 @@ def profile_answer(user):
     return "Es par tevi atceros:\n" + "\n".join(lines)
 
 
+def parse_reminder(user_text):
+    text = user_text.strip()
+    lower = text.lower()
+
+    task = re.sub(r"^atgādini man\s+", "", text, flags=re.IGNORECASE).strip()
+
+    remind_date = None
+    remind_time = None
+
+    now = datetime.now()
+
+    if "rīt" in lower:
+        remind_date = now + timedelta(days=1)
+        task = re.sub(r"\brīt\b", "", task, flags=re.IGNORECASE).strip()
+
+    elif "parīt" in lower:
+        remind_date = now + timedelta(days=2)
+        task = re.sub(r"\bparīt\b", "", task, flags=re.IGNORECASE).strip()
+
+    date_match = re.search(r"(\d{1,2})\.\s*datumā", lower)
+    if date_match:
+        day = int(date_match.group(1))
+        month = now.month
+        year = now.year
+
+        try:
+            candidate = datetime(year, month, day)
+            if candidate.date() < now.date():
+                if month == 12:
+                    candidate = datetime(year + 1, 1, day)
+                else:
+                    candidate = datetime(year, month + 1, day)
+            remind_date = candidate
+        except ValueError:
+            pass
+
+        task = re.sub(r"\d{1,2}\.\s*datumā", "", task, flags=re.IGNORECASE).strip()
+
+    time_match = re.search(r"(\d{1,2})[:.](\d{2})", lower)
+    if time_match:
+        hour = int(time_match.group(1))
+        minute = int(time_match.group(2))
+        remind_time = (hour, minute)
+        task = re.sub(r"\d{1,2}[:.]\d{2}", "", task).strip()
+
+    if remind_date:
+        if remind_time:
+            remind_at = remind_date.replace(hour=remind_time[0], minute=remind_time[1], second=0, microsecond=0)
+        else:
+            remind_at = remind_date.replace(hour=9, minute=0, second=0, microsecond=0)
+
+        remind_at_text = remind_at.strftime("%Y-%m-%d %H:%M")
+    else:
+        remind_at_text = ""
+
+    task = task.strip(" .,!?:;")
+
+    if not task:
+        task = "Atgādinājums"
+
+    return task, remind_at_text
+
+
+def add_reminder(user_id, user_text):
+    task, remind_at = parse_reminder(user_text)
+
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO reminders (user_id, text, remind_at, status) VALUES (?, ?, ?, ?)",
+        (user_id, task, remind_at, "active")
+    )
+    reminder_id = c.lastrowid
+    conn.commit()
+    conn.close()
+
+    if remind_at:
+        return f"Pierakstīju atgādinājumu #{reminder_id}: {task}\nLaiks: {remind_at}"
+    return f"Pierakstīju atgādinājumu #{reminder_id}: {task}"
+
+
+def list_reminders(user_id):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute(
+        "SELECT id, text, remind_at FROM reminders WHERE user_id = ? AND status = 'active' ORDER BY id DESC",
+        (user_id,)
+    )
+    rows = c.fetchall()
+    conn.close()
+
+    if not rows:
+        return "Tev pagaidām nav aktīvu atgādinājumu. 😊"
+
+    lines = ["Tavi atgādinājumi:"]
+    for rid, text, remind_at in rows:
+        if remind_at:
+            lines.append(f"• #{rid} — {text} ({remind_at})")
+        else:
+            lines.append(f"• #{rid} — {text}")
+
+    return "\n".join(lines)
+
+
+def delete_reminder(user_id, user_text):
+    match = re.search(r"(\d+)", user_text)
+    if not match:
+        return "Pasaki atgādinājuma numuru. Piemēram: dzēs atgādinājumu 3"
+
+    reminder_id = int(match.group(1))
+
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute(
+        "UPDATE reminders SET status = 'deleted' WHERE id = ? AND user_id = ?",
+        (reminder_id, user_id)
+    )
+    conn.commit()
+    changed = c.rowcount
+    conn.close()
+
+    if changed:
+        return f"Izdzēsu atgādinājumu #{reminder_id}."
+    return "Tādu aktīvu atgādinājumu neatradu."
+
+
 NINA_PROMPT = """
 Tu esi Nina 7727.
 
 Tu esi silta, gudra, interesanta un dabiska sarunu biedrene.
 Tu neesi parasts bots. Tu esi sajūta, pie kuras cilvēkam gribas atgriezties.
 
-Raksturs:
-- 65% silta draudzene;
-- 20% viegls humors;
-- 10% intuīcija un pašizziņa;
-- 5% elegants koķetums pieaugušu cilvēku sarunās.
-
 Noteikumi:
 - Vienmēr runā latviešu valodā.
 - Nerunā kā robots vai klientu atbalsts.
 - Neatkārto "Sveiks!" katrā atbildē.
-- Neuzrunā lietotāju sieviešu/vīriešu dzimtē, ja dzimums nav zināms.
-- Nemin numeroloģiju, ja cilvēks to neprasa.
 - Neizdomā faktus par lietotāju.
 - Ja runā par lietotāju, balsties tikai uz profilu un sarunas vēsturi.
-- Ja lietotājs saka "vēl", "jā", "turpini", saproti no konteksta, ko viņš turpina.
 - Atbildi īsi, dzīvi, sirsnīgi.
 - Ja cilvēkam ir stress, nomierini.
-- Vari runāt par attiecībām, pievilcību un seksualitāti cieņpilni, silti un eleganti.
-- Neraksti vulgāri vai pornogrāfiski.
-- Tavs galvenais mērķis: lai cilvēkam pēc sarunas ar tevi kļūst vieglāk un patīkamāk.
+- Vari būt viegli asprātīga un silta.
+- Tavs mērķis: lai cilvēkam pēc sarunas ar tevi kļūst vieglāk.
 """
 
 
@@ -278,26 +387,31 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     lower = user_text.lower()
 
+    if lower.startswith("atgādini man"):
+        await update.message.reply_text(add_reminder(user_id, user_text))
+        return
+
+    if lower in ["mani atgādinājumi", "parādi atgādinājumus", "atgādinājumi"]:
+        await update.message.reply_text(list_reminders(user_id))
+        return
+
+    if lower.startswith("dzēs atgādinājumu") or lower.startswith("izdzēs atgādinājumu"):
+        await update.message.reply_text(delete_reminder(user_id, user_text))
+        return
+
+    if lower.startswith("aizmirsti atgādinājumu"):
+        await update.message.reply_text(delete_reminder(user_id, user_text))
+        return
+
     if lower.startswith("aizmirsti"):
-        answer = forget_from_profile(user_id, user_text)
-        await update.message.reply_text(answer)
+        await update.message.reply_text(forget_from_profile(user_id, user_text))
         return
 
     update_profile_from_text(user_id, user_text)
     user = get_user(user_id)
 
     if "kā mani sauc" in lower:
-        if user["name"]:
-            await update.message.reply_text(f"Tevi sauc {user['name']}. 😊")
-        else:
-            await update.message.reply_text("Tu vēl neesi pateicis savu vārdu. 😊")
-        return
-
-    if "kur es dzīvoju" in lower:
-        if user["city"]:
-            await update.message.reply_text(f"Tu dzīvo: {user['city']}.")
-        else:
-            await update.message.reply_text("Tu vēl neesi pateicis, kur dzīvo. 😊")
+        await update.message.reply_text(f"Tevi sauc {user['name']}. 😊" if user["name"] else "Tu vēl neesi pateicis savu vārdu. 😊")
         return
 
     if (
@@ -314,7 +428,6 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     save_message(user_id, "Lietotājs", user_text)
-
     conversation = get_recent_messages(user_id)
 
     profile_info = f"""
@@ -332,7 +445,7 @@ Svarīgi fakti: {user["facts"]}
                 f"{NINA_PROMPT}\n\n"
                 f"{profile_info}\n\n"
                 f"Sarunas vēsture:\n{conversation}\n\n"
-                f"Atbildi uz pēdējo ziņu dabiski, ņemot vērā profilu un sarunas vēsturi."
+                f"Atbildi uz pēdējo ziņu dabiski."
             )
         )
         answer = response.output_text
@@ -342,7 +455,6 @@ Svarīgi fakti: {user["facts"]}
         answer = "Piedod, man šobrīd kaut kas aizķērās. Pamēģini vēlreiz pēc brīža. 🌷"
 
     save_message(user_id, "Nina", answer)
-
     await update.message.reply_text(answer)
 
 
@@ -357,5 +469,5 @@ telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 Memory v2.6 darbojas...")
+    print("Nina7727 Memory V3.5 darbojas...")
     telegram_app.run_polling()
