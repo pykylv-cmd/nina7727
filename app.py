@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import sqlite3
 import asyncio
 from datetime import datetime, timedelta, timezone
@@ -93,6 +94,16 @@ def init_db():
             remind_at TEXT,
             local_time TEXT,
             status TEXT DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    db_execute(c, """
+        CREATE TABLE IF NOT EXISTS memory_backups (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT,
+            backup_text TEXT,
+            source TEXT DEFAULT 'manual',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -279,6 +290,12 @@ def extract_after(text, patterns):
 def update_profile_from_text(user_id, text):
     lower = text.lower()
     user = get_user(user_id)
+    memory_keys = [
+        "name", "city", "hobbies", "facts", "timezone", "goals", "projects", "dreams",
+        "important_dates", "pets", "family", "profession", "favorite_car",
+        "favorite_color", "favorite_music", "premium", "premium_until", "summary"
+    ]
+    before_snapshot = json.dumps({k: user.get(k, "") for k in memory_keys}, ensure_ascii=False, sort_keys=True)
 
     new_tz = detect_timezone(text)
     if new_tz:
@@ -286,7 +303,7 @@ def update_profile_from_text(user_id, text):
 
     name_match = re.search(r"mani sauc\s+([A-Za-zĀČĒĢĪĶĻŅŠŪŽāčēģīķļņšūž]+)", text, re.IGNORECASE)
     if name_match:
-        user["name"] = clean_text(name_match.group(1))
+        user["name"] = clean_text(name_match.group(1)).title()
 
     city_match = re.search(r"es dzīvoju\s+([A-Za-zĀČĒĢĪĶĻŅŠŪŽāčēģīķļņšūž]+)", text, re.IGNORECASE)
     if city_match:
@@ -382,7 +399,10 @@ def update_profile_from_text(user_id, text):
     if favorite_music:
         user["favorite_music"] = favorite_music
 
+    after_snapshot = json.dumps({k: user.get(k, "") for k in memory_keys}, ensure_ascii=False, sort_keys=True)
     update_user(user_id, user)
+    if after_snapshot != before_snapshot:
+        save_memory_backup(user_id, "auto_profile")
 
 
 def forget_from_profile(user_id, text):
@@ -539,6 +559,7 @@ Iepriekšējais ilgtermiņa kopsavilkums:
         user["summary"] = summary
         user["summary_updated_at"] = datetime.now(ZoneInfo(user["timezone"])).strftime("%Y-%m-%d %H:%M")
         update_user(user_id, user)
+        save_memory_backup(user_id, "auto_summary")
 
         return "Atjaunoju Long-Term Memory Pro kopsavilkumu. 🧠\n\n" + summary
 
@@ -558,6 +579,121 @@ def show_summary(user_id):
 
     return "Ilgtermiņa kopsavilkums:\n\n" + user["summary"]
 
+
+
+def active_reminders_for_export(user_id):
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(c,
+        "SELECT id, text, local_time, remind_at FROM reminders WHERE user_id = %s AND status = 'active' ORDER BY id DESC",
+        (user_id,)
+    )
+    rows = c.fetchall()
+    c.close()
+    conn.close()
+
+    if not rows:
+        return "Nav aktīvu atgādinājumu."
+
+    lines = []
+    for rid, text, local_time, remind_at in rows:
+        shown_time = local_time or remind_at or "bez laika"
+        lines.append(f"#{rid}: {text} ({shown_time})")
+    return "\n".join(lines)
+
+
+def build_memory_export(user_id):
+    user = get_user(user_id)
+    exported_at = datetime.now(ZoneInfo(user["timezone"])).strftime("%Y-%m-%d %H:%M")
+
+    data = {
+        "exported_at": exported_at,
+        "user_id": user_id,
+        "profile": {
+            "name": user["name"],
+            "city": user["city"],
+            "timezone": user["timezone"],
+            "hobbies": user["hobbies"],
+            "facts": user["facts"],
+            "goals": user["goals"],
+            "projects": user["projects"],
+            "dreams": user["dreams"],
+            "important_dates": user["important_dates"],
+            "pets": user["pets"],
+            "family": user["family"],
+            "profession": user["profession"],
+            "favorite_car": user["favorite_car"],
+            "favorite_color": user["favorite_color"],
+            "favorite_music": user["favorite_music"],
+            "premium": int(user["premium"] or 0),
+            "premium_until": user["premium_until"],
+            "summary": user["summary"],
+            "summary_updated_at": user.get("summary_updated_at", "")
+        },
+        "active_reminders": active_reminders_for_export(user_id)
+    }
+
+    profile_text = profile_answer(user)
+    return (
+        "NINA MEMORY EXPORT\n"
+        f"Laiks: {exported_at} ({user['timezone']})\n\n"
+        f"{profile_text}\n\n"
+        "Aktīvie atgādinājumi:\n"
+        f"{data['active_reminders']}\n\n"
+        "JSON kopija:\n"
+        + json.dumps(data, ensure_ascii=False, indent=2)
+    )
+
+
+def save_memory_backup(user_id, source="manual"):
+    try:
+        backup_text = build_memory_export(user_id)
+        conn = get_db()
+        c = conn.cursor()
+        if USE_POSTGRES:
+            db_execute(c,
+                "INSERT INTO memory_backups (user_id, backup_text, source) VALUES (%s, %s, %s) RETURNING id",
+                (user_id, backup_text, source)
+            )
+            backup_id = c.fetchone()[0]
+        else:
+            db_execute(c,
+                "INSERT INTO memory_backups (user_id, backup_text, source) VALUES (%s, %s, %s)",
+                (user_id, backup_text, source)
+            )
+            backup_id = c.lastrowid
+        conn.commit()
+        c.close()
+        conn.close()
+        return backup_id, backup_text
+    except Exception as e:
+        print("Backup kļūda:", e)
+        return None, "Backup neizdevās. Pārbaudi Railway logs."
+
+
+def create_backup_answer(user_id):
+    backup_id, backup_text = save_memory_backup(user_id, "manual")
+    if not backup_id:
+        return backup_text
+    return f"✅ Backup #{backup_id} izveidots.\n\n" + backup_text
+
+
+def latest_backup_answer(user_id):
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(c,
+        "SELECT id, backup_text, source, created_at FROM memory_backups WHERE user_id = %s ORDER BY id DESC LIMIT 1",
+        (user_id,)
+    )
+    row = c.fetchone()
+    c.close()
+    conn.close()
+
+    if not row:
+        return "Backup vēl nav izveidots. Raksti: izveido backup"
+
+    backup_id, backup_text, source, created_at = row
+    return f"Pēdējais backup #{backup_id} ({source}, {created_at}):\n\n{backup_text}"
 
 def premium_status(user_id):
     user = get_user(user_id)
@@ -785,6 +921,18 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(deactivate_premium(user_id))
         return
 
+    if lower in ["eksportē atmiņu", "atmiņas eksports", "export memory", "eksports"]:
+        await update.message.reply_text(build_memory_export(user_id))
+        return
+
+    if lower in ["backup", "izveido backup", "rezerves kopija", "izveido rezerves kopiju"]:
+        await update.message.reply_text(create_backup_answer(user_id))
+        return
+
+    if lower in ["pēdējais backup", "parādi backup", "mans backup", "pēdējā rezerves kopija"]:
+        await update.message.reply_text(latest_backup_answer(user_id))
+        return
+
     if lower.startswith("atgādini man"):
         await update.message.reply_text(add_reminder(user_id, user_text))
         return
@@ -888,7 +1036,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 V8.0.1 darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V8.1 Backup darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -903,5 +1051,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V8.0.1 DB Safe darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V8.1 Auto Backup + Export darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
