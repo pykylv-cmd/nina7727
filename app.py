@@ -2,7 +2,8 @@ import os
 import re
 import sqlite3
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -14,6 +15,7 @@ client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 
 DB_FILE = "nina_memory.db"
+DEFAULT_TIMEZONE = "Europe/Riga"
 
 
 def init_db():
@@ -51,6 +53,17 @@ def init_db():
         )
     """)
 
+    # pievieno timezone kolonnas, ja vecā datubāze tās vēl nepazīst
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN timezone TEXT DEFAULT 'Europe/Riga'")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        c.execute("ALTER TABLE reminders ADD COLUMN local_time TEXT")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -58,16 +71,17 @@ def init_db():
 def get_user(user_id):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT name, city, hobbies, facts FROM users WHERE user_id = ?", (user_id,))
+
+    c.execute("SELECT name, city, hobbies, facts, timezone FROM users WHERE user_id = ?", (user_id,))
     row = c.fetchone()
 
     if not row:
         c.execute(
-            "INSERT INTO users (user_id, name, city, hobbies, facts) VALUES (?, ?, ?, ?, ?)",
-            (user_id, "", "", "", "")
+            "INSERT INTO users (user_id, name, city, hobbies, facts, timezone) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, "", "", "", "", DEFAULT_TIMEZONE)
         )
         conn.commit()
-        row = ("", "", "", "")
+        row = ("", "", "", "", DEFAULT_TIMEZONE)
 
     conn.close()
 
@@ -75,8 +89,58 @@ def get_user(user_id):
         "name": row[0] or "",
         "city": row[1] or "",
         "hobbies": row[2] or "",
-        "facts": row[3] or ""
+        "facts": row[3] or "",
+        "timezone": row[4] or DEFAULT_TIMEZONE
     }
+
+
+def update_user(user_id, name, city, hobbies, facts, tz_name):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute(
+        "UPDATE users SET name = ?, city = ?, hobbies = ?, facts = ?, timezone = ? WHERE user_id = ?",
+        (name, city, hobbies, facts, tz_name, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def valid_timezone(tz_name):
+    try:
+        ZoneInfo(tz_name)
+        return True
+    except Exception:
+        return False
+
+
+def detect_timezone(text):
+    lower = text.lower()
+
+    if "mana laika zona ir" in lower:
+        tz = text.split("mana laika zona ir", 1)[1].strip()
+        return tz if valid_timezone(tz) else None
+
+    country_map = {
+        "latvijā": "Europe/Riga",
+        "rīgā": "Europe/Riga",
+        "amerika": "America/New_York",
+        "amerikā": "America/New_York",
+        "new york": "America/New_York",
+        "ņujorkā": "America/New_York",
+        "los angeles": "America/Los_Angeles",
+        "krievijā": "Europe/Moscow",
+        "maskavā": "Europe/Moscow",
+        "anglijā": "Europe/London",
+        "londonā": "Europe/London",
+        "vācijā": "Europe/Berlin",
+        "berlīnē": "Europe/Berlin",
+    }
+
+    for key, tz in country_map.items():
+        if key in lower:
+            return tz
+
+    return None
 
 
 def split_items(text):
@@ -115,17 +179,6 @@ def split_facts(text):
     return [clean_fact(p) for p in parts if clean_fact(p)]
 
 
-def update_user(user_id, name, city, hobbies, facts):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute(
-        "UPDATE users SET name = ?, city = ?, hobbies = ?, facts = ? WHERE user_id = ?",
-        (name, city, hobbies, facts, user_id)
-    )
-    conn.commit()
-    conn.close()
-
-
 def update_profile_from_text(user_id, text):
     lower = text.lower()
     user = get_user(user_id)
@@ -134,6 +187,11 @@ def update_profile_from_text(user_id, text):
     city = user["city"]
     hobbies = user["hobbies"]
     facts = user["facts"]
+    tz_name = user["timezone"]
+
+    new_tz = detect_timezone(text)
+    if new_tz:
+        tz_name = new_tz
 
     name_match = re.search(r"mani sauc\s+([A-Za-zĀČĒĢĪĶĻŅŠŪŽāčēģīķļņšūž]+)", text, re.IGNORECASE)
     if name_match:
@@ -162,7 +220,7 @@ def update_profile_from_text(user_id, text):
     if lower.startswith("atceries ka ") or "man svarīgi" in lower:
         facts = add_unique(facts, split_facts(text))
 
-    update_user(user_id, name, city, hobbies, facts)
+    update_user(user_id, name, city, hobbies, facts, tz_name)
 
 
 def forget_from_profile(user_id, text):
@@ -179,7 +237,7 @@ def forget_from_profile(user_id, text):
     hobbies = remove_item(user["hobbies"], phrase)
     facts = remove_item(user["facts"], phrase)
 
-    update_user(user_id, user["name"], user["city"], hobbies, facts)
+    update_user(user_id, user["name"], user["city"], hobbies, facts, user["timezone"])
 
     return f"Labi, izdzēsu no atmiņas: {phrase}"
 
@@ -215,6 +273,8 @@ def profile_answer(user):
         lines.append(f"• Vārds: {user['name']}")
     if user["city"]:
         lines.append(f"• Pilsēta: {user['city']}")
+    if user["timezone"]:
+        lines.append(f"• Laika zona: {user['timezone']}")
     if user["hobbies"]:
         lines.append("• Patīk: " + user["hobbies"])
     if user["facts"]:
@@ -230,41 +290,43 @@ def profile_answer(user):
     return "Es par tevi atceros:\n" + "\n".join(lines)
 
 
-def parse_reminder(user_text):
+def parse_reminder(user_text, user_tz_name):
     text = user_text.strip()
     lower = text.lower()
 
     task = re.sub(r"^atgādini man\s+", "", text, flags=re.IGNORECASE).strip()
 
+    user_tz = ZoneInfo(user_tz_name)
+    now_local = datetime.now(user_tz)
+
     remind_date = None
     remind_time = None
-    now = datetime.now()
 
     if "rīt" in lower:
-        remind_date = now + timedelta(days=1)
+        remind_date = now_local + timedelta(days=1)
         task = re.sub(r"\brīt\b", "", task, flags=re.IGNORECASE).strip()
 
     elif "parīt" in lower:
-        remind_date = now + timedelta(days=2)
+        remind_date = now_local + timedelta(days=2)
         task = re.sub(r"\bparīt\b", "", task, flags=re.IGNORECASE).strip()
 
     elif "šodien" in lower:
-        remind_date = now
+        remind_date = now_local
         task = re.sub(r"\bšodien\b", "", task, flags=re.IGNORECASE).strip()
 
     date_match = re.search(r"(\d{1,2})\.\s*datumā", lower)
     if date_match:
         day = int(date_match.group(1))
-        month = now.month
-        year = now.year
+        month = now_local.month
+        year = now_local.year
 
         try:
-            candidate = datetime(year, month, day)
-            if candidate.date() < now.date():
+            candidate = datetime(year, month, day, tzinfo=user_tz)
+            if candidate.date() < now_local.date():
                 if month == 12:
-                    candidate = datetime(year + 1, 1, day)
+                    candidate = datetime(year + 1, 1, day, tzinfo=user_tz)
                 else:
-                    candidate = datetime(year, month + 1, day)
+                    candidate = datetime(year, month + 1, day, tzinfo=user_tz)
             remind_date = candidate
         except ValueError:
             pass
@@ -280,37 +342,41 @@ def parse_reminder(user_text):
 
     if remind_date:
         if remind_time:
-            remind_at = remind_date.replace(hour=remind_time[0], minute=remind_time[1], second=0, microsecond=0)
+            local_dt = remind_date.replace(hour=remind_time[0], minute=remind_time[1], second=0, microsecond=0)
         else:
-            remind_at = remind_date.replace(hour=9, minute=0, second=0, microsecond=0)
+            local_dt = remind_date.replace(hour=9, minute=0, second=0, microsecond=0)
 
-        remind_at_text = remind_at.strftime("%Y-%m-%d %H:%M")
+        utc_dt = local_dt.astimezone(timezone.utc)
+        remind_at_utc = utc_dt.strftime("%Y-%m-%d %H:%M")
+        local_time_text = local_dt.strftime("%Y-%m-%d %H:%M")
     else:
-        remind_at_text = ""
+        remind_at_utc = ""
+        local_time_text = ""
 
     task = task.strip(" .,!?:;")
 
     if not task:
         task = "Atgādinājums"
 
-    return task, remind_at_text
+    return task, remind_at_utc, local_time_text
 
 
 def add_reminder(user_id, user_text):
-    task, remind_at = parse_reminder(user_text)
+    user = get_user(user_id)
+    task, remind_at_utc, local_time_text = parse_reminder(user_text, user["timezone"])
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute(
-        "INSERT INTO reminders (user_id, text, remind_at, status) VALUES (?, ?, ?, ?)",
-        (user_id, task, remind_at, "active")
+        "INSERT INTO reminders (user_id, text, remind_at, local_time, status) VALUES (?, ?, ?, ?, ?)",
+        (user_id, task, remind_at_utc, local_time_text, "active")
     )
     reminder_id = c.lastrowid
     conn.commit()
     conn.close()
 
-    if remind_at:
-        return f"Pierakstīju atgādinājumu #{reminder_id}: {task}\nLaiks: {remind_at}"
+    if local_time_text:
+        return f"Pierakstīju atgādinājumu #{reminder_id}: {task}\nLaiks: {local_time_text} ({user['timezone']})"
     return f"Pierakstīju atgādinājumu #{reminder_id}: {task}"
 
 
@@ -318,7 +384,7 @@ def list_reminders(user_id):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute(
-        "SELECT id, text, remind_at FROM reminders WHERE user_id = ? AND status = 'active' ORDER BY id DESC",
+        "SELECT id, text, local_time, remind_at FROM reminders WHERE user_id = ? AND status = 'active' ORDER BY id DESC",
         (user_id,)
     )
     rows = c.fetchall()
@@ -327,10 +393,12 @@ def list_reminders(user_id):
     if not rows:
         return "Tev pagaidām nav aktīvu atgādinājumu. 😊"
 
+    user = get_user(user_id)
     lines = ["Tavi atgādinājumi:"]
-    for rid, text, remind_at in rows:
-        if remind_at:
-            lines.append(f"• #{rid} — {text} ({remind_at})")
+    for rid, text, local_time, remind_at in rows:
+        shown_time = local_time or remind_at
+        if shown_time:
+            lines.append(f"• #{rid} — {text} ({shown_time}, {user['timezone']})")
         else:
             lines.append(f"• #{rid} — {text}")
 
@@ -362,23 +430,23 @@ def delete_reminder(user_id, user_text):
 async def reminder_worker(application):
     while True:
         try:
-            now_text = datetime.now().strftime("%Y-%m-%d %H:%M")
+            now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
             c.execute(
                 """
-                SELECT id, user_id, text, remind_at
+                SELECT id, user_id, text
                 FROM reminders
                 WHERE status = 'active'
                 AND remind_at != ''
                 AND remind_at <= ?
                 """,
-                (now_text,)
+                (now_utc,)
             )
             rows = c.fetchall()
 
-            for reminder_id, user_id, text, remind_at in rows:
+            for reminder_id, user_id, text in rows:
                 try:
                     await application.bot.send_message(
                         chat_id=int(user_id),
@@ -453,6 +521,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     update_profile_from_text(user_id, user_text)
     user = get_user(user_id)
 
+    if "mana laika zona" in lower or "kur es dzīvoju" in lower or "es dzīvoju" in lower:
+        await update.message.reply_text(f"Saglabāju. Tava laika zona: {user['timezone']}")
+        return
+
     if "kā mani sauc" in lower:
         await update.message.reply_text(f"Tevi sauc {user['name']}. 😊" if user["name"] else "Tu vēl neesi pateicis savu vārdu. 😊")
         return
@@ -477,6 +549,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Lietotāja profils:
 Vārds: {user["name"]}
 Pilsēta: {user["city"]}
+Laika zona: {user["timezone"]}
 Patīk: {user["hobbies"]}
 Svarīgi fakti: {user["facts"]}
 """
@@ -518,5 +591,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 Memory V4 automātiskie atgādinājumi darbojas...")
+    print("Nina7727 V4.2 Global Time darbojas...")
     telegram_app.run_polling()
