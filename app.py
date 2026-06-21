@@ -1,3 +1,4 @@
+
 import os
 import re
 import sqlite3
@@ -59,7 +60,9 @@ def init_db():
         ("projects", "TEXT DEFAULT ''"),
         ("dreams", "TEXT DEFAULT ''"),
         ("important_dates", "TEXT DEFAULT ''"),
-        ("summary", "TEXT DEFAULT ''")
+        ("summary", "TEXT DEFAULT ''"),
+        ("premium", "INTEGER DEFAULT 0"),
+        ("premium_until", "TEXT DEFAULT ''")
     ]:
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col[0]} {col[1]}")
@@ -79,7 +82,7 @@ def get_user(user_id):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("""
-        SELECT name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary
+        SELECT name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until
         FROM users WHERE user_id = ?
     """, (user_id,))
     row = c.fetchone()
@@ -87,11 +90,11 @@ def get_user(user_id):
     if not row:
         c.execute("""
             INSERT INTO users
-            (user_id, name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (user_id, "", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", ""))
+            (user_id, name, city, hobbies, facts, timezone, goals, projects, dreams, important_dates, summary, premium, premium_until)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, "", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, ""))
         conn.commit()
-        row = ("", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "")
+        row = ("", "", "", "", DEFAULT_TIMEZONE, "", "", "", "", "", 0, "")
 
     conn.close()
 
@@ -105,7 +108,9 @@ def get_user(user_id):
         "projects": row[6] or "",
         "dreams": row[7] or "",
         "important_dates": row[8] or "",
-        "summary": row[9] or ""
+        "summary": row[9] or "",
+        "premium": row[10] or 0,
+        "premium_until": row[11] or ""
     }
 
 
@@ -115,11 +120,13 @@ def update_user(user_id, user):
     c.execute("""
         UPDATE users SET
         name = ?, city = ?, hobbies = ?, facts = ?, timezone = ?,
-        goals = ?, projects = ?, dreams = ?, important_dates = ?, summary = ?
+        goals = ?, projects = ?, dreams = ?, important_dates = ?, summary = ?,
+        premium = ?, premium_until = ?
         WHERE user_id = ?
     """, (
         user["name"], user["city"], user["hobbies"], user["facts"], user["timezone"],
         user["goals"], user["projects"], user["dreams"], user["important_dates"], user["summary"],
+        user["premium"], user["premium_until"],
         user_id
     ))
     conn.commit()
@@ -300,6 +307,11 @@ def profile_answer(user):
         lines.append(f"• Pilsēta: {user['city']}")
     if user["timezone"]:
         lines.append(f"• Laika zona: {user['timezone']}")
+    if user.get("premium"):
+        premium_text = "Aktīvs"
+        if user.get("premium_until"):
+            premium_text += f" līdz {user['premium_until']}"
+        lines.append(f"• Premium: {premium_text}")
     if user["hobbies"]:
         lines.append("• Patīk: " + user["hobbies"])
     if user["facts"]:
@@ -367,6 +379,42 @@ Iepriekšējais kopsavilkums:
         print("Kopsavilkuma kļūda:", e)
         return "Kopsavilkumu šobrīd neizdevās izveidot. Pamēģini vēlreiz pēc brīža."
 
+
+
+
+def premium_status(user_id):
+    user = get_user(user_id)
+
+    if user["premium"]:
+        if user["premium_until"]:
+            return f"💎 Premium: aktīvs\nLīdz: {user['premium_until']}"
+        return "💎 Premium: aktīvs"
+
+    return (
+        "Premium: neaktīvs\n\n"
+        "Bezmaksas režīmā Nina darbojas pamata līmenī.\n"
+        "Premium vēlāk dos vairāk atmiņas, vairāk atgādinājumu un gudrākus kopsavilkumus."
+    )
+
+
+def activate_premium(user_id):
+    user = get_user(user_id)
+    until = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+
+    user["premium"] = 1
+    user["premium_until"] = until
+
+    update_user(user_id, user)
+
+    return f"💎 Premium aktivizēts testa režīmā līdz {until}."
+
+
+def deactivate_premium(user_id):
+    user = get_user(user_id)
+    user["premium"] = 0
+    user["premium_until"] = ""
+    update_user(user_id, user)
+    return "Premium izslēgts testa režīmā."
 
 def parse_reminder(user_text, user_tz_name):
     text = user_text.strip()
@@ -534,6 +582,18 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     lower = user_text.lower()
 
+    if lower in ["mans premium statuss", "premium statuss", "premium"]:
+        await update.message.reply_text(premium_status(user_id))
+        return
+
+    if lower in ["aktivizē premium", "aktivize premium", "ieslēdz premium"]:
+        await update.message.reply_text(activate_premium(user_id))
+        return
+
+    if lower in ["izslēdz premium", "atslēdz premium"]:
+        await update.message.reply_text(deactivate_premium(user_id))
+        return
+
     if lower.startswith("atgādini man"):
         await update.message.reply_text(add_reminder(user_id, user_text))
         return
@@ -596,6 +656,8 @@ Mērķi: {user["goals"]}
 Projekti: {user["projects"]}
 Sapņi: {user["dreams"]}
 Svarīgi datumi: {user["important_dates"]}
+Premium: {user["premium"]}
+Premium līdz: {user["premium_until"]}
 
 Ilgtermiņa kopsavilkums:
 {user["summary"]}
@@ -638,5 +700,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V6 Long-Term Memory darbojas...")
+    print("Nina7727 V7.1 Premium Core darbojas...")
     telegram_app.run_polling()
