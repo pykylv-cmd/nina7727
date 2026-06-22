@@ -341,13 +341,101 @@ def user_level_info(user_id):
 
 def achievement_definitions():
     return {
-        "backup_starter": {"icon": "📦", "title": "Backup Starter", "description": "Izveidoji savu pirmo backup.", "xp": 25},
-        "memory_builder": {"icon": "🧠", "title": "Memory Builder", "description": "Aizpildīti vismaz 5 atmiņas lauki.", "xp": 25},
-        "premium_explorer": {"icon": "💎", "title": "Premium Explorer", "description": "Aktivizēji Premium.", "xp": 50},
-        "rising_star": {"icon": "⭐", "title": "Rising Star", "description": "Sasniedzi 100 XP.", "xp": 50},
-        "nina_veteran": {"icon": "🏆", "title": "Nina Veteran", "description": "Sasniedzi 5. līmeni.", "xp": 100},
-        "streak_7": {"icon": "🔥", "title": "Consistent User", "description": "7 dienas pēc kārtas ar Ninu.", "xp": 75},
-        "streak_30": {"icon": "🔥", "title": "Nina Loyal", "description": "30 dienas pēc kārtas ar Ninu.", "xp": 200},
+        # 📦 Backup sērija
+        "backup_starter": {
+            "icon": "📦",
+            "title": "Backup Starter",
+            "description": "Izveidoji savu pirmo backup.",
+            "xp": 25,
+        },
+        "backup_collector": {
+            "icon": "📦",
+            "title": "Backup Collector",
+            "description": "Izveidoji 5 backup.",
+            "xp": 50,
+        },
+        "backup_master": {
+            "icon": "📦",
+            "title": "Backup Master",
+            "description": "Izveidoji 10 backup.",
+            "xp": 100,
+        },
+
+        # 🧠 Atmiņas sērija
+        "memory_builder": {
+            "icon": "🧠",
+            "title": "Memory Builder",
+            "description": "Aizpildīti vismaz 5 atmiņas lauki.",
+            "xp": 25,
+        },
+        "memory_expert": {
+            "icon": "🧠",
+            "title": "Memory Expert",
+            "description": "Atmiņa aizpildīta vismaz 50%.",
+            "xp": 100,
+        },
+        "memory_master": {
+            "icon": "🧠",
+            "title": "Memory Master",
+            "description": "Atmiņa aizpildīta 100%.",
+            "xp": 250,
+        },
+
+        # 💎 Premium
+        "premium_explorer": {
+            "icon": "💎",
+            "title": "Premium Explorer",
+            "description": "Aktivizēji Premium.",
+            "xp": 50,
+        },
+
+        # ⭐ XP sērija
+        "rising_star": {
+            "icon": "⭐",
+            "title": "Rising Star",
+            "description": "Sasniedzi 100 XP.",
+            "xp": 50,
+        },
+        "xp_warrior": {
+            "icon": "⭐",
+            "title": "XP Warrior",
+            "description": "Sasniedzi 500 XP.",
+            "xp": 100,
+        },
+        "xp_legend": {
+            "icon": "⭐",
+            "title": "XP Legend",
+            "description": "Sasniedzi 1000 XP.",
+            "xp": 250,
+        },
+
+        # 🏆 Līmeņu sērija
+        "nina_veteran": {
+            "icon": "🏆",
+            "title": "Nina Veteran",
+            "description": "Sasniedzi 5. līmeni.",
+            "xp": 100,
+        },
+        "nina_master": {
+            "icon": "🏆",
+            "title": "Nina Master",
+            "description": "Sasniedzi 10. līmeni.",
+            "xp": 250,
+        },
+
+        # 🔥 Streak sērija
+        "streak_7": {
+            "icon": "🔥",
+            "title": "Consistent User",
+            "description": "7 dienas pēc kārtas ar Ninu.",
+            "xp": 75,
+        },
+        "streak_30": {
+            "icon": "🔥",
+            "title": "Nina Loyal",
+            "description": "30 dienas pēc kārtas ar Ninu.",
+            "xp": 200,
+        },
     }
 
 
@@ -409,39 +497,106 @@ def achievements_answer(user_id):
     return "\n".join(lines).strip()
 
 
-def check_achievements(user_id):
-    notices = []
+def next_achievement_progress(user_id):
     user = get_user(user_id)
-    if backup_count_number(user_id) >= 1:
-        msg = unlock_achievement(user_id, "backup_starter")
-        if msg:
-            notices.append(msg)
-    if memory_fill_percent(user_id) >= 33:
-        msg = unlock_achievement(user_id, "memory_builder")
-        if msg:
-            notices.append(msg)
-    if user.get("premium"):
-        msg = unlock_achievement(user_id, "premium_explorer")
-        if msg:
-            notices.append(msg)
     xp = int(user.get("xp", 0) or 0)
     level = calculate_level(xp)
-    if xp >= 100:
-        msg = unlock_achievement(user_id, "rising_star")
-        if msg:
-            notices.append(msg)
-    if level >= 5:
-        msg = unlock_achievement(user_id, "nina_veteran")
-        if msg:
-            notices.append(msg)
-    if int(user.get("streak_days", 0) or 0) >= 7:
-        msg = unlock_achievement(user_id, "streak_7")
-        if msg:
-            notices.append(msg)
-    if int(user.get("streak_days", 0) or 0) >= 30:
-        msg = unlock_achievement(user_id, "streak_30")
-        if msg:
-            notices.append(msg)
+    backups = backup_count_number(user_id)
+    memory_percent = memory_fill_percent(user_id)
+    streak_days = int(user.get("streak_days", 0) or 0)
+
+    progress_items = [
+        ("📦 Backup Collector", backups, 5, "backup_collector"),
+        ("📦 Backup Master", backups, 10, "backup_master"),
+        ("⭐ Rising Star", xp, 100, "rising_star"),
+        ("⭐ XP Warrior", xp, 500, "xp_warrior"),
+        ("⭐ XP Legend", xp, 1000, "xp_legend"),
+        ("🏆 Nina Veteran", level, 5, "nina_veteran"),
+        ("🏆 Nina Master", level, 10, "nina_master"),
+        ("🔥 Consistent User", streak_days, 7, "streak_7"),
+        ("🔥 Nina Loyal", streak_days, 30, "streak_30"),
+        ("🧠 Memory Builder", memory_percent, 33, "memory_builder"),
+        ("🧠 Memory Expert", memory_percent, 50, "memory_expert"),
+        ("🧠 Memory Master", memory_percent, 100, "memory_master"),
+    ]
+
+    available = []
+    for title, current, target, code in progress_items:
+        if not has_achievement(user_id, code):
+            available.append((title, current, target, code))
+
+    if not available:
+        return "Visi pašreizējie sasniegumi ir atbloķēti. 🏆"
+
+    available.sort(key=lambda item: max(0, item[2] - item[1]))
+    title, current, target, _ = available[0]
+    return f"{title}: {current}/{target}"
+
+
+def achievement_progress(user_id):
+    user = get_user(user_id)
+    xp = int(user.get("xp", 0) or 0)
+    level = calculate_level(xp)
+    backups = backup_count_number(user_id)
+    memory_percent = memory_fill_percent(user_id)
+    streak_days = int(user.get("streak_days", 0) or 0)
+    total = len(achievement_definitions())
+    unlocked = achievement_count(user_id)
+
+    return (
+        "🏅 Sasniegumu progress\n\n"
+        f"Kopā atbloķēti: {unlocked}/{total}\n\n"
+        f"📦 Backup: {backups}/5 un {backups}/10\n"
+        f"⭐ XP: {xp}/100, {xp}/500, {xp}/1000\n"
+        f"🏆 Līmenis: {level}/5 un {level}/10\n"
+        f"🔥 Streak: {streak_days}/7 un {streak_days}/30\n"
+        f"🧠 Atmiņa: {memory_percent}/50% un {memory_percent}/100%\n\n"
+        "Nākamais tuvākais:\n"
+        f"{next_achievement_progress(user_id)}"
+    )
+
+
+def check_achievements(user_id):
+    notices = []
+
+    # Daži sasniegumi dod XP, kas var atbloķēt nākamos sasniegumus.
+    # Tāpēc pārbaudām vairākās kārtās, līdz vairs nav jaunu unlock.
+    for _ in range(3):
+        before = achievement_count(user_id)
+        user = get_user(user_id)
+        xp = int(user.get("xp", 0) or 0)
+        level = calculate_level(xp)
+        backups = backup_count_number(user_id)
+        memory_percent = memory_fill_percent(user_id)
+        streak_days = int(user.get("streak_days", 0) or 0)
+
+        checks = [
+            (backups >= 1, "backup_starter"),
+            (backups >= 5, "backup_collector"),
+            (backups >= 10, "backup_master"),
+            (memory_percent >= 33, "memory_builder"),
+            (memory_percent >= 50, "memory_expert"),
+            (memory_percent >= 100, "memory_master"),
+            (bool(user.get("premium")), "premium_explorer"),
+            (xp >= 100, "rising_star"),
+            (xp >= 500, "xp_warrior"),
+            (xp >= 1000, "xp_legend"),
+            (level >= 5, "nina_veteran"),
+            (level >= 10, "nina_master"),
+            (streak_days >= 7, "streak_7"),
+            (streak_days >= 30, "streak_30"),
+        ]
+
+        for condition, code in checks:
+            if condition:
+                msg = unlock_achievement(user_id, code)
+                if msg:
+                    notices.append(msg)
+
+        after = achievement_count(user_id)
+        if after == before:
+            break
+
     return "\n\n".join(notices)
 
 
@@ -498,6 +653,7 @@ def append_bonus_notices(answer, *notices):
     if not extra:
         return answer
     return answer + "\n\n" + "\n\n".join(extra)
+
 
 def valid_timezone(tz_name):
     try:
@@ -1770,7 +1926,7 @@ COMMAND_LINES = {
     "mana statistika", "mana aktivitāte", "mana atmiņa",
     "premium panelis", "mans panelis", "dashboard",
     "mans līmenis", "mana pieredze", "xp",
-    "mani sasniegumi", "sasniegumi",
+    "mani sasniegumi", "sasniegumi", "sasniegumu progress",
     "mans streak", "mana sērija", "streak",
     "aktivizē premium", "aktivize premium", "ieslēdz premium",
     "izslēdz premium", "atslēdz premium",
@@ -1843,6 +1999,9 @@ def command_answer(user_id, command_text):
 
     if lower in ["mani sasniegumi", "sasniegumi"]:
         return achievements_answer(user_id)
+
+    if lower == "sasniegumu progress":
+        return achievement_progress(user_id)
 
     if lower in ["mans streak", "mana sērija", "streak"]:
         return streak_info(user_id)
@@ -2141,7 +2300,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 V9.8 Daily Streak darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V9.9 Achievement Expansion darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -2156,5 +2315,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V9.8 Daily Streak darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V9.9 Achievement Expansion darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
