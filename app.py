@@ -453,7 +453,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.5.2 Premium Welcome Hard Fix."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.7 Revenue Dashboard."
     )
 
 
@@ -522,6 +522,96 @@ def premium_history(user_id):
 
     return "\n".join(lines).strip()
 
+
+
+
+def revenue_dashboard(user_id=None):
+    """V10.7: Revenue Dashboard — admin pārskats par Premium ieņēmumiem."""
+    conn = get_db()
+    c = conn.cursor()
+
+    try:
+        db_execute(c, """
+            SELECT
+                COALESCE(SUM(amount), 0),
+                COUNT(*)
+            FROM premium_transactions
+            WHERE status = 'paid'
+        """)
+        total_revenue, paid_count = c.fetchone()
+    except Exception:
+        total_revenue, paid_count = 0, 0
+
+    try:
+        db_execute(c, """
+            SELECT COUNT(*)
+            FROM users
+            WHERE premium = 1
+        """)
+        premium_users = int(c.fetchone()[0] or 0)
+    except Exception:
+        premium_users = 0
+
+    try:
+        db_execute(c, """
+            SELECT COUNT(DISTINCT user_id)
+            FROM premium_transactions
+            WHERE status = 'paid' AND plan_name = %s
+        """, (PLAN_PREMIUM_BASIC,))
+        basic_users = int(c.fetchone()[0] or 0)
+    except Exception:
+        basic_users = 0
+
+    try:
+        db_execute(c, """
+            SELECT COUNT(DISTINCT user_id)
+            FROM premium_transactions
+            WHERE status = 'paid' AND plan_name = %s
+        """, (PLAN_PREMIUM_PLUS,))
+        plus_users = int(c.fetchone()[0] or 0)
+    except Exception:
+        plus_users = 0
+
+    try:
+        db_execute(c, """
+            SELECT COUNT(*)
+            FROM premium_transactions
+            WHERE status = 'checkout_created'
+        """)
+        checkout_created = int(c.fetchone()[0] or 0)
+    except Exception:
+        checkout_created = 0
+
+    try:
+        db_execute(c, """
+            SELECT COUNT(*)
+            FROM premium_transactions
+            WHERE status IN ('checkout_missing', 'checkout_ready_static')
+        """)
+        checkout_pending = int(c.fetchone()[0] or 0)
+    except Exception:
+        checkout_pending = 0
+
+    c.close()
+    conn.close()
+
+    total_revenue = float(total_revenue or 0)
+    paid_count = int(paid_count or 0)
+    mrr = basic_users * PREMIUM_BASIC_PRICE + plus_users * PREMIUM_PLUS_PRICE
+
+    return (
+        "💰 Nina Revenue Dashboard\n\n"
+        f"Ieņēmumi kopā: {total_revenue:.2f} {PREMIUM_CURRENCY}\n"
+        f"Apmaksāti darījumi: {paid_count}\n"
+        f"Premium klienti: {premium_users}\n\n"
+        "Plāni:\n"
+        f"🥉 Basic: {basic_users}\n"
+        f"🥈 Plus: {plus_users}\n\n"
+        f"MRR: {mrr:.2f} {PREMIUM_CURRENCY}\n\n"
+        "Checkout:\n"
+        f"Izveidoti checkout: {checkout_created}\n"
+        f"Nepabeigti/statiskie: {checkout_pending}"
+    )
 
 
 
@@ -716,15 +806,15 @@ def stripe_setup_helper(user_id=None):
         f"{'✅' if webhook_ready else '❌'} STRIPE_WEBHOOK_SECRET=whsec_...",
         f"{'✅' if basic_price_ready else '❌'} STRIPE_BASIC_PRICE_ID=price_...",
         f"{'✅' if plus_price_ready else '❌'} STRIPE_PLUS_PRICE_ID=price_...",
-        f"{'✅' if success_ready else '❌'} STRIPE_SUCCESS_URL=https://tavs-domens/success",
-        f"{'✅' if cancel_ready else '❌'} STRIPE_CANCEL_URL=https://tavs-domens/cancel",
+        f"{'✅' if success_ready else '❌'} STRIPE_SUCCESS_URL=tavs-domens/success",
+        f"{'✅' if cancel_ready else '❌'} STRIPE_CANCEL_URL=tavs-domens/cancel",
         "",
         "3. Alternatīva — statiskie Stripe Checkout linki:",
-        f"{'✅' if basic_url_ready else '❌'} STRIPE_BASIC_CHECKOUT_URL=https://buy.stripe.com/...",
-        f"{'✅' if plus_url_ready else '❌'} STRIPE_PLUS_CHECKOUT_URL=https://buy.stripe.com/...",
+        f"{'✅' if basic_url_ready else '❌'} STRIPE_BASIC_CHECKOUT_URL=buy.stripe.com/...",
+        f"{'✅' if plus_url_ready else '❌'} STRIPE_PLUS_CHECKOUT_URL=buy.stripe.com/...",
         "",
         "4. Stripe webhook URL:",
-        "https://TAVS-RAILWAY-DOMENS/stripe/webhook",
+        "TAVS-RAILWAY-DOMENS/stripe/webhook",
         "",
         "5. Stripe webhook event:",
         "checkout.session.completed",
@@ -735,6 +825,8 @@ def stripe_setup_helper(user_id=None):
         "pirkt plus",
         "premium vēsture",
         "premium panelis",
+        "",
+        "URL piemēri ir bez https://, lai Telegram nerādītu link preview.",
         "",
     ]
 
@@ -2483,6 +2575,7 @@ COMMAND_LINES = {
     "premium welcome", "premium sveiciens", "premium starts", "premium sveiks",
     "pirkt premium", "pirkt basic", "pirkt premium basic", "pirkt plus", "pirkt premium plus", "stripe statuss",
     "stripe setup", "stripe env", "stripe palīgs", "stripe paligs",
+    "revenue", "ieņēmumi", "ienemumi", "admin panelis", "premium ieņēmumi", "premium ienemumi",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
     "premium panelis", "mans panelis", "dashboard",
     "mans līmenis", "mana pieredze", "xp",
@@ -2574,6 +2667,9 @@ def command_answer(user_id, command_text):
 
     if lower in ["stripe setup", "stripe env", "stripe palīgs", "stripe paligs"]:
         return stripe_setup_helper(user_id)
+
+    if lower in ["revenue", "ieņēmumi", "ienemumi", "admin panelis", "premium ieņēmumi", "premium ienemumi"]:
+        return revenue_dashboard(user_id)
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
         return premium_dashboard(user_id)
@@ -2734,6 +2830,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V10.5.2: keep Stripe helper commands direct too, not only in command_answer().
     if lower in ["stripe setup", "stripe env", "stripe palīgs", "stripe paligs"]:
         await update.message.reply_text(append_bonus_notices(stripe_setup_helper(user_id), streak_notice))
+        return
+
+    if lower in ["revenue", "ieņēmumi", "ienemumi", "admin panelis", "premium ieņēmumi", "premium ienemumi"]:
+        await update.message.reply_text(append_bonus_notices(revenue_dashboard(user_id), streak_notice))
         return
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
