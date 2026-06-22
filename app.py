@@ -11,7 +11,12 @@ try:
 except Exception:
     psycopg2 = None
 
-from flask import Flask
+try:
+    import stripe
+except Exception:
+    stripe = None
+
+from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 from openai import OpenAI
@@ -44,6 +49,15 @@ STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_BASIC_CHECKOUT_URL = os.environ.get("STRIPE_BASIC_CHECKOUT_URL", "")
 STRIPE_PLUS_CHECKOUT_URL = os.environ.get("STRIPE_PLUS_CHECKOUT_URL", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+
+# V10.3 Stripe Webhooks + dynamic Checkout Sessions
+STRIPE_BASIC_PRICE_ID = os.environ.get("STRIPE_BASIC_PRICE_ID", "")
+STRIPE_PLUS_PRICE_ID = os.environ.get("STRIPE_PLUS_PRICE_ID", "")
+STRIPE_SUCCESS_URL = os.environ.get("STRIPE_SUCCESS_URL", "https://t.me/")
+STRIPE_CANCEL_URL = os.environ.get("STRIPE_CANCEL_URL", "https://t.me/")
+
+if stripe and STRIPE_SECRET_KEY:
+    stripe.api_key = STRIPE_SECRET_KEY
 
 
 
@@ -153,13 +167,17 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             expires_at TEXT,
             checkout_url TEXT DEFAULT '',
-            stripe_session_id TEXT DEFAULT ''
+            stripe_session_id TEXT DEFAULT '',
+            stripe_event_id TEXT DEFAULT '',
+            customer_email TEXT DEFAULT ''
         )
     """)
 
     for col, col_type in [
         ("checkout_url", "TEXT DEFAULT ''"),
         ("stripe_session_id", "TEXT DEFAULT ''"),
+        ("stripe_event_id", "TEXT DEFAULT ''"),
+        ("customer_email", "TEXT DEFAULT ''"),
     ]:
         try:
             db_execute(c, f"ALTER TABLE premium_transactions ADD COLUMN {col} {col_type}")
@@ -345,7 +363,19 @@ def current_plan_name(user_id):
     return PLAN_FREE
 
 
-def record_premium_transaction(user_id, plan_name, amount, currency, payment_method, status, expires_at="", checkout_url="", stripe_session_id=""):
+def record_premium_transaction(
+    user_id,
+    plan_name,
+    amount,
+    currency,
+    payment_method,
+    status,
+    expires_at="",
+    checkout_url="",
+    stripe_session_id="",
+    stripe_event_id="",
+    customer_email="",
+):
     try:
         conn = get_db()
         c = conn.cursor()
@@ -353,10 +383,13 @@ def record_premium_transaction(user_id, plan_name, amount, currency, payment_met
             c,
             """
             INSERT INTO premium_transactions
-            (user_id, plan_name, amount, currency, payment_method, status, expires_at, checkout_url, stripe_session_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (user_id, plan_name, amount, currency, payment_method, status, expires_at, checkout_url, stripe_session_id, stripe_event_id, customer_email)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (user_id, plan_name, float(amount or 0), currency, payment_method, status, expires_at, checkout_url, stripe_session_id)
+            (
+                user_id, plan_name, float(amount or 0), currency, payment_method, status,
+                expires_at, checkout_url, stripe_session_id, stripe_event_id, customer_email
+            )
         )
         conn.commit()
         c.close()
@@ -420,7 +453,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.1 Stripe Checkout Foundation."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.3 Stripe Webhooks."
     )
 
 
@@ -490,41 +523,181 @@ def premium_history(user_id):
     return "\n".join(lines).strip()
 
 
+
+def stripe_event_seen(stripe_event_id):
+    if not stripe_event_id:
+        return False
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        db_execute(
+            c,
+            "SELECT COUNT(*) FROM premium_transactions WHERE stripe_event_id = %s",
+            (stripe_event_id,)
+        )
+        count = int(c.fetchone()[0] or 0)
+    except Exception:
+        count = 0
+    c.close()
+    conn.close()
+    return count > 0
+
+
+def activate_paid_premium(user_id, plan_name, amount, currency, payment_method, stripe_session_id="", stripe_event_id="", customer_email=""):
+    user = get_user(str(user_id))
+    until = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+    user["premium"] = 1
+    user["premium_until"] = until
+    update_user(str(user_id), user)
+
+    record_premium_transaction(
+        user_id=str(user_id),
+        plan_name=plan_name or PLAN_PREMIUM_BASIC,
+        amount=amount,
+        currency=currency or PREMIUM_CURRENCY,
+        payment_method=payment_method or "stripe",
+        status="paid",
+        expires_at=until,
+        stripe_session_id=stripe_session_id,
+        stripe_event_id=stripe_event_id,
+        customer_email=customer_email,
+    )
+
+    achievements = check_achievements(str(user_id))
+    return until, achievements
+
+
+def create_stripe_checkout_session(user_id, plan_key="basic"):
+    if not stripe or not STRIPE_SECRET_KEY:
+        return None, "stripe_library_or_secret_missing"
+
+    if plan_key == "plus":
+        plan_name = PLAN_PREMIUM_PLUS
+        price_id = STRIPE_PLUS_PRICE_ID
+    else:
+        plan_name = PLAN_PREMIUM_BASIC
+        price_id = STRIPE_BASIC_PRICE_ID
+
+    if not price_id:
+        return None, "stripe_price_id_missing"
+
+    try:
+        session = stripe.checkout.Session.create(
+            mode="subscription",
+            line_items=[{"price": price_id, "quantity": 1}],
+            success_url=STRIPE_SUCCESS_URL,
+            cancel_url=STRIPE_CANCEL_URL,
+            client_reference_id=str(user_id),
+            metadata={
+                "user_id": str(user_id),
+                "plan_name": plan_name,
+                "source": "nina_telegram",
+            },
+        )
+        return session, "ok"
+    except Exception as e:
+        print("Stripe checkout session kļūda:", e)
+        return None, "stripe_checkout_error"
+
+
+def plan_from_stripe_session(session):
+    metadata = session.get("metadata") or {}
+    plan_name = metadata.get("plan_name") or PLAN_PREMIUM_BASIC
+
+    amount_total = session.get("amount_total")
+    currency = (session.get("currency") or PREMIUM_CURRENCY).upper()
+
+    if plan_name == PLAN_PREMIUM_PLUS:
+        amount = PREMIUM_PLUS_PRICE
+    elif amount_total is not None:
+        amount = float(amount_total or 0) / 100
+    else:
+        amount = PREMIUM_BASIC_PRICE
+
+    return plan_name, amount, currency
+
+
+def user_id_from_stripe_session(session):
+    metadata = session.get("metadata") or {}
+    return str(metadata.get("user_id") or session.get("client_reference_id") or "").strip()
+
+
 def stripe_status(user_id=None):
-    basic_ready = bool(STRIPE_BASIC_CHECKOUT_URL)
-    plus_ready = bool(STRIPE_PLUS_CHECKOUT_URL)
+    basic_url_ready = bool(STRIPE_BASIC_CHECKOUT_URL)
+    plus_url_ready = bool(STRIPE_PLUS_CHECKOUT_URL)
+    basic_price_ready = bool(STRIPE_BASIC_PRICE_ID)
+    plus_price_ready = bool(STRIPE_PLUS_PRICE_ID)
     secret_ready = bool(STRIPE_SECRET_KEY)
     webhook_ready = bool(STRIPE_WEBHOOK_SECRET)
+    stripe_lib_ready = bool(stripe)
 
     lines = [
         "💳 Stripe statuss",
         "",
+        f"stripe python library: {'✅' if stripe_lib_ready else '❌'}",
         f"STRIPE_SECRET_KEY: {'✅' if secret_ready else '❌'}",
-        f"STRIPE_BASIC_CHECKOUT_URL: {'✅' if basic_ready else '❌'}",
-        f"STRIPE_PLUS_CHECKOUT_URL: {'✅' if plus_ready else '❌'}",
+        f"STRIPE_BASIC_CHECKOUT_URL: {'✅' if basic_url_ready else '❌'}",
+        f"STRIPE_PLUS_CHECKOUT_URL: {'✅' if plus_url_ready else '❌'}",
+        f"STRIPE_BASIC_PRICE_ID: {'✅' if basic_price_ready else '❌'}",
+        f"STRIPE_PLUS_PRICE_ID: {'✅' if plus_price_ready else '❌'}",
         f"STRIPE_WEBHOOK_SECRET: {'✅' if webhook_ready else '❌'}",
         "",
     ]
 
-    if basic_ready or plus_ready:
-        lines.append("Checkout linki ir sagatavoti.")
+    if secret_ready and webhook_ready and (basic_price_ready or basic_url_ready):
+        lines.append("Stripe maksājumu plūsma ir gatava V10.3 webhook režīmam.")
+    elif basic_url_ready or plus_url_ready:
+        lines.append("Checkout linki ir sagatavoti, bet automātiskai Premium aktivizācijai vajag webhook.")
     else:
-        lines.append("Stripe vēl nav pieslēgts. Pievieno checkout linkus Railway environment variables.")
+        lines.append("Stripe vēl nav pieslēgts. Pievieno Railway environment variables.")
+
+    lines.extend([
+        "",
+        "Webhook endpoint:",
+        "/stripe/webhook",
+    ])
 
     return "\n".join(lines)
-
 
 def stripe_checkout_answer(user_id, plan_key="basic"):
     if plan_key == "plus":
         plan_name = PLAN_PREMIUM_PLUS
         amount = PREMIUM_PLUS_PRICE
-        checkout_url = STRIPE_PLUS_CHECKOUT_URL
+        fallback_url = STRIPE_PLUS_CHECKOUT_URL
+        env_name = "STRIPE_PLUS_CHECKOUT_URL"
     else:
         plan_name = PLAN_PREMIUM_BASIC
         amount = PREMIUM_BASIC_PRICE
-        checkout_url = STRIPE_BASIC_CHECKOUT_URL
+        fallback_url = STRIPE_BASIC_CHECKOUT_URL
+        env_name = "STRIPE_BASIC_CHECKOUT_URL"
 
-    status = "checkout_ready" if checkout_url else "checkout_missing"
+    session, session_status = create_stripe_checkout_session(user_id, plan_key)
+
+    if session:
+        checkout_url = session.get("url") or ""
+        stripe_session_id = session.get("id") or ""
+        record_premium_transaction(
+            user_id=user_id,
+            plan_name=plan_name,
+            amount=amount,
+            currency=PREMIUM_CURRENCY,
+            payment_method="stripe",
+            status="checkout_created",
+            checkout_url=checkout_url,
+            stripe_session_id=stripe_session_id,
+        )
+
+        return (
+            "💳 Stripe Checkout\n\n"
+            f"Plāns: {plan_name}\n"
+            f"Cena: {amount:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
+            "Checkout links:\n"
+            f"{checkout_url}\n\n"
+            "Pēc apmaksas V10.3 webhook automātiski aktivizēs Premium."
+        )
+
+    checkout_url = fallback_url
+    status = "checkout_ready_static" if checkout_url else "checkout_missing"
     record_premium_transaction(
         user_id=user_id,
         plan_name=plan_name,
@@ -548,15 +721,16 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             "Checkout links:",
             checkout_url,
             "",
-            "Pēc apmaksas V10.2 pieslēgsim webhook, lai Premium aktivizējas automātiski.",
+            "V10.3 webhook ir gatavs, bet statiskam linkam Stripe notikumā jābūt user_id metadata/client_reference_id.",
         ])
     else:
-        env_name = "STRIPE_PLUS_CHECKOUT_URL" if plan_key == "plus" else "STRIPE_BASIC_CHECKOUT_URL"
+        price_env = "STRIPE_PLUS_PRICE_ID" if plan_key == "plus" else "STRIPE_BASIC_PRICE_ID"
         lines.extend([
-            "Stripe checkout links vēl nav pieslēgts.",
-            f"Pievieno Railway mainīgajam: {env_name}",
+            "Stripe checkout vēl nav pilnībā pieslēgts.",
+            f"Dinamiskam checkout pievieno Railway: {price_env}, STRIPE_SECRET_KEY, STRIPE_SUCCESS_URL, STRIPE_CANCEL_URL",
+            f"Vai statiskam linkam pievieno: {env_name}",
             "",
-            "Šis ir V10.1 Checkout Foundation — maksājuma plūsma sagatavota.",
+            f"Iemesls: {session_status}",
         ])
 
     return "\n".join(lines)
@@ -2639,9 +2813,67 @@ Kopsavilkums atjaunots:
     await update.message.reply_text(answer)
 
 
+@app.route("/stripe/webhook", methods=["POST"])
+def stripe_webhook():
+    if not stripe:
+        return jsonify({"error": "stripe library missing"}), 500
+
+    payload = request.get_data(as_text=False)
+    sig_header = request.headers.get("Stripe-Signature", "")
+
+    try:
+        if STRIPE_WEBHOOK_SECRET:
+            event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+        else:
+            event = json.loads(payload.decode("utf-8"))
+    except Exception as e:
+        print("Stripe webhook signature/json kļūda:", e)
+        return jsonify({"error": "invalid webhook"}), 400
+
+    event_id = event.get("id", "")
+    event_type = event.get("type", "")
+
+    if event_id and stripe_event_seen(event_id):
+        return jsonify({"ok": True, "duplicate": True})
+
+    if event_type == "checkout.session.completed":
+        session = (event.get("data") or {}).get("object") or {}
+        user_id = user_id_from_stripe_session(session)
+
+        if not user_id:
+            print("Stripe webhook: nav user_id metadata/client_reference_id")
+            return jsonify({"ok": False, "error": "missing user_id"}), 200
+
+        plan_name, amount, currency = plan_from_stripe_session(session)
+        customer_details = session.get("customer_details") or {}
+        customer_email = customer_details.get("email", "")
+        stripe_session_id = session.get("id", "")
+
+        until, achievements = activate_paid_premium(
+            user_id=user_id,
+            plan_name=plan_name,
+            amount=amount,
+            currency=currency,
+            payment_method="stripe",
+            stripe_session_id=stripe_session_id,
+            stripe_event_id=event_id,
+            customer_email=customer_email,
+        )
+
+        print(f"Stripe webhook: Premium aktivizēts user_id={user_id}, plan={plan_name}, līdz={until}")
+        if achievements:
+            print("Stripe achievements:", achievements)
+
+        return jsonify({"ok": True, "premium_until": until})
+
+    # Atzīmējam citus Stripe eventus tikai logā; Premium nemainām.
+    print("Stripe webhook ignored:", event_type)
+    return jsonify({"ok": True, "ignored": event_type})
+
+
 @app.route("/")
 def home():
-    return "Nina7727 V10.1 Stripe Checkout Foundation darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V10.3 Stripe Webhooks darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -2656,5 +2888,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V10.1 Stripe Checkout Foundation darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V10.3 Stripe Webhooks darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
