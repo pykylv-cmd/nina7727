@@ -453,7 +453,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.4 Success/Cancel Pages."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.5 Premium Welcome Flow."
     )
 
 
@@ -522,6 +522,39 @@ def premium_history(user_id):
 
     return "\n".join(lines).strip()
 
+
+
+
+def premium_welcome_answer(user_id):
+    """V10.5: Premium Welcome Flow — parāda Premium starta pieredzi pēc aktivizācijas/maksājuma."""
+    user = get_user(user_id)
+    plan = current_plan_name(user_id)
+
+    if not user.get("premium"):
+        return (
+            "💎 Premium vēl nav aktīvs\n\n"
+            "Lai aktivizētu Premium, raksti:\n"
+            "pirkt premium\n\n"
+            "Pēc apmaksas atgriezies šeit un raksti:\n"
+            "premium welcome"
+        )
+
+    until = user.get("premium_until") or "bez beigu datuma"
+    return (
+        "💎 Laipni lūgts Nina Premium!\n\n"
+        f"Tavs plāns: {plan}\n"
+        f"Premium aktīvs līdz: {until}\n\n"
+        "Tagad tev ir:\n"
+        "• backup bez limita\n"
+        "• atgādinājumi bez limita\n"
+        "• kopsavilkumi bez limita\n"
+        "• pilns Premium Dashboard\n"
+        "• vairāk vietas ilgtermiņa atmiņai\n\n"
+        "Ieteicamie nākamie soļi:\n"
+        "premium panelis\n"
+        "atjauno kopsavilkumu\n"
+        "izveido backup"
+    )
 
 
 def stripe_event_seen(stripe_event_id):
@@ -2447,6 +2480,7 @@ COMMAND_LINES = {
     "mans premium statuss", "premium statuss", "premium",
     "premium funkcijas", "premium limiti", "cik atmiņas man palicis", "premium beidzas",
     "abonements", "mans plāns", "mans plans", "premium vēsture", "premium vesture",
+    "premium welcome", "premium sveiciens", "premium starts",
     "pirkt premium", "pirkt basic", "pirkt premium basic", "pirkt plus", "pirkt premium plus", "stripe statuss",
     "stripe setup", "stripe env", "stripe palīgs", "stripe paligs",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
@@ -2525,6 +2559,9 @@ def command_answer(user_id, command_text):
 
     if lower in ["premium vēsture", "premium vesture"]:
         return premium_history(user_id)
+
+    if lower in ["premium welcome", "premium sveiciens", "premium starts"]:
+        return premium_welcome_answer(user_id)
 
     if lower in ["pirkt premium", "pirkt basic", "pirkt premium basic"]:
         return stripe_checkout_answer(user_id, "basic")
@@ -2920,7 +2957,7 @@ def stripe_webhook():
             customer_email=customer_email,
         )
 
-        print(f"Stripe webhook: Premium aktivizēts user_id={user_id}, plan={plan_name}, līdz={until}")
+        print(f"Stripe webhook: Premium aktivizēts user_id={user_id}, plan={plan_name}, līdz={until}. Welcome ready: premium welcome")
         if achievements:
             print("Stripe achievements:", achievements)
 
@@ -2952,7 +2989,9 @@ def payment_success_page():
         <div class="card">
             <h1>✅ Maksājums saņemts</h1>
             <p>Paldies! Ja Stripe webhook ir pieslēgts, Nina Premium tiks aktivizēts automātiski.</p>
-            <p>Atgriezies Telegram un pārbaudi statusu:</p>
+            <p>Atgriezies Telegram un palaid Premium sveicienu:</p>
+            <p><span class="cmd">premium welcome</span></p>
+            <p>Pēc tam vari pārbaudīt pilno paneli:</p>
             <p><span class="cmd">premium panelis</span></p>
             <p>Ja Premium vēl nerādās uzreiz, pagaidi dažas sekundes un pārbaudi vēlreiz.</p>
         </div>
@@ -2994,7 +3033,7 @@ def payment_cancel_page():
 
 @app.route("/")
 def home():
-    return "Nina7727 V10.4 Success/Cancel Pages darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V10.5 Premium Welcome Flow darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -3009,5 +3048,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V10.4 Success/Cancel Pages darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V10.5 Premium Welcome Flow darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
