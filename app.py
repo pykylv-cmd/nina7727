@@ -2688,6 +2688,12 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(append_bonus_notices(stripe_status(user_id), streak_notice))
         return
 
+    # V10.3.2: Stripe setup komandas jāapstrādā arī kā viena ziņa,
+    # ne tikai split_profile_and_commands ceļā.
+    if lower in ["stripe setup", "stripe env", "stripe palīgs", "stripe paligs"]:
+        await update.message.reply_text(append_bonus_notices(stripe_setup_helper(user_id), streak_notice))
+        return
+
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
         await update.message.reply_text(append_bonus_notices(premium_dashboard(user_id), streak_notice, check_achievements(user_id)))
         return
