@@ -31,12 +31,19 @@ FREE_REMINDER_LIMIT = 5
 FREE_SUMMARY_LIMIT_PER_DAY = 1
 XP_PER_LEVEL = 100
 
+# V10/V10.1 Payments + Stripe Checkout Foundation
 PLAN_FREE = "Free"
 PLAN_PREMIUM_BASIC = "Premium Basic"
 PLAN_PREMIUM_PLUS = "Premium Plus"
+
 PREMIUM_BASIC_PRICE = 4.99
 PREMIUM_PLUS_PRICE = 9.99
-PAYMENT_METHOD_TEST = "test"
+PREMIUM_CURRENCY = "EUR"
+
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_BASIC_CHECKOUT_URL = os.environ.get("STRIPE_BASIC_CHECKOUT_URL", "")
+STRIPE_PLUS_CHECKOUT_URL = os.environ.get("STRIPE_PLUS_CHECKOUT_URL", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
 
 
@@ -138,15 +145,26 @@ def init_db():
         CREATE TABLE IF NOT EXISTS premium_transactions (
             id SERIAL PRIMARY KEY,
             user_id TEXT,
-            plan_name TEXT DEFAULT '',
-            amount REAL DEFAULT 0,
+            plan_name TEXT,
+            amount REAL,
             currency TEXT DEFAULT 'EUR',
-            payment_method TEXT DEFAULT '',
-            status TEXT DEFAULT 'pending',
+            payment_method TEXT,
+            status TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            expires_at TEXT DEFAULT ''
+            expires_at TEXT,
+            checkout_url TEXT DEFAULT '',
+            stripe_session_id TEXT DEFAULT ''
         )
     """)
+
+    for col, col_type in [
+        ("checkout_url", "TEXT DEFAULT ''"),
+        ("stripe_session_id", "TEXT DEFAULT ''"),
+    ]:
+        try:
+            db_execute(c, f"ALTER TABLE premium_transactions ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
 
     # Ja tabulas jau eksistēja no vecākas versijas, pievieno trūkstošās kolonnas.
     for col, col_type in [
@@ -307,6 +325,16 @@ def premium_expiration_info(user_id):
     return "💎 Premium aktīvs bez beigu datuma."
 
 
+
+
+def plan_price(plan_name):
+    if plan_name == PLAN_PREMIUM_PLUS:
+        return PREMIUM_PLUS_PRICE
+    if plan_name == PLAN_PREMIUM_BASIC:
+        return PREMIUM_BASIC_PRICE
+    return 0.0
+
+
 def current_plan_name(user_id):
     user = get_user(user_id)
     if user.get("premium"):
@@ -317,21 +345,44 @@ def current_plan_name(user_id):
     return PLAN_FREE
 
 
+def record_premium_transaction(user_id, plan_name, amount, currency, payment_method, status, expires_at="", checkout_url="", stripe_session_id=""):
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(
+            c,
+            """
+            INSERT INTO premium_transactions
+            (user_id, plan_name, amount, currency, payment_method, status, expires_at, checkout_url, stripe_session_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (user_id, plan_name, float(amount or 0), currency, payment_method, status, expires_at, checkout_url, stripe_session_id)
+        )
+        conn.commit()
+        c.close()
+        conn.close()
+    except Exception as e:
+        print("Premium transaction kļūda:", e)
+
+
 def latest_premium_transaction(user_id):
     conn = get_db()
     c = conn.cursor()
-    db_execute(
-        c,
-        """
-        SELECT id, plan_name, amount, currency, payment_method, status, created_at, expires_at
-        FROM premium_transactions
-        WHERE user_id = %s
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        (user_id,)
-    )
-    row = c.fetchone()
+    try:
+        db_execute(
+            c,
+            """
+            SELECT plan_name, amount, currency, payment_method, status, created_at, expires_at, checkout_url, stripe_session_id
+            FROM premium_transactions
+            WHERE user_id = %s
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (user_id,)
+        )
+        row = c.fetchone()
+    except Exception:
+        row = None
     c.close()
     conn.close()
 
@@ -339,50 +390,19 @@ def latest_premium_transaction(user_id):
         return None
 
     return {
-        "id": row[0],
-        "plan_name": row[1] or "",
-        "amount": row[2] or 0,
-        "currency": row[3] or "EUR",
-        "payment_method": row[4] or "",
-        "status": row[5] or "",
-        "created_at": row[6],
-        "expires_at": row[7] or "",
+        "plan_name": row[0] or "",
+        "amount": row[1] or 0,
+        "currency": row[2] or PREMIUM_CURRENCY,
+        "payment_method": row[3] or "",
+        "status": row[4] or "",
+        "created_at": row[5] or "",
+        "expires_at": row[6] or "",
+        "checkout_url": row[7] or "",
+        "stripe_session_id": row[8] or "",
     }
 
 
-def record_premium_transaction(user_id, plan_name, amount, currency="EUR", payment_method=PAYMENT_METHOD_TEST, status="test_active", expires_at=""):
-    conn = get_db()
-    c = conn.cursor()
-    if USE_POSTGRES:
-        db_execute(
-            c,
-            """
-            INSERT INTO premium_transactions
-            (user_id, plan_name, amount, currency, payment_method, status, expires_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-            """,
-            (user_id, plan_name, float(amount or 0), currency, payment_method, status, expires_at)
-        )
-        transaction_id = c.fetchone()[0]
-    else:
-        db_execute(
-            c,
-            """
-            INSERT INTO premium_transactions
-            (user_id, plan_name, amount, currency, payment_method, status, expires_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """,
-            (user_id, plan_name, float(amount or 0), currency, payment_method, status, expires_at)
-        )
-        transaction_id = c.lastrowid
-    conn.commit()
-    c.close()
-    conn.close()
-    return transaction_id
-
-
-def subscription_answer(user_id=None):
+def subscription_info(user_id=None):
     return (
         "💎 Nina abonements\n\n"
         "Free:\n"
@@ -394,82 +414,152 @@ def subscription_answer(user_id=None):
         "• atgādinājumi bez limita\n"
         "• kopsavilkumi bez limita\n"
         "• vairāk vietas ilgtermiņa atmiņai\n\n"
-        f"Cena: {PREMIUM_BASIC_PRICE:.2f} EUR/mēn\n\n"
+        f"Cena: {PREMIUM_BASIC_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
         "Premium Plus:\n"
         "• viss no Basic\n"
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
-        f"Cena: {PREMIUM_PLUS_PRICE:.2f} EUR/mēn\n\n"
-        "Maksājumi vēl nav pieslēgti. Šis ir V10 Payments Foundation."
+        f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.1 Stripe Checkout Foundation."
     )
 
 
-def user_plan_answer(user_id):
-    user = get_user(user_id)
+def current_plan_answer(user_id):
     plan = current_plan_name(user_id)
+    user = get_user(user_id)
 
-    lines = ["💎 Tavs plāns", "", f"Pašreizējais: {plan}"]
+    lines = [
+        "💎 Tavs plāns",
+        "",
+        f"Pašreizējais: {plan}",
+    ]
 
-    if user.get("premium"):
-        if user.get("premium_until"):
-            lines.append(f"Premium aktīvs līdz: {user['premium_until']}")
-        latest = latest_premium_transaction(user_id)
-        if latest:
-            lines.extend([
-                "",
-                "Pēdējais ieraksts:",
-                f"• Plāns: {latest['plan_name']}",
-                f"• Summa: {latest['amount']} {latest['currency']}",
-                f"• Metode: {latest['payment_method']}",
-                f"• Statuss: {latest['status']}",
-            ])
-    else:
-        lines.extend([
-            "",
-            "Pieejamie plāni:",
-            f"🥉 Premium Basic — {PREMIUM_BASIC_PRICE:.2f} EUR/mēn",
-            f"🥈 Premium Plus — {PREMIUM_PLUS_PRICE:.2f} EUR/mēn",
-            "",
-            "Raksti: abonements",
-        ])
+    if user.get("premium") and user.get("premium_until"):
+        lines.append(f"Beidzas: {user['premium_until']}")
+
+    lines.extend([
+        "",
+        "Pieejamie plāni:",
+        f"🥉 Premium Basic — {PREMIUM_BASIC_PRICE:.2f} {PREMIUM_CURRENCY}/mēn",
+        f"🥈 Premium Plus — {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn",
+        "",
+        "Raksti: abonements",
+        "Vai: pirkt basic / pirkt plus",
+    ])
 
     return "\n".join(lines)
 
 
-def premium_history_answer(user_id):
+def premium_history(user_id):
     conn = get_db()
     c = conn.cursor()
-    db_execute(
-        c,
-        """
-        SELECT plan_name, amount, currency, payment_method, status, created_at, expires_at
-        FROM premium_transactions
-        WHERE user_id = %s
-        ORDER BY id DESC
-        LIMIT 10
-        """,
-        (user_id,)
-    )
-    rows = c.fetchall()
+    try:
+        db_execute(
+            c,
+            """
+            SELECT plan_name, amount, currency, payment_method, status, created_at, expires_at, checkout_url
+            FROM premium_transactions
+            WHERE user_id = %s
+            ORDER BY id DESC
+            LIMIT 10
+            """,
+            (user_id,)
+        )
+        rows = c.fetchall()
+    except Exception:
+        rows = []
     c.close()
     conn.close()
 
     if not rows:
-        return "💳 Premium vēsture\n\nNav maksājumu vai testa aktivizāciju."
+        return "💳 Premium vēsture\n\nNav maksājumu."
 
     lines = ["💳 Premium vēsture", ""]
-    for plan_name, amount, currency, payment_method, status, created_at, expires_at in rows:
+    for plan_name, amount, currency, method, status, created_at, expires_at, checkout_url in rows:
         lines.append(str(created_at))
-        lines.append(f"{plan_name or PLAN_PREMIUM_BASIC}")
-        lines.append(f"{amount or 0} {currency or 'EUR'}")
-        lines.append(f"Metode: {payment_method or '-'}")
-        lines.append(f"Statuss: {status or '-'}")
+        lines.append(str(plan_name))
+        lines.append(f"{float(amount or 0):.2f} {currency or PREMIUM_CURRENCY}")
+        lines.append(f"Metode: {method or 'nav'}")
+        lines.append(f"Statuss: {status or 'nav'}")
         if expires_at:
             lines.append(f"Beidzas: {expires_at}")
+        if checkout_url:
+            lines.append("Checkout: izveidots")
         lines.append("")
 
     return "\n".join(lines).strip()
 
+
+def stripe_status(user_id=None):
+    basic_ready = bool(STRIPE_BASIC_CHECKOUT_URL)
+    plus_ready = bool(STRIPE_PLUS_CHECKOUT_URL)
+    secret_ready = bool(STRIPE_SECRET_KEY)
+    webhook_ready = bool(STRIPE_WEBHOOK_SECRET)
+
+    lines = [
+        "💳 Stripe statuss",
+        "",
+        f"STRIPE_SECRET_KEY: {'✅' if secret_ready else '❌'}",
+        f"STRIPE_BASIC_CHECKOUT_URL: {'✅' if basic_ready else '❌'}",
+        f"STRIPE_PLUS_CHECKOUT_URL: {'✅' if plus_ready else '❌'}",
+        f"STRIPE_WEBHOOK_SECRET: {'✅' if webhook_ready else '❌'}",
+        "",
+    ]
+
+    if basic_ready or plus_ready:
+        lines.append("Checkout linki ir sagatavoti.")
+    else:
+        lines.append("Stripe vēl nav pieslēgts. Pievieno checkout linkus Railway environment variables.")
+
+    return "\n".join(lines)
+
+
+def stripe_checkout_answer(user_id, plan_key="basic"):
+    if plan_key == "plus":
+        plan_name = PLAN_PREMIUM_PLUS
+        amount = PREMIUM_PLUS_PRICE
+        checkout_url = STRIPE_PLUS_CHECKOUT_URL
+    else:
+        plan_name = PLAN_PREMIUM_BASIC
+        amount = PREMIUM_BASIC_PRICE
+        checkout_url = STRIPE_BASIC_CHECKOUT_URL
+
+    status = "checkout_ready" if checkout_url else "checkout_missing"
+    record_premium_transaction(
+        user_id=user_id,
+        plan_name=plan_name,
+        amount=amount,
+        currency=PREMIUM_CURRENCY,
+        payment_method="stripe",
+        status=status,
+        checkout_url=checkout_url,
+    )
+
+    lines = [
+        "💳 Stripe Checkout",
+        "",
+        f"Plāns: {plan_name}",
+        f"Cena: {amount:.2f} {PREMIUM_CURRENCY}/mēn",
+        "",
+    ]
+
+    if checkout_url:
+        lines.extend([
+            "Checkout links:",
+            checkout_url,
+            "",
+            "Pēc apmaksas V10.2 pieslēgsim webhook, lai Premium aktivizējas automātiski.",
+        ])
+    else:
+        env_name = "STRIPE_PLUS_CHECKOUT_URL" if plan_key == "plus" else "STRIPE_BASIC_CHECKOUT_URL"
+        lines.extend([
+            "Stripe checkout links vēl nav pieslēgts.",
+            f"Pievieno Railway mainīgajam: {env_name}",
+            "",
+            "Šis ir V10.1 Checkout Foundation — maksājuma plūsma sagatavota.",
+        ])
+
+    return "\n".join(lines)
 
 def calculate_level(xp):
     try:
@@ -1799,12 +1889,11 @@ def premium_dashboard(user_id):
     c.close()
     conn.close()
 
-    plan_name = current_plan_name(user_id)
     lines = ["💎 Nina Premium Dashboard", ""]
 
     if user.get("premium"):
         lines.append("Statuss: Premium aktīvs")
-        lines.append(f"Plāns: {plan_name}")
+        lines.append(f"Plāns: {current_plan_name(user_id)}")
         if user.get("premium_until"):
             lines.append(f"Beidzas: {user['premium_until']}")
         lines.extend([
@@ -1817,7 +1906,7 @@ def premium_dashboard(user_id):
     else:
         lines.extend([
             "Statuss: Free režīms",
-            f"Plāns: {plan_name}",
+            f"Plāns: {PLAN_FREE}",
             "",
             "Limiti:",
             f"📦 Backup: {backups}/{FREE_BACKUP_LIMIT}",
@@ -1921,14 +2010,15 @@ def activate_premium(user_id):
     user["premium_until"] = until
 
     update_user(user_id, user)
+
     record_premium_transaction(
-        user_id,
-        PLAN_PREMIUM_BASIC,
-        PREMIUM_BASIC_PRICE,
-        "EUR",
-        PAYMENT_METHOD_TEST,
-        "test_active",
-        until
+        user_id=user_id,
+        plan_name=PLAN_PREMIUM_BASIC,
+        amount=PREMIUM_BASIC_PRICE,
+        currency=PREMIUM_CURRENCY,
+        payment_method="test",
+        status="test_active",
+        expires_at=until,
     )
 
     achievements = check_achievements(user_id)
@@ -2127,6 +2217,7 @@ COMMAND_LINES = {
     "mans premium statuss", "premium statuss", "premium",
     "premium funkcijas", "premium limiti", "cik atmiņas man palicis", "premium beidzas",
     "abonements", "mans plāns", "mans plans", "premium vēsture", "premium vesture",
+    "pirkt premium", "pirkt basic", "pirkt premium basic", "pirkt plus", "pirkt premium plus", "stripe statuss",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
     "premium panelis", "mans panelis", "dashboard",
     "mans līmenis", "mana pieredze", "xp",
@@ -2196,13 +2287,22 @@ def command_answer(user_id, command_text):
         return premium_expiration_info(user_id)
 
     if lower == "abonements":
-        return subscription_answer(user_id)
+        return subscription_info(user_id)
 
     if lower in ["mans plāns", "mans plans"]:
-        return user_plan_answer(user_id)
+        return current_plan_answer(user_id)
 
     if lower in ["premium vēsture", "premium vesture"]:
-        return premium_history_answer(user_id)
+        return premium_history(user_id)
+
+    if lower in ["pirkt premium", "pirkt basic", "pirkt premium basic"]:
+        return stripe_checkout_answer(user_id, "basic")
+
+    if lower in ["pirkt plus", "pirkt premium plus"]:
+        return stripe_checkout_answer(user_id, "plus")
+
+    if lower == "stripe statuss":
+        return stripe_status(user_id)
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
         return premium_dashboard(user_id)
@@ -2331,15 +2431,27 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if lower == "abonements":
-        await update.message.reply_text(subscription_answer(user_id))
+        await update.message.reply_text(append_bonus_notices(subscription_info(user_id), streak_notice))
         return
 
     if lower in ["mans plāns", "mans plans"]:
-        await update.message.reply_text(user_plan_answer(user_id))
+        await update.message.reply_text(append_bonus_notices(current_plan_answer(user_id), streak_notice))
         return
 
     if lower in ["premium vēsture", "premium vesture"]:
-        await update.message.reply_text(premium_history_answer(user_id))
+        await update.message.reply_text(append_bonus_notices(premium_history(user_id), streak_notice))
+        return
+
+    if lower in ["pirkt premium", "pirkt basic", "pirkt premium basic"]:
+        await update.message.reply_text(append_bonus_notices(stripe_checkout_answer(user_id, "basic"), streak_notice))
+        return
+
+    if lower in ["pirkt plus", "pirkt premium plus"]:
+        await update.message.reply_text(append_bonus_notices(stripe_checkout_answer(user_id, "plus"), streak_notice))
+        return
+
+    if lower == "stripe statuss":
+        await update.message.reply_text(append_bonus_notices(stripe_status(user_id), streak_notice))
         return
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
@@ -2529,7 +2641,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 V9.9.2 Achievement Sync Fix darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V10.1 Stripe Checkout Foundation darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -2544,5 +2656,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V9.9.2 Achievement Sync Fix darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V10.1 Stripe Checkout Foundation darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
