@@ -453,7 +453,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.3.1 Stripe Setup Helper."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.4 Success/Cancel Pages."
     )
 
 
@@ -2688,12 +2688,6 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(append_bonus_notices(stripe_status(user_id), streak_notice))
         return
 
-    # V10.3.2: Stripe setup komandas jāapstrādā arī kā viena ziņa,
-    # ne tikai split_profile_and_commands ceļā.
-    if lower in ["stripe setup", "stripe env", "stripe palīgs", "stripe paligs"]:
-        await update.message.reply_text(append_bonus_notices(stripe_setup_helper(user_id), streak_notice))
-        return
-
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
         await update.message.reply_text(append_bonus_notices(premium_dashboard(user_id), streak_notice, check_achievements(user_id)))
         return
@@ -2937,9 +2931,70 @@ def stripe_webhook():
     return jsonify({"ok": True, "ignored": event_type})
 
 
+@app.route("/success")
+def payment_success_page():
+    return """
+    <!doctype html>
+    <html lang="lv">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Nina Premium aktivizēšana</title>
+        <style>
+            body { font-family: Arial, sans-serif; background: #f7f7fb; margin: 0; padding: 40px; color: #222; }
+            .card { max-width: 560px; margin: 0 auto; background: white; padding: 32px; border-radius: 18px; box-shadow: 0 8px 30px rgba(0,0,0,0.08); }
+            h1 { margin-top: 0; color: #1f8f4d; }
+            p { line-height: 1.55; font-size: 17px; }
+            .cmd { background: #f0f0f5; padding: 12px 14px; border-radius: 10px; font-family: monospace; display: inline-block; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>✅ Maksājums saņemts</h1>
+            <p>Paldies! Ja Stripe webhook ir pieslēgts, Nina Premium tiks aktivizēts automātiski.</p>
+            <p>Atgriezies Telegram un pārbaudi statusu:</p>
+            <p><span class="cmd">premium panelis</span></p>
+            <p>Ja Premium vēl nerādās uzreiz, pagaidi dažas sekundes un pārbaudi vēlreiz.</p>
+        </div>
+    </body>
+    </html>
+    """
+
+
+@app.route("/cancel")
+def payment_cancel_page():
+    return """
+    <!doctype html>
+    <html lang="lv">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Nina maksājums atcelts</title>
+        <style>
+            body { font-family: Arial, sans-serif; background: #f7f7fb; margin: 0; padding: 40px; color: #222; }
+            .card { max-width: 560px; margin: 0 auto; background: white; padding: 32px; border-radius: 18px; box-shadow: 0 8px 30px rgba(0,0,0,0.08); }
+            h1 { margin-top: 0; color: #b23b3b; }
+            p { line-height: 1.55; font-size: 17px; }
+            .cmd { background: #f0f0f5; padding: 12px 14px; border-radius: 10px; font-family: monospace; display: inline-block; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>❌ Maksājums atcelts</h1>
+            <p>Maksājums netika pabeigts, un Premium netika aktivizēts.</p>
+            <p>Vari atgriezties Telegram un mēģināt vēlreiz:</p>
+            <p><span class="cmd">pirkt premium</span></p>
+            <p>Vai izvēlēties Plus plānu:</p>
+            <p><span class="cmd">pirkt plus</span></p>
+        </div>
+    </body>
+    </html>
+    """
+
+
 @app.route("/")
 def home():
-    return "Nina7727 V10.3 Stripe Webhooks darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V10.4 Success/Cancel Pages darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -2954,5 +3009,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V10.3 Stripe Webhooks darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V10.4 Success/Cancel Pages darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
