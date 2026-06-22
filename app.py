@@ -453,7 +453,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.3 Stripe Webhooks."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.3.1 Stripe Setup Helper."
     )
 
 
@@ -658,6 +658,62 @@ def stripe_status(user_id=None):
     ])
 
     return "\n".join(lines)
+
+
+def stripe_setup_helper(user_id=None):
+    """V10.3.1: Stripe Setup Helper — parāda precīzu Railway/Stripe checklist."""
+    stripe_lib_ready = bool(stripe)
+    secret_ready = bool(STRIPE_SECRET_KEY)
+    webhook_ready = bool(STRIPE_WEBHOOK_SECRET)
+    basic_price_ready = bool(STRIPE_BASIC_PRICE_ID)
+    plus_price_ready = bool(STRIPE_PLUS_PRICE_ID)
+    success_ready = bool(STRIPE_SUCCESS_URL and STRIPE_SUCCESS_URL != "https://t.me/")
+    cancel_ready = bool(STRIPE_CANCEL_URL and STRIPE_CANCEL_URL != "https://t.me/")
+    basic_url_ready = bool(STRIPE_BASIC_CHECKOUT_URL)
+    plus_url_ready = bool(STRIPE_PLUS_CHECKOUT_URL)
+
+    lines = [
+        "💳 Stripe Setup Helper",
+        "",
+        "1. requirements.txt:",
+        f"{'✅' if stripe_lib_ready else '❌'} stripe",
+        "",
+        "2. Railway ENV dinamiskam Checkout:",
+        f"{'✅' if secret_ready else '❌'} STRIPE_SECRET_KEY=sk_test_...",
+        f"{'✅' if webhook_ready else '❌'} STRIPE_WEBHOOK_SECRET=whsec_...",
+        f"{'✅' if basic_price_ready else '❌'} STRIPE_BASIC_PRICE_ID=price_...",
+        f"{'✅' if plus_price_ready else '❌'} STRIPE_PLUS_PRICE_ID=price_...",
+        f"{'✅' if success_ready else '❌'} STRIPE_SUCCESS_URL=https://tavs-domens/success",
+        f"{'✅' if cancel_ready else '❌'} STRIPE_CANCEL_URL=https://tavs-domens/cancel",
+        "",
+        "3. Alternatīva — statiskie Stripe Checkout linki:",
+        f"{'✅' if basic_url_ready else '❌'} STRIPE_BASIC_CHECKOUT_URL=https://buy.stripe.com/...",
+        f"{'✅' if plus_url_ready else '❌'} STRIPE_PLUS_CHECKOUT_URL=https://buy.stripe.com/...",
+        "",
+        "4. Stripe webhook URL:",
+        "https://TAVS-RAILWAY-DOMENS/stripe/webhook",
+        "",
+        "5. Stripe webhook event:",
+        "checkout.session.completed",
+        "",
+        "6. Testa komandas Telegramā:",
+        "stripe statuss",
+        "pirkt premium",
+        "pirkt plus",
+        "premium vēsture",
+        "premium panelis",
+        "",
+    ]
+
+    if stripe_lib_ready and secret_ready and webhook_ready and basic_price_ready and success_ready and cancel_ready:
+        lines.append("✅ Stripe Basic dinamiskā plūsma izskatās gatava testam.")
+    elif basic_url_ready or plus_url_ready:
+        lines.append("⚠️ Statiskie checkout linki ir pieejami, bet automātiskai Premium aktivizācijai vajag webhook un user_id metadata/client_reference_id.")
+    else:
+        lines.append("❌ Stripe vēl nav pilnībā pieslēgts. Sāc ar requirements.txt + Railway ENV.")
+
+    return "\n".join(lines)
+
 
 def stripe_checkout_answer(user_id, plan_key="basic"):
     if plan_key == "plus":
@@ -2392,6 +2448,7 @@ COMMAND_LINES = {
     "premium funkcijas", "premium limiti", "cik atmiņas man palicis", "premium beidzas",
     "abonements", "mans plāns", "mans plans", "premium vēsture", "premium vesture",
     "pirkt premium", "pirkt basic", "pirkt premium basic", "pirkt plus", "pirkt premium plus", "stripe statuss",
+    "stripe setup", "stripe env", "stripe palīgs", "stripe paligs",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
     "premium panelis", "mans panelis", "dashboard",
     "mans līmenis", "mana pieredze", "xp",
@@ -2477,6 +2534,9 @@ def command_answer(user_id, command_text):
 
     if lower == "stripe statuss":
         return stripe_status(user_id)
+
+    if lower in ["stripe setup", "stripe env", "stripe palīgs", "stripe paligs"]:
+        return stripe_setup_helper(user_id)
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
         return premium_dashboard(user_id)
