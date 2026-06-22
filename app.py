@@ -341,13 +341,101 @@ def user_level_info(user_id):
 
 def achievement_definitions():
     return {
-        "backup_starter": {"icon": "📦", "title": "Backup Starter", "description": "Izveidoji savu pirmo backup.", "xp": 25},
-        "memory_builder": {"icon": "🧠", "title": "Memory Builder", "description": "Aizpildīti vismaz 5 atmiņas lauki.", "xp": 25},
-        "premium_explorer": {"icon": "💎", "title": "Premium Explorer", "description": "Aktivizēji Premium.", "xp": 50},
-        "rising_star": {"icon": "⭐", "title": "Rising Star", "description": "Sasniedzi 100 XP.", "xp": 50},
-        "nina_veteran": {"icon": "🏆", "title": "Nina Veteran", "description": "Sasniedzi 5. līmeni.", "xp": 100},
-        "streak_7": {"icon": "🔥", "title": "Consistent User", "description": "7 dienas pēc kārtas ar Ninu.", "xp": 75},
-        "streak_30": {"icon": "🔥", "title": "Nina Loyal", "description": "30 dienas pēc kārtas ar Ninu.", "xp": 200},
+        # 📦 Backup sērija
+        "backup_starter": {
+            "icon": "📦",
+            "title": "Backup Starter",
+            "description": "Izveidoji savu pirmo backup.",
+            "xp": 25,
+        },
+        "backup_collector": {
+            "icon": "📦",
+            "title": "Backup Collector",
+            "description": "Izveidoji 5 backup.",
+            "xp": 50,
+        },
+        "backup_master": {
+            "icon": "📦",
+            "title": "Backup Master",
+            "description": "Izveidoji 10 backup.",
+            "xp": 100,
+        },
+
+        # 🧠 Atmiņas sērija
+        "memory_builder": {
+            "icon": "🧠",
+            "title": "Memory Builder",
+            "description": "Aizpildīti vismaz 5 atmiņas lauki.",
+            "xp": 25,
+        },
+        "memory_expert": {
+            "icon": "🧠",
+            "title": "Memory Expert",
+            "description": "Atmiņa aizpildīta vismaz 50%.",
+            "xp": 100,
+        },
+        "memory_master": {
+            "icon": "🧠",
+            "title": "Memory Master",
+            "description": "Atmiņa aizpildīta 100%.",
+            "xp": 250,
+        },
+
+        # 💎 Premium
+        "premium_explorer": {
+            "icon": "💎",
+            "title": "Premium Explorer",
+            "description": "Aktivizēji Premium.",
+            "xp": 50,
+        },
+
+        # ⭐ XP sērija
+        "rising_star": {
+            "icon": "⭐",
+            "title": "Rising Star",
+            "description": "Sasniedzi 100 XP.",
+            "xp": 50,
+        },
+        "xp_warrior": {
+            "icon": "⭐",
+            "title": "XP Warrior",
+            "description": "Sasniedzi 500 XP.",
+            "xp": 100,
+        },
+        "xp_legend": {
+            "icon": "⭐",
+            "title": "XP Legend",
+            "description": "Sasniedzi 1000 XP.",
+            "xp": 250,
+        },
+
+        # 🏆 Līmeņu sērija
+        "nina_veteran": {
+            "icon": "🏆",
+            "title": "Nina Veteran",
+            "description": "Sasniedzi 5. līmeni.",
+            "xp": 100,
+        },
+        "nina_master": {
+            "icon": "🏆",
+            "title": "Nina Master",
+            "description": "Sasniedzi 10. līmeni.",
+            "xp": 250,
+        },
+
+        # 🔥 Streak sērija
+        "streak_7": {
+            "icon": "🔥",
+            "title": "Consistent User",
+            "description": "7 dienas pēc kārtas ar Ninu.",
+            "xp": 75,
+        },
+        "streak_30": {
+            "icon": "🔥",
+            "title": "Nina Loyal",
+            "description": "30 dienas pēc kārtas ar Ninu.",
+            "xp": 200,
+        },
     }
 
 
@@ -409,106 +497,111 @@ def achievements_answer(user_id):
     return "\n".join(lines).strip()
 
 
-
-def achievement_progress(user_id):
+def next_achievement_progress(user_id):
     user = get_user(user_id)
-    backups = backup_count_number(user_id)
     xp = int(user.get("xp", 0) or 0)
     level = calculate_level(xp)
-    streak_days = int(user.get("streak_days", 0) or 0)
+    backups = backup_count_number(user_id)
     memory_percent = memory_fill_percent(user_id)
-    achievements_total = achievement_count(user_id)
+    streak_days = int(user.get("streak_days", 0) or 0)
 
-    # Tuvākie mērķi lietotājam saprotamā formā.
-    next_backup_target = 1 if backups < 1 else (5 if backups < 5 else (10 if backups < 10 else None))
-    next_xp_target = 100 if xp < 100 else (500 if xp < 500 else (1000 if xp < 1000 else None))
-    next_streak_target = 3 if streak_days < 3 else (7 if streak_days < 7 else (30 if streak_days < 30 else None))
-    next_memory_target = 33 if memory_percent < 33 else (50 if memory_percent < 50 else (100 if memory_percent < 100 else None))
-
-    lines = [
-        "🏅 Sasniegumu progress",
-        "",
-        f"🏅 Atbloķēti sasniegumi: {achievements_total}",
-        f"📦 Backup: {backups}" + (f"/{next_backup_target}" if next_backup_target else " — maksimuma mērķi sasniegti"),
-        f"⭐ XP: {xp}" + (f"/{next_xp_target}" if next_xp_target else " — ļoti spēcīgi"),
-        f"🏆 Līmenis: {level}",
-        f"🔥 Streak: {streak_days}" + (f"/{next_streak_target}" if next_streak_target else " — ļoti stabils"),
-        f"🧠 Atmiņa: {memory_percent}%" + (f"/{next_memory_target}%" if next_memory_target else " — pilna"),
-        "",
+    progress_items = [
+        ("📦 Backup Collector", backups, 5, "backup_collector"),
+        ("📦 Backup Master", backups, 10, "backup_master"),
+        ("⭐ Rising Star", xp, 100, "rising_star"),
+        ("⭐ XP Warrior", xp, 500, "xp_warrior"),
+        ("⭐ XP Legend", xp, 1000, "xp_legend"),
+        ("🏆 Nina Veteran", level, 5, "nina_veteran"),
+        ("🏆 Nina Master", level, 10, "nina_master"),
+        ("🔥 Consistent User", streak_days, 7, "streak_7"),
+        ("🔥 Nina Loyal", streak_days, 30, "streak_30"),
+        ("🧠 Memory Builder", memory_percent, 33, "memory_builder"),
+        ("🧠 Memory Expert", memory_percent, 50, "memory_expert"),
+        ("🧠 Memory Master", memory_percent, 100, "memory_master"),
     ]
 
-    suggestions = []
-    if backups < 1:
-        suggestions.append("📦 Izveido pirmo backup")
-    elif backups < 5:
-        suggestions.append("📦 Sasniedz 5 backup")
-    elif backups < 10:
-        suggestions.append("📦 Sasniedz 10 backup")
+    available = []
+    for title, current, target, code in progress_items:
+        if not has_achievement(user_id, code):
+            available.append((title, current, target, code))
 
-    if xp < 100:
-        suggestions.append("⭐ Sasniedz 100 XP")
-    elif xp < 500:
-        suggestions.append("⭐ Sasniedz 500 XP")
-    elif xp < 1000:
-        suggestions.append("⭐ Sasniedz 1000 XP")
+    if not available:
+        return "Visi pašreizējie sasniegumi ir atbloķēti. 🏆"
 
-    if streak_days < 3:
-        suggestions.append("🔥 Turpini streak līdz 3 dienām")
-    elif streak_days < 7:
-        suggestions.append("🔥 Turpini streak līdz 7 dienām")
-    elif streak_days < 30:
-        suggestions.append("🔥 Turpini streak līdz 30 dienām")
+    available.sort(key=lambda item: max(0, item[2] - item[1]))
+    title, current, target, _ = available[0]
+    return f"{title}: {current}/{target}"
 
-    if memory_percent < 33:
-        suggestions.append("🧠 Aizpildi vairāk atmiņas laukus")
-    elif memory_percent < 50:
-        suggestions.append("🧠 Sasniedz 50% atmiņas aizpildījumu")
-    elif memory_percent < 100:
-        suggestions.append("🧠 Sasniedz 100% atmiņas aizpildījumu")
 
-    if suggestions:
-        lines.append("Nākamie mērķi:")
-        for item in suggestions[:4]:
-            lines.append(f"• {item}")
-    else:
-        lines.append("Tu jau esi ļoti tālu ticis. 🔥")
+def achievement_progress(user_id):
+    # V9.9.2: vispirms sinhronizē sasniegumus, lai progress nerāda vecu skaitu.
+    achievement_notices = check_achievements(user_id)
 
-    return "\n".join(lines)
+    user = get_user(user_id)
+    xp = int(user.get("xp", 0) or 0)
+    level = calculate_level(xp)
+    backups = backup_count_number(user_id)
+    memory_percent = memory_fill_percent(user_id)
+    streak_days = int(user.get("streak_days", 0) or 0)
+    total = len(achievement_definitions())
+    unlocked = achievement_count(user_id)
+
+    answer = (
+        "🏅 Sasniegumu progress\n\n"
+        f"Kopā atbloķēti: {unlocked}/{total}\n\n"
+        f"📦 Backup: {backups}/5 un {backups}/10\n"
+        f"⭐ XP: {xp}/100, {xp}/500, {xp}/1000\n"
+        f"🏆 Līmenis: {level}/5 un {level}/10\n"
+        f"🔥 Streak: {streak_days}/7 un {streak_days}/30\n"
+        f"🧠 Atmiņa: {memory_percent}/50% un {memory_percent}/100%\n\n"
+        "Nākamais tuvākais:\n"
+        f"{next_achievement_progress(user_id)}"
+    )
+
+    return append_bonus_notices(answer, achievement_notices)
 
 
 def check_achievements(user_id):
     notices = []
-    user = get_user(user_id)
-    if backup_count_number(user_id) >= 1:
-        msg = unlock_achievement(user_id, "backup_starter")
-        if msg:
-            notices.append(msg)
-    if memory_fill_percent(user_id) >= 33:
-        msg = unlock_achievement(user_id, "memory_builder")
-        if msg:
-            notices.append(msg)
-    if user.get("premium"):
-        msg = unlock_achievement(user_id, "premium_explorer")
-        if msg:
-            notices.append(msg)
-    xp = int(user.get("xp", 0) or 0)
-    level = calculate_level(xp)
-    if xp >= 100:
-        msg = unlock_achievement(user_id, "rising_star")
-        if msg:
-            notices.append(msg)
-    if level >= 5:
-        msg = unlock_achievement(user_id, "nina_veteran")
-        if msg:
-            notices.append(msg)
-    if int(user.get("streak_days", 0) or 0) >= 7:
-        msg = unlock_achievement(user_id, "streak_7")
-        if msg:
-            notices.append(msg)
-    if int(user.get("streak_days", 0) or 0) >= 30:
-        msg = unlock_achievement(user_id, "streak_30")
-        if msg:
-            notices.append(msg)
+
+    # Daži sasniegumi dod XP, kas var atbloķēt nākamos sasniegumus.
+    # Tāpēc pārbaudām vairākās kārtās, līdz vairs nav jaunu unlock.
+    for _ in range(3):
+        before = achievement_count(user_id)
+        user = get_user(user_id)
+        xp = int(user.get("xp", 0) or 0)
+        level = calculate_level(xp)
+        backups = backup_count_number(user_id)
+        memory_percent = memory_fill_percent(user_id)
+        streak_days = int(user.get("streak_days", 0) or 0)
+
+        checks = [
+            (backups >= 1, "backup_starter"),
+            (backups >= 5, "backup_collector"),
+            (backups >= 10, "backup_master"),
+            (memory_percent >= 33, "memory_builder"),
+            (memory_percent >= 50, "memory_expert"),
+            (memory_percent >= 100, "memory_master"),
+            (bool(user.get("premium")), "premium_explorer"),
+            (xp >= 100, "rising_star"),
+            (xp >= 500, "xp_warrior"),
+            (xp >= 1000, "xp_legend"),
+            (level >= 5, "nina_veteran"),
+            (level >= 10, "nina_master"),
+            (streak_days >= 7, "streak_7"),
+            (streak_days >= 30, "streak_30"),
+        ]
+
+        for condition, code in checks:
+            if condition:
+                msg = unlock_achievement(user_id, code)
+                if msg:
+                    notices.append(msg)
+
+        after = achievement_count(user_id)
+        if after == before:
+            break
+
     return "\n\n".join(notices)
 
 
@@ -565,6 +658,7 @@ def append_bonus_notices(answer, *notices):
     if not extra:
         return answer
     return answer + "\n\n" + "\n\n".join(extra)
+
 
 def valid_timezone(tz_name):
     try:
@@ -1036,7 +1130,8 @@ def create_backup_answer(user_id):
     if not backup_id:
         return backup_text
     add_xp(user_id, 5)
-    return f"✅ Backup #{backup_id} izveidots.\n\n" + backup_text
+    answer = f"✅ Backup #{backup_id} izveidots.\n\n" + backup_text
+    return append_bonus_notices(answer, check_achievements(user_id))
 
 
 def latest_backup_answer(user_id):
@@ -2041,7 +2136,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if lower == "sasniegumu progress":
-        await update.message.reply_text(append_bonus_notices(achievement_progress(user_id), streak_notice, check_achievements(user_id)))
+        await update.message.reply_text(append_bonus_notices(achievement_progress(user_id), streak_notice))
         return
 
     if lower in ["mans streak", "mana sērija", "streak"]:
@@ -2215,7 +2310,7 @@ Kopsavilkums atjaunots:
 
 @app.route("/")
 def home():
-    return "Nina7727 V9.9.1 Achievement Progress Fix darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V9.9.2 Achievement Sync Fix darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -2230,5 +2325,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V9.9.1 Achievement Progress Fix darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V9.9.2 Achievement Sync Fix darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
