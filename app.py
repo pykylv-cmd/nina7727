@@ -116,6 +116,16 @@ def init_db():
         )
     """)
 
+    db_execute(c, """
+        CREATE TABLE IF NOT EXISTS user_achievements (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT,
+            achievement_code TEXT,
+            unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, achievement_code)
+        )
+    """)
+
     # Ja tabulas jau eksistēja no vecākas versijas, pievieno trūkstošās kolonnas.
     for col, col_type in [
         ("timezone", "TEXT DEFAULT 'Europe/Riga'"),
@@ -318,6 +328,165 @@ def user_level_info(user_id):
         f"Nākamais līmenis: {next_level}\n"
         f"Vēl vajag: {left} XP"
     )
+
+
+ACHIEVEMENTS = {
+    "backup_starter": {
+        "emoji": "📦",
+        "title": "Backup Starter",
+        "description": "Izveidoji savu pirmo backup.",
+        "xp": 25,
+    },
+    "memory_builder": {
+        "emoji": "🧠",
+        "title": "Memory Builder",
+        "description": "Aizpildīji vismaz 5 atmiņas laukus.",
+        "xp": 25,
+    },
+    "premium_explorer": {
+        "emoji": "💎",
+        "title": "Premium Explorer",
+        "description": "Aktivizēji Premium režīmu.",
+        "xp": 50,
+    },
+    "rising_star": {
+        "emoji": "⭐",
+        "title": "Rising Star",
+        "description": "Sasniedzi 100 XP.",
+        "xp": 50,
+    },
+    "nina_veteran": {
+        "emoji": "🏆",
+        "title": "Nina Veteran",
+        "description": "Sasniedzi 5. līmeni.",
+        "xp": 100,
+    },
+}
+
+
+def achievement_count(user_id):
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(c, "SELECT COUNT(*) FROM user_achievements WHERE user_id = %s", (user_id,))
+    count = int(c.fetchone()[0] or 0)
+    c.close()
+    conn.close()
+    return count
+
+
+def has_achievement(user_id, code):
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(
+        c,
+        "SELECT 1 FROM user_achievements WHERE user_id = %s AND achievement_code = %s LIMIT 1",
+        (user_id, code)
+    )
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    return bool(row)
+
+
+def unlock_achievement(user_id, code):
+    if code not in ACHIEVEMENTS or has_achievement(user_id, code):
+        return ""
+
+    ach = ACHIEVEMENTS[code]
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        db_execute(
+            c,
+            "INSERT INTO user_achievements (user_id, achievement_code) VALUES (%s, %s)",
+            (user_id, code)
+        )
+        conn.commit()
+    except Exception:
+        # Ja reizē mēģina atbloķēt to pašu sasniegumu, vienkārši ignorē.
+        c.close()
+        conn.close()
+        return ""
+
+    c.close()
+    conn.close()
+
+    bonus_xp = int(ach.get("xp", 0) or 0)
+    if bonus_xp:
+        add_xp(user_id, bonus_xp)
+
+    return (
+        "🎉 Jauns sasniegums!\n\n"
+        f"{ach['emoji']} {ach['title']}\n"
+        f"{ach['description']}\n\n"
+        f"+{bonus_xp} XP"
+    )
+
+
+def check_and_unlock_achievements(user_id):
+    unlocked = []
+
+    # Divi apļi ļauj uzreiz noķert arī XP/līmeņa sasniegumus,
+    # ja kāds iepriekšējais achievement piešķīra bonus XP.
+    for _ in range(2):
+        user = get_user(user_id)
+        xp = int(user.get("xp", 0) or 0)
+        level = calculate_level(xp)
+        memory_percent = memory_fill_percent(user_id)
+        backups = backup_count_number(user_id)
+
+        checks = [
+            ("backup_starter", backups >= 1),
+            ("memory_builder", memory_percent >= 33),  # 5/15 lauki ≈ 33%
+            ("premium_explorer", bool(user.get("premium"))),
+            ("rising_star", xp >= 100),
+            ("nina_veteran", level >= 5),
+        ]
+
+        for code, condition in checks:
+            if condition and not has_achievement(user_id, code):
+                msg = unlock_achievement(user_id, code)
+                if msg:
+                    unlocked.append(msg)
+
+    return "\n\n".join(unlocked)
+
+
+def user_achievements_answer(user_id):
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(
+        c,
+        """
+        SELECT achievement_code, unlocked_at
+        FROM user_achievements
+        WHERE user_id = %s
+        ORDER BY unlocked_at ASC, id ASC
+        """,
+        (user_id,)
+    )
+    rows = c.fetchall()
+    c.close()
+    conn.close()
+
+    if not rows:
+        return (
+            "🏅 Tev vēl nav sasniegumu.\n\n"
+            "Sāc ar pirmo backup vai aizpildi vairāk atmiņas laukus."
+        )
+
+    lines = ["🏅 Tavi sasniegumi", ""]
+    for code, unlocked_at in rows:
+        ach = ACHIEVEMENTS.get(code, {})
+        emoji = ach.get("emoji", "🏅")
+        title = ach.get("title", code)
+        description = ach.get("description", "")
+        lines.append(f"{emoji} {title}")
+        if description:
+            lines.append(f"   {description}")
+
+    lines.extend(["", f"Kopā: {len(rows)} sasniegumi"])
+    return "\n".join(lines)
 
 
 def valid_timezone(tz_name):
@@ -670,8 +839,12 @@ Iepriekšējais ilgtermiņa kopsavilkums:
         update_user(user_id, user)
         save_memory_backup(user_id, "auto_summary")
         add_xp(user_id, 10)
+        achievements = check_and_unlock_achievements(user_id)
 
-        return "Atjaunoju Long-Term Memory Pro kopsavilkumu. 🧠\n\n" + summary
+        answer = "Atjaunoju Long-Term Memory Pro kopsavilkumu. 🧠\n\n" + summary
+        if achievements:
+            answer += "\n\n" + achievements
+        return answer
 
     except Exception as e:
         print("Kopsavilkuma kļūda:", e)
@@ -790,7 +963,11 @@ def create_backup_answer(user_id):
     if not backup_id:
         return backup_text
     add_xp(user_id, 5)
-    return f"✅ Backup #{backup_id} izveidots.\n\n" + backup_text
+    achievements = check_and_unlock_achievements(user_id)
+    answer = f"✅ Backup #{backup_id} izveidots.\n\n" + backup_text
+    if achievements:
+        answer += "\n\n" + achievements
+    return answer
 
 
 def latest_backup_answer(user_id):
@@ -1261,6 +1438,7 @@ def premium_dashboard(user_id):
     active_reminders = active_reminder_count(user_id)
     summaries_today = summaries_used_today(user_id)
     memory_percent = memory_fill_percent(user_id)
+    achievements = achievement_count(user_id)
 
     conn = get_db()
     c = conn.cursor()
@@ -1299,6 +1477,7 @@ def premium_dashboard(user_id):
         "Lojalitāte:",
         f"🏆 Līmenis: {level}",
         f"⭐ XP: {xp}",
+        f"🏅 Sasniegumi: {achievements}",
         f"➡️ Līdz nākamajam līmenim: {xp_for_next_level(xp)} XP",
         "",
         "Lietošana:",
@@ -1388,8 +1567,12 @@ def activate_premium(user_id):
     user["premium_until"] = until
 
     update_user(user_id, user)
+    achievements = check_and_unlock_achievements(user_id)
 
-    return f"💎 Premium aktivizēts testa režīmā līdz {until}."
+    answer = f"💎 Premium aktivizēts testa režīmā līdz {until}."
+    if achievements:
+        answer += "\n\n" + achievements
+    return answer
 
 
 def deactivate_premium(user_id):
@@ -1482,10 +1665,16 @@ def add_reminder(user_id, user_text):
     conn.close()
 
     add_xp(user_id, 3)
+    achievements = check_and_unlock_achievements(user_id)
 
     if local_time_text:
-        return f"Pierakstīju atgādinājumu #{reminder_id}: {task}\nLaiks: {local_time_text} ({user['timezone']})"
-    return f"Pierakstīju atgādinājumu #{reminder_id}: {task}"
+        answer = f"Pierakstīju atgādinājumu #{reminder_id}: {task}\nLaiks: {local_time_text} ({user['timezone']})"
+    else:
+        answer = f"Pierakstīju atgādinājumu #{reminder_id}: {task}"
+
+    if achievements:
+        answer += "\n\n" + achievements
+    return answer
 
 
 def list_reminders(user_id):
@@ -1586,6 +1775,7 @@ COMMAND_LINES = {
     "mana statistika", "mana aktivitāte", "mana atmiņa",
     "premium panelis", "mans panelis", "dashboard",
     "mans līmenis", "mana pieredze", "xp",
+    "mani sasniegumi", "sasniegumi",
     "aktivizē premium", "aktivize premium", "ieslēdz premium",
     "izslēdz premium", "atslēdz premium",
     "eksportē atmiņu", "atmiņas eksports", "export memory", "eksports",
@@ -1654,6 +1844,9 @@ def command_answer(user_id, command_text):
 
     if lower in ["mans līmenis", "mana pieredze", "xp"]:
         return user_level_info(user_id)
+
+    if lower in ["mani sasniegumi", "sasniegumi"]:
+        return user_achievements_answer(user_id)
 
     if lower == "mana statistika":
         return user_statistics(user_id)
@@ -1740,7 +1933,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     profile_text, command_lines = split_profile_and_commands(user_text)
     if command_lines and profile_text.strip():
         update_profile_from_text(user_id, profile_text)
+        profile_achievements = check_and_unlock_achievements(user_id)
         answers = []
+        if profile_achievements:
+            answers.append(profile_achievements)
         for command in command_lines:
             answer = command_answer(user_id, command)
             if answer:
@@ -1771,6 +1967,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower in ["mans līmenis", "mana pieredze", "xp"]:
         await update.message.reply_text(user_level_info(user_id))
+        return
+
+    if lower in ["mani sasniegumi", "sasniegumi"]:
+        await update.message.reply_text(user_achievements_answer(user_id))
         return
 
     if lower == "mana statistika":
@@ -1862,6 +2062,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     update_profile_from_text(user_id, user_text)
+    profile_achievements = check_and_unlock_achievements(user_id)
     user = get_user(user_id)
 
     if "mana laika zona" in lower or "kur es dzīvoju" in lower or "es dzīvoju" in lower:
@@ -1932,13 +2133,16 @@ Kopsavilkums atjaunots:
         print("Kļūda:", e)
         answer = "Piedod, man šobrīd kaut kas aizķērās. Pamēģini vēlreiz pēc brīža. 🌷"
 
+    if profile_achievements:
+        answer += "\n\n" + profile_achievements
+
     save_message(user_id, "Nina", answer)
     await update.message.reply_text(answer)
 
 
 @app.route("/")
 def home():
-    return "Nina7727 V9.6 User Levels & Loyalty darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V9.7 Achievements darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -1953,5 +2157,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V9.6 User Levels & Loyalty darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V9.7 Achievements darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
