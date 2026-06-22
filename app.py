@@ -31,6 +31,13 @@ FREE_REMINDER_LIMIT = 5
 FREE_SUMMARY_LIMIT_PER_DAY = 1
 XP_PER_LEVEL = 100
 
+PLAN_FREE = "Free"
+PLAN_PREMIUM_BASIC = "Premium Basic"
+PLAN_PREMIUM_PLUS = "Premium Plus"
+PREMIUM_BASIC_PRICE = 4.99
+PREMIUM_PLUS_PRICE = 9.99
+PAYMENT_METHOD_TEST = "test"
+
 
 
 def db_sql(sql):
@@ -124,6 +131,20 @@ def init_db():
             user_id TEXT,
             achievement_code TEXT,
             unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    db_execute(c, """
+        CREATE TABLE IF NOT EXISTS premium_transactions (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT,
+            plan_name TEXT DEFAULT '',
+            amount REAL DEFAULT 0,
+            currency TEXT DEFAULT 'EUR',
+            payment_method TEXT DEFAULT '',
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TEXT DEFAULT ''
         )
     """)
 
@@ -284,6 +305,170 @@ def premium_expiration_info(user_id):
         return f"💎 Premium aktīvs līdz {user['premium_until']}."
 
     return "💎 Premium aktīvs bez beigu datuma."
+
+
+def current_plan_name(user_id):
+    user = get_user(user_id)
+    if user.get("premium"):
+        latest = latest_premium_transaction(user_id)
+        if latest and latest.get("plan_name"):
+            return latest["plan_name"]
+        return PLAN_PREMIUM_BASIC
+    return PLAN_FREE
+
+
+def latest_premium_transaction(user_id):
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(
+        c,
+        """
+        SELECT id, plan_name, amount, currency, payment_method, status, created_at, expires_at
+        FROM premium_transactions
+        WHERE user_id = %s
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (user_id,)
+    )
+    row = c.fetchone()
+    c.close()
+    conn.close()
+
+    if not row:
+        return None
+
+    return {
+        "id": row[0],
+        "plan_name": row[1] or "",
+        "amount": row[2] or 0,
+        "currency": row[3] or "EUR",
+        "payment_method": row[4] or "",
+        "status": row[5] or "",
+        "created_at": row[6],
+        "expires_at": row[7] or "",
+    }
+
+
+def record_premium_transaction(user_id, plan_name, amount, currency="EUR", payment_method=PAYMENT_METHOD_TEST, status="test_active", expires_at=""):
+    conn = get_db()
+    c = conn.cursor()
+    if USE_POSTGRES:
+        db_execute(
+            c,
+            """
+            INSERT INTO premium_transactions
+            (user_id, plan_name, amount, currency, payment_method, status, expires_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (user_id, plan_name, float(amount or 0), currency, payment_method, status, expires_at)
+        )
+        transaction_id = c.fetchone()[0]
+    else:
+        db_execute(
+            c,
+            """
+            INSERT INTO premium_transactions
+            (user_id, plan_name, amount, currency, payment_method, status, expires_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (user_id, plan_name, float(amount or 0), currency, payment_method, status, expires_at)
+        )
+        transaction_id = c.lastrowid
+    conn.commit()
+    c.close()
+    conn.close()
+    return transaction_id
+
+
+def subscription_answer(user_id=None):
+    return (
+        "💎 Nina abonements\n\n"
+        "Free:\n"
+        f"• {FREE_BACKUP_LIMIT} backup\n"
+        f"• {FREE_REMINDER_LIMIT} aktīvi atgādinājumi\n"
+        f"• {FREE_SUMMARY_LIMIT_PER_DAY} kopsavilkums dienā\n\n"
+        "Premium Basic:\n"
+        "• backup bez limita\n"
+        "• atgādinājumi bez limita\n"
+        "• kopsavilkumi bez limita\n"
+        "• vairāk vietas ilgtermiņa atmiņai\n\n"
+        f"Cena: {PREMIUM_BASIC_PRICE:.2f} EUR/mēn\n\n"
+        "Premium Plus:\n"
+        "• viss no Basic\n"
+        "• prioritāras nākotnes funkcijas\n"
+        "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
+        f"Cena: {PREMIUM_PLUS_PRICE:.2f} EUR/mēn\n\n"
+        "Maksājumi vēl nav pieslēgti. Šis ir V10 Payments Foundation."
+    )
+
+
+def user_plan_answer(user_id):
+    user = get_user(user_id)
+    plan = current_plan_name(user_id)
+
+    lines = ["💎 Tavs plāns", "", f"Pašreizējais: {plan}"]
+
+    if user.get("premium"):
+        if user.get("premium_until"):
+            lines.append(f"Premium aktīvs līdz: {user['premium_until']}")
+        latest = latest_premium_transaction(user_id)
+        if latest:
+            lines.extend([
+                "",
+                "Pēdējais ieraksts:",
+                f"• Plāns: {latest['plan_name']}",
+                f"• Summa: {latest['amount']} {latest['currency']}",
+                f"• Metode: {latest['payment_method']}",
+                f"• Statuss: {latest['status']}",
+            ])
+    else:
+        lines.extend([
+            "",
+            "Pieejamie plāni:",
+            f"🥉 Premium Basic — {PREMIUM_BASIC_PRICE:.2f} EUR/mēn",
+            f"🥈 Premium Plus — {PREMIUM_PLUS_PRICE:.2f} EUR/mēn",
+            "",
+            "Raksti: abonements",
+        ])
+
+    return "\n".join(lines)
+
+
+def premium_history_answer(user_id):
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(
+        c,
+        """
+        SELECT plan_name, amount, currency, payment_method, status, created_at, expires_at
+        FROM premium_transactions
+        WHERE user_id = %s
+        ORDER BY id DESC
+        LIMIT 10
+        """,
+        (user_id,)
+    )
+    rows = c.fetchall()
+    c.close()
+    conn.close()
+
+    if not rows:
+        return "💳 Premium vēsture\n\nNav maksājumu vai testa aktivizāciju."
+
+    lines = ["💳 Premium vēsture", ""]
+    for plan_name, amount, currency, payment_method, status, created_at, expires_at in rows:
+        lines.append(str(created_at))
+        lines.append(f"{plan_name or PLAN_PREMIUM_BASIC}")
+        lines.append(f"{amount or 0} {currency or 'EUR'}")
+        lines.append(f"Metode: {payment_method or '-'}")
+        lines.append(f"Statuss: {status or '-'}")
+        if expires_at:
+            lines.append(f"Beidzas: {expires_at}")
+        lines.append("")
+
+    return "\n".join(lines).strip()
 
 
 def calculate_level(xp):
@@ -1614,10 +1799,12 @@ def premium_dashboard(user_id):
     c.close()
     conn.close()
 
+    plan_name = current_plan_name(user_id)
     lines = ["💎 Nina Premium Dashboard", ""]
 
     if user.get("premium"):
         lines.append("Statuss: Premium aktīvs")
+        lines.append(f"Plāns: {plan_name}")
         if user.get("premium_until"):
             lines.append(f"Beidzas: {user['premium_until']}")
         lines.extend([
@@ -1630,6 +1817,7 @@ def premium_dashboard(user_id):
     else:
         lines.extend([
             "Statuss: Free režīms",
+            f"Plāns: {plan_name}",
             "",
             "Limiti:",
             f"📦 Backup: {backups}/{FREE_BACKUP_LIMIT}",
@@ -1733,6 +1921,15 @@ def activate_premium(user_id):
     user["premium_until"] = until
 
     update_user(user_id, user)
+    record_premium_transaction(
+        user_id,
+        PLAN_PREMIUM_BASIC,
+        PREMIUM_BASIC_PRICE,
+        "EUR",
+        PAYMENT_METHOD_TEST,
+        "test_active",
+        until
+    )
 
     achievements = check_achievements(user_id)
     return append_bonus_notices(f"💎 Premium aktivizēts testa režīmā līdz {until}.", achievements)
@@ -1929,6 +2126,7 @@ Noteikumi:
 COMMAND_LINES = {
     "mans premium statuss", "premium statuss", "premium",
     "premium funkcijas", "premium limiti", "cik atmiņas man palicis", "premium beidzas",
+    "abonements", "mans plāns", "mans plans", "premium vēsture", "premium vesture",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
     "premium panelis", "mans panelis", "dashboard",
     "mans līmenis", "mana pieredze", "xp",
@@ -1996,6 +2194,15 @@ def command_answer(user_id, command_text):
 
     if lower == "premium beidzas":
         return premium_expiration_info(user_id)
+
+    if lower == "abonements":
+        return subscription_answer(user_id)
+
+    if lower in ["mans plāns", "mans plans"]:
+        return user_plan_answer(user_id)
+
+    if lower in ["premium vēsture", "premium vesture"]:
+        return premium_history_answer(user_id)
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
         return premium_dashboard(user_id)
@@ -2121,6 +2328,18 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower == "premium beidzas":
         await update.message.reply_text(premium_expiration_info(user_id))
+        return
+
+    if lower == "abonements":
+        await update.message.reply_text(subscription_answer(user_id))
+        return
+
+    if lower in ["mans plāns", "mans plans"]:
+        await update.message.reply_text(user_plan_answer(user_id))
+        return
+
+    if lower in ["premium vēsture", "premium vesture"]:
+        await update.message.reply_text(premium_history_answer(user_id))
         return
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
