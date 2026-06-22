@@ -453,7 +453,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.5.1 Premium Welcome Command Fix."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.5.2 Premium Welcome Hard Fix."
     )
 
 
@@ -2713,6 +2713,12 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(append_bonus_notices(premium_history(user_id), streak_notice))
         return
 
+    # V10.5.2 HARD FIX: catch Premium Welcome as a direct Telegram command
+    # before it can fall through to GPT chat mode.
+    if lower in ["premium welcome", "premium sveiciens", "premium starts", "premium sveiks"]:
+        await update.message.reply_text(append_bonus_notices(premium_welcome_answer(user_id), streak_notice))
+        return
+
     if lower in ["pirkt premium", "pirkt basic", "pirkt premium basic"]:
         await update.message.reply_text(append_bonus_notices(stripe_checkout_answer(user_id, "basic"), streak_notice))
         return
@@ -2723,6 +2729,11 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower == "stripe statuss":
         await update.message.reply_text(append_bonus_notices(stripe_status(user_id), streak_notice))
+        return
+
+    # V10.5.2: keep Stripe helper commands direct too, not only in command_answer().
+    if lower in ["stripe setup", "stripe env", "stripe palīgs", "stripe paligs"]:
+        await update.message.reply_text(append_bonus_notices(stripe_setup_helper(user_id), streak_notice))
         return
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
