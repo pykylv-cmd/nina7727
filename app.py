@@ -453,7 +453,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.5 Premium Welcome Flow."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.5.1 Premium Welcome Command Fix."
     )
 
 
@@ -2480,7 +2480,7 @@ COMMAND_LINES = {
     "mans premium statuss", "premium statuss", "premium",
     "premium funkcijas", "premium limiti", "cik atmiņas man palicis", "premium beidzas",
     "abonements", "mans plāns", "mans plans", "premium vēsture", "premium vesture",
-    "premium welcome", "premium sveiciens", "premium starts",
+    "premium welcome", "premium sveiciens", "premium starts", "premium sveiks",
     "pirkt premium", "pirkt basic", "pirkt premium basic", "pirkt plus", "pirkt premium plus", "stripe statuss",
     "stripe setup", "stripe env", "stripe palīgs", "stripe paligs",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
@@ -2560,7 +2560,7 @@ def command_answer(user_id, command_text):
     if lower in ["premium vēsture", "premium vesture"]:
         return premium_history(user_id)
 
-    if lower in ["premium welcome", "premium sveiciens", "premium starts"]:
+    if lower in ["premium welcome", "premium sveiciens", "premium starts", "premium sveiks"]:
         return premium_welcome_answer(user_id)
 
     if lower in ["pirkt premium", "pirkt basic", "pirkt premium basic"]:
