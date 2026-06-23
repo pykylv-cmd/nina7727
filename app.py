@@ -453,7 +453,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.7.2 Full Preview Cleanup."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.7.3 Checkout Noise Cleanup."
     )
 
 
@@ -586,7 +586,7 @@ def revenue_dashboard(user_id=None):
         db_execute(c, """
             SELECT COUNT(*)
             FROM premium_transactions
-            WHERE status IN ('checkout_missing', 'checkout_ready_static')
+            WHERE status = 'checkout_ready_static'
         """)
         checkout_pending = int(c.fetchone()[0] or 0)
     except Exception:
@@ -878,16 +878,21 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
         )
 
     checkout_url = fallback_url
-    status = "checkout_ready_static" if checkout_url else "checkout_missing"
-    record_premium_transaction(
-        user_id=user_id,
-        plan_name=plan_name,
-        amount=amount,
-        currency=PREMIUM_CURRENCY,
-        payment_method="stripe",
-        status=status,
-        checkout_url=checkout_url,
-    )
+
+    # V10.7.3 Checkout Noise Cleanup:
+    # Ja maksājumu vide vēl nav gatava un nav statiskā checkout linka,
+    # neveidojam checkout_missing ierakstu datubāzē.
+    # Revenue Dashboard lai neskaita testa mēģinājumus kā nepabeigtus checkout.
+    if checkout_url:
+        record_premium_transaction(
+            user_id=user_id,
+            plan_name=plan_name,
+            amount=amount,
+            currency=PREMIUM_CURRENCY,
+            payment_method="stripe",
+            status="checkout_ready_static",
+            checkout_url=checkout_url,
+        )
 
     lines = [
         "💳 Maksājumu Checkout",
