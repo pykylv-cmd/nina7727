@@ -469,7 +469,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.9.1 Audit Statistics."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.10 System Health Dashboard."
     )
 
 
@@ -719,6 +719,104 @@ def admin_audit_stats_answer(user_id):
         lines.append("nav datu")
 
     return "\n".join(lines)
+
+
+def _count_table_rows(table_name, where_sql="", params=None):
+    """Drošs skaitītājs System Health panelim."""
+    allowed_tables = {"users", "reminders", "memory_backups", "admin_audit_logs", "premium_transactions"}
+    if table_name not in allowed_tables:
+        return 0
+    conn = None
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        sql = f"SELECT COUNT(*) FROM {table_name}"
+        if where_sql:
+            sql += " " + where_sql
+        db_execute(c, sql, params or ())
+        count = int(c.fetchone()[0] or 0)
+        c.close()
+        conn.close()
+        return count
+    except Exception as e:
+        print("System health count kļūda:", e)
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+        return 0
+
+
+def _database_health_ok():
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(c, "SELECT 1")
+        c.fetchone()
+        c.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print("Database health kļūda:", e)
+        return False
+
+
+def system_health_answer(user_id, command_text="health"):
+    """V10.10: System Health Dashboard — admin sistēmas monitoringa panelis."""
+    if not is_admin(user_id):
+        log_admin_action(user_id, "health_view", "denied", command_text)
+        return admin_locked_answer()
+
+    log_admin_action(user_id, "health_view", "allowed", command_text)
+
+    db_ok = _database_health_ok()
+    telegram_ok = bool(TELEGRAM_TOKEN)
+    openai_ok = bool(os.environ.get("OPENAI_API_KEY"))
+
+    secret_ready = bool(STRIPE_SECRET_KEY)
+    webhook_ready = bool(STRIPE_WEBHOOK_SECRET)
+    checkout_ready = bool(
+        STRIPE_BASIC_PRICE_ID or STRIPE_PLUS_PRICE_ID or
+        STRIPE_BASIC_CHECKOUT_URL or STRIPE_PLUS_CHECKOUT_URL
+    )
+
+    admin_lock_ready = admin_access_configured()
+    audit_log_ready = db_ok
+    try:
+        _count_table_rows("admin_audit_logs")
+    except Exception:
+        audit_log_ready = False
+
+    users_count = _count_table_rows("users")
+    premium_users = _count_table_rows("users", "WHERE premium = 1")
+    active_reminders = _count_table_rows("reminders", "WHERE status = %s", ("active",))
+    backups_total = _count_table_rows("memory_backups")
+    audit_total = _count_table_rows("admin_audit_logs")
+
+    overall_icon = "🟢" if db_ok and telegram_ok and openai_ok else "🟡"
+
+    return (
+        f"{overall_icon} Nina System Health\n\n"
+        "Core:\n"
+        f"Datubāze: {'OK' if db_ok else 'ERROR'}\n"
+        f"Telegram: {'OK' if telegram_ok else 'Missing Token'}\n"
+        f"OpenAI: {'OK' if openai_ok else 'Missing Key'}\n\n"
+        "Maksājumi:\n"
+        f"Secret Key: {'✅' if secret_ready else '❌'}\n"
+        f"Webhook: {'✅' if webhook_ready else '❌'}\n"
+        f"Checkout: {'✅' if checkout_ready else '❌'}\n\n"
+        "Drošība:\n"
+        f"Admin Lock: {'✅' if admin_lock_ready else '❌'}\n"
+        f"Audit Log: {'✅' if audit_log_ready else '❌'}\n\n"
+        "Lietošana:\n"
+        f"Lietotāji: {users_count}\n"
+        f"Premium lietotāji: {premium_users}\n"
+        f"Aktīvie atgādinājumi: {active_reminders}\n"
+        f"Backup kopā: {backups_total}\n"
+        f"Audit ieraksti: {audit_total}\n\n"
+        "Versija: V10.10"
+    )
 
 def admin_revenue_dashboard(user_id, command_text="revenue"):
     if not is_admin(user_id):
@@ -2785,6 +2883,7 @@ COMMAND_LINES = {
     "revenue", "ieņēmumi", "ienemumi", "admin panelis", "premium ieņēmumi", "premium ienemumi",
     "admin logs", "audit logs", "admin žurnāls", "admin zurnals",
     "audit stats", "admin statistika", "admin stats",
+    "health", "system status", "sistēmas statuss", "sistemas statuss", "veselība", "veseliba",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
     "premium panelis", "mans panelis", "dashboard",
     "mans līmenis", "mana pieredze", "xp",
@@ -2885,6 +2984,9 @@ def command_answer(user_id, command_text):
 
     if lower in ["audit stats", "admin statistika", "admin stats"]:
         return admin_audit_stats_answer(user_id)
+
+    if lower in ["health", "system status", "sistēmas statuss", "sistemas statuss", "veselība", "veseliba"]:
+        return system_health_answer(user_id, lower)
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
         return premium_dashboard(user_id)
@@ -3057,6 +3159,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower in ["audit stats", "admin statistika", "admin stats"]:
         await update.message.reply_text(append_bonus_notices(admin_audit_stats_answer(user_id), streak_notice), disable_web_page_preview=True)
+        return
+
+    if lower in ["health", "system status", "sistēmas statuss", "sistemas statuss", "veselība", "veseliba"]:
+        await update.message.reply_text(append_bonus_notices(system_health_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
         return
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
