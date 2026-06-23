@@ -838,7 +838,7 @@ def system_health_answer(user_id, command_text="health"):
         f"Aktīvie atgādinājumi: {active_reminders}\n"
         f"Backup kopā: {backups_total}\n"
         f"Audit ieraksti: {audit_total}\n\n"
-        "Versija: V10.15.1"
+        "Versija: V10.16"
     )
 
 
@@ -918,7 +918,7 @@ def user_analytics_answer(user_id, command_text="analytics"):
         f"Vidējais XP: {avg_xp:.1f}\n"
         f"Vidējais līmenis: {avg_level:.1f}\n"
         f"Vidējais streak: {avg_streak:.1f}\n\n"
-        "Versija: V10.15.1"
+        "Versija: V10.16"
     )
 
 
@@ -990,7 +990,7 @@ def database_backup_dashboard(user_id, command_text="db backup"):
         f"Pēdējais backup: {latest_backup}\n"
         f"Pēdējā ziņa: {latest_message}\n"
         f"Pēdējais audit: {latest_audit}\n\n"
-        "Versija: V10.15.1"
+        "Versija: V10.16"
     )
 
 
@@ -1216,7 +1216,7 @@ def backup_scheduler_answer(user_id, command_text="auto backup"):
         f"{max(total_runs, auto_count)}\n\n"
         "Audit action:\n"
         "auto_backup_run\n\n"
-        "Versija: V10.15.1"
+        "Versija: V10.16"
     )
 
 
@@ -1323,7 +1323,7 @@ def recovery_center_answer(user_id, command_text="recovery"):
         "",
         f"Restore mēģinājumi: {restore_logs}",
         "Statuss: Ready",
-        "Versija: V10.15.1",
+        "Versija: V10.16",
     ])
 
     return "\n".join(lines)
@@ -1357,7 +1357,7 @@ def restore_latest_backup(user_id, command_text="restore latest"):
             f"{result}\n\n"
             f"Backup ID: #{backup_id}\n"
             "Statuss: Restored\n"
-            "Versija: V10.15.1"
+            "Versija: V10.16"
         )
 
     log_restore_action(user_id, backup_id, "failed")
@@ -1405,7 +1405,84 @@ def admin_command_center(user_id, command_text="admin"):
         "Drošība:\n"
         f"🔒 Admin Lock: {admin_lock_status}\n"
         f"📋 Audit Log: {audit_status}\n\n"
-        "Versija: V10.15.1"
+        "Versija: V10.16"
+    )
+
+
+def admin_notifications_center(user_id, command_text="notifications"):
+    """V10.16: Admin Notifications Center — svarīgākie brīdinājumi vienā vietā."""
+    if not is_admin(user_id):
+        log_admin_action(user_id, "admin_notifications_view", "denied", command_text)
+        return admin_locked_answer()
+
+    log_admin_action(user_id, "admin_notifications_view", "allowed", command_text)
+
+    conn = None
+
+    def count_audit(where_sql="", params=()):
+        nonlocal conn
+        try:
+            if conn is None:
+                conn = get_db()
+            c = conn.cursor()
+            sql = "SELECT COUNT(*) FROM admin_audit_logs"
+            if where_sql:
+                sql += " " + where_sql
+            db_execute(c, sql, params)
+            value = int(c.fetchone()[0] or 0)
+            c.close()
+            return value
+        except Exception as e:
+            print("Admin notifications audit count kļūda:", e)
+            return 0
+
+    def count_premium_errors():
+        try:
+            local_conn = get_db()
+            c = local_conn.cursor()
+            db_execute(c, """
+                SELECT COUNT(*)
+                FROM premium_transactions
+                WHERE status IN ('payment_failed', 'checkout_error', 'stripe_checkout_error', 'failed')
+            """)
+            value = int(c.fetchone()[0] or 0)
+            c.close()
+            local_conn.close()
+            return value
+        except Exception as e:
+            print("Admin notifications payment count kļūda:", e)
+            return 0
+
+    denied_admin = count_audit("WHERE status = %s", ("denied",))
+    auto_backup_errors = count_audit(
+        "WHERE action = %s AND status IN (%s, %s)",
+        ("auto_backup_run", "failed", "error")
+    )
+    restore_errors = count_audit(
+        "WHERE action IN (%s, %s) OR command_text = %s",
+        ("backup_restore_failed", "backup_restore_attempt", "no_user_backup")
+    )
+    payment_errors = count_premium_errors()
+
+    try:
+        if conn:
+            conn.close()
+    except Exception:
+        pass
+
+    total_alerts = denied_admin + auto_backup_errors + restore_errors + payment_errors
+    status = "OK" if total_alerts == 0 else "Jāpārbauda"
+    icon = "🟢" if total_alerts == 0 else "🟡"
+
+    return (
+        "🔔 Nina Admin Notifications\n\n"
+        "Jauni notikumi:\n"
+        f"• Bloķēti admin mēģinājumi: {denied_admin}\n"
+        f"• Auto backup kļūdas: {auto_backup_errors}\n"
+        f"• Restore kļūdas: {restore_errors}\n"
+        f"• Maksājumu kļūdas: {payment_errors}\n\n"
+        f"Statuss: {icon} {status}\n"
+        "Versija: V10.16"
     )
 
 
@@ -3609,6 +3686,9 @@ def command_answer(user_id, command_text):
     if lower in ["restore latest", "atjauno pēdējo", "atjauno pedejo"]:
         return restore_latest_backup(user_id, lower)
 
+    if lower in ["admin notifications", "notifications", "paziņojumi", "pazinojumi", "admin paziņojumi", "admin pazinojumi"]:
+        return admin_notifications_center(user_id, lower)
+
     if lower in ["admin", "admin center", "admin command center", "command center", "dashboard"]:
         return admin_command_center(user_id, lower)
 
@@ -3809,7 +3889,11 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(append_bonus_notices(restore_latest_backup(user_id, lower), streak_notice), disable_web_page_preview=True)
         return
 
-    # V10.15.1 Command Routing Fix:
+    if lower in ["admin notifications", "notifications", "paziņojumi", "pazinojumi", "admin paziņojumi", "admin pazinojumi"]:
+        await update.message.reply_text(append_bonus_notices(admin_notifications_center(user_id, lower), streak_notice), disable_web_page_preview=True)
+        return
+
+    # V10.16 Command Routing Fix:
     # Admin Command Center komandām jānostrādā pirms premium dashboard un pirms GPT fallback.
     if lower in ["admin", "admin center", "admin command center", "command center", "dashboard"]:
         await update.message.reply_text(append_bonus_notices(admin_command_center(user_id, lower), streak_notice), disable_web_page_preview=True)
