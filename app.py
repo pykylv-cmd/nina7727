@@ -492,7 +492,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.18 Admin User Lookup."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.19 Admin User Search."
     )
 
 
@@ -838,7 +838,7 @@ def system_health_answer(user_id, command_text="health"):
         f"Aktīvie atgādinājumi: {active_reminders}\n"
         f"Backup kopā: {backups_total}\n"
         f"Audit ieraksti: {audit_total}\n\n"
-        "Versija: V10.18"
+        "Versija: V10.19"
     )
 
 
@@ -918,7 +918,7 @@ def user_analytics_answer(user_id, command_text="analytics"):
         f"Vidējais XP: {avg_xp:.1f}\n"
         f"Vidējais līmenis: {avg_level:.1f}\n"
         f"Vidējais streak: {avg_streak:.1f}\n\n"
-        "Versija: V10.18"
+        "Versija: V10.19"
     )
 
 
@@ -990,7 +990,7 @@ def database_backup_dashboard(user_id, command_text="db backup"):
         f"Pēdējais backup: {latest_backup}\n"
         f"Pēdējā ziņa: {latest_message}\n"
         f"Pēdējais audit: {latest_audit}\n\n"
-        "Versija: V10.18"
+        "Versija: V10.19"
     )
 
 
@@ -1216,7 +1216,7 @@ def backup_scheduler_answer(user_id, command_text="auto backup"):
         f"{max(total_runs, auto_count)}\n\n"
         "Audit action:\n"
         "auto_backup_run\n\n"
-        "Versija: V10.18"
+        "Versija: V10.19"
     )
 
 
@@ -1323,7 +1323,7 @@ def recovery_center_answer(user_id, command_text="recovery"):
         "",
         f"Restore mēģinājumi: {restore_logs}",
         "Statuss: Ready",
-        "Versija: V10.18",
+        "Versija: V10.19",
     ])
 
     return "\n".join(lines)
@@ -1357,7 +1357,7 @@ def restore_latest_backup(user_id, command_text="restore latest"):
             f"{result}\n\n"
             f"Backup ID: #{backup_id}\n"
             "Statuss: Restored\n"
-            "Versija: V10.18"
+            "Versija: V10.19"
         )
 
     log_restore_action(user_id, backup_id, "failed")
@@ -1405,7 +1405,7 @@ def admin_command_center(user_id, command_text="admin"):
         "Drošība:\n"
         f"🔒 Admin Lock: {admin_lock_status}\n"
         f"📋 Audit Log: {audit_status}\n\n"
-        "Versija: V10.18"
+        "Versija: V10.19"
     )
 
 
@@ -1482,12 +1482,12 @@ def admin_notifications_center(user_id, command_text="notifications"):
         f"• Restore kļūdas: {restore_errors}\n"
         f"• Maksājumu kļūdas: {payment_errors}\n\n"
         f"Statuss: {icon} {status}\n"
-        "Versija: V10.18"
+        "Versija: V10.19"
     )
 
 
 def admin_activity_feed(user_id, command_text="activity", limit=10):
-    """V10.18: Admin Activity Feed — pēdējās admin/audit darbības vienā plūsmā."""
+    """V10.19: Admin Activity Feed — pēdējās admin/audit darbības vienā plūsmā."""
     if not is_admin(user_id):
         log_admin_action(user_id, "activity_feed_view", "denied", command_text)
         return admin_locked_answer()
@@ -1545,14 +1545,14 @@ def admin_activity_feed(user_id, command_text="activity", limit=10):
     lines.extend([
         f"Kopā ieraksti: {total}",
         "",
-        "Versija: V10.18",
+        "Versija: V10.19",
     ])
 
     return "\n".join(lines).strip()
 
 
 def _admin_extract_target_user_id(command_text):
-    """V10.18: mēģina izvilkt Telegram user_id no admin lookup komandas."""
+    """V10.19: mēģina izvilkt Telegram user_id no admin lookup komandas."""
     text = (command_text or "").strip()
     # Atbalsta: user 123, user lookup 123, lietotājs 123, meklēt lietotāju 123
     match = re.search(r"\b(\d{4,})\b", text)
@@ -1562,7 +1562,7 @@ def _admin_extract_target_user_id(command_text):
 
 
 def _fetch_user_row_for_admin(target_user_id):
-    """V10.18: nolasa lietotāju bez jauna profila automātiskas izveides."""
+    """V10.19: nolasa lietotāju bez jauna profila automātiskas izveides."""
     conn = get_db()
     c = conn.cursor()
     try:
@@ -1611,7 +1611,7 @@ def _fetch_user_row_for_admin(target_user_id):
 
 
 def admin_user_lookup(user_id, command_text="user lookup"):
-    """V10.18: Admin User Lookup — konkrēta lietotāja profils, lojalitāte un aktivitāte."""
+    """V10.19: Admin User Search — konkrēta lietotāja profils, lojalitāte un aktivitāte."""
     if not is_admin(user_id):
         log_admin_action(user_id, "user_lookup_view", "denied", command_text)
         return admin_locked_answer()
@@ -1624,7 +1624,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
             "Norādi lietotāja ID.\n\n"
             "Piemērs:\n"
             "user 5138563912\n\n"
-            "Versija: V10.18"
+            "Versija: V10.19"
         )
 
     log_admin_action(user_id, "user_lookup_view", "allowed", command_text)
@@ -1636,7 +1636,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
             f"User ID: {target_user_id}\n"
             "Statuss: nav atrasts\n\n"
             "Šāds lietotājs vēl nav Nina datubāzē.\n\n"
-            "Versija: V10.18"
+            "Versija: V10.19"
         )
 
     messages_total = _count_table_rows("messages", "WHERE user_id = %s", (str(target_user_id),))
@@ -1674,8 +1674,163 @@ def admin_user_lookup(user_id, command_text="user lookup"):
         f"Backup: {backups_total}\n"
         f"Atgādinājumi: {reminders_total}\n"
         f"Aktīvie atgādinājumi: {active_reminders}\n\n"
-        "Versija: V10.18"
+        "Versija: V10.19"
     )
+
+
+def _admin_user_search_keyword(command_text):
+    """V10.19: izvelk meklēšanas atslēgvārdu no admin user search komandas."""
+    text = (command_text or "").strip()
+    lower = text.lower()
+
+    prefixes = [
+        "search user",
+        "find user",
+        "meklēt lietotāju",
+        "meklet lietotaju",
+        "lietotāji",
+        "lietotaji",
+    ]
+
+    for prefix in prefixes:
+        if lower.startswith(prefix):
+            return text[len(prefix):].strip()
+
+    return ""
+
+
+def _admin_search_users_rows(keyword="", limit=10):
+    """V10.19: meklē lietotājus pēc ID, vārda, premium/free, XP vai level."""
+    keyword = (keyword or "").strip()
+    lower = keyword.lower()
+
+    conn = get_db()
+    c = conn.cursor()
+
+    rows = []
+    try:
+        if lower in ["premium", "premium users", "premium lietotāji", "premium lietotaji"]:
+            db_execute(c, """
+                SELECT user_id, name, premium, premium_until, xp, level, streak_days, last_seen_date
+                FROM users
+                WHERE premium = 1
+                ORDER BY xp DESC, user_id ASC
+                LIMIT %s
+            """, (int(limit or 10),))
+
+        elif lower in ["free", "free users", "bezmaksas"]:
+            db_execute(c, """
+                SELECT user_id, name, premium, premium_until, xp, level, streak_days, last_seen_date
+                FROM users
+                WHERE premium = 0 OR premium IS NULL
+                ORDER BY xp DESC, user_id ASC
+                LIMIT %s
+            """, (int(limit or 10),))
+
+        elif lower in ["xp", "top xp", "pieredze"]:
+            db_execute(c, """
+                SELECT user_id, name, premium, premium_until, xp, level, streak_days, last_seen_date
+                FROM users
+                ORDER BY xp DESC, user_id ASC
+                LIMIT %s
+            """, (int(limit or 10),))
+
+        elif lower in ["level", "līmenis", "limenis"]:
+            db_execute(c, """
+                SELECT user_id, name, premium, premium_until, xp, level, streak_days, last_seen_date
+                FROM users
+                ORDER BY level DESC, xp DESC, user_id ASC
+                LIMIT %s
+            """, (int(limit or 10),))
+
+        elif keyword:
+            like = f"%{keyword}%"
+            db_execute(c, """
+                SELECT user_id, name, premium, premium_until, xp, level, streak_days, last_seen_date
+                FROM users
+                WHERE user_id = %s OR name LIKE %s OR city LIKE %s
+                ORDER BY xp DESC, user_id ASC
+                LIMIT %s
+            """, (keyword, like, like, int(limit or 10)))
+
+        else:
+            db_execute(c, """
+                SELECT user_id, name, premium, premium_until, xp, level, streak_days, last_seen_date
+                FROM users
+                ORDER BY last_seen_date DESC, xp DESC, user_id ASC
+                LIMIT %s
+            """, (int(limit or 10),))
+
+        rows = c.fetchall()
+    except Exception as e:
+        print("Admin user search kļūda:", e)
+        rows = []
+
+    c.close()
+    conn.close()
+    return rows
+
+
+def admin_user_search(user_id, command_text="search user"):
+    """V10.19: Admin User Search — meklē lietotājus pēc ID, vārda, premium/free, XP vai līmeņa."""
+    if not is_admin(user_id):
+        log_admin_action(user_id, "user_search_view", "denied", command_text)
+        return admin_locked_answer()
+
+    log_admin_action(user_id, "user_search_view", "allowed", command_text)
+
+    keyword = _admin_user_search_keyword(command_text)
+    rows = _admin_search_users_rows(keyword, limit=10)
+
+    lines = [
+        "👥 Nina User Search",
+        "",
+    ]
+
+    if keyword:
+        lines.append(f"Meklēšana: {keyword}")
+    else:
+        lines.append("Meklēšana: visi lietotāji")
+
+    lines.append(f"Atrasti: {len(rows)}")
+    lines.append("")
+
+    if not rows:
+        lines.extend([
+            "Nav atrastu lietotāju.",
+            "",
+            "Piemēri:",
+            "search user premium",
+            "search user free",
+            "find user 5138563912",
+            "lietotāji",
+            "",
+            "Versija: V10.19",
+        ])
+        return "\n".join(lines)
+
+    for idx, row in enumerate(rows, start=1):
+        found_user_id, name, premium, premium_until, xp, level, streak_days, last_seen_date = row
+
+        premium_status = "Premium" if int(premium or 0) else "Free"
+        plan = PLAN_FREE
+        if int(premium or 0):
+            latest = latest_premium_transaction(str(found_user_id))
+            plan = latest.get("plan_name") if latest and latest.get("plan_name") else PLAN_PREMIUM_BASIC
+
+        lines.append(f"{idx}. {found_user_id}")
+        lines.append(f"Vārds: {name or '—'}")
+        lines.append(f"Statuss: {plan if premium_status == 'Premium' else 'Free'}")
+        if premium_until:
+            lines.append(f"Premium līdz: {premium_until}")
+        lines.append(f"XP: {int(xp or 0)}")
+        lines.append(f"Līmenis: {int(level or 1)}")
+        lines.append(f"Streak: {int(streak_days or 0)}")
+        lines.append(f"Pēdējā aktivitāte: {last_seen_date or '—'}")
+        lines.append("")
+
+    lines.append("Versija: V10.19")
+    return "\n".join(lines).strip()
 
 
 async def auto_backup_worker(application):
@@ -3885,7 +4040,18 @@ def command_answer(user_id, command_text):
         return admin_activity_feed(user_id, lower)
 
     if (
-        lower in ["user lookup", "lietotājs", "lietotajs", "meklēt lietotāju", "meklet lietotaju"]
+        lower in ["lietotāji", "lietotaji", "meklēt lietotāju", "meklet lietotaju"]
+        or lower.startswith("search user")
+        or lower.startswith("find user")
+        or lower.startswith("lietotāji ")
+        or lower.startswith("lietotaji ")
+        or lower.startswith("meklēt lietotāju ")
+        or lower.startswith("meklet lietotaju ")
+    ):
+        return admin_user_search(user_id, command_text)
+
+    if (
+        lower in ["user lookup", "lietotājs", "lietotajs"]
         or lower.startswith("user ")
         or lower.startswith("user lookup ")
         or lower.startswith("lietotājs ")
@@ -4104,7 +4270,30 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if (
-        lower in ["user lookup", "lietotājs", "lietotajs", "meklēt lietotāju", "meklet lietotaju"]
+        lower in ["lietotāji", "lietotaji", "meklēt lietotāju", "meklet lietotaju"]
+        or lower.startswith("search user")
+        or lower.startswith("find user")
+        or lower.startswith("lietotāji ")
+        or lower.startswith("lietotaji ")
+        or lower.startswith("meklēt lietotāju ")
+        or lower.startswith("meklet lietotaju ")
+    ):
+        return admin_user_search(user_id, command_text)
+
+    if (
+        lower in ["lietotāji", "lietotaji", "meklēt lietotāju", "meklet lietotaju"]
+        or lower.startswith("search user")
+        or lower.startswith("find user")
+        or lower.startswith("lietotāji ")
+        or lower.startswith("lietotaji ")
+        or lower.startswith("meklēt lietotāju ")
+        or lower.startswith("meklet lietotaju ")
+    ):
+        await update.message.reply_text(append_bonus_notices(admin_user_search(user_id, user_text), streak_notice), disable_web_page_preview=True)
+        return
+
+    if (
+        lower in ["user lookup", "lietotājs", "lietotajs"]
         or lower.startswith("user ")
         or lower.startswith("user lookup ")
         or lower.startswith("lietotājs ")
@@ -4115,7 +4304,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(append_bonus_notices(admin_user_lookup(user_id, user_text), streak_notice), disable_web_page_preview=True)
         return
 
-    # V10.18 Command Routing Fix:
+    # V10.19 Command Routing Fix:
     # Admin Command Center komandām jānostrādā pirms premium dashboard un pirms GPT fallback.
     if lower in ["admin", "admin center", "admin command center", "command center", "dashboard"]:
         await update.message.reply_text(append_bonus_notices(admin_command_center(user_id, lower), streak_notice), disable_web_page_preview=True)
@@ -4429,7 +4618,7 @@ def payment_cancel_page():
 
 @app.route("/")
 def home():
-    return "Nina7727 V10.18 Admin User Lookup darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V10.19 Admin User Search darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -4444,5 +4633,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V10.18 Admin User Lookup darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V10.19 Admin User Search darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
