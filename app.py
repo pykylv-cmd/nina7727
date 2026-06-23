@@ -469,7 +469,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.9 Admin Audit Log."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.9.1 Audit Statistics."
     )
 
 
@@ -632,6 +632,93 @@ def admin_audit_log_answer(user_id):
 
     return "\n".join(lines).strip()
 
+
+
+def admin_audit_stats_answer(user_id):
+    """V10.9.1: Admin Audit Statistics — kopsavilkums par admin darbībām."""
+    if not is_admin(user_id):
+        log_admin_action(user_id, "audit_stats_view", "denied", "audit stats")
+        return admin_locked_answer()
+
+    log_admin_action(user_id, "audit_stats_view", "allowed", "audit stats")
+
+    conn = get_db()
+    c = conn.cursor()
+
+    try:
+        db_execute(c, "SELECT COUNT(*) FROM admin_audit_logs")
+        total = int(c.fetchone()[0] or 0)
+    except Exception:
+        total = 0
+
+    try:
+        db_execute(c, "SELECT COUNT(*) FROM admin_audit_logs WHERE status = 'allowed'")
+        allowed = int(c.fetchone()[0] or 0)
+    except Exception:
+        allowed = 0
+
+    try:
+        db_execute(c, "SELECT COUNT(*) FROM admin_audit_logs WHERE status = 'denied'")
+        denied = int(c.fetchone()[0] or 0)
+    except Exception:
+        denied = 0
+
+    action_counts = {}
+    try:
+        db_execute(c, """
+            SELECT action, COUNT(*)
+            FROM admin_audit_logs
+            GROUP BY action
+            ORDER BY COUNT(*) DESC, action ASC
+        """)
+        for action, count in c.fetchall():
+            action_counts[action or "unknown"] = int(count or 0)
+    except Exception:
+        action_counts = {}
+
+    try:
+        db_execute(c, """
+            SELECT created_at, user_id, action, status, command_text
+            FROM admin_audit_logs
+            ORDER BY id DESC
+            LIMIT 1
+        """)
+        last = c.fetchone()
+    except Exception:
+        last = None
+
+    c.close()
+    conn.close()
+
+    lines = [
+        "📊 Admin Audit Statistics",
+        "",
+        f"Kopā admin darbības: {total}",
+        f"Atļautas: {allowed}",
+        f"Bloķētas: {denied}",
+        "",
+        "Pēc darbībām:",
+    ]
+
+    if action_counts:
+        for action, count in action_counts.items():
+            lines.append(f"• {action}: {count}")
+    else:
+        lines.append("• vēl nav datu")
+
+    lines.extend(["", "Pēdējais mēģinājums:"])
+    if last:
+        created_at, logged_user_id, action, status, command_text = last
+        lines.append(str(created_at))
+        lines.append(f"user_id: {logged_user_id}")
+        lines.append(f"action: {action}")
+        lines.append(f"status: {status}")
+        if command_text:
+            lines.append(f"command: {command_text}")
+    else:
+        lines.append("nav datu")
+
+    return "\n".join(lines)
 
 def admin_revenue_dashboard(user_id, command_text="revenue"):
     if not is_admin(user_id):
@@ -2697,6 +2784,7 @@ COMMAND_LINES = {
     "stripe setup", "stripe env", "stripe palīgs", "stripe paligs",
     "revenue", "ieņēmumi", "ienemumi", "admin panelis", "premium ieņēmumi", "premium ienemumi",
     "admin logs", "audit logs", "admin žurnāls", "admin zurnals",
+    "audit stats", "admin statistika", "admin stats",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
     "premium panelis", "mans panelis", "dashboard",
     "mans līmenis", "mana pieredze", "xp",
@@ -2794,6 +2882,9 @@ def command_answer(user_id, command_text):
 
     if lower in ["admin logs", "audit logs", "admin žurnāls", "admin zurnals"]:
         return admin_audit_log_answer(user_id)
+
+    if lower in ["audit stats", "admin statistika", "admin stats"]:
+        return admin_audit_stats_answer(user_id)
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
         return premium_dashboard(user_id)
@@ -2962,6 +3053,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower in ["admin logs", "audit logs", "admin žurnāls", "admin zurnals"]:
         await update.message.reply_text(append_bonus_notices(admin_audit_log_answer(user_id), streak_notice), disable_web_page_preview=True)
+        return
+
+    if lower in ["audit stats", "admin statistika", "admin stats"]:
+        await update.message.reply_text(append_bonus_notices(admin_audit_stats_answer(user_id), streak_notice), disable_web_page_preview=True)
         return
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
