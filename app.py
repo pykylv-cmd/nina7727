@@ -26,9 +26,10 @@ app = Flask(__name__)
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 
-# V10.8 Admin Access Lock
+# V10.8.1 Strict Admin ENV
 # Railway ENV example: ADMIN_USER_IDS=5138563912
-ADMIN_USER_IDS = os.environ.get("ADMIN_USER_IDS", "5138563912")
+# Drošības nolūkos nav fallback admina. Ja ENV nav uzlikts, admin komandas ir bloķētas.
+ADMIN_USER_IDS = os.environ.get("ADMIN_USER_IDS", "")
 
 DEFAULT_TIMEZONE = "Europe/Riga"
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -457,7 +458,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.8 Admin Access Lock."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.8.1 Strict Admin ENV."
     )
 
 
@@ -531,9 +532,18 @@ def premium_history(user_id):
 
 
 def admin_user_ids():
-    """V10.8: nolasa admin Telegram user_id sarakstu no Railway ENV."""
-    raw = os.environ.get("ADMIN_USER_IDS", ADMIN_USER_IDS) or ""
+    """V10.8.1: stingri nolasa admin Telegram user_id sarakstu tikai no Railway ENV.
+
+    Ja ADMIN_USER_IDS nav uzlikts, admin komandas ir bloķētas visiem.
+    Piemērs Railway: ADMIN_USER_IDS=5138563912
+    Vairāki admini: ADMIN_USER_IDS=5138563912,123456789
+    """
+    raw = os.environ.get("ADMIN_USER_IDS", "") or ""
     return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+def admin_access_configured():
+    return bool(admin_user_ids())
 
 
 def is_admin(user_id):
@@ -541,6 +551,12 @@ def is_admin(user_id):
 
 
 def admin_locked_answer():
+    if not admin_access_configured():
+        return (
+            "🔒 Admin piekļuve nav konfigurēta.\n\n"
+            "Railway ENV pievieno:\n"
+            "ADMIN_USER_IDS=5138563912"
+        )
     return "🔒 Šī komanda pieejama tikai administratoram."
 
 
