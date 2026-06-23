@@ -36,7 +36,7 @@ FREE_REMINDER_LIMIT = 5
 FREE_SUMMARY_LIMIT_PER_DAY = 1
 XP_PER_LEVEL = 100
 
-# V10/V10.1 Payments + Stripe Checkout Foundation
+# V10/V10.1 Payments + Maksājumu Checkout Foundation
 PLAN_FREE = "Free"
 PLAN_PREMIUM_BASIC = "Premium Basic"
 PLAN_PREMIUM_PLUS = "Premium Plus"
@@ -453,7 +453,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.7 Revenue Dashboard."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.7.1 Disable Stripe Word Preview."
     )
 
 
@@ -755,7 +755,7 @@ def stripe_status(user_id=None):
     stripe_lib_ready = bool(stripe)
 
     lines = [
-        "💳 Stripe statuss",
+        "💳 Maksājumu statuss",
         "",
         f"stripe python library: {'✅' if stripe_lib_ready else '❌'}",
         f"STRIPE_SECRET_KEY: {'✅' if secret_ready else '❌'}",
@@ -768,11 +768,11 @@ def stripe_status(user_id=None):
     ]
 
     if secret_ready and webhook_ready and (basic_price_ready or basic_url_ready):
-        lines.append("Stripe maksājumu plūsma ir gatava V10.3 webhook režīmam.")
+        lines.append("Maksājumu plūsma ir gatava V10.3 webhook režīmam.")
     elif basic_url_ready or plus_url_ready:
         lines.append("Checkout linki ir sagatavoti, bet automātiskai Premium aktivizācijai vajag webhook.")
     else:
-        lines.append("Stripe vēl nav pieslēgts. Pievieno Railway environment variables.")
+        lines.append("Maksājumi vēl nav pieslēgti. Pievieno Railway environment variables.")
 
     lines.extend([
         "",
@@ -784,7 +784,7 @@ def stripe_status(user_id=None):
 
 
 def stripe_setup_helper(user_id=None):
-    """V10.3.1: Stripe Setup Helper — parāda precīzu Railway/Stripe checklist."""
+    """V10.3.1: Maksājumu Setup Helper — parāda precīzu Railway/Stripe checklist."""
     stripe_lib_ready = bool(stripe)
     secret_ready = bool(STRIPE_SECRET_KEY)
     webhook_ready = bool(STRIPE_WEBHOOK_SECRET)
@@ -796,7 +796,7 @@ def stripe_setup_helper(user_id=None):
     plus_url_ready = bool(STRIPE_PLUS_CHECKOUT_URL)
 
     lines = [
-        "💳 Stripe Setup Helper",
+        "💳 Maksājumu Setup Helper",
         "",
         "1. requirements.txt:",
         f"{'✅' if stripe_lib_ready else '❌'} stripe",
@@ -809,14 +809,14 @@ def stripe_setup_helper(user_id=None):
         f"{'✅' if success_ready else '❌'} STRIPE_SUCCESS_URL=tavs-domens/success",
         f"{'✅' if cancel_ready else '❌'} STRIPE_CANCEL_URL=tavs-domens/cancel",
         "",
-        "3. Alternatīva — statiskie Stripe Checkout linki:",
+        "3. Alternatīva — statiskie Checkout linki:",
         f"{'✅' if basic_url_ready else '❌'} STRIPE_BASIC_CHECKOUT_URL=buy.stripe.com/...",
         f"{'✅' if plus_url_ready else '❌'} STRIPE_PLUS_CHECKOUT_URL=buy.stripe.com/...",
         "",
-        "4. Stripe webhook URL:",
+        "4. Maksājumu webhook URL:",
         "TAVS-RAILWAY-DOMENS/stripe/webhook",
         "",
-        "5. Stripe webhook event:",
+        "5. Maksājumu webhook event:",
         "checkout.session.completed",
         "",
         "6. Testa komandas Telegramā:",
@@ -831,11 +831,11 @@ def stripe_setup_helper(user_id=None):
     ]
 
     if stripe_lib_ready and secret_ready and webhook_ready and basic_price_ready and success_ready and cancel_ready:
-        lines.append("✅ Stripe Basic dinamiskā plūsma izskatās gatava testam.")
+        lines.append("✅ Basic dinamiskā maksājumu plūsma izskatās gatava testam.")
     elif basic_url_ready or plus_url_ready:
         lines.append("⚠️ Statiskie checkout linki ir pieejami, bet automātiskai Premium aktivizācijai vajag webhook un user_id metadata/client_reference_id.")
     else:
-        lines.append("❌ Stripe vēl nav pilnībā pieslēgts. Sāc ar requirements.txt + Railway ENV.")
+        lines.append("❌ Maksājumi vēl nav pilnībā pieslēgts. Sāc ar requirements.txt + Railway ENV.")
 
     return "\n".join(lines)
 
@@ -869,7 +869,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
         )
 
         return (
-            "💳 Stripe Checkout\n\n"
+            "💳 Maksājumu Checkout\n\n"
             f"Plāns: {plan_name}\n"
             f"Cena: {amount:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
             "Checkout links:\n"
@@ -890,7 +890,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
     )
 
     lines = [
-        "💳 Stripe Checkout",
+        "💳 Maksājumu Checkout",
         "",
         f"Plāns: {plan_name}",
         f"Cena: {amount:.2f} {PREMIUM_CURRENCY}/mēn",
@@ -902,12 +902,12 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             "Checkout links:",
             checkout_url,
             "",
-            "V10.3 webhook ir gatavs, bet statiskam linkam Stripe notikumā jābūt user_id metadata/client_reference_id.",
+            "V10.3 webhook ir gatavs, bet statiskam linkam maksājuma notikumā jābūt user_id metadata/client_reference_id.",
         ])
     else:
         price_env = "STRIPE_PLUS_PRICE_ID" if plan_key == "plus" else "STRIPE_BASIC_PRICE_ID"
         lines.extend([
-            "Stripe checkout vēl nav pilnībā pieslēgts.",
+            "Maksājumu checkout vēl nav pilnībā pieslēgts.",
             f"Dinamiskam checkout pievieno Railway: {price_env}, STRIPE_SECRET_KEY, STRIPE_SUCCESS_URL, STRIPE_CANCEL_URL",
             f"Vai statiskam linkam pievieno: {env_name}",
             "",
@@ -3035,7 +3035,7 @@ def stripe_webhook():
         else:
             event = json.loads(payload.decode("utf-8"))
     except Exception as e:
-        print("Stripe webhook signature/json kļūda:", e)
+        print("Maksājumu webhook signature/json kļūda:", e)
         return jsonify({"error": "invalid webhook"}), 400
 
     event_id = event.get("id", "")
@@ -3049,7 +3049,7 @@ def stripe_webhook():
         user_id = user_id_from_stripe_session(session)
 
         if not user_id:
-            print("Stripe webhook: nav user_id metadata/client_reference_id")
+            print("Maksājumu webhook: nav user_id metadata/client_reference_id")
             return jsonify({"ok": False, "error": "missing user_id"}), 200
 
         plan_name, amount, currency = plan_from_stripe_session(session)
@@ -3068,14 +3068,14 @@ def stripe_webhook():
             customer_email=customer_email,
         )
 
-        print(f"Stripe webhook: Premium aktivizēts user_id={user_id}, plan={plan_name}, līdz={until}. Welcome ready: premium welcome")
+        print(f"Maksājumu webhook: Premium aktivizēts user_id={user_id}, plan={plan_name}, līdz={until}. Welcome ready: premium welcome")
         if achievements:
             print("Stripe achievements:", achievements)
 
         return jsonify({"ok": True, "premium_until": until})
 
     # Atzīmējam citus Stripe eventus tikai logā; Premium nemainām.
-    print("Stripe webhook ignored:", event_type)
+    print("Maksājumu webhook ignored:", event_type)
     return jsonify({"ok": True, "ignored": event_type})
 
 
@@ -3099,7 +3099,7 @@ def payment_success_page():
     <body>
         <div class="card">
             <h1>✅ Maksājums saņemts</h1>
-            <p>Paldies! Ja Stripe webhook ir pieslēgts, Nina Premium tiks aktivizēts automātiski.</p>
+            <p>Paldies! Ja Maksājumu webhook ir pieslēgts, Nina Premium tiks aktivizēts automātiski.</p>
             <p>Atgriezies Telegram un palaid Premium sveicienu:</p>
             <p><span class="cmd">premium welcome</span></p>
             <p>Pēc tam vari pārbaudīt pilno paneli:</p>
