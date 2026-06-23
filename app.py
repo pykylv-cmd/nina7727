@@ -26,6 +26,10 @@ app = Flask(__name__)
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 
+# V10.8 Admin Access Lock
+# Railway ENV example: ADMIN_USER_IDS=5138563912
+ADMIN_USER_IDS = os.environ.get("ADMIN_USER_IDS", "5138563912")
+
 DEFAULT_TIMEZONE = "Europe/Riga"
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DB_FILE = "nina_memory.db"
@@ -453,7 +457,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.7.3 Checkout Noise Cleanup."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.8 Admin Access Lock."
     )
 
 
@@ -524,6 +528,26 @@ def premium_history(user_id):
 
 
 
+
+
+def admin_user_ids():
+    """V10.8: nolasa admin Telegram user_id sarakstu no Railway ENV."""
+    raw = os.environ.get("ADMIN_USER_IDS", ADMIN_USER_IDS) or ""
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+def is_admin(user_id):
+    return str(user_id) in admin_user_ids()
+
+
+def admin_locked_answer():
+    return "🔒 Šī komanda pieejama tikai administratoram."
+
+
+def admin_revenue_dashboard(user_id):
+    if not is_admin(user_id):
+        return admin_locked_answer()
+    return revenue_dashboard(user_id)
 
 def revenue_dashboard(user_id=None):
     """V10.7: Revenue Dashboard — admin pārskats par Premium ieņēmumiem."""
@@ -2674,7 +2698,7 @@ def command_answer(user_id, command_text):
         return stripe_setup_helper(user_id)
 
     if lower in ["revenue", "ieņēmumi", "ienemumi", "admin panelis", "premium ieņēmumi", "premium ienemumi"]:
-        return revenue_dashboard(user_id)
+        return admin_revenue_dashboard(user_id)
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
         return premium_dashboard(user_id)
@@ -2838,7 +2862,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if lower in ["revenue", "ieņēmumi", "ienemumi", "admin panelis", "premium ieņēmumi", "premium ienemumi"]:
-        await update.message.reply_text(append_bonus_notices(revenue_dashboard(user_id), streak_notice), disable_web_page_preview=True)
+        await update.message.reply_text(append_bonus_notices(admin_revenue_dashboard(user_id), streak_notice), disable_web_page_preview=True)
         return
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
