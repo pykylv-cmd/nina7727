@@ -492,7 +492,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.15 Admin Command Center."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.17 Admin Activity Feed."
     )
 
 
@@ -838,7 +838,7 @@ def system_health_answer(user_id, command_text="health"):
         f"Aktīvie atgādinājumi: {active_reminders}\n"
         f"Backup kopā: {backups_total}\n"
         f"Audit ieraksti: {audit_total}\n\n"
-        "Versija: V10.16"
+        "Versija: V10.17"
     )
 
 
@@ -918,7 +918,7 @@ def user_analytics_answer(user_id, command_text="analytics"):
         f"Vidējais XP: {avg_xp:.1f}\n"
         f"Vidējais līmenis: {avg_level:.1f}\n"
         f"Vidējais streak: {avg_streak:.1f}\n\n"
-        "Versija: V10.16"
+        "Versija: V10.17"
     )
 
 
@@ -990,7 +990,7 @@ def database_backup_dashboard(user_id, command_text="db backup"):
         f"Pēdējais backup: {latest_backup}\n"
         f"Pēdējā ziņa: {latest_message}\n"
         f"Pēdējais audit: {latest_audit}\n\n"
-        "Versija: V10.16"
+        "Versija: V10.17"
     )
 
 
@@ -1216,7 +1216,7 @@ def backup_scheduler_answer(user_id, command_text="auto backup"):
         f"{max(total_runs, auto_count)}\n\n"
         "Audit action:\n"
         "auto_backup_run\n\n"
-        "Versija: V10.16"
+        "Versija: V10.17"
     )
 
 
@@ -1323,7 +1323,7 @@ def recovery_center_answer(user_id, command_text="recovery"):
         "",
         f"Restore mēģinājumi: {restore_logs}",
         "Statuss: Ready",
-        "Versija: V10.16",
+        "Versija: V10.17",
     ])
 
     return "\n".join(lines)
@@ -1357,7 +1357,7 @@ def restore_latest_backup(user_id, command_text="restore latest"):
             f"{result}\n\n"
             f"Backup ID: #{backup_id}\n"
             "Statuss: Restored\n"
-            "Versija: V10.16"
+            "Versija: V10.17"
         )
 
     log_restore_action(user_id, backup_id, "failed")
@@ -1405,7 +1405,7 @@ def admin_command_center(user_id, command_text="admin"):
         "Drošība:\n"
         f"🔒 Admin Lock: {admin_lock_status}\n"
         f"📋 Audit Log: {audit_status}\n\n"
-        "Versija: V10.16"
+        "Versija: V10.17"
     )
 
 
@@ -1482,8 +1482,73 @@ def admin_notifications_center(user_id, command_text="notifications"):
         f"• Restore kļūdas: {restore_errors}\n"
         f"• Maksājumu kļūdas: {payment_errors}\n\n"
         f"Statuss: {icon} {status}\n"
-        "Versija: V10.16"
+        "Versija: V10.17"
     )
+
+
+def admin_activity_feed(user_id, command_text="activity", limit=10):
+    """V10.17: Admin Activity Feed — pēdējās admin/audit darbības vienā plūsmā."""
+    if not is_admin(user_id):
+        log_admin_action(user_id, "activity_feed_view", "denied", command_text)
+        return admin_locked_answer()
+
+    log_admin_action(user_id, "activity_feed_view", "allowed", command_text)
+
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        db_execute(
+            c,
+            """
+            SELECT created_at, user_id, action, status, command_text
+            FROM admin_audit_logs
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            (int(limit or 10),)
+        )
+        rows = c.fetchall()
+    except Exception as e:
+        print("Activity feed kļūda:", e)
+        rows = []
+
+    try:
+        db_execute(c, "SELECT COUNT(*) FROM admin_audit_logs")
+        total = int(c.fetchone()[0] or 0)
+    except Exception:
+        total = len(rows)
+
+    c.close()
+    conn.close()
+
+    lines = [
+        "📋 Nina Activity Feed",
+        "",
+        "Pēdējās darbības:",
+        "",
+    ]
+
+    if rows:
+        for created_at, logged_user_id, action, status, cmd in rows:
+            status_text = (status or "unknown").upper()
+            lines.append(str(created_at))
+            lines.append(str(action or "unknown"))
+            lines.append(status_text)
+            lines.append(f"user_id: {logged_user_id}")
+            if cmd:
+                lines.append(f"command: {cmd}")
+            lines.append("")
+    else:
+        lines.append("Nav audit ierakstu.")
+        lines.append("")
+
+    lines.extend([
+        f"Kopā ieraksti: {total}",
+        "",
+        "Versija: V10.17",
+    ])
+
+    return "\n".join(lines).strip()
 
 
 async def auto_backup_worker(application):
@@ -3689,6 +3754,9 @@ def command_answer(user_id, command_text):
     if lower in ["admin notifications", "notifications", "paziņojumi", "pazinojumi", "admin paziņojumi", "admin pazinojumi"]:
         return admin_notifications_center(user_id, lower)
 
+    if lower in ["activity", "admin activity", "activity feed", "aktivitāte", "aktivitate"]:
+        return admin_activity_feed(user_id, lower)
+
     if lower in ["admin", "admin center", "admin command center", "command center", "dashboard"]:
         return admin_command_center(user_id, lower)
 
@@ -3893,7 +3961,11 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(append_bonus_notices(admin_notifications_center(user_id, lower), streak_notice), disable_web_page_preview=True)
         return
 
-    # V10.16 Command Routing Fix:
+    if lower in ["activity", "admin activity", "activity feed", "aktivitāte", "aktivitate"]:
+        await update.message.reply_text(append_bonus_notices(admin_activity_feed(user_id, lower), streak_notice), disable_web_page_preview=True)
+        return
+
+    # V10.17 Command Routing Fix:
     # Admin Command Center komandām jānostrādā pirms premium dashboard un pirms GPT fallback.
     if lower in ["admin", "admin center", "admin command center", "command center", "dashboard"]:
         await update.message.reply_text(append_bonus_notices(admin_command_center(user_id, lower), streak_notice), disable_web_page_preview=True)
@@ -4207,7 +4279,7 @@ def payment_cancel_page():
 
 @app.route("/")
 def home():
-    return "Nina7727 V10.15 Admin Command Center darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V10.17 Admin Activity Feed darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -4222,5 +4294,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V10.15 Admin Command Center darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V10.17 Admin Activity Feed darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
