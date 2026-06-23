@@ -469,7 +469,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.11 User Analytics Dashboard."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.12 Database Backup Dashboard."
     )
 
 
@@ -723,7 +723,7 @@ def admin_audit_stats_answer(user_id):
 
 def _count_table_rows(table_name, where_sql="", params=None):
     """Drošs skaitītājs System Health panelim."""
-    allowed_tables = {"users", "reminders", "memory_backups", "admin_audit_logs", "premium_transactions"}
+    allowed_tables = {"users", "messages", "reminders", "memory_backups", "user_achievements", "admin_audit_logs", "premium_transactions"}
     if table_name not in allowed_tables:
         return 0
     conn = None
@@ -815,7 +815,7 @@ def system_health_answer(user_id, command_text="health"):
         f"Aktīvie atgādinājumi: {active_reminders}\n"
         f"Backup kopā: {backups_total}\n"
         f"Audit ieraksti: {audit_total}\n\n"
-        "Versija: V10.11"
+        "Versija: V10.12"
     )
 
 
@@ -895,7 +895,79 @@ def user_analytics_answer(user_id, command_text="analytics"):
         f"Vidējais XP: {avg_xp:.1f}\n"
         f"Vidējais līmenis: {avg_level:.1f}\n"
         f"Vidējais streak: {avg_streak:.1f}\n\n"
-        "Versija: V10.11"
+        "Versija: V10.12"
+    )
+
+
+def _latest_created_at(table_name, created_col="created_at"):
+    """Atrod pēdējo ieraksta laiku drošām DB Backup Dashboard tabulām."""
+    allowed_tables = {"messages", "reminders", "memory_backups", "user_achievements", "premium_transactions", "admin_audit_logs"}
+    allowed_cols = {"created_at", "unlocked_at"}
+    if table_name not in allowed_tables or created_col not in allowed_cols:
+        return "nav datu"
+    conn = None
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(c, f"SELECT MAX({created_col}) FROM {table_name}")
+        value = c.fetchone()[0]
+        c.close()
+        conn.close()
+        return str(value) if value else "nav datu"
+    except Exception as e:
+        print("DB backup latest kļūda:", e)
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+        return "nav datu"
+
+
+def database_backup_dashboard(user_id, command_text="db backup"):
+    """V10.12: Database Backup Dashboard — admin DB satura un backup statusa pārskats."""
+    if not is_admin(user_id):
+        log_admin_action(user_id, "database_backup_view", "denied", command_text)
+        return admin_locked_answer()
+
+    log_admin_action(user_id, "database_backup_view", "allowed", command_text)
+
+    db_ok = _database_health_ok()
+    db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
+
+    users_total = _count_table_rows("users")
+    messages_total = _count_table_rows("messages")
+    reminders_total = _count_table_rows("reminders")
+    active_reminders = _count_table_rows("reminders", "WHERE status = %s", ("active",))
+    backups_total = _count_table_rows("memory_backups")
+    achievements_total = _count_table_rows("user_achievements")
+    premium_transactions_total = _count_table_rows("premium_transactions")
+    audit_total = _count_table_rows("admin_audit_logs")
+
+    latest_backup = _latest_created_at("memory_backups")
+    latest_message = _latest_created_at("messages")
+    latest_audit = _latest_created_at("admin_audit_logs")
+
+    return (
+        "🗄️ Nina Database Backup\n\n"
+        "Datubāze:\n"
+        f"Tips: {db_type}\n"
+        f"Statuss: {'OK' if db_ok else 'ERROR'}\n\n"
+        "Saturs:\n"
+        f"👤 Lietotāji: {users_total}\n"
+        f"💬 Ziņas: {messages_total}\n"
+        f"⏰ Atgādinājumi: {reminders_total}\n"
+        f"✅ Aktīvie atgādinājumi: {active_reminders}\n"
+        f"📦 Backup ieraksti: {backups_total}\n"
+        f"🏅 Sasniegumi: {achievements_total}\n"
+        f"💎 Premium darījumi: {premium_transactions_total}\n\n"
+        "Audit:\n"
+        f"📋 Audit ieraksti: {audit_total}\n\n"
+        "Pēdējie ieraksti:\n"
+        f"Pēdējais backup: {latest_backup}\n"
+        f"Pēdējā ziņa: {latest_message}\n"
+        f"Pēdējais audit: {latest_audit}\n\n"
+        "Versija: V10.12"
     )
 
 def admin_revenue_dashboard(user_id, command_text="revenue"):
@@ -2965,6 +3037,7 @@ COMMAND_LINES = {
     "audit stats", "admin statistika", "admin stats",
     "health", "system status", "sistēmas statuss", "sistemas statuss", "veselība", "veseliba",
     "analytics", "lietotāju statistika", "lietotaju statistika", "user stats", "user analytics",
+    "db backup", "database backup", "backup stats", "datubāzes backup", "datubazes backup",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
     "premium panelis", "mans panelis", "dashboard",
     "mans līmenis", "mana pieredze", "xp",
@@ -3071,6 +3144,9 @@ def command_answer(user_id, command_text):
 
     if lower in ["analytics", "lietotāju statistika", "lietotaju statistika", "user stats", "user analytics"]:
         return user_analytics_answer(user_id, lower)
+
+    if lower in ["db backup", "database backup", "backup stats", "datubāzes backup", "datubazes backup"]:
+        return database_backup_dashboard(user_id, lower)
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
         return premium_dashboard(user_id)
@@ -3251,6 +3327,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower in ["analytics", "lietotāju statistika", "lietotaju statistika", "user stats", "user analytics"]:
         await update.message.reply_text(append_bonus_notices(user_analytics_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
+        return
+
+    if lower in ["db backup", "database backup", "backup stats", "datubāzes backup", "datubazes backup"]:
+        await update.message.reply_text(append_bonus_notices(database_backup_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
         return
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
