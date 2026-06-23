@@ -36,7 +36,7 @@ FREE_REMINDER_LIMIT = 5
 FREE_SUMMARY_LIMIT_PER_DAY = 1
 XP_PER_LEVEL = 100
 
-# V10/V10.1 Payments + Maksājumu Checkout Foundation
+# V10/V10.1 Payments + Stripe Checkout Foundation
 PLAN_FREE = "Free"
 PLAN_PREMIUM_BASIC = "Premium Basic"
 PLAN_PREMIUM_PLUS = "Premium Plus"
@@ -453,7 +453,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.7.1 Disable Stripe Word Preview."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.7.2 Full Preview Cleanup."
     )
 
 
@@ -757,7 +757,7 @@ def stripe_status(user_id=None):
     lines = [
         "💳 Maksājumu statuss",
         "",
-        f"stripe python library: {'✅' if stripe_lib_ready else '❌'}",
+        f"payments python library: {'✅' if stripe_lib_ready else '❌'}",
         f"STRIPE_SECRET_KEY: {'✅' if secret_ready else '❌'}",
         f"STRIPE_BASIC_CHECKOUT_URL: {'✅' if basic_url_ready else '❌'}",
         f"STRIPE_PLUS_CHECKOUT_URL: {'✅' if plus_url_ready else '❌'}",
@@ -777,14 +777,14 @@ def stripe_status(user_id=None):
     lines.extend([
         "",
         "Webhook endpoint:",
-        "/stripe/webhook",
+        "/payments/webhook",
     ])
 
     return "\n".join(lines)
 
 
 def stripe_setup_helper(user_id=None):
-    """V10.3.1: Maksājumu Setup Helper — parāda precīzu Railway/Stripe checklist."""
+    """V10.3.1: Stripe Setup Helper — parāda precīzu Railway/Stripe checklist."""
     stripe_lib_ready = bool(stripe)
     secret_ready = bool(STRIPE_SECRET_KEY)
     webhook_ready = bool(STRIPE_WEBHOOK_SECRET)
@@ -810,11 +810,11 @@ def stripe_setup_helper(user_id=None):
         f"{'✅' if cancel_ready else '❌'} STRIPE_CANCEL_URL=tavs-domens/cancel",
         "",
         "3. Alternatīva — statiskie Checkout linki:",
-        f"{'✅' if basic_url_ready else '❌'} STRIPE_BASIC_CHECKOUT_URL=buy.stripe.com/...",
-        f"{'✅' if plus_url_ready else '❌'} STRIPE_PLUS_CHECKOUT_URL=buy.stripe.com/...",
+        f"{'✅' if basic_url_ready else '❌'} STRIPE_BASIC_CHECKOUT_URL=buy dot stripe dot com/...",
+        f"{'✅' if plus_url_ready else '❌'} STRIPE_PLUS_CHECKOUT_URL=buy dot stripe dot com/...",
         "",
         "4. Maksājumu webhook URL:",
-        "TAVS-RAILWAY-DOMENS/stripe/webhook",
+        "TAVS-RAILWAY-DOMENS/payments/webhook",
         "",
         "5. Maksājumu webhook event:",
         "checkout.session.completed",
@@ -826,7 +826,7 @@ def stripe_setup_helper(user_id=None):
         "premium vēsture",
         "premium panelis",
         "",
-        "URL piemēri ir bez https://, lai Telegram nerādītu link preview.",
+        "URL piemēri ir rakstīti kā teksts, lai Telegram nerādītu link preview.",
         "",
     ]
 
@@ -835,7 +835,7 @@ def stripe_setup_helper(user_id=None):
     elif basic_url_ready or plus_url_ready:
         lines.append("⚠️ Statiskie checkout linki ir pieejami, bet automātiskai Premium aktivizācijai vajag webhook un user_id metadata/client_reference_id.")
     else:
-        lines.append("❌ Maksājumi vēl nav pilnībā pieslēgts. Sāc ar requirements.txt + Railway ENV.")
+        lines.append("❌ Maksājumi vēl nav pilnībā pieslēgti. Sāc ar requirements.txt + Railway ENV.")
 
     return "\n".join(lines)
 
@@ -869,7 +869,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
         )
 
         return (
-            "💳 Maksājumu Checkout\n\n"
+            "💳 Stripe Checkout\n\n"
             f"Plāns: {plan_name}\n"
             f"Cena: {amount:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
             "Checkout links:\n"
@@ -902,7 +902,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             "Checkout links:",
             checkout_url,
             "",
-            "V10.3 webhook ir gatavs, bet statiskam linkam maksājuma notikumā jābūt user_id metadata/client_reference_id.",
+            "V10.3 webhook ir gatavs, bet statiskam linkam Stripe notikumā jābūt user_id metadata/client_reference_id.",
         ])
     else:
         price_env = "STRIPE_PLUS_PRICE_ID" if plan_key == "plus" else "STRIPE_BASIC_PRICE_ID"
@@ -2529,7 +2529,7 @@ async def reminder_worker(application):
 
             for reminder_id, user_id, text in rows:
                 try:
-                    await application.bot.send_message(chat_id=int(user_id), text=f"🌷 Atgādinājums:\n{text}")
+                    await application.bot.send_message(chat_id=int(user_id), text=f"🌷 Atgādinājums:\n{text}", disable_web_page_preview=True)
                     db_execute(c, "UPDATE reminders SET status = 'sent' WHERE id = %s", (reminder_id,))
                     conn.commit()
                 except Exception as e:
@@ -2778,181 +2778,181 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if answer:
                 answers.append(answer)
         if answers:
-            await update.message.reply_text("\n\n".join(answers))
+            await update.message.reply_text("\n\n".join(answers), disable_web_page_preview=True)
             return
 
     if lower in ["mans premium statuss", "premium statuss", "premium"]:
-        await update.message.reply_text(premium_status(user_id))
+        await update.message.reply_text(premium_status(user_id), disable_web_page_preview=True)
         return
 
     if lower in ["premium funkcijas"]:
-        await update.message.reply_text(premium_features(user_id))
+        await update.message.reply_text(premium_features(user_id), disable_web_page_preview=True)
         return
 
     if lower in ["premium limiti", "cik atmiņas man palicis"]:
-        await update.message.reply_text(premium_limits(user_id))
+        await update.message.reply_text(premium_limits(user_id), disable_web_page_preview=True)
         return
 
     if lower == "premium beidzas":
-        await update.message.reply_text(premium_expiration_info(user_id))
+        await update.message.reply_text(premium_expiration_info(user_id), disable_web_page_preview=True)
         return
 
     if lower == "abonements":
-        await update.message.reply_text(append_bonus_notices(subscription_info(user_id), streak_notice))
+        await update.message.reply_text(append_bonus_notices(subscription_info(user_id), streak_notice), disable_web_page_preview=True)
         return
 
     if lower in ["mans plāns", "mans plans"]:
-        await update.message.reply_text(append_bonus_notices(current_plan_answer(user_id), streak_notice))
+        await update.message.reply_text(append_bonus_notices(current_plan_answer(user_id), streak_notice), disable_web_page_preview=True)
         return
 
     if lower in ["premium vēsture", "premium vesture"]:
-        await update.message.reply_text(append_bonus_notices(premium_history(user_id), streak_notice))
+        await update.message.reply_text(append_bonus_notices(premium_history(user_id), streak_notice), disable_web_page_preview=True)
         return
 
     # V10.5.2 HARD FIX: catch Premium Welcome as a direct Telegram command
     # before it can fall through to GPT chat mode.
     if lower in ["premium welcome", "premium sveiciens", "premium starts", "premium sveiks"]:
-        await update.message.reply_text(append_bonus_notices(premium_welcome_answer(user_id), streak_notice))
+        await update.message.reply_text(append_bonus_notices(premium_welcome_answer(user_id), streak_notice), disable_web_page_preview=True)
         return
 
     if lower in ["pirkt premium", "pirkt basic", "pirkt premium basic"]:
-        await update.message.reply_text(append_bonus_notices(stripe_checkout_answer(user_id, "basic"), streak_notice))
+        await update.message.reply_text(append_bonus_notices(stripe_checkout_answer(user_id, "basic"), streak_notice), disable_web_page_preview=True)
         return
 
     if lower in ["pirkt plus", "pirkt premium plus"]:
-        await update.message.reply_text(append_bonus_notices(stripe_checkout_answer(user_id, "plus"), streak_notice))
+        await update.message.reply_text(append_bonus_notices(stripe_checkout_answer(user_id, "plus"), streak_notice), disable_web_page_preview=True)
         return
 
     if lower == "stripe statuss":
-        await update.message.reply_text(append_bonus_notices(stripe_status(user_id), streak_notice))
+        await update.message.reply_text(append_bonus_notices(stripe_status(user_id), streak_notice), disable_web_page_preview=True)
         return
 
     # V10.5.2: keep Stripe helper commands direct too, not only in command_answer().
     if lower in ["stripe setup", "stripe env", "stripe palīgs", "stripe paligs"]:
-        await update.message.reply_text(append_bonus_notices(stripe_setup_helper(user_id), streak_notice))
+        await update.message.reply_text(append_bonus_notices(stripe_setup_helper(user_id), streak_notice), disable_web_page_preview=True)
         return
 
     if lower in ["revenue", "ieņēmumi", "ienemumi", "admin panelis", "premium ieņēmumi", "premium ienemumi"]:
-        await update.message.reply_text(append_bonus_notices(revenue_dashboard(user_id), streak_notice))
+        await update.message.reply_text(append_bonus_notices(revenue_dashboard(user_id), streak_notice), disable_web_page_preview=True)
         return
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
-        await update.message.reply_text(append_bonus_notices(premium_dashboard(user_id), streak_notice, check_achievements(user_id)))
+        await update.message.reply_text(append_bonus_notices(premium_dashboard(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
         return
 
     if lower in ["mans līmenis", "mana pieredze", "xp"]:
-        await update.message.reply_text(append_bonus_notices(user_level_info(user_id), streak_notice, check_achievements(user_id)))
+        await update.message.reply_text(append_bonus_notices(user_level_info(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
         return
 
     if lower in ["mani sasniegumi", "sasniegumi"]:
-        await update.message.reply_text(append_bonus_notices(achievements_answer(user_id), streak_notice, check_achievements(user_id)))
+        await update.message.reply_text(append_bonus_notices(achievements_answer(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
         return
 
     if lower == "sasniegumu progress":
-        await update.message.reply_text(append_bonus_notices(achievement_progress(user_id), streak_notice))
+        await update.message.reply_text(append_bonus_notices(achievement_progress(user_id), streak_notice), disable_web_page_preview=True)
         return
 
     if lower in ["mans streak", "mana sērija", "streak"]:
-        await update.message.reply_text(append_bonus_notices(streak_info(user_id), check_achievements(user_id)))
+        await update.message.reply_text(append_bonus_notices(streak_info(user_id), check_achievements(user_id)), disable_web_page_preview=True)
         return
 
     if lower == "mana statistika":
-        await update.message.reply_text(user_statistics(user_id))
+        await update.message.reply_text(user_statistics(user_id), disable_web_page_preview=True)
         return
 
     if lower == "mana aktivitāte":
-        await update.message.reply_text(user_activity(user_id))
+        await update.message.reply_text(user_activity(user_id), disable_web_page_preview=True)
         return
 
     if lower == "mana atmiņa":
-        await update.message.reply_text(user_memory_stats(user_id))
+        await update.message.reply_text(user_memory_stats(user_id), disable_web_page_preview=True)
         return
 
     if lower in ["aktivizē premium", "aktivize premium", "ieslēdz premium"]:
-        await update.message.reply_text(activate_premium(user_id))
+        await update.message.reply_text(activate_premium(user_id), disable_web_page_preview=True)
         return
 
     if lower in ["izslēdz premium", "atslēdz premium"]:
-        await update.message.reply_text(deactivate_premium(user_id))
+        await update.message.reply_text(deactivate_premium(user_id), disable_web_page_preview=True)
         return
 
     if lower in ["eksportē atmiņu", "atmiņas eksports", "export memory", "eksports"]:
-        await update.message.reply_text(build_memory_export(user_id))
+        await update.message.reply_text(build_memory_export(user_id), disable_web_page_preview=True)
         return
 
     if lower in ["backup", "izveido backup", "rezerves kopija", "izveido rezerves kopiju"]:
-        await update.message.reply_text(create_backup_answer(user_id))
+        await update.message.reply_text(create_backup_answer(user_id), disable_web_page_preview=True)
         return
 
     if lower in ["pēdējais backup", "parādi backup", "mans backup", "pēdējā rezerves kopija"]:
-        await update.message.reply_text(latest_backup_answer(user_id))
+        await update.message.reply_text(latest_backup_answer(user_id), disable_web_page_preview=True)
         return
 
     if lower in ["backup saraksts", "parādi backup sarakstu", "mani backup"]:
-        await update.message.reply_text(list_backups(user_id))
+        await update.message.reply_text(list_backups(user_id), disable_web_page_preview=True)
         return
 
     if lower in ["cik man ir backup"]:
-        await update.message.reply_text(backup_count(user_id))
+        await update.message.reply_text(backup_count(user_id), disable_web_page_preview=True)
         return
 
     if lower in ["backup statistika"]:
-        await update.message.reply_text(backup_stats(user_id))
+        await update.message.reply_text(backup_stats(user_id), disable_web_page_preview=True)
         return
 
     if lower in ["jaunākais backup"]:
-        await update.message.reply_text(latest_backup_info(user_id))
+        await update.message.reply_text(latest_backup_info(user_id), disable_web_page_preview=True)
         return
 
     if lower in ["dzēs visus backup", "izdzēs visus backup"]:
-        await update.message.reply_text(delete_all_backups(user_id))
+        await update.message.reply_text(delete_all_backups(user_id), disable_web_page_preview=True)
         return
 
     if lower.startswith("dzēs backup") or lower.startswith("izdzēs backup"):
-        await update.message.reply_text(delete_backup(user_id, user_text))
+        await update.message.reply_text(delete_backup(user_id, user_text), disable_web_page_preview=True)
         return
 
     if lower.startswith("atjauno no backup"):
-        await update.message.reply_text(restore_backup(user_id, user_text))
+        await update.message.reply_text(restore_backup(user_id, user_text), disable_web_page_preview=True)
         return
 
     if lower.startswith("atgādini man"):
-        await update.message.reply_text(add_reminder(user_id, user_text))
+        await update.message.reply_text(add_reminder(user_id, user_text), disable_web_page_preview=True)
         return
 
     if lower in ["mani atgādinājumi", "parādi atgādinājumus", "atgādinājumi"]:
-        await update.message.reply_text(list_reminders(user_id))
+        await update.message.reply_text(list_reminders(user_id), disable_web_page_preview=True)
         return
 
     if lower.startswith("dzēs atgādinājumu") or lower.startswith("izdzēs atgādinājumu"):
-        await update.message.reply_text(delete_reminder(user_id, user_text))
+        await update.message.reply_text(delete_reminder(user_id, user_text), disable_web_page_preview=True)
         return
 
     if lower.startswith("aizmirsti atgādinājumu"):
-        await update.message.reply_text(delete_reminder(user_id, user_text))
+        await update.message.reply_text(delete_reminder(user_id, user_text), disable_web_page_preview=True)
         return
 
     if lower.startswith("aizmirsti"):
-        await update.message.reply_text(forget_from_profile(user_id, user_text))
+        await update.message.reply_text(forget_from_profile(user_id, user_text), disable_web_page_preview=True)
         return
 
     if lower in ["atjauno kopsavilkumu", "izveido kopsavilkumu", "atjauno atmiņu"]:
-        await update.message.reply_text(build_summary(user_id))
+        await update.message.reply_text(build_summary(user_id), disable_web_page_preview=True)
         return
 
     if lower in ["mans kopsavilkums", "parādi kopsavilkumu", "ilgtermiņa atmiņa"]:
-        await update.message.reply_text(show_summary(user_id))
+        await update.message.reply_text(show_summary(user_id), disable_web_page_preview=True)
         return
 
     update_profile_from_text(user_id, user_text)
     user = get_user(user_id)
 
     if "mana laika zona" in lower or "kur es dzīvoju" in lower or "es dzīvoju" in lower:
-        await update.message.reply_text(f"Saglabāju. Tava laika zona: {user['timezone']}")
+        await update.message.reply_text(f"Saglabāju. Tava laika zona: {user['timezone']}", disable_web_page_preview=True)
         return
 
     if "kā mani sauc" in lower:
-        await update.message.reply_text(f"Tevi sauc {user['name']}. 😊" if user["name"] else "Tu vēl neesi pateicis savu vārdu. 😊")
+        await update.message.reply_text(f"Tevi sauc {user['name']}. 😊" if user["name"] else "Tu vēl neesi pateicis savu vārdu. 😊", disable_web_page_preview=True)
         return
 
     if (
@@ -2965,7 +2965,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         or "ko par mani zini" in lower
         or "ko par manīm zini" in lower
     ):
-        await update.message.reply_text(profile_answer(user))
+        await update.message.reply_text(profile_answer(user), disable_web_page_preview=True)
         return
 
     save_message(user_id, "Lietotājs", user_text)
@@ -3018,7 +3018,7 @@ Kopsavilkums atjaunots:
     achievements = check_achievements(user_id)
     answer = append_bonus_notices(answer, streak_notice, achievements)
     save_message(user_id, "Nina", answer)
-    await update.message.reply_text(answer)
+    await update.message.reply_text(answer, disable_web_page_preview=True)
 
 
 @app.route("/stripe/webhook", methods=["POST"])
@@ -3035,7 +3035,7 @@ def stripe_webhook():
         else:
             event = json.loads(payload.decode("utf-8"))
     except Exception as e:
-        print("Maksājumu webhook signature/json kļūda:", e)
+        print("Stripe webhook signature/json kļūda:", e)
         return jsonify({"error": "invalid webhook"}), 400
 
     event_id = event.get("id", "")
@@ -3049,7 +3049,7 @@ def stripe_webhook():
         user_id = user_id_from_stripe_session(session)
 
         if not user_id:
-            print("Maksājumu webhook: nav user_id metadata/client_reference_id")
+            print("Stripe webhook: nav user_id metadata/client_reference_id")
             return jsonify({"ok": False, "error": "missing user_id"}), 200
 
         plan_name, amount, currency = plan_from_stripe_session(session)
@@ -3068,14 +3068,14 @@ def stripe_webhook():
             customer_email=customer_email,
         )
 
-        print(f"Maksājumu webhook: Premium aktivizēts user_id={user_id}, plan={plan_name}, līdz={until}. Welcome ready: premium welcome")
+        print(f"Stripe webhook: Premium aktivizēts user_id={user_id}, plan={plan_name}, līdz={until}. Welcome ready: premium welcome")
         if achievements:
             print("Stripe achievements:", achievements)
 
         return jsonify({"ok": True, "premium_until": until})
 
     # Atzīmējam citus Stripe eventus tikai logā; Premium nemainām.
-    print("Maksājumu webhook ignored:", event_type)
+    print("Stripe webhook ignored:", event_type)
     return jsonify({"ok": True, "ignored": event_type})
 
 
@@ -3099,7 +3099,7 @@ def payment_success_page():
     <body>
         <div class="card">
             <h1>✅ Maksājums saņemts</h1>
-            <p>Paldies! Ja Maksājumu webhook ir pieslēgts, Nina Premium tiks aktivizēts automātiski.</p>
+            <p>Paldies! Ja Stripe webhook ir pieslēgts, Nina Premium tiks aktivizēts automātiski.</p>
             <p>Atgriezies Telegram un palaid Premium sveicienu:</p>
             <p><span class="cmd">premium welcome</span></p>
             <p>Pēc tam vari pārbaudīt pilno paneli:</p>
