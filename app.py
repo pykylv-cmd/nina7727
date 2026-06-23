@@ -201,6 +201,17 @@ def init_db():
         )
     """)
 
+
+    db_execute(c, """
+        CREATE TABLE IF NOT EXISTS backup_restore_logs (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT,
+            backup_id TEXT,
+            status TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     for col, col_type in [
         ("checkout_url", "TEXT DEFAULT ''"),
         ("stripe_session_id", "TEXT DEFAULT ''"),
@@ -735,7 +746,7 @@ def admin_audit_stats_answer(user_id):
 
 def _count_table_rows(table_name, where_sql="", params=None):
     """Drošs skaitītājs System Health panelim."""
-    allowed_tables = {"users", "messages", "reminders", "memory_backups", "user_achievements", "admin_audit_logs", "premium_transactions"}
+    allowed_tables = {"users", "messages", "reminders", "memory_backups", "user_achievements", "admin_audit_logs", "premium_transactions", "backup_restore_logs"}
     if table_name not in allowed_tables:
         return 0
     conn = None
@@ -827,7 +838,7 @@ def system_health_answer(user_id, command_text="health"):
         f"Aktīvie atgādinājumi: {active_reminders}\n"
         f"Backup kopā: {backups_total}\n"
         f"Audit ieraksti: {audit_total}\n\n"
-        "Versija: V10.13"
+        "Versija: V10.14"
     )
 
 
@@ -907,7 +918,7 @@ def user_analytics_answer(user_id, command_text="analytics"):
         f"Vidējais XP: {avg_xp:.1f}\n"
         f"Vidējais līmenis: {avg_level:.1f}\n"
         f"Vidējais streak: {avg_streak:.1f}\n\n"
-        "Versija: V10.13"
+        "Versija: V10.14"
     )
 
 
@@ -979,7 +990,7 @@ def database_backup_dashboard(user_id, command_text="db backup"):
         f"Pēdējais backup: {latest_backup}\n"
         f"Pēdējā ziņa: {latest_message}\n"
         f"Pēdējais audit: {latest_audit}\n\n"
-        "Versija: V10.13"
+        "Versija: V10.14"
     )
 
 
@@ -997,7 +1008,7 @@ def _riga_next_daily_text(hour=22, minute=0):
 
 
 def init_backup_scheduler():
-    """V10.13: izveido noklusēto backup scheduler ierakstu, ja tā vēl nav."""
+    """V10.14: izveido noklusēto backup scheduler ierakstu, ja tā vēl nav."""
     try:
         conn = get_db()
         c = conn.cursor()
@@ -1074,7 +1085,7 @@ def build_system_backup_text():
     data = {
         "exported_at": exported_at,
         "type": "system_database_backup",
-        "version": "V10.13",
+        "version": "V10.14",
         "database": db_type,
         "counts": {
             "users": _count_table_rows("users"),
@@ -1091,7 +1102,7 @@ def build_system_backup_text():
         "NINA SYSTEM DATABASE BACKUP\n"
         f"Laiks: {exported_at} ({DEFAULT_TIMEZONE})\n"
         f"Datubāze: {db_type}\n"
-        "Versija: V10.13\n\n"
+        "Versija: V10.14\n\n"
         "JSON kopija:\n" + json.dumps(data, ensure_ascii=False, indent=2)
     )
 
@@ -1123,7 +1134,7 @@ def save_system_database_backup(source="auto_system"):
 
 
 def run_auto_backup(force=False):
-    """V10.13: palaiž auto backup, ja pienācis next_run vai ja force=True."""
+    """V10.14: palaiž auto backup, ja pienācis next_run vai ja force=True."""
     init_backup_scheduler()
     state = get_backup_scheduler_state()
     if not state.get("enabled"):
@@ -1178,7 +1189,7 @@ def auto_backup_count():
 
 
 def backup_scheduler_answer(user_id, command_text="auto backup"):
-    """V10.13: Automated Backup Scheduler panelis."""
+    """V10.14: Automated Backup Scheduler panelis."""
     if not is_admin(user_id):
         log_admin_action(user_id, "backup_scheduler_view", "denied", command_text)
         return admin_locked_answer()
@@ -1205,8 +1216,160 @@ def backup_scheduler_answer(user_id, command_text="auto backup"):
         f"{max(total_runs, auto_count)}\n\n"
         "Audit action:\n"
         "auto_backup_run\n\n"
-        "Versija: V10.13"
+        "Versija: V10.14"
     )
+
+
+def log_restore_action(user_id, backup_id, status):
+    """V10.14: saglabā recovery darbību atsevišķā restore žurnālā."""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(
+            c,
+            """
+            INSERT INTO backup_restore_logs (user_id, backup_id, status)
+            VALUES (%s, %s, %s)
+            """,
+            (str(user_id), str(backup_id or ""), status or "")
+        )
+        conn.commit()
+        c.close()
+        conn.close()
+    except Exception as e:
+        print("Backup restore log kļūda:", e)
+
+
+def latest_recovery_backups(limit=5):
+    """V10.14: atgriež pēdējos backup ierakstus Recovery Center panelim."""
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        db_execute(
+            c,
+            """
+            SELECT id, user_id, source, created_at
+            FROM memory_backups
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            (int(limit or 5),)
+        )
+        rows = c.fetchall()
+    except Exception:
+        rows = []
+    c.close()
+    conn.close()
+    return rows
+
+
+def latest_user_backup_id(user_id):
+    """V10.14: pēdējais konkrētā lietotāja profila backup."""
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        db_execute(
+            c,
+            """
+            SELECT id
+            FROM memory_backups
+            WHERE user_id = %s
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (str(user_id),)
+        )
+        row = c.fetchone()
+    except Exception:
+        row = None
+    c.close()
+    conn.close()
+    return int(row[0]) if row else None
+
+
+def recovery_center_answer(user_id, command_text="recovery"):
+    """V10.14: Recovery Center — pārskats par backup un restore iespējām."""
+    if not is_admin(user_id):
+        log_admin_action(user_id, "recovery_center_view", "denied", command_text)
+        return admin_locked_answer()
+
+    log_admin_action(user_id, "recovery_center_view", "allowed", command_text)
+    rows = latest_recovery_backups(5)
+    restore_logs = _count_table_rows("backup_restore_logs")
+
+    lines = [
+        "🛟 Nina Recovery Center",
+        "",
+        "Pēdējie backup:",
+        "",
+    ]
+
+    if rows:
+        for idx, (bid, backup_user_id, source, created_at) in enumerate(rows, start=1):
+            lines.append(f"{idx}. #{bid} — {created_at} ({source or 'manual'}, user: {backup_user_id or 'unknown'})")
+    else:
+        lines.append("Nav backup ierakstu.")
+
+    lines.extend([
+        "",
+        "Pieejamās darbības:",
+        "• backup stats",
+        "• auto backup",
+        "• restore latest",
+        "",
+        "Atjaunošana:",
+        "restore latest atjauno pēdējo tava profila backup.",
+        "Sistēmas auto backup šobrīd ir drošības eksports/statistika, nevis pilns DB dump.",
+        "",
+        f"Restore mēģinājumi: {restore_logs}",
+        "Statuss: Ready",
+        "Versija: V10.14",
+    ])
+
+    return "\n".join(lines)
+
+
+def restore_latest_backup(user_id, command_text="restore latest"):
+    """V10.14: atjauno pēdējo admina profila backup."""
+    if not is_admin(user_id):
+        log_admin_action(user_id, "backup_restore_attempt", "denied", command_text)
+        return admin_locked_answer()
+
+    log_admin_action(user_id, "backup_restore_attempt", "started", command_text)
+    backup_id = latest_user_backup_id(user_id)
+
+    if not backup_id:
+        log_restore_action(user_id, "", "failed_no_backup")
+        log_admin_action(user_id, "backup_restore_failed", "failed", "no_user_backup")
+        return (
+            "🛟 Nina Recovery Center\n\n"
+            "Atjaunošana neizdevās.\n\n"
+            "Nav atrasts tavs profila backup.\n"
+            "Vispirms izveido backup."
+        )
+
+    result = restore_backup(user_id, f"atjauno no backup {backup_id}")
+    if result.startswith("✅"):
+        log_restore_action(user_id, backup_id, "success")
+        log_admin_action(user_id, "backup_restore_success", "success", f"backup_id={backup_id}")
+        return (
+            "🛟 Nina Recovery Center\n\n"
+            f"{result}\n\n"
+            f"Backup ID: #{backup_id}\n"
+            "Statuss: Restored\n"
+            "Versija: V10.14"
+        )
+
+    log_restore_action(user_id, backup_id, "failed")
+    log_admin_action(user_id, "backup_restore_failed", "failed", f"backup_id={backup_id}")
+    return (
+        "🛟 Nina Recovery Center\n\n"
+        "Atjaunošana neizdevās.\n\n"
+        f"Backup ID: #{backup_id}\n"
+        f"Iemesls: {result}\n\n"
+        "Statuss: Failed"
+    )
+
 
 
 async def auto_backup_worker(application):
@@ -3401,6 +3564,12 @@ def command_answer(user_id, command_text):
     if lower in ["auto backup", "backup scheduler", "backup grafiks", "automātiskais backup", "automatiskais backup"]:
         return backup_scheduler_answer(user_id, lower)
 
+    if lower in ["recovery", "recovery center", "restore backup", "backup restore"]:
+        return recovery_center_answer(user_id, lower)
+
+    if lower in ["restore latest", "atjauno pēdējo", "atjauno pedejo"]:
+        return restore_latest_backup(user_id, lower)
+
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
         return premium_dashboard(user_id)
 
@@ -3588,6 +3757,14 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower in ["auto backup", "backup scheduler", "backup grafiks", "automātiskais backup", "automatiskais backup"]:
         await update.message.reply_text(append_bonus_notices(backup_scheduler_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
+        return
+
+    if lower in ["recovery", "recovery center", "restore backup", "backup restore"]:
+        await update.message.reply_text(append_bonus_notices(recovery_center_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
+        return
+
+    if lower in ["restore latest", "atjauno pēdējo", "atjauno pedejo"]:
+        await update.message.reply_text(append_bonus_notices(restore_latest_backup(user_id, lower), streak_notice), disable_web_page_preview=True)
         return
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
@@ -3898,7 +4075,7 @@ def payment_cancel_page():
 
 @app.route("/")
 def home():
-    return "Nina7727 V10.13 Automated Backup Scheduler darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V10.14 Recovery Center darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -3913,5 +4090,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V10.13 Automated Backup Scheduler darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V10.14 Recovery Center darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
