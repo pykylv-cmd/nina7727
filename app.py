@@ -492,7 +492,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.19 Admin User Search."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.20 Admin User Search."
     )
 
 
@@ -838,7 +838,7 @@ def system_health_answer(user_id, command_text="health"):
         f"Aktīvie atgādinājumi: {active_reminders}\n"
         f"Backup kopā: {backups_total}\n"
         f"Audit ieraksti: {audit_total}\n\n"
-        "Versija: V10.19"
+        "Versija: V10.20"
     )
 
 
@@ -918,7 +918,7 @@ def user_analytics_answer(user_id, command_text="analytics"):
         f"Vidējais XP: {avg_xp:.1f}\n"
         f"Vidējais līmenis: {avg_level:.1f}\n"
         f"Vidējais streak: {avg_streak:.1f}\n\n"
-        "Versija: V10.19"
+        "Versija: V10.20"
     )
 
 
@@ -990,7 +990,7 @@ def database_backup_dashboard(user_id, command_text="db backup"):
         f"Pēdējais backup: {latest_backup}\n"
         f"Pēdējā ziņa: {latest_message}\n"
         f"Pēdējais audit: {latest_audit}\n\n"
-        "Versija: V10.19"
+        "Versija: V10.20"
     )
 
 
@@ -1216,7 +1216,7 @@ def backup_scheduler_answer(user_id, command_text="auto backup"):
         f"{max(total_runs, auto_count)}\n\n"
         "Audit action:\n"
         "auto_backup_run\n\n"
-        "Versija: V10.19"
+        "Versija: V10.20"
     )
 
 
@@ -1323,7 +1323,7 @@ def recovery_center_answer(user_id, command_text="recovery"):
         "",
         f"Restore mēģinājumi: {restore_logs}",
         "Statuss: Ready",
-        "Versija: V10.19",
+        "Versija: V10.20",
     ])
 
     return "\n".join(lines)
@@ -1357,7 +1357,7 @@ def restore_latest_backup(user_id, command_text="restore latest"):
             f"{result}\n\n"
             f"Backup ID: #{backup_id}\n"
             "Statuss: Restored\n"
-            "Versija: V10.19"
+            "Versija: V10.20"
         )
 
     log_restore_action(user_id, backup_id, "failed")
@@ -1405,7 +1405,7 @@ def admin_command_center(user_id, command_text="admin"):
         "Drošība:\n"
         f"🔒 Admin Lock: {admin_lock_status}\n"
         f"📋 Audit Log: {audit_status}\n\n"
-        "Versija: V10.19"
+        "Versija: V10.20"
     )
 
 
@@ -1482,12 +1482,12 @@ def admin_notifications_center(user_id, command_text="notifications"):
         f"• Restore kļūdas: {restore_errors}\n"
         f"• Maksājumu kļūdas: {payment_errors}\n\n"
         f"Statuss: {icon} {status}\n"
-        "Versija: V10.19"
+        "Versija: V10.20"
     )
 
 
 def admin_activity_feed(user_id, command_text="activity", limit=10):
-    """V10.19: Admin Activity Feed — pēdējās admin/audit darbības vienā plūsmā."""
+    """V10.20: Admin Activity Feed — pēdējās admin/audit darbības vienā plūsmā."""
     if not is_admin(user_id):
         log_admin_action(user_id, "activity_feed_view", "denied", command_text)
         return admin_locked_answer()
@@ -1545,14 +1545,14 @@ def admin_activity_feed(user_id, command_text="activity", limit=10):
     lines.extend([
         f"Kopā ieraksti: {total}",
         "",
-        "Versija: V10.19",
+        "Versija: V10.20",
     ])
 
     return "\n".join(lines).strip()
 
 
 def _admin_extract_target_user_id(command_text):
-    """V10.19: mēģina izvilkt Telegram user_id no admin lookup komandas."""
+    """V10.20: mēģina izvilkt Telegram user_id no admin lookup komandas."""
     text = (command_text or "").strip()
     # Atbalsta: user 123, user lookup 123, lietotājs 123, meklēt lietotāju 123
     match = re.search(r"\b(\d{4,})\b", text)
@@ -1562,7 +1562,7 @@ def _admin_extract_target_user_id(command_text):
 
 
 def _fetch_user_row_for_admin(target_user_id):
-    """V10.19: nolasa lietotāju bez jauna profila automātiskas izveides."""
+    """V10.20: nolasa lietotāju bez jauna profila automātiskas izveides."""
     conn = get_db()
     c = conn.cursor()
     try:
@@ -1611,7 +1611,7 @@ def _fetch_user_row_for_admin(target_user_id):
 
 
 def admin_user_lookup(user_id, command_text="user lookup"):
-    """V10.19: Admin User Lookup — konkrēta lietotāja profils, lojalitāte un aktivitāte."""
+    """V10.20: Admin User Lookup — konkrēta lietotāja profils, lojalitāte un aktivitāte."""
     if not is_admin(user_id):
         log_admin_action(user_id, "user_lookup_view", "denied", command_text)
         return admin_locked_answer()
@@ -1624,7 +1624,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
             "Norādi lietotāja ID.\n\n"
             "Piemērs:\n"
             "user 5138563912\n\n"
-            "Versija: V10.19"
+            "Versija: V10.20"
         )
 
     log_admin_action(user_id, "user_lookup_view", "allowed", command_text)
@@ -1636,7 +1636,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
             f"User ID: {target_user_id}\n"
             "Statuss: nav atrasts\n\n"
             "Šāds lietotājs vēl nav Nina datubāzē.\n\n"
-            "Versija: V10.19"
+            "Versija: V10.20"
         )
 
     messages_total = _count_table_rows("messages", "WHERE user_id = %s", (str(target_user_id),))
@@ -1674,12 +1674,12 @@ def admin_user_lookup(user_id, command_text="user lookup"):
         f"Backup: {backups_total}\n"
         f"Atgādinājumi: {reminders_total}\n"
         f"Aktīvie atgādinājumi: {active_reminders}\n\n"
-        "Versija: V10.19"
+        "Versija: V10.20"
     )
 
 
 def admin_user_search(user_id, command_text="search user"):
-    """V10.19: Admin User Search — meklē lietotājus pēc user_id, vārda, premium/free, xp/level."""
+    """V10.20: Admin User Search — meklē lietotājus pēc user_id, vārda, premium/free, xp/level."""
     if not is_admin(user_id):
         log_admin_action(user_id, "user_search_view", "denied", command_text)
         return admin_locked_answer()
@@ -1791,7 +1791,7 @@ def admin_user_search(user_id, command_text="search user"):
             "find user 5138563912",
             "lietotāji",
             "",
-            "Versija: V10.19",
+            "Versija: V10.20",
         ])
         return "\n".join(lines)
 
@@ -1810,8 +1810,184 @@ def admin_user_search(user_id, command_text="search user"):
         lines.append(f"Streak: {int(streak_days or 0)}")
         lines.append("")
 
-    lines.append("Versija: V10.19")
+    lines.append("Versija: V10.20")
     return "\n".join(lines).strip()
+
+
+def _admin_extract_action_numbers(command_text):
+    """V10.20: izvelk skaitļus no admin darbības komandas."""
+    return re.findall(r"\b\d+\b", command_text or "")
+
+
+def admin_user_actions_help(user_id, command_text="user actions"):
+    """V10.20: Admin User Actions palīdzības panelis."""
+    if not is_admin(user_id):
+        log_admin_action(user_id, "user_actions_help", "denied", command_text)
+        return admin_locked_answer()
+
+    log_admin_action(user_id, "user_actions_help", "allowed", command_text)
+    return (
+        "🧰 Nina Admin User Actions\n\n"
+        "Pieejamās darbības:\n\n"
+        "grant premium 5138563912\n"
+        "Piešķir Premium uz 30 dienām.\n\n"
+        "remove premium 5138563912\n"
+        "Noņem Premium statusu.\n\n"
+        "add xp 5138563912 100\n"
+        "Pievieno XP lietotājam.\n\n"
+        "remove xp 5138563912 50\n"
+        "Noņem XP lietotājam.\n\n"
+        "set level 5138563912 5\n"
+        "Uzstāda līmeni un pielāgo XP.\n\n"
+        "reset streak 5138563912\n"
+        "Nodzēš lietotāja streak.\n\n"
+        "Drošība:\n"
+        "Visas darbības ir tikai administratoram un tiek ierakstītas Audit Log.\n\n"
+        "Versija: V10.20"
+    )
+
+
+def admin_user_action(user_id, command_text="user actions"):
+    """V10.20: Admin User Actions — Premium, XP, level un streak darbības."""
+    lower = (command_text or "").strip().lower()
+
+    if lower == "user actions":
+        return admin_user_actions_help(user_id, command_text)
+
+    if not is_admin(user_id):
+        log_admin_action(user_id, "user_action_execute", "denied", command_text)
+        return admin_locked_answer()
+
+    numbers = _admin_extract_action_numbers(command_text)
+    if not numbers:
+        log_admin_action(user_id, "user_action_execute", "failed_missing_user_id", command_text)
+        return (
+            "🧰 Nina Admin User Actions\n\n"
+            "Trūkst lietotāja ID.\n\n"
+            "Piemērs:\n"
+            "grant premium 5138563912\n\n"
+            "Versija: V10.20"
+        )
+
+    target_user_id = numbers[0]
+    target = _fetch_user_row_for_admin(target_user_id)
+    if not target:
+        log_admin_action(user_id, "user_action_execute", "failed_user_not_found", command_text)
+        return (
+            "🧰 Nina Admin User Actions\n\n"
+            f"User ID: {target_user_id}\n"
+            "Statuss: nav atrasts\n\n"
+            "Šāds lietotājs vēl nav Nina datubāzē.\n\n"
+            "Versija: V10.20"
+        )
+
+    try:
+        action_name = "unknown"
+        result_text = ""
+
+        if lower.startswith("grant premium"):
+            until = (datetime.now(ZoneInfo(target.get("timezone") or DEFAULT_TIMEZONE)) + timedelta(days=30)).strftime("%Y-%m-%d")
+            target["premium"] = 1
+            target["premium_until"] = until
+            update_user(str(target_user_id), target)
+            record_premium_transaction(
+                user_id=str(target_user_id),
+                plan_name=PLAN_PREMIUM_BASIC,
+                amount=0,
+                currency=PREMIUM_CURRENCY,
+                payment_method="admin",
+                status="admin_granted",
+                expires_at=until,
+            )
+            action_name = "grant_premium"
+            result_text = f"Premium piešķirts līdz {until}."
+
+        elif lower.startswith("remove premium"):
+            target["premium"] = 0
+            target["premium_until"] = ""
+            update_user(str(target_user_id), target)
+            record_premium_transaction(
+                user_id=str(target_user_id),
+                plan_name=PLAN_FREE,
+                amount=0,
+                currency=PREMIUM_CURRENCY,
+                payment_method="admin",
+                status="admin_removed",
+                expires_at="",
+            )
+            action_name = "remove_premium"
+            result_text = "Premium noņemts."
+
+        elif lower.startswith("add xp"):
+            if len(numbers) < 2:
+                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nadd xp 5138563912 100\n\nVersija: V10.20"
+            amount = max(0, int(numbers[1]))
+            new_xp = int(target.get("xp", 0) or 0) + amount
+            target["xp"] = new_xp
+            target["level"] = calculate_level(new_xp)
+            update_user(str(target_user_id), target)
+            action_name = "add_xp"
+            result_text = f"Pievienots {amount} XP. Jaunais XP: {new_xp}. Līmenis: {target['level']}."
+
+        elif lower.startswith("remove xp"):
+            if len(numbers) < 2:
+                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nremove xp 5138563912 50\n\nVersija: V10.20"
+            amount = max(0, int(numbers[1]))
+            new_xp = max(0, int(target.get("xp", 0) or 0) - amount)
+            target["xp"] = new_xp
+            target["level"] = calculate_level(new_xp)
+            update_user(str(target_user_id), target)
+            action_name = "remove_xp"
+            result_text = f"Noņemts {amount} XP. Jaunais XP: {new_xp}. Līmenis: {target['level']}."
+
+        elif lower.startswith("set level"):
+            if len(numbers) < 2:
+                return "🧰 Nina Admin User Actions\n\nTrūkst līmeņa.\n\nPiemērs:\nset level 5138563912 5\n\nVersija: V10.20"
+            new_level = max(1, int(numbers[1]))
+            new_xp = (new_level - 1) * XP_PER_LEVEL
+            target["level"] = new_level
+            target["xp"] = new_xp
+            update_user(str(target_user_id), target)
+            action_name = "set_level"
+            result_text = f"Līmenis uzstādīts uz {new_level}. XP pielāgots uz {new_xp}."
+
+        elif lower.startswith("reset streak"):
+            target["streak_days"] = 0
+            target["last_seen_date"] = ""
+            update_user(str(target_user_id), target)
+            action_name = "reset_streak"
+            result_text = "Streak atiestatīts uz 0."
+
+        else:
+            log_admin_action(user_id, "user_action_execute", "failed_unknown_action", command_text)
+            return "🧰 Nina Admin User Actions\n\nDarbība nav atpazīta.\n\nRaksti: user actions\n\nVersija: V10.20"
+
+        log_admin_action(user_id, f"user_action_{action_name}", "success", command_text)
+        updated = _fetch_user_row_for_admin(target_user_id) or target
+        return (
+            "🧰 Nina Admin User Actions\n\n"
+            f"User ID: {target_user_id}\n"
+            f"Darbība: {action_name}\n"
+            "Statuss: success\n\n"
+            f"{result_text}\n\n"
+            "Pašreizējais stāvoklis:\n"
+            f"Premium: {'Premium' if updated.get('premium') else 'Free'}\n"
+            f"Premium līdz: {updated.get('premium_until') or '—'}\n"
+            f"XP: {updated.get('xp', 0)}\n"
+            f"Līmenis: {updated.get('level', 1)}\n"
+            f"Streak: {updated.get('streak_days', 0)}\n\n"
+            "Versija: V10.20"
+        )
+
+    except Exception as e:
+        print("Admin user action kļūda:", e)
+        log_admin_action(user_id, "user_action_execute", "failed_exception", command_text)
+        return (
+            "🧰 Nina Admin User Actions\n\n"
+            "Darbība neizdevās tehniskas kļūdas dēļ.\n\n"
+            f"Iemesls: {e}\n\n"
+            "Versija: V10.20"
+        )
 
 
 async def auto_backup_worker(application):
@@ -3927,6 +4103,13 @@ def is_command_line(line):
         or lower.startswith("aizmirsti atgādinājumu")
         or lower.startswith("aizmirsti")
         or lower.startswith("atjauno no backup")
+        or lower.startswith("grant premium")
+        or lower.startswith("remove premium")
+        or lower.startswith("add xp")
+        or lower.startswith("remove xp")
+        or lower.startswith("set level")
+        or lower.startswith("reset streak")
+        or lower == "user actions"
         or lower.startswith("dzēs backup")
         or lower.startswith("izdzēs backup")
     )
@@ -4019,6 +4202,17 @@ def command_answer(user_id, command_text):
 
     if lower in ["activity", "admin activity", "activity feed", "aktivitāte", "aktivitate"]:
         return admin_activity_feed(user_id, lower)
+
+    if (
+        lower == "user actions"
+        or lower.startswith("grant premium")
+        or lower.startswith("remove premium")
+        or lower.startswith("add xp")
+        or lower.startswith("remove xp")
+        or lower.startswith("set level")
+        or lower.startswith("reset streak")
+    ):
+        return admin_user_action(user_id, command_text)
 
     if (
         lower.startswith("search user")
@@ -4249,6 +4443,18 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if (
+        lower == "user actions"
+        or lower.startswith("grant premium")
+        or lower.startswith("remove premium")
+        or lower.startswith("add xp")
+        or lower.startswith("remove xp")
+        or lower.startswith("set level")
+        or lower.startswith("reset streak")
+    ):
+        await update.message.reply_text(append_bonus_notices(admin_user_action(user_id, user_text), streak_notice), disable_web_page_preview=True)
+        return
+
+    if (
         lower.startswith("search user")
         or lower.startswith("find user")
         or lower.startswith("meklēt lietotāju")
@@ -4270,7 +4476,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(append_bonus_notices(admin_user_lookup(user_id, user_text), streak_notice), disable_web_page_preview=True)
         return
 
-    # V10.19 Command Routing Fix:
+    # V10.20 Command Routing Fix:
     # Admin Command Center komandām jānostrādā pirms premium dashboard un pirms GPT fallback.
     if lower in ["admin", "admin center", "admin command center", "command center", "dashboard"]:
         await update.message.reply_text(append_bonus_notices(admin_command_center(user_id, lower), streak_notice), disable_web_page_preview=True)
@@ -4584,7 +4790,7 @@ def payment_cancel_page():
 
 @app.route("/")
 def home():
-    return "Nina7727 V10.19 Admin User Search darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V10.20 Admin User Search darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -4599,5 +4805,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V10.19 Admin User Search darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V10.20 Admin User Search darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
