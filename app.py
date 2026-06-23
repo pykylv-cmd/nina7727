@@ -178,6 +178,17 @@ def init_db():
         )
     """)
 
+    db_execute(c, """
+        CREATE TABLE IF NOT EXISTS admin_audit_logs (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT,
+            action TEXT,
+            status TEXT,
+            command_text TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     for col, col_type in [
         ("checkout_url", "TEXT DEFAULT ''"),
         ("stripe_session_id", "TEXT DEFAULT ''"),
@@ -458,7 +469,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.8.1 Strict Admin ENV."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.9 Admin Audit Log."
     )
 
 
@@ -560,9 +571,73 @@ def admin_locked_answer():
     return "🔒 Šī komanda pieejama tikai administratoram."
 
 
-def admin_revenue_dashboard(user_id):
+def log_admin_action(user_id, action, status, command_text=""):
+    """V10.9: saglabā admin darbību audita žurnālā."""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(
+            c,
+            """
+            INSERT INTO admin_audit_logs (user_id, action, status, command_text)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (str(user_id), action, status, command_text or "")
+        )
+        conn.commit()
+        c.close()
+        conn.close()
+    except Exception as e:
+        print("Admin audit log kļūda:", e)
+
+
+def admin_audit_log_answer(user_id):
+    """V10.9: parāda pēdējās admin darbības tikai administratoram."""
     if not is_admin(user_id):
+        log_admin_action(user_id, "audit_log_view", "denied", "admin logs")
         return admin_locked_answer()
+
+    log_admin_action(user_id, "audit_log_view", "allowed", "admin logs")
+
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        db_execute(
+            c,
+            """
+            SELECT created_at, user_id, action, status, command_text
+            FROM admin_audit_logs
+            ORDER BY id DESC
+            LIMIT 20
+            """
+        )
+        rows = c.fetchall()
+    except Exception:
+        rows = []
+    c.close()
+    conn.close()
+
+    if not rows:
+        return "📋 Admin Audit Log\n\nŽurnāls vēl ir tukšs."
+
+    lines = ["📋 Admin Audit Log", "", "Pēdējās darbības:", ""]
+    for created_at, logged_user_id, action, status, command_text in rows:
+        lines.append(str(created_at))
+        lines.append(f"user_id: {logged_user_id}")
+        lines.append(f"action: {action}")
+        lines.append(f"status: {status}")
+        if command_text:
+            lines.append(f"command: {command_text}")
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
+def admin_revenue_dashboard(user_id, command_text="revenue"):
+    if not is_admin(user_id):
+        log_admin_action(user_id, "revenue_view", "denied", command_text)
+        return admin_locked_answer()
+    log_admin_action(user_id, "revenue_view", "allowed", command_text)
     return revenue_dashboard(user_id)
 
 def revenue_dashboard(user_id=None):
@@ -2621,6 +2696,7 @@ COMMAND_LINES = {
     "pirkt premium", "pirkt basic", "pirkt premium basic", "pirkt plus", "pirkt premium plus", "stripe statuss",
     "stripe setup", "stripe env", "stripe palīgs", "stripe paligs",
     "revenue", "ieņēmumi", "ienemumi", "admin panelis", "premium ieņēmumi", "premium ienemumi",
+    "admin logs", "audit logs", "admin žurnāls", "admin zurnals",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
     "premium panelis", "mans panelis", "dashboard",
     "mans līmenis", "mana pieredze", "xp",
@@ -2714,7 +2790,10 @@ def command_answer(user_id, command_text):
         return stripe_setup_helper(user_id)
 
     if lower in ["revenue", "ieņēmumi", "ienemumi", "admin panelis", "premium ieņēmumi", "premium ienemumi"]:
-        return admin_revenue_dashboard(user_id)
+        return admin_revenue_dashboard(user_id, lower)
+
+    if lower in ["admin logs", "audit logs", "admin žurnāls", "admin zurnals"]:
+        return admin_audit_log_answer(user_id)
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
         return premium_dashboard(user_id)
@@ -2878,7 +2957,11 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if lower in ["revenue", "ieņēmumi", "ienemumi", "admin panelis", "premium ieņēmumi", "premium ienemumi"]:
-        await update.message.reply_text(append_bonus_notices(admin_revenue_dashboard(user_id), streak_notice), disable_web_page_preview=True)
+        await update.message.reply_text(append_bonus_notices(admin_revenue_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
+        return
+
+    if lower in ["admin logs", "audit logs", "admin žurnāls", "admin zurnals"]:
+        await update.message.reply_text(append_bonus_notices(admin_audit_log_answer(user_id), streak_notice), disable_web_page_preview=True)
         return
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
