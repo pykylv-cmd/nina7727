@@ -189,6 +189,18 @@ def init_db():
         )
     """)
 
+    db_execute(c, """
+        CREATE TABLE IF NOT EXISTS backup_scheduler (
+            id SERIAL PRIMARY KEY,
+            enabled INTEGER DEFAULT 1,
+            frequency TEXT DEFAULT 'daily',
+            last_run TEXT DEFAULT '',
+            next_run TEXT DEFAULT '',
+            total_runs INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     for col, col_type in [
         ("checkout_url", "TEXT DEFAULT ''"),
         ("stripe_session_id", "TEXT DEFAULT ''"),
@@ -815,7 +827,7 @@ def system_health_answer(user_id, command_text="health"):
         f"Aktīvie atgādinājumi: {active_reminders}\n"
         f"Backup kopā: {backups_total}\n"
         f"Audit ieraksti: {audit_total}\n\n"
-        "Versija: V10.12"
+        "Versija: V10.13"
     )
 
 
@@ -895,7 +907,7 @@ def user_analytics_answer(user_id, command_text="analytics"):
         f"Vidējais XP: {avg_xp:.1f}\n"
         f"Vidējais līmenis: {avg_level:.1f}\n"
         f"Vidējais streak: {avg_streak:.1f}\n\n"
-        "Versija: V10.12"
+        "Versija: V10.13"
     )
 
 
@@ -967,8 +979,243 @@ def database_backup_dashboard(user_id, command_text="db backup"):
         f"Pēdējais backup: {latest_backup}\n"
         f"Pēdējā ziņa: {latest_message}\n"
         f"Pēdējais audit: {latest_audit}\n\n"
-        "Versija: V10.12"
+        "Versija: V10.13"
     )
+
+
+
+def _riga_now_text():
+    return datetime.now(ZoneInfo(DEFAULT_TIMEZONE)).strftime("%Y-%m-%d %H:%M")
+
+
+def _riga_next_daily_text(hour=22, minute=0):
+    now = datetime.now(ZoneInfo(DEFAULT_TIMEZONE))
+    next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if next_run <= now:
+        next_run = next_run + timedelta(days=1)
+    return next_run.strftime("%Y-%m-%d %H:%M")
+
+
+def init_backup_scheduler():
+    """V10.13: izveido noklusēto backup scheduler ierakstu, ja tā vēl nav."""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(c, "SELECT COUNT(*) FROM backup_scheduler")
+        count = int(c.fetchone()[0] or 0)
+        if count == 0:
+            db_execute(
+                c,
+                """
+                INSERT INTO backup_scheduler (enabled, frequency, last_run, next_run, total_runs)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (1, "daily", "", _riga_next_daily_text(), 0)
+            )
+            conn.commit()
+        c.close()
+        conn.close()
+    except Exception as e:
+        print("Backup scheduler init kļūda:", e)
+
+
+def get_backup_scheduler_state():
+    init_backup_scheduler()
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        db_execute(c, """
+            SELECT enabled, frequency, last_run, next_run, total_runs
+            FROM backup_scheduler
+            ORDER BY id ASC
+            LIMIT 1
+        """)
+        row = c.fetchone()
+    except Exception:
+        row = None
+    c.close()
+    conn.close()
+
+    if not row:
+        return {"enabled": 0, "frequency": "daily", "last_run": "", "next_run": "", "total_runs": 0}
+
+    return {
+        "enabled": int(row[0] or 0),
+        "frequency": row[1] or "daily",
+        "last_run": row[2] or "",
+        "next_run": row[3] or "",
+        "total_runs": int(row[4] or 0),
+    }
+
+
+def update_backup_scheduler_state(last_run, next_run, total_runs):
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(
+            c,
+            """
+            UPDATE backup_scheduler
+            SET last_run = %s, next_run = %s, total_runs = %s
+            WHERE id = (SELECT id FROM backup_scheduler ORDER BY id ASC LIMIT 1)
+            """,
+            (last_run, next_run, int(total_runs or 0))
+        )
+        conn.commit()
+        c.close()
+        conn.close()
+    except Exception as e:
+        print("Backup scheduler update kļūda:", e)
+
+
+def build_system_backup_text():
+    db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
+    exported_at = _riga_now_text()
+    data = {
+        "exported_at": exported_at,
+        "type": "system_database_backup",
+        "version": "V10.13",
+        "database": db_type,
+        "counts": {
+            "users": _count_table_rows("users"),
+            "messages": _count_table_rows("messages"),
+            "reminders": _count_table_rows("reminders"),
+            "active_reminders": _count_table_rows("reminders", "WHERE status = %s", ("active",)),
+            "memory_backups": _count_table_rows("memory_backups"),
+            "user_achievements": _count_table_rows("user_achievements"),
+            "premium_transactions": _count_table_rows("premium_transactions"),
+            "admin_audit_logs": _count_table_rows("admin_audit_logs"),
+        }
+    }
+    return (
+        "NINA SYSTEM DATABASE BACKUP\n"
+        f"Laiks: {exported_at} ({DEFAULT_TIMEZONE})\n"
+        f"Datubāze: {db_type}\n"
+        "Versija: V10.13\n\n"
+        "JSON kopija:\n" + json.dumps(data, ensure_ascii=False, indent=2)
+    )
+
+
+def save_system_database_backup(source="auto_system"):
+    backup_text = build_system_backup_text()
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        if USE_POSTGRES:
+            db_execute(
+                c,
+                "INSERT INTO memory_backups (user_id, backup_text, source) VALUES (%s, %s, %s) RETURNING id",
+                ("__system__", backup_text, source)
+            )
+            backup_id = c.fetchone()[0]
+        else:
+            db_execute(
+                c,
+                "INSERT INTO memory_backups (user_id, backup_text, source) VALUES (%s, %s, %s)",
+                ("__system__", backup_text, source)
+            )
+            backup_id = c.lastrowid
+        conn.commit()
+    finally:
+        c.close()
+        conn.close()
+    return backup_id, backup_text
+
+
+def run_auto_backup(force=False):
+    """V10.13: palaiž auto backup, ja pienācis next_run vai ja force=True."""
+    init_backup_scheduler()
+    state = get_backup_scheduler_state()
+    if not state.get("enabled"):
+        return False, "disabled"
+
+    now_text = _riga_now_text()
+    next_run = state.get("next_run") or _riga_next_daily_text()
+    if not force and next_run and now_text < next_run:
+        return False, "not_due"
+
+    try:
+        backup_id, _ = save_system_database_backup("auto_system")
+        total_runs = int(state.get("total_runs", 0) or 0) + 1
+        new_next = _riga_next_daily_text()
+        update_backup_scheduler_state(now_text, new_next, total_runs)
+        log_admin_action("system", "auto_backup_run", "success", f"backup_id={backup_id}")
+        return True, f"backup_id={backup_id}"
+    except Exception as e:
+        log_admin_action("system", "auto_backup_run", "failed", str(e))
+        print("Auto backup kļūda:", e)
+        return False, "failed"
+
+
+def latest_auto_backup_time():
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        db_execute(c, """
+            SELECT MAX(created_at)
+            FROM memory_backups
+            WHERE source = %s
+        """, ("auto_system",))
+        value = c.fetchone()[0]
+    except Exception:
+        value = None
+    c.close()
+    conn.close()
+    return str(value) if value else "nav datu"
+
+
+def auto_backup_count():
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        db_execute(c, "SELECT COUNT(*) FROM memory_backups WHERE source = %s", ("auto_system",))
+        count = int(c.fetchone()[0] or 0)
+    except Exception:
+        count = 0
+    c.close()
+    conn.close()
+    return count
+
+
+def backup_scheduler_answer(user_id, command_text="auto backup"):
+    """V10.13: Automated Backup Scheduler panelis."""
+    if not is_admin(user_id):
+        log_admin_action(user_id, "backup_scheduler_view", "denied", command_text)
+        return admin_locked_answer()
+
+    log_admin_action(user_id, "backup_scheduler_view", "allowed", command_text)
+    state = get_backup_scheduler_state()
+    status = "Aktīvs" if state.get("enabled") else "Izslēgts"
+    frequency = (state.get("frequency") or "daily").capitalize()
+    last_run = state.get("last_run") or latest_auto_backup_time()
+    next_run = state.get("next_run") or _riga_next_daily_text()
+    total_runs = int(state.get("total_runs", 0) or 0)
+    auto_count = auto_backup_count()
+
+    return (
+        "🗄️ Nina Backup Scheduler\n\n"
+        f"Statuss: {status}\n"
+        f"Frekvence: {frequency}\n"
+        f"Laiks: 22:00 ({DEFAULT_TIMEZONE})\n\n"
+        "Pēdējais auto backup:\n"
+        f"{last_run or 'nav datu'}\n\n"
+        "Nākamais auto backup:\n"
+        f"{next_run}\n\n"
+        "Kopā auto backup:\n"
+        f"{max(total_runs, auto_count)}\n\n"
+        "Audit action:\n"
+        "auto_backup_run\n\n"
+        "Versija: V10.13"
+    )
+
+
+async def auto_backup_worker(application):
+    while True:
+        try:
+            run_auto_backup(force=False)
+        except Exception as e:
+            print("Auto backup worker kļūda:", e)
+        await asyncio.sleep(60)
 
 def admin_revenue_dashboard(user_id, command_text="revenue"):
     if not is_admin(user_id):
@@ -3001,7 +3248,9 @@ async def reminder_worker(application):
 
 
 async def post_init(application):
+    init_backup_scheduler()
     asyncio.create_task(reminder_worker(application))
+    asyncio.create_task(auto_backup_worker(application))
 
 
 NINA_PROMPT = """
@@ -3038,6 +3287,7 @@ COMMAND_LINES = {
     "health", "system status", "sistēmas statuss", "sistemas statuss", "veselība", "veseliba",
     "analytics", "lietotāju statistika", "lietotaju statistika", "user stats", "user analytics",
     "db backup", "database backup", "backup stats", "datubāzes backup", "datubazes backup",
+    "auto backup", "backup scheduler", "backup grafiks", "automātiskais backup", "automatiskais backup",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
     "premium panelis", "mans panelis", "dashboard",
     "mans līmenis", "mana pieredze", "xp",
@@ -3147,6 +3397,9 @@ def command_answer(user_id, command_text):
 
     if lower in ["db backup", "database backup", "backup stats", "datubāzes backup", "datubazes backup"]:
         return database_backup_dashboard(user_id, lower)
+
+    if lower in ["auto backup", "backup scheduler", "backup grafiks", "automātiskais backup", "automatiskais backup"]:
+        return backup_scheduler_answer(user_id, lower)
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
         return premium_dashboard(user_id)
@@ -3331,6 +3584,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower in ["db backup", "database backup", "backup stats", "datubāzes backup", "datubazes backup"]:
         await update.message.reply_text(append_bonus_notices(database_backup_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
+        return
+
+    if lower in ["auto backup", "backup scheduler", "backup grafiks", "automātiskais backup", "automatiskais backup"]:
+        await update.message.reply_text(append_bonus_notices(backup_scheduler_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
         return
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
@@ -3641,7 +3898,7 @@ def payment_cancel_page():
 
 @app.route("/")
 def home():
-    return "Nina7727 V10.5 Premium Welcome Flow darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V10.13 Automated Backup Scheduler darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -3656,5 +3913,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V10.5 Premium Welcome Flow darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V10.13 Automated Backup Scheduler darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
