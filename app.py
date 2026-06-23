@@ -492,7 +492,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.12 Database Backup Dashboard."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.15 Admin Command Center."
     )
 
 
@@ -838,7 +838,7 @@ def system_health_answer(user_id, command_text="health"):
         f"Aktīvie atgādinājumi: {active_reminders}\n"
         f"Backup kopā: {backups_total}\n"
         f"Audit ieraksti: {audit_total}\n\n"
-        "Versija: V10.14"
+        "Versija: V10.15"
     )
 
 
@@ -918,7 +918,7 @@ def user_analytics_answer(user_id, command_text="analytics"):
         f"Vidējais XP: {avg_xp:.1f}\n"
         f"Vidējais līmenis: {avg_level:.1f}\n"
         f"Vidējais streak: {avg_streak:.1f}\n\n"
-        "Versija: V10.14"
+        "Versija: V10.15"
     )
 
 
@@ -990,7 +990,7 @@ def database_backup_dashboard(user_id, command_text="db backup"):
         f"Pēdējais backup: {latest_backup}\n"
         f"Pēdējā ziņa: {latest_message}\n"
         f"Pēdējais audit: {latest_audit}\n\n"
-        "Versija: V10.14"
+        "Versija: V10.15"
     )
 
 
@@ -1085,7 +1085,7 @@ def build_system_backup_text():
     data = {
         "exported_at": exported_at,
         "type": "system_database_backup",
-        "version": "V10.14",
+        "version": "V10.15",
         "database": db_type,
         "counts": {
             "users": _count_table_rows("users"),
@@ -1102,7 +1102,7 @@ def build_system_backup_text():
         "NINA SYSTEM DATABASE BACKUP\n"
         f"Laiks: {exported_at} ({DEFAULT_TIMEZONE})\n"
         f"Datubāze: {db_type}\n"
-        "Versija: V10.14\n\n"
+        "Versija: V10.15\n\n"
         "JSON kopija:\n" + json.dumps(data, ensure_ascii=False, indent=2)
     )
 
@@ -1216,7 +1216,7 @@ def backup_scheduler_answer(user_id, command_text="auto backup"):
         f"{max(total_runs, auto_count)}\n\n"
         "Audit action:\n"
         "auto_backup_run\n\n"
-        "Versija: V10.14"
+        "Versija: V10.15"
     )
 
 
@@ -1323,7 +1323,7 @@ def recovery_center_answer(user_id, command_text="recovery"):
         "",
         f"Restore mēģinājumi: {restore_logs}",
         "Statuss: Ready",
-        "Versija: V10.14",
+        "Versija: V10.15",
     ])
 
     return "\n".join(lines)
@@ -1357,7 +1357,7 @@ def restore_latest_backup(user_id, command_text="restore latest"):
             f"{result}\n\n"
             f"Backup ID: #{backup_id}\n"
             "Statuss: Restored\n"
-            "Versija: V10.14"
+            "Versija: V10.15"
         )
 
     log_restore_action(user_id, backup_id, "failed")
@@ -1370,6 +1370,43 @@ def restore_latest_backup(user_id, command_text="restore latest"):
         "Statuss: Failed"
     )
 
+
+
+def admin_command_center(user_id, command_text="admin"):
+    """V10.15: Admin Command Center — centrālais admin paneļu saraksts."""
+    if not is_admin(user_id):
+        log_admin_action(user_id, "admin_center_view", "denied", command_text)
+        return admin_locked_answer()
+
+    log_admin_action(user_id, "admin_center_view", "allowed", command_text)
+
+    admin_lock_status = "Aktīvs" if admin_access_configured() else "Nav konfigurēts"
+    audit_status = "Aktīvs" if _database_health_ok() else "Nav pieejams"
+
+    return (
+        "🛠️ Nina Admin Command Center\n\n"
+        "Galvenie paneļi:\n\n"
+        "💰 Revenue\n"
+        "Komanda: revenue\n\n"
+        "📊 Analytics\n"
+        "Komanda: analytics\n\n"
+        "🟢 System Health\n"
+        "Komanda: health\n\n"
+        "📋 Audit Logs\n"
+        "Komanda: admin logs\n\n"
+        "📈 Audit Statistics\n"
+        "Komanda: audit stats\n\n"
+        "🗄️ Database Backup\n"
+        "Komanda: db backup\n\n"
+        "⏰ Backup Scheduler\n"
+        "Komanda: auto backup\n\n"
+        "🛟 Recovery Center\n"
+        "Komanda: recovery\n\n"
+        "Drošība:\n"
+        f"🔒 Admin Lock: {admin_lock_status}\n"
+        f"📋 Audit Log: {audit_status}\n\n"
+        "Versija: V10.15"
+    )
 
 
 async def auto_backup_worker(application):
@@ -3451,8 +3488,10 @@ COMMAND_LINES = {
     "analytics", "lietotāju statistika", "lietotaju statistika", "user stats", "user analytics",
     "db backup", "database backup", "backup stats", "datubāzes backup", "datubazes backup",
     "auto backup", "backup scheduler", "backup grafiks", "automātiskais backup", "automatiskais backup",
+    "recovery", "recovery center", "restore backup", "backup restore", "restore latest",
+    "admin", "admin center", "admin command center", "command center", "dashboard",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
-    "premium panelis", "mans panelis", "dashboard",
+    "premium panelis", "mans panelis",
     "mans līmenis", "mana pieredze", "xp",
     "mani sasniegumi", "sasniegumi", "sasniegumu progress",
     "mans streak", "mana sērija", "streak",
@@ -3570,7 +3609,10 @@ def command_answer(user_id, command_text):
     if lower in ["restore latest", "atjauno pēdējo", "atjauno pedejo"]:
         return restore_latest_backup(user_id, lower)
 
-    if lower in ["premium panelis", "mans panelis", "dashboard"]:
+    if lower in ["admin", "admin center", "admin command center", "command center", "dashboard"]:
+        return admin_command_center(user_id, lower)
+
+    if lower in ["premium panelis", "mans panelis"]:
         return premium_dashboard(user_id)
 
     if lower in ["mans līmenis", "mana pieredze", "xp"]:
@@ -4075,7 +4117,7 @@ def payment_cancel_page():
 
 @app.route("/")
 def home():
-    return "Nina7727 V10.14 Recovery Center darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V10.15 Admin Command Center darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -4090,5 +4132,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V10.14 Recovery Center darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V10.15 Admin Command Center darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
