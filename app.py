@@ -838,7 +838,7 @@ def system_health_answer(user_id, command_text="health"):
         f"Aktīvie atgādinājumi: {active_reminders}\n"
         f"Backup kopā: {backups_total}\n"
         f"Audit ieraksti: {audit_total}\n\n"
-        "Versija: V10.15"
+        "Versija: V10.15.1"
     )
 
 
@@ -918,7 +918,7 @@ def user_analytics_answer(user_id, command_text="analytics"):
         f"Vidējais XP: {avg_xp:.1f}\n"
         f"Vidējais līmenis: {avg_level:.1f}\n"
         f"Vidējais streak: {avg_streak:.1f}\n\n"
-        "Versija: V10.15"
+        "Versija: V10.15.1"
     )
 
 
@@ -990,7 +990,7 @@ def database_backup_dashboard(user_id, command_text="db backup"):
         f"Pēdējais backup: {latest_backup}\n"
         f"Pēdējā ziņa: {latest_message}\n"
         f"Pēdējais audit: {latest_audit}\n\n"
-        "Versija: V10.15"
+        "Versija: V10.15.1"
     )
 
 
@@ -1216,7 +1216,7 @@ def backup_scheduler_answer(user_id, command_text="auto backup"):
         f"{max(total_runs, auto_count)}\n\n"
         "Audit action:\n"
         "auto_backup_run\n\n"
-        "Versija: V10.15"
+        "Versija: V10.15.1"
     )
 
 
@@ -1323,7 +1323,7 @@ def recovery_center_answer(user_id, command_text="recovery"):
         "",
         f"Restore mēģinājumi: {restore_logs}",
         "Statuss: Ready",
-        "Versija: V10.15",
+        "Versija: V10.15.1",
     ])
 
     return "\n".join(lines)
@@ -1357,7 +1357,7 @@ def restore_latest_backup(user_id, command_text="restore latest"):
             f"{result}\n\n"
             f"Backup ID: #{backup_id}\n"
             "Statuss: Restored\n"
-            "Versija: V10.15"
+            "Versija: V10.15.1"
         )
 
     log_restore_action(user_id, backup_id, "failed")
@@ -1405,7 +1405,7 @@ def admin_command_center(user_id, command_text="admin"):
         "Drošība:\n"
         f"🔒 Admin Lock: {admin_lock_status}\n"
         f"📋 Audit Log: {audit_status}\n\n"
-        "Versija: V10.15"
+        "Versija: V10.15.1"
     )
 
 
@@ -3809,7 +3809,13 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(append_bonus_notices(restore_latest_backup(user_id, lower), streak_notice), disable_web_page_preview=True)
         return
 
-    if lower in ["premium panelis", "mans panelis", "dashboard"]:
+    # V10.15.1 Command Routing Fix:
+    # Admin Command Center komandām jānostrādā pirms premium dashboard un pirms GPT fallback.
+    if lower in ["admin", "admin center", "admin command center", "command center", "dashboard"]:
+        await update.message.reply_text(append_bonus_notices(admin_command_center(user_id, lower), streak_notice), disable_web_page_preview=True)
+        return
+
+    if lower in ["premium panelis", "mans panelis"]:
         await update.message.reply_text(append_bonus_notices(premium_dashboard(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
         return
 
