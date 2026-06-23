@@ -469,7 +469,7 @@ def subscription_info(user_id=None):
         "• prioritāras nākotnes funkcijas\n"
         "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
         f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.10 System Health Dashboard."
+        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V10.11 User Analytics Dashboard."
     )
 
 
@@ -815,7 +815,87 @@ def system_health_answer(user_id, command_text="health"):
         f"Aktīvie atgādinājumi: {active_reminders}\n"
         f"Backup kopā: {backups_total}\n"
         f"Audit ieraksti: {audit_total}\n\n"
-        "Versija: V10.10"
+        "Versija: V10.11"
+    )
+
+
+def _avg_users_column(column_name):
+    """Drošs AVG skaitītājs User Analytics panelim."""
+    allowed_columns = {"xp", "level", "streak_days"}
+    if column_name not in allowed_columns:
+        return 0.0
+    conn = None
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(c, f"SELECT COALESCE(AVG({column_name}), 0) FROM users")
+        value = float(c.fetchone()[0] or 0)
+        c.close()
+        conn.close()
+        return value
+    except Exception as e:
+        print("Analytics AVG kļūda:", e)
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+        return 0.0
+
+
+def user_analytics_answer(user_id, command_text="analytics"):
+    """V10.11: User Analytics Dashboard — admin pārskats par lietotājiem un aktivitāti."""
+    if not is_admin(user_id):
+        log_admin_action(user_id, "analytics_view", "denied", command_text)
+        return admin_locked_answer()
+
+    log_admin_action(user_id, "analytics_view", "allowed", command_text)
+
+    users_total = _count_table_rows("users")
+    premium_users = _count_table_rows("users", "WHERE premium = 1")
+    free_users = max(0, users_total - premium_users)
+
+    messages_total = 0
+    conn = None
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(c, "SELECT COUNT(*) FROM messages")
+        messages_total = int(c.fetchone()[0] or 0)
+        c.close()
+        conn.close()
+    except Exception as e:
+        print("Analytics messages count kļūda:", e)
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+        messages_total = 0
+
+    backups_total = _count_table_rows("memory_backups")
+    reminders_total = _count_table_rows("reminders")
+    active_reminders = _count_table_rows("reminders", "WHERE status = %s", ("active",))
+
+    avg_xp = _avg_users_column("xp")
+    avg_level = _avg_users_column("level")
+    avg_streak = _avg_users_column("streak_days")
+
+    return (
+        "📊 Nina User Analytics\n\n"
+        f"Lietotāji kopā: {users_total}\n"
+        f"Premium lietotāji: {premium_users}\n"
+        f"Free lietotāji: {free_users}\n\n"
+        "Aktivitāte:\n"
+        f"Ziņas kopā: {messages_total}\n"
+        f"Backup kopā: {backups_total}\n"
+        f"Atgādinājumi kopā: {reminders_total}\n"
+        f"Aktīvie atgādinājumi: {active_reminders}\n\n"
+        "Lojalitāte:\n"
+        f"Vidējais XP: {avg_xp:.1f}\n"
+        f"Vidējais līmenis: {avg_level:.1f}\n"
+        f"Vidējais streak: {avg_streak:.1f}\n\n"
+        "Versija: V10.11"
     )
 
 def admin_revenue_dashboard(user_id, command_text="revenue"):
@@ -2884,6 +2964,7 @@ COMMAND_LINES = {
     "admin logs", "audit logs", "admin žurnāls", "admin zurnals",
     "audit stats", "admin statistika", "admin stats",
     "health", "system status", "sistēmas statuss", "sistemas statuss", "veselība", "veseliba",
+    "analytics", "lietotāju statistika", "lietotaju statistika", "user stats", "user analytics",
     "mana statistika", "mana aktivitāte", "mana atmiņa",
     "premium panelis", "mans panelis", "dashboard",
     "mans līmenis", "mana pieredze", "xp",
@@ -2987,6 +3068,9 @@ def command_answer(user_id, command_text):
 
     if lower in ["health", "system status", "sistēmas statuss", "sistemas statuss", "veselība", "veseliba"]:
         return system_health_answer(user_id, lower)
+
+    if lower in ["analytics", "lietotāju statistika", "lietotaju statistika", "user stats", "user analytics"]:
+        return user_analytics_answer(user_id, lower)
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
         return premium_dashboard(user_id)
@@ -3163,6 +3247,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if lower in ["health", "system status", "sistēmas statuss", "sistemas statuss", "veselība", "veseliba"]:
         await update.message.reply_text(append_bonus_notices(system_health_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
+        return
+
+    if lower in ["analytics", "lietotāju statistika", "lietotaju statistika", "user stats", "user analytics"]:
+        await update.message.reply_text(append_bonus_notices(user_analytics_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
         return
 
     if lower in ["premium panelis", "mans panelis", "dashboard"]:
