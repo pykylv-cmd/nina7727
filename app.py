@@ -1611,7 +1611,7 @@ def _fetch_user_row_for_admin(target_user_id):
 
 
 def admin_user_lookup(user_id, command_text="user lookup"):
-    """V10.19: Admin User Search — konkrēta lietotāja profils, lojalitāte un aktivitāte."""
+    """V10.19: Admin User Lookup — konkrēta lietotāja profils, lojalitāte un aktivitāte."""
     if not is_admin(user_id):
         log_admin_action(user_id, "user_lookup_view", "denied", command_text)
         return admin_locked_answer()
@@ -1678,10 +1678,16 @@ def admin_user_lookup(user_id, command_text="user lookup"):
     )
 
 
-def _admin_user_search_keyword(command_text):
-    """V10.19: izvelk meklēšanas atslēgvārdu no admin user search komandas."""
-    text = (command_text or "").strip()
-    lower = text.lower()
+def admin_user_search(user_id, command_text="search user"):
+    """V10.19: Admin User Search — meklē lietotājus pēc user_id, vārda, premium/free, xp/level."""
+    if not is_admin(user_id):
+        log_admin_action(user_id, "user_search_view", "denied", command_text)
+        return admin_locked_answer()
+
+    log_admin_action(user_id, "user_search_view", "allowed", command_text)
+
+    text = (command_text or "").strip().lower()
+    query = text
 
     prefixes = [
         "search user",
@@ -1693,107 +1699,86 @@ def _admin_user_search_keyword(command_text):
     ]
 
     for prefix in prefixes:
-        if lower.startswith(prefix):
-            return text[len(prefix):].strip()
+        if query.startswith(prefix):
+            query = query.replace(prefix, "", 1).strip()
+            break
 
-    return ""
-
-
-def _admin_search_users_rows(keyword="", limit=10):
-    """V10.19: meklē lietotājus pēc ID, vārda, premium/free, XP vai level."""
-    keyword = (keyword or "").strip()
-    lower = keyword.lower()
+    # Ja raksta tikai "lietotāji", rādām jaunākos/visus lietotājus.
+    if query in ["all", "visi", "visus"]:
+        query = ""
 
     conn = get_db()
     c = conn.cursor()
-
     rows = []
+
     try:
-        if lower in ["premium", "premium users", "premium lietotāji", "premium lietotaji"]:
+        if query in ["premium", "premium users", "premium lietotāji", "premium lietotaji"]:
             db_execute(c, """
-                SELECT user_id, name, premium, premium_until, xp, level, streak_days, last_seen_date
+                SELECT user_id, name, premium, premium_until, xp, level, streak_days
                 FROM users
                 WHERE premium = 1
                 ORDER BY xp DESC, user_id ASC
-                LIMIT %s
-            """, (int(limit or 10),))
+                LIMIT 20
+            """)
 
-        elif lower in ["free", "free users", "bezmaksas"]:
+        elif query in ["free", "free users", "bezmaksas"]:
             db_execute(c, """
-                SELECT user_id, name, premium, premium_until, xp, level, streak_days, last_seen_date
+                SELECT user_id, name, premium, premium_until, xp, level, streak_days
                 FROM users
-                WHERE premium = 0 OR premium IS NULL
+                WHERE premium = 0
                 ORDER BY xp DESC, user_id ASC
-                LIMIT %s
-            """, (int(limit or 10),))
+                LIMIT 20
+            """)
 
-        elif lower in ["xp", "top xp", "pieredze"]:
+        elif query in ["xp", "top xp", "pieredze"]:
             db_execute(c, """
-                SELECT user_id, name, premium, premium_until, xp, level, streak_days, last_seen_date
+                SELECT user_id, name, premium, premium_until, xp, level, streak_days
                 FROM users
                 ORDER BY xp DESC, user_id ASC
-                LIMIT %s
-            """, (int(limit or 10),))
+                LIMIT 20
+            """)
 
-        elif lower in ["level", "līmenis", "limenis"]:
+        elif query in ["level", "top level", "līmenis", "limenis"]:
             db_execute(c, """
-                SELECT user_id, name, premium, premium_until, xp, level, streak_days, last_seen_date
+                SELECT user_id, name, premium, premium_until, xp, level, streak_days
                 FROM users
                 ORDER BY level DESC, xp DESC, user_id ASC
-                LIMIT %s
-            """, (int(limit or 10),))
+                LIMIT 20
+            """)
 
-        elif keyword:
-            like = f"%{keyword}%"
+        elif query:
+            like = f"%{query}%"
             db_execute(c, """
-                SELECT user_id, name, premium, premium_until, xp, level, streak_days, last_seen_date
+                SELECT user_id, name, premium, premium_until, xp, level, streak_days
                 FROM users
-                WHERE user_id = %s OR name LIKE %s OR city LIKE %s
+                WHERE user_id LIKE %s OR LOWER(name) LIKE %s
                 ORDER BY xp DESC, user_id ASC
-                LIMIT %s
-            """, (keyword, like, like, int(limit or 10)))
+                LIMIT 20
+            """, (like, like))
 
         else:
             db_execute(c, """
-                SELECT user_id, name, premium, premium_until, xp, level, streak_days, last_seen_date
+                SELECT user_id, name, premium, premium_until, xp, level, streak_days
                 FROM users
-                ORDER BY last_seen_date DESC, xp DESC, user_id ASC
-                LIMIT %s
-            """, (int(limit or 10),))
+                ORDER BY user_id ASC
+                LIMIT 20
+            """)
 
         rows = c.fetchall()
+
     except Exception as e:
         print("Admin user search kļūda:", e)
         rows = []
 
     c.close()
     conn.close()
-    return rows
-
-
-def admin_user_search(user_id, command_text="search user"):
-    """V10.19: Admin User Search — meklē lietotājus pēc ID, vārda, premium/free, XP vai līmeņa."""
-    if not is_admin(user_id):
-        log_admin_action(user_id, "user_search_view", "denied", command_text)
-        return admin_locked_answer()
-
-    log_admin_action(user_id, "user_search_view", "allowed", command_text)
-
-    keyword = _admin_user_search_keyword(command_text)
-    rows = _admin_search_users_rows(keyword, limit=10)
 
     lines = [
         "👥 Nina User Search",
         "",
+        f"Atrasti: {len(rows)}",
+        "",
     ]
-
-    if keyword:
-        lines.append(f"Meklēšana: {keyword}")
-    else:
-        lines.append("Meklēšana: visi lietotāji")
-
-    lines.append(f"Atrasti: {len(rows)}")
-    lines.append("")
 
     if not rows:
         lines.extend([
@@ -1802,6 +1787,7 @@ def admin_user_search(user_id, command_text="search user"):
             "Piemēri:",
             "search user premium",
             "search user free",
+            "search user xp",
             "find user 5138563912",
             "lietotāji",
             "",
@@ -1810,23 +1796,18 @@ def admin_user_search(user_id, command_text="search user"):
         return "\n".join(lines)
 
     for idx, row in enumerate(rows, start=1):
-        found_user_id, name, premium, premium_until, xp, level, streak_days, last_seen_date = row
+        found_user_id, name, premium, premium_until, xp, level, streak_days = row
 
-        premium_status = "Premium" if int(premium or 0) else "Free"
-        plan = PLAN_FREE
-        if int(premium or 0):
-            latest = latest_premium_transaction(str(found_user_id))
-            plan = latest.get("plan_name") if latest and latest.get("plan_name") else PLAN_PREMIUM_BASIC
+        status = "Premium" if premium else "Free"
+        if premium and premium_until:
+            status += f" līdz {premium_until}"
 
         lines.append(f"{idx}. {found_user_id}")
         lines.append(f"Vārds: {name or '—'}")
-        lines.append(f"Statuss: {plan if premium_status == 'Premium' else 'Free'}")
-        if premium_until:
-            lines.append(f"Premium līdz: {premium_until}")
+        lines.append(f"Statuss: {status}")
         lines.append(f"XP: {int(xp or 0)}")
         lines.append(f"Līmenis: {int(level or 1)}")
         lines.append(f"Streak: {int(streak_days or 0)}")
-        lines.append(f"Pēdējā aktivitāte: {last_seen_date or '—'}")
         lines.append("")
 
     lines.append("Versija: V10.19")
@@ -4040,18 +4021,16 @@ def command_answer(user_id, command_text):
         return admin_activity_feed(user_id, lower)
 
     if (
-        lower in ["lietotāji", "lietotaji", "meklēt lietotāju", "meklet lietotaju"]
-        or lower.startswith("search user")
+        lower.startswith("search user")
         or lower.startswith("find user")
-        or lower.startswith("lietotāji ")
-        or lower.startswith("lietotaji ")
-        or lower.startswith("meklēt lietotāju ")
-        or lower.startswith("meklet lietotaju ")
+        or lower.startswith("meklēt lietotāju")
+        or lower.startswith("meklet lietotaju")
+        or lower in ["lietotāji", "lietotaji"]
     ):
         return admin_user_search(user_id, command_text)
 
     if (
-        lower in ["user lookup", "lietotājs", "lietotajs"]
+        lower in ["user lookup", "lietotājs", "lietotajs", "meklēt lietotāju", "meklet lietotaju"]
         or lower.startswith("user ")
         or lower.startswith("user lookup ")
         or lower.startswith("lietotājs ")
@@ -4270,30 +4249,17 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if (
-        lower in ["lietotāji", "lietotaji", "meklēt lietotāju", "meklet lietotaju"]
-        or lower.startswith("search user")
+        lower.startswith("search user")
         or lower.startswith("find user")
-        or lower.startswith("lietotāji ")
-        or lower.startswith("lietotaji ")
-        or lower.startswith("meklēt lietotāju ")
-        or lower.startswith("meklet lietotaju ")
-    ):
-        return admin_user_search(user_id, command_text)
-
-    if (
-        lower in ["lietotāji", "lietotaji", "meklēt lietotāju", "meklet lietotaju"]
-        or lower.startswith("search user")
-        or lower.startswith("find user")
-        or lower.startswith("lietotāji ")
-        or lower.startswith("lietotaji ")
-        or lower.startswith("meklēt lietotāju ")
-        or lower.startswith("meklet lietotaju ")
+        or lower.startswith("meklēt lietotāju")
+        or lower.startswith("meklet lietotaju")
+        or lower in ["lietotāji", "lietotaji"]
     ):
         await update.message.reply_text(append_bonus_notices(admin_user_search(user_id, user_text), streak_notice), disable_web_page_preview=True)
         return
 
     if (
-        lower in ["user lookup", "lietotājs", "lietotajs"]
+        lower in ["user lookup", "lietotājs", "lietotajs", "meklēt lietotāju", "meklet lietotaju"]
         or lower.startswith("user ")
         or lower.startswith("user lookup ")
         or lower.startswith("lietotājs ")
