@@ -475,25 +475,107 @@ def latest_premium_transaction(user_id):
 
 
 def subscription_info(user_id=None):
+    """V11.1 Premium Conversion System — skaidrs abonementa piedāvājums Free lietotājiem."""
+    plan = current_plan_name(user_id) if user_id else PLAN_FREE
+    user = get_user(user_id) if user_id else {"premium": 0, "premium_until": ""}
+
+    if user.get("premium"):
+        until = user.get("premium_until") or "bez beigu datuma"
+        return (
+            "💎 Tavs Nina Premium ir aktīvs\n\n"
+            f"Plāns: {plan}\n"
+            f"Aktīvs līdz: {until}\n\n"
+            "Tu jau vari izmantot:\n"
+            "• backup bez limita\n"
+            "• atgādinājumus bez limita\n"
+            "• kopsavilkumus bez limita\n"
+            "• pilnu Premium Dashboard\n\n"
+            "Komandas:\n"
+            "premium panelis\n"
+            "premium vēsture\n"
+            "mans plāns\n\n"
+            "Versija: V11.1"
+        )
+
     return (
-        "💎 Nina abonements\n\n"
-        "Free:\n"
-        f"• {FREE_BACKUP_LIMIT} backup\n"
-        f"• {FREE_REMINDER_LIMIT} aktīvi atgādinājumi\n"
-        f"• {FREE_SUMMARY_LIMIT_PER_DAY} kopsavilkums dienā\n\n"
+        "💎 Nina Premium\n\n"
+        "Free režīms ir labs izmēģināšanai, bet Premium ir domāts ikdienas lietošanai bez bremzēm.\n\n"
+        "Free limiti:\n"
+        f"• Backup: līdz {FREE_BACKUP_LIMIT}\n"
+        f"• Aktīvie atgādinājumi: līdz {FREE_REMINDER_LIMIT}\n"
+        f"• Kopsavilkumi: {FREE_SUMMARY_LIMIT_PER_DAY} dienā\n\n"
         "Premium Basic:\n"
         "• backup bez limita\n"
         "• atgādinājumi bez limita\n"
         "• kopsavilkumi bez limita\n"
-        "• vairāk vietas ilgtermiņa atmiņai\n\n"
-        f"Cena: {PREMIUM_BASIC_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
+        "• vairāk vietas ilgtermiņa atmiņai\n"
+        f"💶 {PREMIUM_BASIC_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
         "Premium Plus:\n"
         "• viss no Basic\n"
         "• prioritāras nākotnes funkcijas\n"
-        "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
-        f"Cena: {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
-        "Maksājumi vēl nav pilnībā pieslēgti. Šis ir V11.0 Admin User Search."
+        "• sagatave WhatsApp un papildu biznesa funkcijām\n"
+        f"💶 {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
+        "Lai sāktu:\n"
+        "pirkt basic\n"
+        "pirkt plus\n\n"
+        "Versija: V11.1"
     )
+
+
+def premium_conversion_answer(user_id):
+    """V11.1: pārdošanas skats komandām premium / aktivizē premium."""
+    user = get_user(user_id)
+    if user.get("premium"):
+        return subscription_info(user_id)
+
+    backups = backup_count_number(user_id)
+    reminders = active_reminder_count(user_id)
+    summaries_today = summaries_used_today(user_id)
+
+    return (
+        "💎 Aktivizē Nina Premium\n\n"
+        "Nina Premium noņem Free limitus un ļauj izmantot Ninu kā ikdienas palīgu pilnā režīmā.\n\n"
+        "Tavs Free statuss tagad:\n"
+        f"📦 Backup: {backups}/{FREE_BACKUP_LIMIT}\n"
+        f"⏰ Aktīvie atgādinājumi: {reminders}/{FREE_REMINDER_LIMIT}\n"
+        f"🧠 Kopsavilkumi šodien: {summaries_today}/{FREE_SUMMARY_LIMIT_PER_DAY}\n\n"
+        "Ko iegūsti ar Premium Basic:\n"
+        "✅ backup bez limita\n"
+        "✅ atgādinājumi bez limita\n"
+        "✅ kopsavilkumi bez limita\n"
+        "✅ vairāk vietas ilgtermiņa atmiņai\n"
+        f"💶 {PREMIUM_BASIC_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
+        "Plus plāns dod vēl prioritāras nākotnes funkcijas.\n\n"
+        "Izvēlies:\n"
+        "pirkt basic\n"
+        "pirkt plus\n\n"
+        "Versija: V11.1"
+    )
+
+
+def premium_buy_intent_answer(user_id, plan_key="basic"):
+    """V11.1: pirms Checkout skaidri pasaka, ko lietotājs pērk."""
+    if plan_key == "plus":
+        plan_name = PLAN_PREMIUM_PLUS
+        amount = PREMIUM_PLUS_PRICE
+        benefit = "Plus ir labākais, ja gribi visas Basic funkcijas un prioritāras nākotnes iespējas."
+    else:
+        plan_name = PLAN_PREMIUM_BASIC
+        amount = PREMIUM_BASIC_PRICE
+        benefit = "Basic ir labākais starts ikdienas lietošanai bez Free limitiem."
+
+    checkout = stripe_checkout_answer(user_id, plan_key)
+
+    return (
+        "💎 Nina Premium Checkout\n\n"
+        f"Plāns: {plan_name}\n"
+        f"Cena: {amount:.2f} {PREMIUM_CURRENCY}/mēn\n"
+        f"{benefit}\n\n"
+        "Pēc apmaksas Premium aktivizēsies automātiski, ja Stripe webhook ir pieslēgts.\n\n"
+        f"{checkout}\n\n"
+        "Versija: V11.1"
+    )
+
 
 
 def current_plan_answer(user_id):
@@ -838,7 +920,7 @@ def system_health_answer(user_id, command_text="health"):
         f"Aktīvie atgādinājumi: {active_reminders}\n"
         f"Backup kopā: {backups_total}\n"
         f"Audit ieraksti: {audit_total}\n\n"
-        "Versija: V11.0"
+        "Versija: V11.1"
     )
 
 
@@ -918,7 +1000,7 @@ def user_analytics_answer(user_id, command_text="analytics"):
         f"Vidējais XP: {avg_xp:.1f}\n"
         f"Vidējais līmenis: {avg_level:.1f}\n"
         f"Vidējais streak: {avg_streak:.1f}\n\n"
-        "Versija: V11.0"
+        "Versija: V11.1"
     )
 
 
@@ -990,7 +1072,7 @@ def database_backup_dashboard(user_id, command_text="db backup"):
         f"Pēdējais backup: {latest_backup}\n"
         f"Pēdējā ziņa: {latest_message}\n"
         f"Pēdējais audit: {latest_audit}\n\n"
-        "Versija: V11.0"
+        "Versija: V11.1"
     )
 
 
@@ -1216,7 +1298,7 @@ def backup_scheduler_answer(user_id, command_text="auto backup"):
         f"{max(total_runs, auto_count)}\n\n"
         "Audit action:\n"
         "auto_backup_run\n\n"
-        "Versija: V11.0"
+        "Versija: V11.1"
     )
 
 
@@ -1323,7 +1405,7 @@ def recovery_center_answer(user_id, command_text="recovery"):
         "",
         f"Restore mēģinājumi: {restore_logs}",
         "Statuss: Ready",
-        "Versija: V11.0",
+        "Versija: V11.1",
     ])
 
     return "\n".join(lines)
@@ -1357,7 +1439,7 @@ def restore_latest_backup(user_id, command_text="restore latest"):
             f"{result}\n\n"
             f"Backup ID: #{backup_id}\n"
             "Statuss: Restored\n"
-            "Versija: V11.0"
+            "Versija: V11.1"
         )
 
     log_restore_action(user_id, backup_id, "failed")
@@ -1405,7 +1487,7 @@ def admin_command_center(user_id, command_text="admin"):
         "Drošība:\n"
         f"🔒 Admin Lock: {admin_lock_status}\n"
         f"📋 Audit Log: {audit_status}\n\n"
-        "Versija: V11.0"
+        "Versija: V11.1"
     )
 
 
@@ -1482,7 +1564,7 @@ def admin_notifications_center(user_id, command_text="notifications"):
         f"• Restore kļūdas: {restore_errors}\n"
         f"• Maksājumu kļūdas: {payment_errors}\n\n"
         f"Statuss: {icon} {status}\n"
-        "Versija: V11.0"
+        "Versija: V11.1"
     )
 
 
@@ -1545,7 +1627,7 @@ def admin_activity_feed(user_id, command_text="activity", limit=10):
     lines.extend([
         f"Kopā ieraksti: {total}",
         "",
-        "Versija: V11.0",
+        "Versija: V11.1",
     ])
 
     return "\n".join(lines).strip()
@@ -1624,7 +1706,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
             "Norādi lietotāja ID.\n\n"
             "Piemērs:\n"
             "user 5138563912\n\n"
-            "Versija: V11.0"
+            "Versija: V11.1"
         )
 
     log_admin_action(user_id, "user_lookup_view", "allowed", command_text)
@@ -1636,7 +1718,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
             f"User ID: {target_user_id}\n"
             "Statuss: nav atrasts\n\n"
             "Šāds lietotājs vēl nav Nina datubāzē.\n\n"
-            "Versija: V11.0"
+            "Versija: V11.1"
         )
 
     messages_total = _count_table_rows("messages", "WHERE user_id = %s", (str(target_user_id),))
@@ -1674,7 +1756,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
         f"Backup: {backups_total}\n"
         f"Atgādinājumi: {reminders_total}\n"
         f"Aktīvie atgādinājumi: {active_reminders}\n\n"
-        "Versija: V11.0"
+        "Versija: V11.1"
     )
 
 
@@ -1791,7 +1873,7 @@ def admin_user_search(user_id, command_text="search user"):
             "find user 5138563912",
             "lietotāji",
             "",
-            "Versija: V11.0",
+            "Versija: V11.1",
         ])
         return "\n".join(lines)
 
@@ -1810,7 +1892,7 @@ def admin_user_search(user_id, command_text="search user"):
         lines.append(f"Streak: {int(streak_days or 0)}")
         lines.append("")
 
-    lines.append("Versija: V11.0")
+    lines.append("Versija: V11.1")
     return "\n".join(lines).strip()
 
 
@@ -1843,7 +1925,7 @@ def admin_user_actions_help(user_id, command_text="user actions"):
         "Nodzēš lietotāja streak.\n\n"
         "Drošība:\n"
         "Visas darbības ir tikai administratoram un tiek ierakstītas Audit Log.\n\n"
-        "Versija: V11.0"
+        "Versija: V11.1"
     )
 
 
@@ -1866,7 +1948,7 @@ def admin_user_action(user_id, command_text="user actions"):
             "Trūkst lietotāja ID.\n\n"
             "Piemērs:\n"
             "grant premium 5138563912\n\n"
-            "Versija: V11.0"
+            "Versija: V11.1"
         )
 
     target_user_id = numbers[0]
@@ -1878,7 +1960,7 @@ def admin_user_action(user_id, command_text="user actions"):
             f"User ID: {target_user_id}\n"
             "Statuss: nav atrasts\n\n"
             "Šāds lietotājs vēl nav Nina datubāzē.\n\n"
-            "Versija: V11.0"
+            "Versija: V11.1"
         )
 
     try:
@@ -1976,7 +2058,7 @@ def admin_user_action(user_id, command_text="user actions"):
             f"XP: {updated.get('xp', 0)}\n"
             f"Līmenis: {updated.get('level', 1)}\n"
             f"Streak: {updated.get('streak_days', 0)}\n\n"
-            "Versija: V11.0"
+            "Versija: V11.1"
         )
 
     except Exception as e:
@@ -1986,7 +2068,7 @@ def admin_user_action(user_id, command_text="user actions"):
             "🧰 Nina Admin User Actions\n\n"
             "Darbība neizdevās tehniskas kļūdas dēļ.\n\n"
             f"Iemesls: {e}\n\n"
-            "Versija: V11.0"
+            "Versija: V11.1"
         )
 
 
@@ -2072,7 +2154,7 @@ def admin_user_management_dashboard(user_id, command_text="user management"):
         "Admin Lock: Aktīvs",
         f"Audit ieraksti: {audit_total}",
         "",
-        "Versija: V11.0",
+        "Versija: V11.1",
     ])
 
     return "\n".join(lines)
@@ -2323,7 +2405,7 @@ def admin_revenue_analytics(user_id, command_text="revenue analytics"):
 
     lines.extend([
         "",
-        "Versija: V11.0",
+        "Versija: V11.1",
     ])
 
     return "\n".join(lines)
@@ -3740,16 +3822,25 @@ def summaries_used_today(user_id):
 
 
 def premium_features(user_id=None):
+    """V11.1: Premium funkciju pārskats ar skaidru CTA."""
     return (
-        "💎 Premium funkcijas:\n"
-        "• backup / rezerves kopijas bez limita\n"
-        "• aktīvi atgādinājumi bez limita\n"
-        "• kopsavilkumi bez limita\n"
-        "• vairāk vietas ilgtermiņa atmiņai\n"
-        "• prioritāras nākotnes funkcijas\n"
-        "• sagatave WhatsApp un maksājumiem nākotnē\n\n"
-        "Bezmaksas režīms ir labs testēšanai. Premium ir domāts nopietnai ikdienas lietošanai."
+        "💎 Premium funkcijas\n\n"
+        "Ar Premium Nina kļūst par nopietnu ikdienas palīgu:\n\n"
+        "✅ Backup bez limita\n"
+        "✅ Aktīvie atgādinājumi bez limita\n"
+        "✅ Kopsavilkumi bez limita\n"
+        "✅ Vairāk vietas ilgtermiņa atmiņai\n"
+        "✅ Premium Dashboard\n"
+        "✅ Prioritāras nākotnes funkcijas\n\n"
+        "Cena:\n"
+        f"Basic — {PREMIUM_BASIC_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n"
+        f"Plus — {PREMIUM_PLUS_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
+        "Sākt:\n"
+        "pirkt basic\n"
+        "pirkt plus\n\n"
+        "Versija: V11.1"
     )
+
 
 
 def premium_limits(user_id):
@@ -3771,7 +3862,7 @@ def premium_limits(user_id):
         f"• Backup: {backups}/{FREE_BACKUP_LIMIT}\n"
         f"• Aktīvie atgādinājumi: {reminders}/{FREE_REMINDER_LIMIT}\n"
         f"• Kopsavilkumi šodien: {summaries_today}/{FREE_SUMMARY_LIMIT_PER_DAY}\n\n"
-        "Lai noņemtu limitus, raksti: aktivizē premium"
+        "Lai noņemtu limitus, raksti: premium"
     )
 
 
@@ -4005,7 +4096,7 @@ def premium_dashboard(user_id):
     ])
 
     if not user.get("premium"):
-        lines.extend(["", "Lai noņemtu limitus, raksti: aktivizē premium"])
+        lines.extend(["", "Lai noņemtu limitus, raksti: premium"])
 
     return "\n".join(lines)
 
@@ -4059,20 +4150,26 @@ def can_create_summary(user_id):
 
 
 def premium_status(user_id):
+    """V11.1: Premium statuss ar skaidru nākamo soli."""
     user = get_user(user_id)
 
-    if user["premium"]:
-        if user["premium_until"]:
-            return f"💎 Premium: aktīvs\nLīdz: {user['premium_until']}"
-        return "💎 Premium: aktīvs"
+    if user.get("premium"):
+        plan = current_plan_name(user_id)
+        until = user.get("premium_until") or "bez beigu datuma"
+        return (
+            "💎 Premium statuss\n\n"
+            "Statuss: aktīvs\n"
+            f"Plāns: {plan}\n"
+            f"Aktīvs līdz: {until}\n\n"
+            "Komandas:\n"
+            "premium panelis\n"
+            "premium vēsture\n"
+            "mans plāns\n\n"
+            "Versija: V11.1"
+        )
 
-    return (
-        "Premium: neaktīvs\n\n"
-        "Bezmaksas režīmā Nina darbojas pamata līmenī.\n"
-        f"Limiti: {FREE_BACKUP_LIMIT} backup, {FREE_REMINDER_LIMIT} aktīvi atgādinājumi, "
-        f"{FREE_SUMMARY_LIMIT_PER_DAY} kopsavilkums dienā.\n"
-        "Premium dod vairāk atmiņas, vairāk atgādinājumu un gudrākus kopsavilkumus."
-    )
+    return premium_conversion_answer(user_id)
+
 
 
 def activate_premium(user_id):
@@ -4378,7 +4475,7 @@ def admin_revenue_forecast(user_id, command_text="revenue forecast"):
         f"Ieņēmumi: {last_30_revenue:.2f} {PREMIUM_CURRENCY}\n"
         f"Checkout konversijas signāls: {conversion_hint:.1f}%\n\n"
         f"Statuss: {status}\n"
-        "Versija: V11.0"
+        "Versija: V11.1"
     )
 
 
@@ -4606,7 +4703,7 @@ def admin_kpi_dashboard(user_id, command_text="kpi"):
         f"Audit ieraksti: {audit_total}\n"
         f"Premium darījumi: {premium_transactions_total}\n\n"
         f"Statuss: {system_status}\n"
-        "Versija: V11.0"
+        "Versija: V11.1"
     )
 
 
@@ -4751,14 +4848,14 @@ def admin_alerts_dashboard(user_id, command_text="alerts"):
         "",
         f"Kopā alert skaits: {total_alerts}",
         f"Audit ieraksti kopā: {total_audit}",
-        "Versija: V11.0",
+        "Versija: V11.1",
     ])
 
     return "\n".join(lines)
 
 
 def admin_launch_dashboard(user_id, command_text="launch"):
-    """V11.0: Production Launch Dashboard — produkta palaišanas un monetizācijas pārskats."""
+    """V11.1: Premium Conversion System — produkta palaišanas un monetizācijas pārskats."""
     if not is_admin(user_id):
         log_admin_action(user_id, "production_launch_view", "denied", command_text)
         return admin_locked_answer()
@@ -4928,7 +5025,7 @@ def admin_launch_dashboard(user_id, command_text="launch"):
         "3. Notestē: pirkt premium / pirkt plus",
         "4. Aicini pirmos 5–10 lietotājus",
         "",
-        "Versija: V11.0",
+        "Versija: V11.1",
     ])
 
     return "\n".join(lines)
@@ -4936,7 +5033,10 @@ def admin_launch_dashboard(user_id, command_text="launch"):
 def command_answer(user_id, command_text):
     lower = command_text.strip().lower()
 
-    if lower in ["mans premium statuss", "premium statuss", "premium"]:
+    if lower in ["premium", "aktivizē premium", "aktivize premium", "pirkt premium", "premium info"]:
+        return premium_conversion_answer(user_id)
+
+    if lower in ["mans premium statuss", "premium statuss"]:
         return premium_status(user_id)
 
     if lower in ["premium funkcijas"]:
@@ -4948,7 +5048,7 @@ def command_answer(user_id, command_text):
     if lower == "premium beidzas":
         return premium_expiration_info(user_id)
 
-    if lower == "abonements":
+    if lower in ["abonements", "premium cena", "cena", "plāni", "plani"]:
         return subscription_info(user_id)
 
     if lower in ["mans plāns", "mans plans"]:
@@ -4960,11 +5060,11 @@ def command_answer(user_id, command_text):
     if lower in ["premium welcome", "premium sveiciens", "premium starts", "premium sveiks"]:
         return premium_welcome_answer(user_id)
 
-    if lower in ["pirkt premium", "pirkt basic", "pirkt premium basic"]:
-        return stripe_checkout_answer(user_id, "basic")
+    if lower in ["pirkt basic", "pirkt premium basic"]:
+        return premium_buy_intent_answer(user_id, "basic")
 
     if lower in ["pirkt plus", "pirkt premium plus"]:
-        return stripe_checkout_answer(user_id, "plus")
+        return premium_buy_intent_answer(user_id, "plus")
 
     if lower == "stripe statuss":
         return stripe_status(user_id)
@@ -5235,12 +5335,12 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(append_bonus_notices(admin_kpi_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
         return
 
-    # V11.0: Alerts command routing fix — catch Alerts before GPT fallback.
+    # V11.1: Alerts command routing fix — catch Alerts before GPT fallback.
     if lower in ["alerts", "admin alerts", "system alerts", "brīdinājumi", "bridinajumi", "admin brīdinājumi", "admin bridinajumi"]:
         await update.message.reply_text(append_bonus_notices(admin_alerts_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
         return
 
-    # V11.0: Production Launch Dashboard routing — catch launch before GPT fallback.
+    # V11.1: Premium Conversion System routing — catch launch before GPT fallback.
     if lower in ["launch", "launch dashboard", "production", "production launch", "palaišana", "palaisana"]:
         await update.message.reply_text(append_bonus_notices(admin_launch_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
         return
@@ -5637,7 +5737,7 @@ def payment_cancel_page():
 
 @app.route("/")
 def home():
-    return "Nina7727 V11.0 Production Launch Dashboard darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V11.1 Premium Conversion System darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -5652,5 +5752,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V11.0 Production Launch Dashboard darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V11.1 Premium Conversion System darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
