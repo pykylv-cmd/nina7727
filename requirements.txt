@@ -1,4 +1,5 @@
-python-telegram-bot==22.1
-openai
 flask
-gunicorn
+python-telegram-bot
+openai
+psycopg2-binary
+stripe
