@@ -475,7 +475,7 @@ def latest_premium_transaction(user_id):
 
 
 def subscription_info(user_id=None):
-    """V11.6.4 Stripe ENV Router Fix — skaidrs abonementa piedāvājums Free lietotājiem."""
+    """V11.7 Premium Activation Webhook — skaidrs abonementa piedāvājums Free lietotājiem."""
     plan = current_plan_name(user_id) if user_id else PLAN_FREE
     user = get_user(user_id) if user_id else {"premium": 0, "premium_until": ""}
 
@@ -494,7 +494,7 @@ def subscription_info(user_id=None):
             "premium panelis\n"
             "premium vēsture\n"
             "mans plāns\n\n"
-            "Versija: V11.6.4"
+            "Versija: V11.7"
         )
 
     return (
@@ -518,7 +518,7 @@ def subscription_info(user_id=None):
         "Lai sāktu:\n"
         "pirkt basic\n"
         "pirkt plus\n\n"
-        "Versija: V11.6.4"
+        "Versija: V11.7"
     )
 
 
@@ -549,7 +549,7 @@ def premium_conversion_answer(user_id):
         "Izvēlies:\n"
         "pirkt basic\n"
         "pirkt plus\n\n"
-        "Versija: V11.6.4"
+        "Versija: V11.7"
     )
 
 
@@ -573,7 +573,7 @@ def premium_buy_intent_answer(user_id, plan_key="basic"):
         f"{benefit}\n\n"
         "Pēc apmaksas Premium aktivizēsies automātiski, ja Stripe webhook ir pieslēgts.\n\n"
         f"{checkout}\n\n"
-        "Versija: V11.6.4"
+        "Versija: V11.7"
     )
 
 
@@ -920,7 +920,7 @@ def system_health_answer(user_id, command_text="health"):
         f"Aktīvie atgādinājumi: {active_reminders}\n"
         f"Backup kopā: {backups_total}\n"
         f"Audit ieraksti: {audit_total}\n\n"
-        "Versija: V11.6.4"
+        "Versija: V11.7"
     )
 
 
@@ -1000,7 +1000,7 @@ def user_analytics_answer(user_id, command_text="analytics"):
         f"Vidējais XP: {avg_xp:.1f}\n"
         f"Vidējais līmenis: {avg_level:.1f}\n"
         f"Vidējais streak: {avg_streak:.1f}\n\n"
-        "Versija: V11.6.4"
+        "Versija: V11.7"
     )
 
 
@@ -1072,7 +1072,7 @@ def database_backup_dashboard(user_id, command_text="db backup"):
         f"Pēdējais backup: {latest_backup}\n"
         f"Pēdējā ziņa: {latest_message}\n"
         f"Pēdējais audit: {latest_audit}\n\n"
-        "Versija: V11.6.4"
+        "Versija: V11.7"
     )
 
 
@@ -1298,7 +1298,7 @@ def backup_scheduler_answer(user_id, command_text="auto backup"):
         f"{max(total_runs, auto_count)}\n\n"
         "Audit action:\n"
         "auto_backup_run\n\n"
-        "Versija: V11.6.4"
+        "Versija: V11.7"
     )
 
 
@@ -1405,7 +1405,7 @@ def recovery_center_answer(user_id, command_text="recovery"):
         "",
         f"Restore mēģinājumi: {restore_logs}",
         "Statuss: Ready",
-        "Versija: V11.6.4",
+        "Versija: V11.7",
     ])
 
     return "\n".join(lines)
@@ -1439,7 +1439,7 @@ def restore_latest_backup(user_id, command_text="restore latest"):
             f"{result}\n\n"
             f"Backup ID: #{backup_id}\n"
             "Statuss: Restored\n"
-            "Versija: V11.6.4"
+            "Versija: V11.7"
         )
 
     log_restore_action(user_id, backup_id, "failed")
@@ -1487,7 +1487,7 @@ def admin_command_center(user_id, command_text="admin"):
         "Drošība:\n"
         f"🔒 Admin Lock: {admin_lock_status}\n"
         f"📋 Audit Log: {audit_status}\n\n"
-        "Versija: V11.6.4"
+        "Versija: V11.7"
     )
 
 
@@ -1564,7 +1564,7 @@ def admin_notifications_center(user_id, command_text="notifications"):
         f"• Restore kļūdas: {restore_errors}\n"
         f"• Maksājumu kļūdas: {payment_errors}\n\n"
         f"Statuss: {icon} {status}\n"
-        "Versija: V11.6.4"
+        "Versija: V11.7"
     )
 
 
@@ -1627,7 +1627,7 @@ def admin_activity_feed(user_id, command_text="activity", limit=10):
     lines.extend([
         f"Kopā ieraksti: {total}",
         "",
-        "Versija: V11.6.4",
+        "Versija: V11.7",
     ])
 
     return "\n".join(lines).strip()
@@ -1706,7 +1706,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
             "Norādi lietotāja ID.\n\n"
             "Piemērs:\n"
             "user 5138563912\n\n"
-            "Versija: V11.6.4"
+            "Versija: V11.7"
         )
 
     log_admin_action(user_id, "user_lookup_view", "allowed", command_text)
@@ -1718,7 +1718,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
             f"User ID: {target_user_id}\n"
             "Statuss: nav atrasts\n\n"
             "Šāds lietotājs vēl nav Nina datubāzē.\n\n"
-            "Versija: V11.6.4"
+            "Versija: V11.7"
         )
 
     messages_total = _count_table_rows("messages", "WHERE user_id = %s", (str(target_user_id),))
@@ -1756,7 +1756,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
         f"Backup: {backups_total}\n"
         f"Atgādinājumi: {reminders_total}\n"
         f"Aktīvie atgādinājumi: {active_reminders}\n\n"
-        "Versija: V11.6.4"
+        "Versija: V11.7"
     )
 
 
@@ -1873,7 +1873,7 @@ def admin_user_search(user_id, command_text="search user"):
             "find user 5138563912",
             "lietotāji",
             "",
-            "Versija: V11.6.4",
+            "Versija: V11.7",
         ])
         return "\n".join(lines)
 
@@ -1892,7 +1892,7 @@ def admin_user_search(user_id, command_text="search user"):
         lines.append(f"Streak: {int(streak_days or 0)}")
         lines.append("")
 
-    lines.append("Versija: V11.6.4")
+    lines.append("Versija: V11.7")
     return "\n".join(lines).strip()
 
 
@@ -1925,7 +1925,7 @@ def admin_user_actions_help(user_id, command_text="user actions"):
         "Nodzēš lietotāja streak.\n\n"
         "Drošība:\n"
         "Visas darbības ir tikai administratoram un tiek ierakstītas Audit Log.\n\n"
-        "Versija: V11.6.4"
+        "Versija: V11.7"
     )
 
 
@@ -1948,7 +1948,7 @@ def admin_user_action(user_id, command_text="user actions"):
             "Trūkst lietotāja ID.\n\n"
             "Piemērs:\n"
             "grant premium 5138563912\n\n"
-            "Versija: V11.6.4"
+            "Versija: V11.7"
         )
 
     target_user_id = numbers[0]
@@ -1960,7 +1960,7 @@ def admin_user_action(user_id, command_text="user actions"):
             f"User ID: {target_user_id}\n"
             "Statuss: nav atrasts\n\n"
             "Šāds lietotājs vēl nav Nina datubāzē.\n\n"
-            "Versija: V11.6.4"
+            "Versija: V11.7"
         )
 
     try:
@@ -2002,7 +2002,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         elif lower.startswith("add xp"):
             if len(numbers) < 2:
-                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nadd xp 5138563912 100\n\nVersija: V11.6.4"
+                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nadd xp 5138563912 100\n\nVersija: V11.7"
             amount = max(0, int(numbers[1]))
             new_xp = int(target.get("xp", 0) or 0) + amount
             target["xp"] = new_xp
@@ -2013,7 +2013,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         elif lower.startswith("remove xp"):
             if len(numbers) < 2:
-                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nremove xp 5138563912 50\n\nVersija: V11.6.4"
+                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nremove xp 5138563912 50\n\nVersija: V11.7"
             amount = max(0, int(numbers[1]))
             new_xp = max(0, int(target.get("xp", 0) or 0) - amount)
             target["xp"] = new_xp
@@ -2024,7 +2024,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         elif lower.startswith("set level"):
             if len(numbers) < 2:
-                return "🧰 Nina Admin User Actions\n\nTrūkst līmeņa.\n\nPiemērs:\nset level 5138563912 5\n\nVersija: V11.6.4"
+                return "🧰 Nina Admin User Actions\n\nTrūkst līmeņa.\n\nPiemērs:\nset level 5138563912 5\n\nVersija: V11.7"
             new_level = max(1, int(numbers[1]))
             new_xp = (new_level - 1) * XP_PER_LEVEL
             target["level"] = new_level
@@ -2042,7 +2042,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         else:
             log_admin_action(user_id, "user_action_execute", "failed_unknown_action", command_text)
-            return "🧰 Nina Admin User Actions\n\nDarbība nav atpazīta.\n\nRaksti: user actions\n\nVersija: V11.6.4"
+            return "🧰 Nina Admin User Actions\n\nDarbība nav atpazīta.\n\nRaksti: user actions\n\nVersija: V11.7"
 
         log_admin_action(user_id, f"user_action_{action_name}", "success", command_text)
         updated = _fetch_user_row_for_admin(target_user_id) or target
@@ -2058,7 +2058,7 @@ def admin_user_action(user_id, command_text="user actions"):
             f"XP: {updated.get('xp', 0)}\n"
             f"Līmenis: {updated.get('level', 1)}\n"
             f"Streak: {updated.get('streak_days', 0)}\n\n"
-            "Versija: V11.6.4"
+            "Versija: V11.7"
         )
 
     except Exception as e:
@@ -2068,7 +2068,7 @@ def admin_user_action(user_id, command_text="user actions"):
             "🧰 Nina Admin User Actions\n\n"
             "Darbība neizdevās tehniskas kļūdas dēļ.\n\n"
             f"Iemesls: {e}\n\n"
-            "Versija: V11.6.4"
+            "Versija: V11.7"
         )
 
 
@@ -2154,7 +2154,7 @@ def admin_user_management_dashboard(user_id, command_text="user management"):
         "Admin Lock: Aktīvs",
         f"Audit ieraksti: {audit_total}",
         "",
-        "Versija: V11.6.4",
+        "Versija: V11.7",
     ])
 
     return "\n".join(lines)
@@ -2405,7 +2405,7 @@ def admin_revenue_analytics(user_id, command_text="revenue analytics"):
 
     lines.extend([
         "",
-        "Versija: V11.6.4",
+        "Versija: V11.7",
     ])
 
     return "\n".join(lines)
@@ -2674,13 +2674,13 @@ def stripe_setup_helper(user_id=None):
 
     lines.extend([
         "",
-        "Versija: V11.6.4",
+        "Versija: V11.7",
     ])
 
     return "\n".join(lines)
 
 def stripe_checkout_answer(user_id, plan_key="basic"):
-    """V11.6.4 Stripe ENV Router Fix — izveido reālu Stripe Checkout linku, ja ENV ir pieslēgts."""
+    """V11.7 Premium Activation Webhook — izveido reālu Stripe Checkout linku, ja ENV ir pieslēgts."""
     if plan_key == "plus":
         plan_name = PLAN_PREMIUM_PLUS
         amount = PREMIUM_PLUS_PRICE
@@ -2710,7 +2710,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             "Apmaksas links:\n"
             f"{static_url}\n\n"
             "Pēc apmaksas Premium aktivizēsies automātiski, ja Stripe webhook ir pieslēgts.\n"
-            "Versija: V11.6.4"
+            "Versija: V11.7"
         )
 
     # 2) Dynamic Stripe Checkout Sessions
@@ -2743,7 +2743,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             "Dinamiskam checkout pievieno Railway: STRIPE_SECRET_KEY, STRIPE_BASIC_PRICE_ID/STRIPE_PLUS_PRICE_ID, STRIPE_SUCCESS_URL, STRIPE_CANCEL_URL\n"
             "Vai statiskam linkam pievieno: STRIPE_BASIC_CHECKOUT_URL / STRIPE_PLUS_CHECKOUT_URL\n\n"
             f"Iemesls: {reason}\n"
-            "Versija: V11.6.4"
+            "Versija: V11.7"
         )
 
     try:
@@ -2782,7 +2782,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             "Apmaksas links:\n"
             f"{checkout_url}\n\n"
             "Pēc apmaksas Premium aktivizēsies automātiski, ja Stripe webhook ir pieslēgts.\n"
-            "Versija: V11.6.4"
+            "Versija: V11.7"
         )
 
     except Exception as e:
@@ -2801,7 +2801,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             f"Cena: {amount:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
             "Stripe checkout izveide neizdevās.\n"
             f"Iemesls: {str(e)}\n"
-            "Versija: V11.6.4"
+            "Versija: V11.7"
         )
 
 
@@ -3927,7 +3927,7 @@ def premium_features(user_id=None):
         "Sākt:\n"
         "pirkt basic\n"
         "pirkt plus\n\n"
-        "Versija: V11.6.4"
+        "Versija: V11.7"
     )
 
 
@@ -4254,7 +4254,7 @@ def premium_status(user_id):
             "premium panelis\n"
             "premium vēsture\n"
             "mans plāns\n\n"
-            "Versija: V11.6.4"
+            "Versija: V11.7"
         )
 
     return premium_conversion_answer(user_id)
@@ -4564,7 +4564,7 @@ def admin_revenue_forecast(user_id, command_text="revenue forecast"):
         f"Ieņēmumi: {last_30_revenue:.2f} {PREMIUM_CURRENCY}\n"
         f"Checkout konversijas signāls: {conversion_hint:.1f}%\n\n"
         f"Statuss: {status}\n"
-        "Versija: V11.6.4"
+        "Versija: V11.7"
     )
 
 
@@ -4792,7 +4792,7 @@ def admin_kpi_dashboard(user_id, command_text="kpi"):
         f"Audit ieraksti: {audit_total}\n"
         f"Premium darījumi: {premium_transactions_total}\n\n"
         f"Statuss: {system_status}\n"
-        "Versija: V11.6.4"
+        "Versija: V11.7"
     )
 
 
@@ -4937,7 +4937,7 @@ def admin_alerts_dashboard(user_id, command_text="alerts"):
         "",
         f"Kopā alert skaits: {total_alerts}",
         f"Audit ieraksti kopā: {total_audit}",
-        "Versija: V11.6.4",
+        "Versija: V11.7",
     ])
 
     return "\n".join(lines)
@@ -5114,7 +5114,7 @@ def admin_launch_dashboard(user_id, command_text="launch"):
         "3. Notestē: pirkt premium / pirkt plus",
         "4. Aicini pirmos 5–10 lietotājus",
         "",
-        "Versija: V11.6.4",
+        "Versija: V11.7",
     ])
 
     return "\n".join(lines)
@@ -5341,7 +5341,7 @@ def command_answer(user_id, command_text):
 
 
 def stripe_env_guide_answer(user_id=None):
-    """V11.6.4 Stripe ENV Router Fix — atsevišķs Stripe ENV panelis."""
+    """V11.7 Premium Activation Webhook — atsevišķs Stripe ENV panelis."""
     checks = [
         ("STRIPE_SECRET_KEY", bool(STRIPE_SECRET_KEY)),
         ("STRIPE_BASIC_PRICE_ID", bool(STRIPE_BASIC_PRICE_ID)),
@@ -5379,7 +5379,7 @@ def stripe_env_guide_answer(user_id=None):
         "Svarīgi:",
         "Ja redzi ❌ stripe package, Railway projektā vajag requirements.txt ar rindu: stripe",
         "",
-        "Versija: V11.6.4",
+        "Versija: V11.7",
     ])
     return "\n".join(lines)
 
@@ -5448,7 +5448,11 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(append_bonus_notices(stripe_status(user_id), streak_notice), disable_web_page_preview=True)
         return
 
-    # V11.6.4: Stripe ENV must be separate from Stripe Setup Helper.
+    # V11.7: Stripe ENV must be separate from Stripe Setup Helper.
+    if lower in ["stripe webhook", "webhook", "webhook statuss", "stripe webhook statuss"]:
+        await update.message.reply_text(append_bonus_notices(stripe_webhook_status_answer(user_id), streak_notice), disable_web_page_preview=True)
+        return
+
     if lower in ["stripe env", "stripe environment", "stripe railway", "stripe konfigurācija", "stripe konfiguracija"]:
         await update.message.reply_text(append_bonus_notices(stripe_env_guide_answer(user_id), streak_notice), disable_web_page_preview=True)
         return
@@ -5754,12 +5758,77 @@ Kopsavilkums atjaunots:
     await update.message.reply_text(answer, disable_web_page_preview=True)
 
 
+
+
+def activate_premium_from_stripe(user_id, plan_key="basic", stripe_session_id="", stripe_event_id="", customer_email=""):
+    """V11.7 Premium Activation Webhook — ieslēdz Premium pēc Stripe maksājuma."""
+    if not user_id:
+        return False, "missing_user_id"
+
+    user_id = str(user_id)
+    user = get_user(user_id)
+
+    if plan_key == "plus":
+        plan_name = PLAN_PREMIUM_PLUS
+        amount = PREMIUM_PLUS_PRICE
+    else:
+        plan_name = PLAN_PREMIUM_BASIC
+        amount = PREMIUM_BASIC_PRICE
+
+    user_tz = ZoneInfo(user.get("timezone") or DEFAULT_TIMEZONE)
+    premium_until = (datetime.now(user_tz) + timedelta(days=30)).strftime("%Y-%m-%d")
+
+    user["premium"] = 1
+    user["premium_until"] = premium_until
+    update_user(user_id, user)
+
+    record_premium_transaction(
+        user_id=user_id,
+        plan_name=plan_name,
+        amount=amount,
+        currency=PREMIUM_CURRENCY,
+        payment_method="stripe_webhook",
+        status="paid",
+        expires_at=premium_until,
+        checkout_url="",
+        stripe_session_id=stripe_session_id or "",
+        stripe_event_id=stripe_event_id or "",
+        customer_email=customer_email or "",
+    )
+
+    return True, premium_until
+
+
+def stripe_webhook_status_answer(user_id=None):
+    """V11.7: parāda Stripe webhook statusu un URL."""
+    railway_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "TAVS-RAILWAY-DOMENS")
+    webhook_url = f"https://{railway_domain}/stripe/webhook"
+
+    return (
+        "🔌 Nina Stripe Webhook\n\n"
+        f"Webhook Secret: {'✅' if STRIPE_WEBHOOK_SECRET else '❌'}\n"
+        f"Stripe package: {'✅' if stripe else '❌'}\n\n"
+        "Stripe Dashboard pievieno webhook endpoint:\n"
+        f"{webhook_url}\n\n"
+        "Event:\n"
+        "checkout.session.completed\n\n"
+        "Ko dara webhook:\n"
+        "1. saņem Stripe maksājumu\n"
+        "2. nolasa telegram_user_id\n"
+        "3. ieslēdz Premium uz 30 dienām\n"
+        "4. saglabā premium_transactions\n\n"
+        "Versija: V11.7"
+    )
+
+
+
 @app.route("/stripe/webhook", methods=["POST"])
 def stripe_webhook():
+    """V11.7 Premium Activation Webhook."""
     if not stripe:
-        return jsonify({"error": "stripe library missing"}), 500
+        return jsonify({"ok": False, "error": "stripe_library_missing"}), 400
 
-    payload = request.get_data(as_text=False)
+    payload = request.data
     sig_header = request.headers.get("Stripe-Signature", "")
 
     try:
@@ -5768,48 +5837,50 @@ def stripe_webhook():
         else:
             event = json.loads(payload.decode("utf-8"))
     except Exception as e:
-        print("Stripe webhook signature/json kļūda:", e)
-        return jsonify({"error": "invalid webhook"}), 400
+        print("Stripe webhook signature/event kļūda:", e)
+        return jsonify({"ok": False, "error": "invalid_webhook"}), 400
 
-    event_id = event.get("id", "")
     event_type = event.get("type", "")
+    event_id = event.get("id", "")
 
-    if event_id and stripe_event_seen(event_id):
-        return jsonify({"ok": True, "duplicate": True})
+    if event_type != "checkout.session.completed":
+        return jsonify({"ok": True, "ignored": event_type}), 200
 
-    if event_type == "checkout.session.completed":
-        session = (event.get("data") or {}).get("object") or {}
-        user_id = user_id_from_stripe_session(session)
+    session = event.get("data", {}).get("object", {}) or {}
 
-        if not user_id:
-            print("Stripe webhook: nav user_id metadata/client_reference_id")
-            return jsonify({"ok": False, "error": "missing user_id"}), 200
+    metadata = session.get("metadata", {}) or {}
+    user_id = (
+        metadata.get("telegram_user_id")
+        or session.get("client_reference_id")
+        or metadata.get("user_id")
+        or ""
+    )
+    plan_key = metadata.get("plan_key", "basic")
+    session_id = session.get("id", "")
+    customer_email = (
+        session.get("customer_details", {}).get("email")
+        or session.get("customer_email")
+        or ""
+    )
 
-        plan_name, amount, currency = plan_from_stripe_session(session)
-        customer_details = session.get("customer_details") or {}
-        customer_email = customer_details.get("email", "")
-        stripe_session_id = session.get("id", "")
+    ok, result = activate_premium_from_stripe(
+        user_id=user_id,
+        plan_key=plan_key,
+        stripe_session_id=session_id,
+        stripe_event_id=event_id,
+        customer_email=customer_email,
+    )
 
-        until, achievements = activate_paid_premium(
-            user_id=user_id,
-            plan_name=plan_name,
-            amount=amount,
-            currency=currency,
-            payment_method="stripe",
-            stripe_session_id=stripe_session_id,
-            stripe_event_id=event_id,
-            customer_email=customer_email,
-        )
+    if not ok:
+        return jsonify({"ok": False, "error": result}), 400
 
-        print(f"Stripe webhook: Premium aktivizēts user_id={user_id}, plan={plan_name}, līdz={until}. Welcome ready: premium welcome")
-        if achievements:
-            print("Stripe achievements:", achievements)
-
-        return jsonify({"ok": True, "premium_until": until})
-
-    # Atzīmējam citus Stripe eventus tikai logā; Premium nemainām.
-    print("Stripe webhook ignored:", event_type)
-    return jsonify({"ok": True, "ignored": event_type})
+    return jsonify({
+        "ok": True,
+        "premium_activated": True,
+        "user_id": str(user_id),
+        "premium_until": result,
+        "version": "V11.7",
+    }), 200
 
 
 @app.route("/success")
@@ -5877,7 +5948,7 @@ def payment_cancel_page():
 
 @app.route("/")
 def home():
-    return "Nina7727 V11.6.4 Stripe ENV Router Fix darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V11.7 Premium Activation Webhook darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -5892,6 +5963,5 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
-    print("Nina7727 V11.6.4 Stripe ENV Router Fix darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V11.7 Premium Activation Webhook darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
-
