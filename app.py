@@ -508,7 +508,7 @@ def subscription_info(user_id=None):
             "premium panelis\n"
             "premium vēsture\n"
             "mans plāns\n\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     return (
@@ -532,7 +532,7 @@ def subscription_info(user_id=None):
         "Lai sāktu:\n"
         "pirkt basic\n"
         "pirkt plus\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -563,7 +563,7 @@ def premium_conversion_answer(user_id):
         "Izvēlies:\n"
         "pirkt basic\n"
         "pirkt plus\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -587,7 +587,7 @@ def premium_buy_intent_answer(user_id, plan_key="basic"):
         f"{benefit}\n\n"
         "Pēc apmaksas Premium aktivizēsies automātiski, ja Stripe webhook ir pieslēgts.\n\n"
         f"{checkout}\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -934,7 +934,7 @@ def system_health_answer(user_id, command_text="health"):
         f"Aktīvie atgādinājumi: {active_reminders}\n"
         f"Backup kopā: {backups_total}\n"
         f"Audit ieraksti: {audit_total}\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -1014,7 +1014,7 @@ def user_analytics_answer(user_id, command_text="analytics"):
         f"Vidējais XP: {avg_xp:.1f}\n"
         f"Vidējais līmenis: {avg_level:.1f}\n"
         f"Vidējais streak: {avg_streak:.1f}\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -1086,7 +1086,7 @@ def database_backup_dashboard(user_id, command_text="db backup"):
         f"Pēdējais backup: {latest_backup}\n"
         f"Pēdējā ziņa: {latest_message}\n"
         f"Pēdējais audit: {latest_audit}\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -1312,7 +1312,7 @@ def backup_scheduler_answer(user_id, command_text="auto backup"):
         f"{max(total_runs, auto_count)}\n\n"
         "Audit action:\n"
         "auto_backup_run\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -1419,7 +1419,7 @@ def recovery_center_answer(user_id, command_text="recovery"):
         "",
         f"Restore mēģinājumi: {restore_logs}",
         "Statuss: Ready",
-        "Versija: V12.4",
+        "Versija: V12.5",
     ])
 
     return "\n".join(lines)
@@ -1453,7 +1453,7 @@ def restore_latest_backup(user_id, command_text="restore latest"):
             f"{result}\n\n"
             f"Backup ID: #{backup_id}\n"
             "Statuss: Restored\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     log_restore_action(user_id, backup_id, "failed")
@@ -1501,7 +1501,7 @@ def admin_command_center(user_id, command_text="admin"):
         "Drošība:\n"
         f"🔒 Admin Lock: {admin_lock_status}\n"
         f"📋 Audit Log: {audit_status}\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -1578,7 +1578,7 @@ def admin_notifications_center(user_id, command_text="notifications"):
         f"• Restore kļūdas: {restore_errors}\n"
         f"• Maksājumu kļūdas: {payment_errors}\n\n"
         f"Statuss: {icon} {status}\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -1641,7 +1641,7 @@ def admin_activity_feed(user_id, command_text="activity", limit=10):
     lines.extend([
         f"Kopā ieraksti: {total}",
         "",
-        "Versija: V12.4",
+        "Versija: V12.5",
     ])
 
     return "\n".join(lines).strip()
@@ -1720,7 +1720,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
             "Norādi lietotāja ID.\n\n"
             "Piemērs:\n"
             "user 5138563912\n\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     log_admin_action(user_id, "user_lookup_view", "allowed", command_text)
@@ -1732,7 +1732,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
             f"User ID: {target_user_id}\n"
             "Statuss: nav atrasts\n\n"
             "Šāds lietotājs vēl nav Nina datubāzē.\n\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     messages_total = _count_table_rows("messages", "WHERE user_id = %s", (str(target_user_id),))
@@ -1770,7 +1770,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
         f"Backup: {backups_total}\n"
         f"Atgādinājumi: {reminders_total}\n"
         f"Aktīvie atgādinājumi: {active_reminders}\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -1887,7 +1887,7 @@ def admin_user_search(user_id, command_text="search user"):
             "find user 5138563912",
             "lietotāji",
             "",
-            "Versija: V12.4",
+            "Versija: V12.5",
         ])
         return "\n".join(lines)
 
@@ -1906,7 +1906,7 @@ def admin_user_search(user_id, command_text="search user"):
         lines.append(f"Streak: {int(streak_days or 0)}")
         lines.append("")
 
-    lines.append("Versija: V12.4")
+    lines.append("Versija: V12.5")
     return "\n".join(lines).strip()
 
 
@@ -1939,7 +1939,7 @@ def admin_user_actions_help(user_id, command_text="user actions"):
         "Nodzēš lietotāja streak.\n\n"
         "Drošība:\n"
         "Visas darbības ir tikai administratoram un tiek ierakstītas Audit Log.\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -1962,7 +1962,7 @@ def admin_user_action(user_id, command_text="user actions"):
             "Trūkst lietotāja ID.\n\n"
             "Piemērs:\n"
             "grant premium 5138563912\n\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     target_user_id = numbers[0]
@@ -1974,7 +1974,7 @@ def admin_user_action(user_id, command_text="user actions"):
             f"User ID: {target_user_id}\n"
             "Statuss: nav atrasts\n\n"
             "Šāds lietotājs vēl nav Nina datubāzē.\n\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     try:
@@ -2016,7 +2016,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         elif lower.startswith("add xp"):
             if len(numbers) < 2:
-                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nadd xp 5138563912 100\n\nVersija: V12.4"
+                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nadd xp 5138563912 100\n\nVersija: V12.5"
             amount = max(0, int(numbers[1]))
             new_xp = int(target.get("xp", 0) or 0) + amount
             target["xp"] = new_xp
@@ -2027,7 +2027,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         elif lower.startswith("remove xp"):
             if len(numbers) < 2:
-                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nremove xp 5138563912 50\n\nVersija: V12.4"
+                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nremove xp 5138563912 50\n\nVersija: V12.5"
             amount = max(0, int(numbers[1]))
             new_xp = max(0, int(target.get("xp", 0) or 0) - amount)
             target["xp"] = new_xp
@@ -2038,7 +2038,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         elif lower.startswith("set level"):
             if len(numbers) < 2:
-                return "🧰 Nina Admin User Actions\n\nTrūkst līmeņa.\n\nPiemērs:\nset level 5138563912 5\n\nVersija: V12.4"
+                return "🧰 Nina Admin User Actions\n\nTrūkst līmeņa.\n\nPiemērs:\nset level 5138563912 5\n\nVersija: V12.5"
             new_level = max(1, int(numbers[1]))
             new_xp = (new_level - 1) * XP_PER_LEVEL
             target["level"] = new_level
@@ -2056,7 +2056,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         else:
             log_admin_action(user_id, "user_action_execute", "failed_unknown_action", command_text)
-            return "🧰 Nina Admin User Actions\n\nDarbība nav atpazīta.\n\nRaksti: user actions\n\nVersija: V12.4"
+            return "🧰 Nina Admin User Actions\n\nDarbība nav atpazīta.\n\nRaksti: user actions\n\nVersija: V12.5"
 
         log_admin_action(user_id, f"user_action_{action_name}", "success", command_text)
         updated = _fetch_user_row_for_admin(target_user_id) or target
@@ -2072,7 +2072,7 @@ def admin_user_action(user_id, command_text="user actions"):
             f"XP: {updated.get('xp', 0)}\n"
             f"Līmenis: {updated.get('level', 1)}\n"
             f"Streak: {updated.get('streak_days', 0)}\n\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     except Exception as e:
@@ -2082,7 +2082,7 @@ def admin_user_action(user_id, command_text="user actions"):
             "🧰 Nina Admin User Actions\n\n"
             "Darbība neizdevās tehniskas kļūdas dēļ.\n\n"
             f"Iemesls: {e}\n\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
 
@@ -2168,7 +2168,7 @@ def admin_user_management_dashboard(user_id, command_text="user management"):
         "Admin Lock: Aktīvs",
         f"Audit ieraksti: {audit_total}",
         "",
-        "Versija: V12.4",
+        "Versija: V12.5",
     ])
 
     return "\n".join(lines)
@@ -2419,7 +2419,7 @@ def admin_revenue_analytics(user_id, command_text="revenue analytics"):
 
     lines.extend([
         "",
-        "Versija: V12.4",
+        "Versija: V12.5",
     ])
 
     return "\n".join(lines)
@@ -2688,7 +2688,7 @@ def stripe_setup_helper(user_id=None):
 
     lines.extend([
         "",
-        "Versija: V12.4",
+        "Versija: V12.5",
     ])
 
     return "\n".join(lines)
@@ -2724,7 +2724,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             "Apmaksas links:\n"
             f"{static_url}\n\n"
             "Pēc apmaksas Premium aktivizēsies automātiski, ja Stripe webhook ir pieslēgts.\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     # 2) Dynamic Stripe Checkout Sessions
@@ -2757,7 +2757,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             "Dinamiskam checkout pievieno Railway: STRIPE_SECRET_KEY, STRIPE_BASIC_PRICE_ID/STRIPE_PLUS_PRICE_ID, STRIPE_SUCCESS_URL, STRIPE_CANCEL_URL\n"
             "Vai statiskam linkam pievieno: STRIPE_BASIC_CHECKOUT_URL / STRIPE_PLUS_CHECKOUT_URL\n\n"
             f"Iemesls: {reason}\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     try:
@@ -2796,7 +2796,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             "Apmaksas links:\n"
             f"{checkout_url}\n\n"
             "Pēc apmaksas Premium aktivizēsies automātiski, ja Stripe webhook ir pieslēgts.\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     except Exception as e:
@@ -2815,7 +2815,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             f"Cena: {amount:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
             "Stripe checkout izveide neizdevās.\n"
             f"Iemesls: {str(e)}\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
 
@@ -3941,7 +3941,7 @@ def premium_features(user_id=None):
         "Sākt:\n"
         "pirkt basic\n"
         "pirkt plus\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -4268,7 +4268,7 @@ def premium_status(user_id):
             "premium panelis\n"
             "premium vēsture\n"
             "mans plāns\n\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     return premium_conversion_answer(user_id)
@@ -4578,7 +4578,7 @@ def admin_revenue_forecast(user_id, command_text="revenue forecast"):
         f"Ieņēmumi: {last_30_revenue:.2f} {PREMIUM_CURRENCY}\n"
         f"Checkout konversijas signāls: {conversion_hint:.1f}%\n\n"
         f"Statuss: {status}\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -4806,7 +4806,7 @@ def admin_kpi_dashboard(user_id, command_text="kpi"):
         f"Audit ieraksti: {audit_total}\n"
         f"Premium darījumi: {premium_transactions_total}\n\n"
         f"Statuss: {system_status}\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -4951,7 +4951,7 @@ def admin_alerts_dashboard(user_id, command_text="alerts"):
         "",
         f"Kopā alert skaits: {total_alerts}",
         f"Audit ieraksti kopā: {total_audit}",
-        "Versija: V12.4",
+        "Versija: V12.5",
     ])
 
     return "\n".join(lines)
@@ -5128,7 +5128,7 @@ def admin_launch_dashboard(user_id, command_text="launch"):
         "3. Notestē: pirkt premium / pirkt plus",
         "4. Aicini pirmos 5–10 lietotājus",
         "",
-        "Versija: V12.4",
+        "Versija: V12.5",
     ])
 
     return "\n".join(lines)
@@ -5393,7 +5393,7 @@ def stripe_env_guide_answer(user_id=None):
         "Svarīgi:",
         "Ja redzi ❌ stripe package, Railway projektā vajag requirements.txt ar rindu: stripe",
         "",
-        "Versija: V12.4",
+        "Versija: V12.5",
     ])
     return "\n".join(lines)
 
@@ -5415,7 +5415,7 @@ def stripe_webhook_test_answer(user_id):
             "🧪 Stripe Webhook Test Mode\n\n"
             "Tests neizdevās.\n"
             f"Iemesls: {result}\n\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     return (
@@ -5428,7 +5428,7 @@ def stripe_webhook_test_answer(user_id):
         "premium\n"
         "mans plāns\n"
         "premium vēsture\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -5459,7 +5459,7 @@ def safe_launch_answer(user_id=None):
         "sales\n"
         "invite\n"
         "earn\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -5476,7 +5476,7 @@ def safe_sales_answer(user_id=None):
         "4. 100 EUR MRR\n\n"
         "Galvenā komanda lietotājam:\n"
         "pirkt basic\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -5490,7 +5490,7 @@ def safe_invite_answer(user_id=None):
         f"{link}\n\n"
         "Teksts draugam:\n"
         "Pamēģini Ninu — Telegram AI palīgs ar atmiņu, atgādinājumiem un Premium režīmu.\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -5505,7 +5505,7 @@ def safe_earn_answer(user_id=None):
         "6. Premium ieslēdzas automātiski\n\n"
         "Tagad galvenais fokuss:\n"
         "Stripe + Telegram izplatīšana + pirmie maksājumi.\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -5591,7 +5591,7 @@ def referral_capture_welcome_answer(user_id, referral_code):
             "Vai apskati:\n"
             "launch\n"
             "invite\n\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     if result == "self_referral_blocked":
@@ -5600,7 +5600,7 @@ def referral_capture_welcome_answer(user_id, referral_code):
             "Referral netika saglabāts, jo nevar uzaicināt pats sevi.\n\n"
             "Sāc ar komandu:\n"
             "premium\n\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     if result == "already_registered":
@@ -5610,7 +5610,7 @@ def referral_capture_welcome_answer(user_id, referral_code):
             "Komandas:\n"
             "premium\n"
             "invite\n\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     return (
@@ -5618,7 +5618,7 @@ def referral_capture_welcome_answer(user_id, referral_code):
         "Referral kodu neizdevās saglabāt, bet vari lietot Ninu tālāk.\n\n"
         "Sāc ar komandu:\n"
         "premium\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -5652,7 +5652,7 @@ def referral_stats_answer(user_id):
         f"Premium konvertēti: {converted}\n\n"
         "Nākamais solis V12.4:\n"
         "ja uzaicinātais nopērk Premium, uzaicinātājs saņem bonusu.\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -5674,7 +5674,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "premium\n"
             "launch\n"
             "invite\n\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     await update.message.reply_text(answer, disable_web_page_preview=True)
@@ -5790,7 +5790,7 @@ def referral_reward_test_answer(user_id):
             "Bonuss:\n"
             f"+{REFERRAL_BONUS_DAYS} Premium dienas\n"
             f"+{REFERRAL_BONUS_XP} XP\n\n"
-            "Versija: V12.4"
+            "Versija: V12.5"
         )
 
     return (
@@ -5798,7 +5798,90 @@ def referral_reward_test_answer(user_id):
         "Bonuss netika piešķirts.\n"
         f"Iemesls: {result}\n\n"
         "Tas ir normāli, ja šim lietotājam nav referral ieraksta vai bonuss jau piešķirts.\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
+    )
+
+
+
+
+# =========================
+# V12.5 STRIPE PRODUCTION SETUP
+# =========================
+
+def stripe_production_setup_answer(user_id=None):
+    """V12.5: tikai īstajam maksājumu palaišanas solim."""
+    checks = [
+        ("stripe package", bool(stripe)),
+        ("STRIPE_SECRET_KEY", bool(STRIPE_SECRET_KEY)),
+        ("STRIPE_BASIC_PRICE_ID", bool(STRIPE_BASIC_PRICE_ID)),
+        ("STRIPE_PLUS_PRICE_ID", bool(STRIPE_PLUS_PRICE_ID)),
+        ("STRIPE_SUCCESS_URL", bool(STRIPE_SUCCESS_URL and STRIPE_SUCCESS_URL != "https://t.me/")),
+        ("STRIPE_CANCEL_URL", bool(STRIPE_CANCEL_URL and STRIPE_CANCEL_URL != "https://t.me/")),
+        ("STRIPE_WEBHOOK_SECRET", bool(STRIPE_WEBHOOK_SECRET)),
+    ]
+
+    ready = sum(1 for _, ok in checks if ok)
+    percent = int((ready / len(checks)) * 100)
+
+    lines = [
+        "💳 Nina Stripe Production Setup",
+        "",
+        "Mērķis: pirmais īstais maksājums.",
+        "",
+        "Statuss:",
+    ]
+
+    for name, ok in checks:
+        lines.append(("✅ " if ok else "❌ ") + name)
+
+    lines.extend([
+        "",
+        f"Gatavība: {percent}%",
+        "",
+        "Railway vajag:",
+        "1. requirements.txt ar rindu: stripe",
+        "2. STRIPE_SECRET_KEY=sk_live_... vai sk_test_...",
+        "3. STRIPE_BASIC_PRICE_ID=price_...",
+        "4. STRIPE_PLUS_PRICE_ID=price_...",
+        "5. STRIPE_SUCCESS_URL=https://tavs-domens/success",
+        "6. STRIPE_CANCEL_URL=https://tavs-domens/cancel",
+        "7. STRIPE_WEBHOOK_SECRET=whsec_...",
+        "",
+        "Stripe Dashboard webhook:",
+        "Endpoint:",
+        "https://nina7727-production.up.railway.app/stripe/webhook",
+        "",
+        "Event:",
+        "checkout.session.completed",
+        "",
+        "Pēc ENV ielikšanas testē:",
+        "stripe production",
+        "stripe env",
+        "pirkt basic",
+        "stripe webhook",
+        "",
+        "Versija: V12.5",
+    ])
+    return "\n".join(lines)
+
+
+def first_payment_plan_answer(user_id=None):
+    return (
+        "💰 Nina First Payment Plan\n\n"
+        "Mērķis: dabūt pirmo īsto maksājumu.\n\n"
+        "Secība:\n"
+        "1. Railway pievieno stripe package\n"
+        "2. Stripe izveido Product: Nina Premium Basic\n"
+        "3. Stripe izveido Price: 4.99 EUR monthly\n"
+        "4. Railway ieliec STRIPE_BASIC_PRICE_ID\n"
+        "5. Railway ieliec STRIPE_SECRET_KEY\n"
+        "6. Stripe ieliec webhook endpoint\n"
+        "7. Railway ieliec STRIPE_WEBHOOK_SECRET\n"
+        "8. Telegram testē: pirkt basic\n"
+        "9. Veic testa maksājumu\n"
+        "10. Pārbaudi: premium un premium vēsture\n\n"
+        "Nākamais biznesa mērķis pēc tam: 10 maksājumi.\n\n"
+        "Versija: V12.5"
     )
 
 
@@ -5807,6 +5890,22 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     lower = user_text.strip().lower()
     streak_notice = update_daily_streak(user_id)
+
+    # V12.5: Stripe production commands.
+    if lower in ["stripe production", "stripe live", "stripe setup production", "production stripe"]:
+        await update.message.reply_text(
+            append_bonus_notices(stripe_production_setup_answer(user_id), streak_notice),
+            disable_web_page_preview=True
+        )
+        return
+
+    if lower in ["first payment", "pirmais maksājums", "pirmais maksajums"]:
+        await update.message.reply_text(
+            append_bonus_notices(first_payment_plan_answer(user_id), streak_notice),
+            disable_web_page_preview=True
+        )
+        return
+
 
     if lower in ["referral reward test", "reward test"]:
         await update.message.reply_text(
@@ -6289,7 +6388,7 @@ def stripe_webhook_status_answer(user_id=None):
         "2. nolasa telegram_user_id\n"
         "3. ieslēdz Premium uz 30 dienām\n"
         "4. saglabā premium_transactions\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 
@@ -6472,7 +6571,7 @@ def stripe_production_checklist_answer(user_id=None):
         "5. Testē: stripe test",
         "6. Testē: pirkt basic",
         "",
-        "Versija: V12.4"
+        "Versija: V12.5"
     ])
     return "\\n".join(lines)
 
@@ -6495,7 +6594,7 @@ def revenue_dashboard_answer(user_id=None):
         "referral\n"
         "invite\n"
         "sales\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 def referral_answer(user_id):
@@ -6504,7 +6603,7 @@ def referral_answer(user_id):
         f"Tavs referral kods: NINA-{user_id}\n\n"
         "Dalies ar Ninu un aicini draugus.\n"
         "Nākamais solis: pieslēgt automātisku referral uzskaiti.\n\n"
-        "Versija: V12.4"
+        "Versija: V12.5"
     )
 
 # =========================
