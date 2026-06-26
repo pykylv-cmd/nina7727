@@ -5401,30 +5401,6 @@ def stripe_env_guide_answer(user_id=None):
 
 
 
-
-# =========================
-# V12.5.3 STRIPE SAFE ACCESS HELPERS
-# =========================
-
-def stripe_safe_get(obj, key, default=None):
-    """Droši nolasa StripeObject vai dict vērtības."""
-    try:
-        if isinstance(obj, dict):
-            return obj.get(key, default)
-        value = getattr(obj, key, default)
-        return default if value is None else value
-    except Exception:
-        return default
-
-
-def stripe_safe_metadata(session):
-    metadata = stripe_safe_get(session, "metadata", {}) or {}
-    try:
-        return dict(metadata)
-    except Exception:
-        return {}
-
-
 def stripe_webhook_test_answer(user_id):
     """V11.9 Stripe Test Router Fix — testē Premium aktivizāciju bez īsta Stripe maksājuma."""
     ok, result = activate_premium_from_stripe(
@@ -6418,77 +6394,123 @@ def stripe_webhook_status_answer(user_id=None):
 
 
 
+
+# =========================
+# V12.5.3 WEBHOOK FINAL SAFE HELPERS
+# =========================
+
+def stripe_value(obj, key, default=None):
+    """Droši nolasa vērtību no StripeObject vai dict."""
+    try:
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        value = getattr(obj, key, default)
+        return default if value is None else value
+    except Exception:
+        return default
+
+
+def stripe_to_dict(obj):
+    """StripeObject/dict pārvērš vienkāršā dict, ja iespējams."""
+    try:
+        if isinstance(obj, dict):
+            return obj
+        if hasattr(obj, "to_dict_recursive"):
+            return obj.to_dict_recursive()
+        if hasattr(obj, "to_dict"):
+            return obj.to_dict()
+    except Exception:
+        pass
+    return {}
+
 @app.route("/stripe/webhook", methods=["POST"])
 def stripe_webhook():
-    """V12.5.3: droša Stripe webhook apstrāde Premium aktivizācijai."""
-    payload = request.get_data(as_text=True)
+    """V12.5.3: Stripe webhook final fix — Premium aktivizācija bez 500 kļūdām."""
+    if not stripe:
+        return jsonify({"ok": False, "error": "stripe_library_missing"}), 400
+
+    payload = request.get_data()
     sig_header = request.headers.get("Stripe-Signature", "")
 
     try:
-        if stripe and STRIPE_WEBHOOK_SECRET:
-            event = stripe.Webhook.construct_event(
-                payload=payload,
-                sig_header=sig_header,
-                secret=STRIPE_WEBHOOK_SECRET
-            )
+        if STRIPE_WEBHOOK_SECRET:
+            event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
         else:
-            event = json.loads(payload or "{}")
+            event = json.loads(payload.decode("utf-8"))
     except Exception as e:
-        print("Stripe webhook signature/json kļūda:", e)
-        return jsonify({"status": "signature_or_json_error", "error": str(e)}), 400
+        print("Stripe webhook signature/event kļūda:", e)
+        return jsonify({"ok": False, "error": "invalid_webhook", "details": str(e)}), 400
 
     try:
-        event_type = stripe_safe_get(event, "type", "")
-        event_id = stripe_safe_get(event, "id", "")
+        event_type = stripe_value(event, "type", "")
+        event_id = stripe_value(event, "id", "")
 
         if event_type != "checkout.session.completed":
-            return jsonify({"status": "ignored", "event_type": event_type}), 200
+            return jsonify({"ok": True, "ignored": event_type}), 200
 
-        data = stripe_safe_get(event, "data", {}) or {}
-        session = stripe_safe_get(data, "object", {}) or {}
+        data = stripe_value(event, "data", {}) or {}
+        session = stripe_value(data, "object", {}) or {}
 
-        metadata = stripe_safe_metadata(session)
-        user_id = str(metadata.get("telegram_user_id") or metadata.get("user_id") or "").strip()
-        plan_key = str(metadata.get("plan_key") or "basic").strip().lower()
+        session_dict = stripe_to_dict(session)
 
-        if not user_id:
-            print("Stripe webhook: nav telegram_user_id metadata. Session:", stripe_safe_get(session, "id", ""))
-            return jsonify({"status": "missing_user_id"}), 200
-
-        stripe_session_id = str(stripe_safe_get(session, "id", ""))
-        customer_email = str(stripe_safe_get(session, "customer_email", "") or "")
-        amount_total = stripe_safe_get(session, "amount_total", 0) or 0
-
-        if plan_key == "plus":
-            plan_name = PLAN_PREMIUM_PLUS
-            amount = PREMIUM_PLUS_PRICE
-        else:
-            plan_name = PLAN_PREMIUM_BASIC
-            amount = PREMIUM_BASIC_PRICE
-
+        metadata = stripe_value(session, "metadata", {}) or session_dict.get("metadata", {}) or {}
         try:
-            if amount_total:
-                amount = float(amount_total) / 100.0
+            metadata = dict(metadata)
         except Exception:
-            pass
+            metadata = {}
 
-        ok, premium_until = activate_premium_from_stripe(
-            user_id=user_id,
-            plan_name=plan_name,
-            amount=amount,
-            stripe_session_id=stripe_session_id,
-            stripe_event_id=str(event_id or ""),
-            customer_email=customer_email,
+        customer_details = stripe_value(session, "customer_details", {}) or session_dict.get("customer_details", {}) or {}
+        try:
+            customer_details = dict(customer_details)
+        except Exception:
+            customer_details = {}
+
+        user_id = (
+            metadata.get("telegram_user_id")
+            or stripe_value(session, "client_reference_id", "")
+            or session_dict.get("client_reference_id", "")
+            or metadata.get("user_id")
+            or ""
+        )
+        user_id = str(user_id).strip()
+
+        plan_key = str(metadata.get("plan_key", "basic") or "basic").strip().lower()
+        session_id = str(stripe_value(session, "id", "") or session_dict.get("id", "") or "")
+        customer_email = (
+            customer_details.get("email")
+            or stripe_value(session, "customer_email", "")
+            or session_dict.get("customer_email", "")
+            or ""
         )
 
-        if ok:
-            return jsonify({"status": "paid", "user_id": user_id, "premium_until": premium_until}), 200
+        if not user_id:
+            print("Stripe webhook: missing_user_id; session_id=", session_id, "metadata=", metadata)
+            return jsonify({"ok": True, "status": "missing_user_id", "session_id": session_id}), 200
 
-        return jsonify({"status": "activation_failed", "user_id": user_id}), 200
+        ok, result = activate_premium_from_stripe(
+            user_id=user_id,
+            plan_key=plan_key,
+            stripe_session_id=session_id,
+            stripe_event_id=str(event_id or ""),
+            customer_email=str(customer_email or ""),
+        )
+
+        if not ok:
+            print("Stripe webhook: activation_failed", result)
+            return jsonify({"ok": True, "status": "activation_failed", "error": result}), 200
+
+        return jsonify({
+            "ok": True,
+            "premium_activated": True,
+            "user_id": str(user_id),
+            "premium_until": result,
+            "version": "V12.5.3",
+        }), 200
 
     except Exception as e:
         print("Stripe webhook apstrādes kļūda:", e)
-        return jsonify({"status": "webhook_processing_error", "error": str(e)}), 200
+        return jsonify({"ok": True, "status": "webhook_processing_error", "error": str(e)}), 200
+
 
 
 @app.route("/success")
@@ -6556,7 +6578,7 @@ def payment_cancel_page():
 
 @app.route("/")
 def home():
-    return "Nina7727 V12.5.3 Webhook Safe Dict Fix darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V12.5.3 Webhook Final Fix darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -6579,7 +6601,7 @@ def run_flask_server():
 
 
 if __name__ == "__main__":
-    print("Nina7727 V12.5.3 Webhook Safe Dict Fix darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V12.5.3 Webhook Final Fix darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
     # Stripe webhook vajag HTTP serveri. Telegram botam vienlaikus vajag polling.
     # Tāpēc Flask palaižam background threadā, bet Telegram polling atstājam galvenajā procesā.
