@@ -1,4 +1,3 @@
-
 """
 emotion.py — V16.2
 
