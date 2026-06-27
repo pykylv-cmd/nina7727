@@ -1,4 +1,3 @@
-
 """
 relationship.py — V16.3
 
