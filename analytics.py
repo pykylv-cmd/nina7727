@@ -1,8 +1,17 @@
 """
-analytics.py — V15.5
+analytics.py — V15.6
 
 Nina AI Platform analītikas modulis.
 Šeit nav Telegram, WhatsApp, Stripe vai webhook koda.
+
+Šis modulis veido lietotāja progresa pārskatu:
+- atmiņas;
+- mērķi;
+- atgādinājumi;
+- streak;
+- XP;
+- līmenis;
+- dominējošās tēmas.
 """
 
 from collections import Counter
@@ -42,7 +51,7 @@ def build_progress_line(snapshot):
     parts = []
 
     if goals > 0:
-        parts.append(f"{goals} mērķis")
+        parts.append(f"{goals} mērķi")
     if memories > 0:
         parts.append(f"{memories} atmiņas")
     if reminders > 0:
@@ -86,30 +95,38 @@ def build_topic_summary(topic_counts):
     return "Pēdējā laikā biežāk parādās šīs tēmas: " + ", ".join(nice_topics) + "."
 
 
-def build_weekly_progress_text(snapshot, topic_counts=None, version="V15.5"):
+def build_weekly_progress_text(snapshot, topic_counts=None, version="V15.6"):
     progress = build_progress_line(snapshot)
     topic_summary = build_topic_summary(topic_counts or {})
+
+    memories = safe_int(snapshot.get("memories_count"))
+    goals = safe_int(snapshot.get("goals_count"))
+    reminders = safe_int(snapshot.get("reminders_count"))
+    streak = safe_int(snapshot.get("streak_days"))
+    xp = safe_int(snapshot.get("xp"))
+    level = safe_int(snapshot.get("level"), 1)
 
     lines = [
         "📊 Tavs progress ar Ninu",
         "",
         progress,
+        "",
+        f"🧠 Saglabātās atmiņas: {memories}",
+        f"🎯 Aktīvie mērķi: {goals}",
+        f"⏰ Aktīvie atgādinājumi: {reminders}",
+        "",
+        f"🔥 Streak: {streak} dienas",
+        f"⭐ XP: {xp}",
+        f"🏅 Līmenis: {level}",
     ]
 
     if topic_summary:
         lines.extend(["", f"🧠 {topic_summary}"])
 
-    streak = safe_int(snapshot.get("streak_days"))
-    xp = safe_int(snapshot.get("xp"))
-    level = safe_int(snapshot.get("level"), 1)
-
     lines.extend([
         "",
-        f"🔥 Streak: {streak} dienas",
-        f"⭐ XP: {xp}",
-        f"🏅 Līmenis: {level}",
-        "",
-        "Mans ieteikums: turpini ar vienu skaidru mērķi dienā. Tas ilgtermiņā dod lielu progresu.",
+        "💡 Mans ieteikums:",
+        "Turpini ar vienu skaidru mērķi dienā. Mazs, bet konsekvents progress ilgtermiņā uzvar haosu.",
         "",
         f"Versija: {version}",
     ])
@@ -117,7 +134,7 @@ def build_weekly_progress_text(snapshot, topic_counts=None, version="V15.5"):
     return "\n".join(lines)
 
 
-def build_empty_progress_text(version="V15.5"):
+def build_empty_progress_text(version="V15.6"):
     return (
         "📊 Tavs progress ar Ninu\n\n"
         "Vēl nav pietiekami daudz datu, lai veidotu īstu pārskatu.\n\n"
