@@ -1,12 +1,8 @@
 """
-conversation.py — V14.4
+conversation.py — V15.8.3
 
-Ninas dabiskās sarunas klasifikācija.
-Šeit nav Stripe, Premium, webhook vai datubāzes koda.
-Šis modulis tikai pasaka, ko lietotājs, visticamāk, grib:
-- memory
-- goal
-- none
+Saprot dabiskus ziņojumus.
+Svarīgi: jautājumi NAV atmiņas.
 """
 
 
@@ -18,9 +14,14 @@ def classify_natural_message(text):
     blocked_starts = [
         "/start", "premium", "pirkt", "mana diena", "labrīt", "labrit",
         "vakars", "mērķis:", "merkis:", "atceries", "invite", "referral",
-        "stripe", "mans plāns", "abonements"
+        "stripe", "mans plāns", "abonements", "progress", "statistika",
+        "atgādini", "atgadini"
     ]
     if any(lower.startswith(x) for x in blocked_starts):
+        return "none"
+
+    question_words = ["ko ", "kas ", "kā ", "ka ", "kāpēc", "kapec", "vai ", "kur ", "kad "]
+    if "?" in lower or any(lower.startswith(q) for q in question_words):
         return "none"
 
     today_words = ["šodien", "sodien"]
@@ -44,7 +45,7 @@ def classify_natural_message(text):
     return "none"
 
 
-def build_auto_memory_answer(memory_text, version="V14.4"):
+def build_auto_memory_answer(memory_text, version="V15.8.3"):
     return (
         "🧠 Saglabāju. ✅\n\n"
         f"Atcerēšos: {memory_text}\n\n"
@@ -53,7 +54,7 @@ def build_auto_memory_answer(memory_text, version="V14.4"):
     )
 
 
-def build_auto_goal_answer(goal_text, version="V14.4"):
+def build_auto_goal_answer(goal_text, version="V15.8.3"):
     return (
         "🎯 Labi, šo iestatīju kā tavas dienas galveno mērķi. ✅\n\n"
         f"Mērķis: {goal_text}\n\n"
