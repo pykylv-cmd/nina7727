@@ -22,7 +22,7 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 from openai import OpenAI
 
-# V15.7 Safe Daily Module Import
+# V15.8.1 Safe Daily Module Import
 # Ja daily.py vēl nav augšupielādēts, app.py joprojām startē ar iebūvētiem fallback tekstiem.
 try:
     from daily import (
@@ -34,7 +34,7 @@ try:
 except Exception as e:
     print("daily.py imports nav pieejams, izmantoju fallback:", e)
 
-    def build_daily_answer(name="", plan="Free", is_premium=False, goals=None, memories=None, reminders=0, version="V15.7"):
+    def build_daily_answer(name="", plan="Free", is_premium=False, goals=None, memories=None, reminders=0, version="V15.8.1"):
         goals = goals or []
         memories = memories or []
         greeting = f"👋 Sveiks, {name}!" if name else "👋 Sveiks!"
@@ -73,7 +73,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_morning_answer(name="", version="V15.7"):
+    def build_morning_answer(name="", version="V15.8.1"):
         greeting = f"🌅 Labrīt, {name}!" if name else "🌅 Labrīt!"
         return (
             f"{greeting}\n\n"
@@ -90,7 +90,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_evening_answer(version="V15.7"):
+    def build_evening_answer(version="V15.8.1"):
         return (
             "🌙 Vakara pārskats ar Ninu\n\n"
             "Pirms diena beidzas, vari man īsi uzrakstīt:\n"
@@ -103,7 +103,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_goal_prompt_answer(version="V15.7"):
+    def build_goal_prompt_answer(version="V15.8.1"):
         return (
             "🎯 Šodienas mērķis\n\n"
             "Uzraksti vienu galveno lietu, ko šodien gribi paveikt.\n\n"
@@ -116,7 +116,7 @@ except Exception as e:
 
 
 
-# V15.7 Safe Memory Module Import
+# V15.8.1 Safe Memory Module Import
 # Ja memory.py vēl nav augšupielādēts, app.py joprojām strādā ar fallback loģiku.
 try:
     from memory import (
@@ -130,7 +130,7 @@ try:
 except Exception as e:
     print("memory.py imports nav pieejams, izmantoju fallback:", e)
 
-    def build_memory_saved_answer(saved_text, version="V15.7"):
+    def build_memory_saved_answer(saved_text, version="V15.8.1"):
         return (
             "🧠 Pierakstīju. ✅\n\n"
             f"Atcerēšos: {saved_text}\n\n"
@@ -138,7 +138,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_goal_saved_answer(goal_text, version="V15.7"):
+    def build_goal_saved_answer(goal_text, version="V15.8.1"):
         return (
             "🎯 Saglabāju šodienas mērķi. ✅\n\n"
             f"Mērķis: {goal_text}\n\n"
@@ -253,7 +253,7 @@ except Exception as e:
             return []
 
 
-# V15.7 Safe Conversation Module Import
+# V15.8.1 Safe Conversation Module Import
 # Ja conversation.py vēl nav augšupielādēts, app.py joprojām strādā ar fallback.
 try:
     from conversation import (
@@ -293,7 +293,7 @@ except Exception as e:
 
         return "none"
 
-    def build_auto_memory_answer(memory_text, version="V15.7"):
+    def build_auto_memory_answer(memory_text, version="V15.8.1"):
         return (
             "🧠 Saglabāju. ✅\n\n"
             f"Atcerēšos: {memory_text}\n\n"
@@ -301,7 +301,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_auto_goal_answer(goal_text, version="V15.7"):
+    def build_auto_goal_answer(goal_text, version="V15.8.1"):
         return (
             "🎯 Labi, šo iestatīju kā tavas dienas galveno mērķi. ✅\n\n"
             f"Mērķis: {goal_text}\n\n"
@@ -311,7 +311,7 @@ except Exception as e:
 
 
 
-# V15.7 Safe Coach Module Import
+# V15.8.1 Safe Coach Module Import
 try:
     from coach import build_daily_coach_tip
 except Exception as e:
@@ -343,7 +343,7 @@ except Exception as e:
 
 
 
-# V15.7 Safe Personality Module Import
+# V15.8.1 Safe Personality Module Import
 try:
     from personality import nina_daily_closing_line
 except Exception as e:
@@ -354,7 +354,7 @@ except Exception as e:
 
 
 
-# V15.7 Safe Reminders Module Import
+# V15.8.1 Safe Reminders Module Import
 # Nina AI Platform: atgādinājumu loģika atsevišķā modulī.
 try:
     from reminders import (
@@ -405,7 +405,7 @@ except Exception as e:
             print("Reminder fallback save kļūda:", e)
             return False
 
-    def build_reminder_saved_answer(reminder_text, human_time="", version="V15.7"):
+    def build_reminder_saved_answer(reminder_text, human_time="", version="V15.8.1"):
         if human_time:
             return (
                 "⏰ Atgādinājums saglabāts. ✅\n\n"
@@ -420,7 +420,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_reminder_help_answer(version="V15.7"):
+    def build_reminder_help_answer(version="V15.8.1"):
         return (
             "⏰ Raksti šādi:\n\n"
             "atgādini rīt 10:00 piezvanīt klientam\n"
@@ -431,7 +431,7 @@ except Exception as e:
 
 
 
-# V15.7 Safe Brain Module Import
+# V15.8.1 Safe Brain Module Import
 try:
     from brain import build_brain_summary, detect_topics, analyze_memories
 except Exception as e:
@@ -448,7 +448,7 @@ except Exception as e:
 
 
 
-# V15.7 Safe Analytics Module Import
+# V15.8.1 Safe Analytics Module Import
 # Nina AI Platform: progress un aktivitātes pārskati.
 try:
     from analytics import (
@@ -469,7 +469,7 @@ except Exception as e:
             "level": int(level or 1),
         }
 
-    def build_weekly_progress_text(snapshot, topic_counts=None, version="V15.7"):
+    def build_weekly_progress_text(snapshot, topic_counts=None, version="V15.8.1"):
         return (
             "📊 Tavs progress ar Ninu\n\n"
             f"🧠 Atmiņas: {snapshot.get('memories_count', 0)}\n"
@@ -481,7 +481,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_empty_progress_text(version="V15.7"):
+    def build_empty_progress_text(version="V15.8.1"):
         return (
             "📊 Tavs progress ar Ninu\n\n"
             "Vēl nav pietiekami daudz datu. Sāc ar vienu mērķi, atmiņu vai atgādinājumu.\n\n"
@@ -725,7 +725,7 @@ def init_db():
 
 
 
-    # V15.7 Daily Goals
+    # V15.8.1 Daily Goals
     db_execute(c, """
         CREATE TABLE IF NOT EXISTS daily_goals (
             id SERIAL PRIMARY KEY,
@@ -738,7 +738,7 @@ def init_db():
     """)
 
 
-    # V15.7 Memory Intelligence topic statistics
+    # V15.8.1 Memory Intelligence topic statistics
     db_execute(c, """
         CREATE TABLE IF NOT EXISTS user_topic_stats (
             id SERIAL PRIMARY KEY,
@@ -982,7 +982,7 @@ def latest_premium_transaction(user_id):
 
 
 def subscription_info(user_id=None):
-    """V15.7: Premium pārdošanas teksts ar cilvēkam saprotamu vērtību."""
+    """V15.8.1: Premium pārdošanas teksts ar cilvēkam saprotamu vērtību."""
     plan = current_plan_name(user_id) if user_id else PLAN_FREE
     user = get_user(user_id) if user_id else {"premium": 0, "premium_until": ""}
 
@@ -1001,7 +1001,7 @@ def subscription_info(user_id=None):
             "mana diena\n"
             "premium vēsture\n"
             "mans plāns\n\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     return (
@@ -1019,13 +1019,13 @@ def subscription_info(user_id=None):
         "pirkt basic\n\n"
         "Ja gribi paskatīties savu plānu:\n"
         "mans plāns\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
 
 def premium_conversion_answer(user_id):
-    """V15.7: labāks Free -> Premium pārdošanas teksts."""
+    """V15.8.1: labāks Free -> Premium pārdošanas teksts."""
     user = get_user(user_id)
     if user.get("premium"):
         return subscription_info(user_id)
@@ -1058,7 +1058,7 @@ def premium_conversion_answer(user_id):
         f"💶 Cena: {PREMIUM_BASIC_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
         "Ja gribi, lai Nina kļūst par tavu ikdienas palīgu, raksti:\n"
         "pirkt basic\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -1083,7 +1083,7 @@ def premium_buy_intent_answer(user_id, plan_key="basic"):
         f"{benefit}\n\n"
         "Pēc apmaksas Premium aktivizēsies automātiski, ja Stripe webhook ir pieslēgts.\n\n"
         f"{checkout}\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -1430,7 +1430,7 @@ def system_health_answer(user_id, command_text="health"):
         f"Aktīvie atgādinājumi: {active_reminders}\n"
         f"Backup kopā: {backups_total}\n"
         f"Audit ieraksti: {audit_total}\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -1510,7 +1510,7 @@ def user_analytics_answer(user_id, command_text="analytics"):
         f"Vidējais XP: {avg_xp:.1f}\n"
         f"Vidējais līmenis: {avg_level:.1f}\n"
         f"Vidējais streak: {avg_streak:.1f}\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -1582,7 +1582,7 @@ def database_backup_dashboard(user_id, command_text="db backup"):
         f"Pēdējais backup: {latest_backup}\n"
         f"Pēdējā ziņa: {latest_message}\n"
         f"Pēdējais audit: {latest_audit}\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -1808,7 +1808,7 @@ def backup_scheduler_answer(user_id, command_text="auto backup"):
         f"{max(total_runs, auto_count)}\n\n"
         "Audit action:\n"
         "auto_backup_run\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -1915,7 +1915,7 @@ def recovery_center_answer(user_id, command_text="recovery"):
         "",
         f"Restore mēģinājumi: {restore_logs}",
         "Statuss: Ready",
-        "Versija: V15.7",
+        "Versija: V15.8.1",
     ])
 
     return "\n".join(lines)
@@ -1949,7 +1949,7 @@ def restore_latest_backup(user_id, command_text="restore latest"):
             f"{result}\n\n"
             f"Backup ID: #{backup_id}\n"
             "Statuss: Restored\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     log_restore_action(user_id, backup_id, "failed")
@@ -1997,7 +1997,7 @@ def admin_command_center(user_id, command_text="admin"):
         "Drošība:\n"
         f"🔒 Admin Lock: {admin_lock_status}\n"
         f"📋 Audit Log: {audit_status}\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -2074,7 +2074,7 @@ def admin_notifications_center(user_id, command_text="notifications"):
         f"• Restore kļūdas: {restore_errors}\n"
         f"• Maksājumu kļūdas: {payment_errors}\n\n"
         f"Statuss: {icon} {status}\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -2137,7 +2137,7 @@ def admin_activity_feed(user_id, command_text="activity", limit=10):
     lines.extend([
         f"Kopā ieraksti: {total}",
         "",
-        "Versija: V15.7",
+        "Versija: V15.8.1",
     ])
 
     return "\n".join(lines).strip()
@@ -2216,7 +2216,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
             "Norādi lietotāja ID.\n\n"
             "Piemērs:\n"
             "user 5138563912\n\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     log_admin_action(user_id, "user_lookup_view", "allowed", command_text)
@@ -2228,7 +2228,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
             f"User ID: {target_user_id}\n"
             "Statuss: nav atrasts\n\n"
             "Šāds lietotājs vēl nav Nina datubāzē.\n\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     messages_total = _count_table_rows("messages", "WHERE user_id = %s", (str(target_user_id),))
@@ -2266,7 +2266,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
         f"Backup: {backups_total}\n"
         f"Atgādinājumi: {reminders_total}\n"
         f"Aktīvie atgādinājumi: {active_reminders}\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -2383,7 +2383,7 @@ def admin_user_search(user_id, command_text="search user"):
             "find user 5138563912",
             "lietotāji",
             "",
-            "Versija: V15.7",
+            "Versija: V15.8.1",
         ])
         return "\n".join(lines)
 
@@ -2402,7 +2402,7 @@ def admin_user_search(user_id, command_text="search user"):
         lines.append(f"Streak: {int(streak_days or 0)}")
         lines.append("")
 
-    lines.append("Versija: V15.7")
+    lines.append("Versija: V15.8.1")
     return "\n".join(lines).strip()
 
 
@@ -2435,7 +2435,7 @@ def admin_user_actions_help(user_id, command_text="user actions"):
         "Nodzēš lietotāja streak.\n\n"
         "Drošība:\n"
         "Visas darbības ir tikai administratoram un tiek ierakstītas Audit Log.\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -2458,7 +2458,7 @@ def admin_user_action(user_id, command_text="user actions"):
             "Trūkst lietotāja ID.\n\n"
             "Piemērs:\n"
             "grant premium 5138563912\n\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     target_user_id = numbers[0]
@@ -2470,7 +2470,7 @@ def admin_user_action(user_id, command_text="user actions"):
             f"User ID: {target_user_id}\n"
             "Statuss: nav atrasts\n\n"
             "Šāds lietotājs vēl nav Nina datubāzē.\n\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     try:
@@ -2512,7 +2512,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         elif lower.startswith("add xp"):
             if len(numbers) < 2:
-                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nadd xp 5138563912 100\n\nVersija: V15.7"
+                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nadd xp 5138563912 100\n\nVersija: V15.8.1"
             amount = max(0, int(numbers[1]))
             new_xp = int(target.get("xp", 0) or 0) + amount
             target["xp"] = new_xp
@@ -2523,7 +2523,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         elif lower.startswith("remove xp"):
             if len(numbers) < 2:
-                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nremove xp 5138563912 50\n\nVersija: V15.7"
+                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nremove xp 5138563912 50\n\nVersija: V15.8.1"
             amount = max(0, int(numbers[1]))
             new_xp = max(0, int(target.get("xp", 0) or 0) - amount)
             target["xp"] = new_xp
@@ -2534,7 +2534,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         elif lower.startswith("set level"):
             if len(numbers) < 2:
-                return "🧰 Nina Admin User Actions\n\nTrūkst līmeņa.\n\nPiemērs:\nset level 5138563912 5\n\nVersija: V15.7"
+                return "🧰 Nina Admin User Actions\n\nTrūkst līmeņa.\n\nPiemērs:\nset level 5138563912 5\n\nVersija: V15.8.1"
             new_level = max(1, int(numbers[1]))
             new_xp = (new_level - 1) * XP_PER_LEVEL
             target["level"] = new_level
@@ -2552,7 +2552,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         else:
             log_admin_action(user_id, "user_action_execute", "failed_unknown_action", command_text)
-            return "🧰 Nina Admin User Actions\n\nDarbība nav atpazīta.\n\nRaksti: user actions\n\nVersija: V15.7"
+            return "🧰 Nina Admin User Actions\n\nDarbība nav atpazīta.\n\nRaksti: user actions\n\nVersija: V15.8.1"
 
         log_admin_action(user_id, f"user_action_{action_name}", "success", command_text)
         updated = _fetch_user_row_for_admin(target_user_id) or target
@@ -2568,7 +2568,7 @@ def admin_user_action(user_id, command_text="user actions"):
             f"XP: {updated.get('xp', 0)}\n"
             f"Līmenis: {updated.get('level', 1)}\n"
             f"Streak: {updated.get('streak_days', 0)}\n\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     except Exception as e:
@@ -2578,7 +2578,7 @@ def admin_user_action(user_id, command_text="user actions"):
             "🧰 Nina Admin User Actions\n\n"
             "Darbība neizdevās tehniskas kļūdas dēļ.\n\n"
             f"Iemesls: {e}\n\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
 
@@ -2664,7 +2664,7 @@ def admin_user_management_dashboard(user_id, command_text="user management"):
         "Admin Lock: Aktīvs",
         f"Audit ieraksti: {audit_total}",
         "",
-        "Versija: V15.7",
+        "Versija: V15.8.1",
     ])
 
     return "\n".join(lines)
@@ -2915,7 +2915,7 @@ def admin_revenue_analytics(user_id, command_text="revenue analytics"):
 
     lines.extend([
         "",
-        "Versija: V15.7",
+        "Versija: V15.8.1",
     ])
 
     return "\n".join(lines)
@@ -3184,7 +3184,7 @@ def stripe_setup_helper(user_id=None):
 
     lines.extend([
         "",
-        "Versija: V15.7",
+        "Versija: V15.8.1",
     ])
 
     return "\n".join(lines)
@@ -3220,7 +3220,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             "Apmaksas links:\n"
             f"{static_url}\n\n"
             "Pēc apmaksas Premium aktivizēsies automātiski, ja Stripe webhook ir pieslēgts.\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     # 2) Dynamic Stripe Checkout Sessions
@@ -3253,7 +3253,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             "Dinamiskam checkout pievieno Railway: STRIPE_SECRET_KEY, STRIPE_BASIC_PRICE_ID/STRIPE_PLUS_PRICE_ID, STRIPE_SUCCESS_URL, STRIPE_CANCEL_URL\n"
             "Vai statiskam linkam pievieno: STRIPE_BASIC_CHECKOUT_URL / STRIPE_PLUS_CHECKOUT_URL\n\n"
             f"Iemesls: {reason}\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     try:
@@ -3292,7 +3292,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             "Apmaksas links:\n"
             f"{checkout_url}\n\n"
             "Pēc apmaksas Premium aktivizēsies automātiski, ja Stripe webhook ir pieslēgts.\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     except Exception as e:
@@ -3311,7 +3311,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             f"Cena: {amount:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
             "Stripe checkout izveide neizdevās.\n"
             f"Iemesls: {str(e)}\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
 
@@ -4437,7 +4437,7 @@ def premium_features(user_id=None):
         "Sākt:\n"
         "pirkt basic\n"
         "pirkt plus\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -4764,7 +4764,7 @@ def premium_status(user_id):
             "premium panelis\n"
             "premium vēsture\n"
             "mans plāns\n\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     return premium_conversion_answer(user_id)
@@ -5074,7 +5074,7 @@ def admin_revenue_forecast(user_id, command_text="revenue forecast"):
         f"Ieņēmumi: {last_30_revenue:.2f} {PREMIUM_CURRENCY}\n"
         f"Checkout konversijas signāls: {conversion_hint:.1f}%\n\n"
         f"Statuss: {status}\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -5302,7 +5302,7 @@ def admin_kpi_dashboard(user_id, command_text="kpi"):
         f"Audit ieraksti: {audit_total}\n"
         f"Premium darījumi: {premium_transactions_total}\n\n"
         f"Statuss: {system_status}\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -5447,7 +5447,7 @@ def admin_alerts_dashboard(user_id, command_text="alerts"):
         "",
         f"Kopā alert skaits: {total_alerts}",
         f"Audit ieraksti kopā: {total_audit}",
-        "Versija: V15.7",
+        "Versija: V15.8.1",
     ])
 
     return "\n".join(lines)
@@ -5624,7 +5624,7 @@ def admin_launch_dashboard(user_id, command_text="launch"):
         "3. Notestē: pirkt premium / pirkt plus",
         "4. Aicini pirmos 5–10 lietotājus",
         "",
-        "Versija: V15.7",
+        "Versija: V15.8.1",
     ])
 
     return "\n".join(lines)
@@ -5889,7 +5889,7 @@ def stripe_env_guide_answer(user_id=None):
         "Svarīgi:",
         "Ja redzi ❌ stripe package, Railway projektā vajag requirements.txt ar rindu: stripe",
         "",
-        "Versija: V15.7",
+        "Versija: V15.8.1",
     ])
     return "\n".join(lines)
 
@@ -5911,7 +5911,7 @@ def stripe_webhook_test_answer(user_id):
             "🧪 Stripe Webhook Test Mode\n\n"
             "Tests neizdevās.\n"
             f"Iemesls: {result}\n\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     return (
@@ -5924,7 +5924,7 @@ def stripe_webhook_test_answer(user_id):
         "premium\n"
         "mans plāns\n"
         "premium vēsture\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -5955,7 +5955,7 @@ def safe_launch_answer(user_id=None):
         "sales\n"
         "invite\n"
         "earn\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -5972,7 +5972,7 @@ def safe_sales_answer(user_id=None):
         "4. 100 EUR MRR\n\n"
         "Galvenā komanda lietotājam:\n"
         "pirkt basic\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -5986,7 +5986,7 @@ def safe_invite_answer(user_id=None):
         f"{link}\n\n"
         "Teksts draugam:\n"
         "Pamēģini Ninu — Telegram AI palīgs ar atmiņu, atgādinājumiem un Premium režīmu.\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -6001,7 +6001,7 @@ def safe_earn_answer(user_id=None):
         "6. Premium ieslēdzas automātiski\n\n"
         "Tagad galvenais fokuss:\n"
         "Stripe + Telegram izplatīšana + pirmie maksājumi.\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -6087,7 +6087,7 @@ def referral_capture_welcome_answer(user_id, referral_code):
             "Vai apskati:\n"
             "launch\n"
             "invite\n\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     if result == "self_referral_blocked":
@@ -6096,7 +6096,7 @@ def referral_capture_welcome_answer(user_id, referral_code):
             "Referral netika saglabāts, jo nevar uzaicināt pats sevi.\n\n"
             "Sāc ar komandu:\n"
             "premium\n\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     if result == "already_registered":
@@ -6106,7 +6106,7 @@ def referral_capture_welcome_answer(user_id, referral_code):
             "Komandas:\n"
             "premium\n"
             "invite\n\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     return (
@@ -6114,7 +6114,7 @@ def referral_capture_welcome_answer(user_id, referral_code):
         "Referral kodu neizdevās saglabāt, bet vari lietot Ninu tālāk.\n\n"
         "Sāc ar komandu:\n"
         "premium\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -6148,7 +6148,7 @@ def referral_stats_answer(user_id):
         f"Premium konvertēti: {converted}\n\n"
         "Nākamais solis V12.4:\n"
         "ja uzaicinātais nopērk Premium, uzaicinātājs saņem bonusu.\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -6177,53 +6177,53 @@ def nina_start_answer(user_id=None):
         "premium\n\n"
         "Ja gribi uzaicināt draugu:\n"
         "invite\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
 
 # =========================
-# V15.7 NATURAL MEMORY + DAILY GOALS
+# V15.8.1 NATURAL MEMORY + DAILY GOALS
 # =========================
 
 def save_daily_goal(user_id, goal_text):
-    """V15.7: dienas mērķa saglabāšana pārvietota uz memory.py loģiku."""
+    """V15.8.1: dienas mērķa saglabāšana pārvietota uz memory.py loģiku."""
     return save_daily_goal_logic(get_db, db_execute, DEFAULT_TIMEZONE, user_id, goal_text)
 
 
 
 def latest_daily_goals(user_id, limit=3):
-    """V15.7: dienas mērķu nolasīšana pārvietota uz memory.py loģiku."""
+    """V15.8.1: dienas mērķu nolasīšana pārvietota uz memory.py loģiku."""
     return latest_daily_goals_logic(get_db, db_execute, DEFAULT_TIMEZONE, user_id, limit)
 
 
 
 def save_natural_memory(user_id, memory_text):
-    """V15.7: dabiskās atmiņas saglabāšana pārvietota uz memory.py loģiku."""
+    """V15.8.1: dabiskās atmiņas saglabāšana pārvietota uz memory.py loģiku."""
     return save_natural_memory_logic(get_db, db_execute, user_id, memory_text)
 
 
 
 def latest_natural_memories(user_id, limit=3):
-    """V15.7: pēdējo atmiņu nolasīšana pārvietota uz memory.py loģiku."""
+    """V15.8.1: pēdējo atmiņu nolasīšana pārvietota uz memory.py loģiku."""
     return latest_natural_memories_logic(get_db, db_execute, user_id, limit)
 
 
 
 def nina_memory_saved_answer(saved_text):
-    """V15.7: atmiņas saglabāšanas teksts no memory.py vai fallback."""
-    return build_memory_saved_answer(saved_text, version="V15.7")
+    """V15.8.1: atmiņas saglabāšanas teksts no memory.py vai fallback."""
+    return build_memory_saved_answer(saved_text, version="V15.8.1")
 
 
 
 def nina_goal_saved_answer(goal_text):
-    """V15.7: mērķa saglabāšanas teksts no memory.py vai fallback."""
-    return build_goal_saved_answer(goal_text, version="V15.7")
+    """V15.8.1: mērķa saglabāšanas teksts no memory.py vai fallback."""
+    return build_goal_saved_answer(goal_text, version="V15.8.1")
 
 
 
 def nina_daily_habit_answer(user_id):
-    """V15.7: Daily Assistant ar coach.py + brain.py secinājumiem."""
+    """V15.8.1: Daily Assistant ar coach.py + brain.py secinājumiem."""
     try:
         user = get_user(str(user_id))
     except Exception as e:
@@ -6271,7 +6271,7 @@ def nina_daily_habit_answer(user_id):
         goals=goals,
         memories=memories[:3],
         reminders=reminders,
-        version="V15.7",
+        version="V15.8.1",
     )
 
     try:
@@ -6289,25 +6289,25 @@ def nina_daily_habit_answer(user_id):
 
 
 def nina_morning_answer(user_id):
-    """V15.7: labrīta teksts no daily.py vai fallback."""
+    """V15.8.1: labrīta teksts no daily.py vai fallback."""
     try:
         user = get_user(str(user_id))
         name = (user.get("name") or "").strip()
     except Exception:
         name = ""
-    return build_morning_answer(name=name, version="V15.7")
+    return build_morning_answer(name=name, version="V15.8.1")
 
 
 
 def nina_evening_answer(user_id):
-    """V15.7: vakara teksts no daily.py vai fallback."""
-    return build_evening_answer(version="V15.7")
+    """V15.8.1: vakara teksts no daily.py vai fallback."""
+    return build_evening_answer(version="V15.8.1")
 
 
 
 def nina_today_goal_answer(user_id):
-    """V15.7: mērķa teksta sagatave no daily.py vai fallback."""
-    return build_goal_prompt_answer(version="V15.7")
+    """V15.8.1: mērķa teksta sagatave no daily.py vai fallback."""
+    return build_goal_prompt_answer(version="V15.8.1")
 
 
 
@@ -6319,7 +6319,7 @@ def nina_remember_prompt_answer(user_id=None):
         "Atceries, ka man patīk melna BMW krāsa.\n"
         "Atceries, ka šonedēļ jāizdara projekta plāns.\n\n"
         "Ja tā ir svarīga doma, uzdevums vai fakts — uztici to man.\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -6342,7 +6342,7 @@ def nina_launch_invite_text(user_id):
         "• būt tavs ikdienas AI palīgs.\n\n"
         "Sākt var bez maksas:\n"
         f"{link}\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -6361,7 +6361,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "mana diena\n"
             "atceries\n"
             "premium\n\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
     else:
         answer = nina_start_answer(user_id)
@@ -6469,7 +6469,7 @@ def referral_reward_test_answer(user_id):
             "Bonuss:\n"
             f"+{REFERRAL_BONUS_DAYS} Premium dienas\n"
             f"+{REFERRAL_BONUS_XP} XP\n\n"
-            "Versija: V15.7"
+            "Versija: V15.8.1"
         )
 
     return (
@@ -6477,7 +6477,7 @@ def referral_reward_test_answer(user_id):
         "Bonuss netika piešķirts.\n"
         f"Iemesls: {result}\n\n"
         "Tas ir normāli, ja šim lietotājam nav referral ieraksta vai bonuss jau piešķirts.\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -6539,7 +6539,7 @@ def stripe_production_setup_answer(user_id=None):
         "pirkt basic",
         "stripe webhook",
         "",
-        "Versija: V15.7",
+        "Versija: V15.8.1",
     ])
     return "\n".join(lines)
 
@@ -6560,17 +6560,17 @@ def first_payment_plan_answer(user_id=None):
         "9. Veic testa maksājumu\n"
         "10. Pārbaudi: premium un premium vēsture\n\n"
         "Nākamais biznesa mērķis pēc tam: 10 maksājumi.\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
 
-# V15.7 natural conversation logic is in conversation.py
+# V15.8.1 natural conversation logic is in conversation.py
 
 
 
 def record_memory_topics(user_id, memory_text):
-    """V15.7: pēc atmiņas saglabāšanas pieraksta tēmas brain/analytics vajadzībām."""
+    """V15.8.1: pēc atmiņas saglabāšanas pieraksta tēmas brain/analytics vajadzībām."""
     try:
         topics = detect_topics(memory_text)
     except Exception as e:
@@ -6612,7 +6612,7 @@ def record_memory_topics(user_id, memory_text):
 
 
 def user_topic_counts(user_id, limit=5):
-    """V15.7: atgriež lietotāja dominējošo tēmu skaitītāju."""
+    """V15.8.1: atgriež lietotāja dominējošo tēmu skaitītāju."""
     conn = None
     try:
         conn = get_db()
@@ -6644,7 +6644,7 @@ def user_topic_counts(user_id, limit=5):
 
 
 def nina_progress_answer(user_id):
-    """V15.7: lietotāja progress ar analytics.py + brain.py."""
+    """V15.8.1: lietotāja progress ar analytics.py + brain.py."""
     try:
         user = get_user(str(user_id))
     except Exception as e:
@@ -6687,582 +6687,616 @@ def nina_progress_answer(user_id):
     )
 
     if not memories and not goals and reminders == 0:
-        return build_empty_progress_text(version="V15.7")
+        return build_empty_progress_text(version="V15.8.1")
 
-    return build_weekly_progress_text(snapshot, topic_counts=topic_counts, version="V15.7")
+    return build_weekly_progress_text(snapshot, topic_counts=topic_counts, version="V15.8.1")
+
+
+
+async def safe_reply_text(update, text, disable_web_page_preview=True):
+    """V15.8.1: publiskā testa drošība — nekad neatstāj lietotāju bez atbildes."""
+    try:
+        if update and update.message:
+            await update.message.reply_text(
+                text,
+                disable_web_page_preview=disable_web_page_preview
+            )
+            return True
+    except Exception as e:
+        print("safe_reply_text kļūda:", e)
+    return False
+
+
+def public_test_fallback_answer():
+    return (
+        "👋 Sveiks! Es esmu Nina.\n\n"
+        "Man šobrīd bija neliela aizķeršanās, bet es esmu online.\n\n"
+        "Pamēģini uzrakstīt:\n"
+        "mana diena\n"
+        "vai:\n"
+        "rīt jāzvana klientam\n\n"
+        "Versija: V15.8.1"
+    )
 
 
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text
-    user_id = str(update.effective_user.id)
-    lower = user_text.strip().lower()
+    # V15.8.1 public reply wrapper
+    try:
+        user_text = update.message.text
+        user_id = str(update.effective_user.id)
+        lower = user_text.strip().lower()
 
-    # V15.7: Progress command.
-    if lower in ["progress", "progresss", "mans progress", "mans progress", "progress report", "statistika", "mana statistika"]:
-        await update.message.reply_text(
-            nina_progress_answer(user_id),
-            disable_web_page_preview=True
-        )
-        return
-
-
-    # V15.7: Reminder command.
-    reminder_data = parse_reminder_request(user_text, DEFAULT_TIMEZONE)
-    if reminder_data is not None:
-        if not reminder_data.get("ok"):
-            await update.message.reply_text(build_reminder_help_answer(version="V15.7"), disable_web_page_preview=True)
-            return
-
-        ok = save_reminder_logic(
-            get_db,
-            db_execute,
-            user_id,
-            reminder_data.get("text") or user_text,
-            reminder_data.get("remind_at") or "",
-            reminder_data.get("local_time") or "",
-        )
-
-        if ok:
+        # V15.8.1: Progress command.
+        if lower in ["progress", "progresss", "mans progress", "mans progress", "progress report", "statistika", "mana statistika"]:
             await update.message.reply_text(
-                build_reminder_saved_answer(
-                    reminder_data.get("text") or user_text,
-                    reminder_data.get("human_time") or "",
-                    version="V15.7",
-                ),
+                nina_progress_answer(user_id),
                 disable_web_page_preview=True
             )
             return
 
-        await update.message.reply_text("Neizdevās saglabāt atgādinājumu. Pamēģini vēlreiz.", disable_web_page_preview=True)
-        return
+
+        # V15.8.1: Reminder command.
+        reminder_data = parse_reminder_request(user_text, DEFAULT_TIMEZONE)
+        if reminder_data is not None:
+            if not reminder_data.get("ok"):
+                await update.message.reply_text(build_reminder_help_answer(version="V15.8.1"), disable_web_page_preview=True)
+                return
+
+            ok = save_reminder_logic(
+                get_db,
+                db_execute,
+                user_id,
+                reminder_data.get("text") or user_text,
+                reminder_data.get("remind_at") or "",
+                reminder_data.get("local_time") or "",
+            )
+
+            if ok:
+                await update.message.reply_text(
+                    build_reminder_saved_answer(
+                        reminder_data.get("text") or user_text,
+                        reminder_data.get("human_time") or "",
+                        version="V15.8.1",
+                    ),
+                    disable_web_page_preview=True
+                )
+                return
+
+            await update.message.reply_text("Neizdevās saglabāt atgādinājumu. Pamēģini vēlreiz.", disable_web_page_preview=True)
+            return
 
 
 
-    # V15.7: Mana diena top-priority route.
-    if lower in ["mana diena", "diena", "my day"]:
-        await update.message.reply_text(
-            nina_daily_habit_answer(user_id),
-            disable_web_page_preview=True
-        )
-        return
+        # V15.8.1: Mana diena top-priority route.
+        if lower in ["mana diena", "diena", "my day"]:
+            await update.message.reply_text(
+                nina_daily_habit_answer(user_id),
+                disable_web_page_preview=True
+            )
+            return
 
-    # V15.7: Natural memory and daily goal capture — immediate replies.
-    if lower.startswith("atceries,") or lower.startswith("atceries ka") or lower.startswith("atceries "):
-        saved = save_natural_memory(user_id, user_text)
-        if saved:
-            record_memory_topics(user_id, saved)
-            answer = nina_memory_saved_answer(saved)
-        else:
-            answer = "Neizdevās saglabāt. Pamēģini vēlreiz ar: atceries, ka ..."
-        await update.message.reply_text(answer, disable_web_page_preview=True)
-        return
-
-    if lower.startswith("mērķis:") or lower.startswith("merkis:") or lower.startswith("šodienas mērķis:") or lower.startswith("sodienas merkis:"):
-        goal_text = user_text.split(":", 1)[1].strip() if ":" in user_text else ""
-        if goal_text:
-            ok = save_daily_goal(user_id, goal_text)
-            answer = nina_goal_saved_answer(goal_text) if ok else "Neizdevās saglabāt mērķi. Pamēģini vēlreiz."
+        # V15.8.1: Natural memory and daily goal capture — immediate replies.
+        if lower.startswith("atceries,") or lower.startswith("atceries ka") or lower.startswith("atceries "):
+            saved = save_natural_memory(user_id, user_text)
+            if saved:
+                record_memory_topics(user_id, saved)
+                answer = nina_memory_saved_answer(saved)
+            else:
+                answer = "Neizdevās saglabāt. Pamēģini vēlreiz ar: atceries, ka ..."
             await update.message.reply_text(answer, disable_web_page_preview=True)
             return
-        await update.message.reply_text("Uzraksti šādi: mērķis: tavs šodienas mērķis", disable_web_page_preview=True)
-        return
 
-
-    # V15.7: Natural conversation auto-handle.
-    natural_kind = classify_natural_message(user_text)
-
-    if natural_kind == "goal":
-        goal_text = user_text.strip()
-        ok = save_daily_goal(user_id, goal_text)
-        answer = build_auto_goal_answer(goal_text, version="V15.7") if ok else "Neizdevās saglabāt mērķi. Pamēģini vēlreiz."
-        await update.message.reply_text(answer, disable_web_page_preview=True)
-        return
-
-    if natural_kind == "memory":
-        memory_text = user_text.strip()
-        saved = save_natural_memory(user_id, "atceries, ka " + memory_text)
-        if saved:
-            record_memory_topics(user_id, saved)
-        answer = build_auto_memory_answer(saved or memory_text, version="V15.7") if saved else "Neizdevās saglabāt. Pamēģini vēlreiz."
-        await update.message.reply_text(answer, disable_web_page_preview=True)
-        return
-
-    if lower in ["labrīt", "labrit", "labrīt nina", "labrit nina", "morning"]:
-        await update.message.reply_text(
-            append_bonus_notices(nina_morning_answer(user_id), streak_notice),
-            disable_web_page_preview=True
-        )
-        return
-
-    if lower in ["vakars", "vakara pārskats", "vakara parskats", "good night", "evening"]:
-        await update.message.reply_text(
-            append_bonus_notices(nina_evening_answer(user_id), streak_notice),
-            disable_web_page_preview=True
-        )
-        return
-
-    if lower in ["šodienas mērķis", "sodienas merkis", "dienas mērķis", "dienas merkis", "mērķis", "merkis"]:
-        await update.message.reply_text(
-            append_bonus_notices(nina_today_goal_answer(user_id), streak_notice),
-            disable_web_page_preview=True
-        )
-        return
-
-    # V12.6: Daily Habit commands.
-    if lower in ["mana diena", "diena", "my day"]:
-        await update.message.reply_text(
-            append_bonus_notices(nina_daily_habit_answer(user_id), streak_notice),
-            disable_web_page_preview=True
-        )
-        return
-
-    if lower in ["atceries", "ko atceries", "remember"]:
-        await update.message.reply_text(
-            append_bonus_notices(nina_remember_prompt_answer(user_id), streak_notice),
-            disable_web_page_preview=True
-        )
-        return
-
-    if lower in ["invite", "uzaicini", "ielūgt", "ielugt"]:
-        await update.message.reply_text(
-            append_bonus_notices(nina_launch_invite_text(user_id), streak_notice),
-            disable_web_page_preview=True
-        )
-        return
-
-
-    # V12.5: Stripe production commands.
-    if lower in ["stripe production", "stripe live", "stripe setup production", "production stripe"]:
-        await update.message.reply_text(
-            append_bonus_notices(stripe_production_setup_answer(user_id), streak_notice),
-            disable_web_page_preview=True
-        )
-        return
-
-    if lower in ["first payment", "pirmais maksājums", "pirmais maksajums"]:
-        await update.message.reply_text(
-            append_bonus_notices(first_payment_plan_answer(user_id), streak_notice),
-            disable_web_page_preview=True
-        )
-        return
-
-
-    if lower in ["referral reward test", "reward test"]:
-        await update.message.reply_text(
-            append_bonus_notices(referral_reward_test_answer(user_id), streak_notice),
-            disable_web_page_preview=True
-        )
-        return
-
-
-    # V12.3.1: capture referral from /start NINA-XXXX before normal chat logic.
-    referral_code = parse_referral_code_from_text(user_text)
-    if referral_code:
-        await update.message.reply_text(
-            append_bonus_notices(referral_capture_welcome_answer(user_id, referral_code), streak_notice),
-            disable_web_page_preview=True
-        )
-        return
-
-    if lower in ["referral", "referral stats", "mans referral"]:
-        await update.message.reply_text(
-            append_bonus_notices(referral_stats_answer(user_id), streak_notice),
-            disable_web_page_preview=True
-        )
-        return
-
-
-    # V12.1.2 SAFE ROUTER — public monetization commands before all other logic.
-    if lower == "launch":
-        await update.message.reply_text(append_bonus_notices(safe_launch_answer(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower == "sales":
-        await update.message.reply_text(append_bonus_notices(safe_sales_answer(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["invite", "referral"]:
-        await update.message.reply_text(append_bonus_notices(safe_invite_answer(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower == "earn":
-        await update.message.reply_text(append_bonus_notices(safe_earn_answer(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-
-    # V11.9 HARD FIX: catch Stripe test before GPT fallback.
-    if lower in ["stripe test", "webhook test", "test webhook", "stripe webhook test"]:
-        await update.message.reply_text(append_bonus_notices(stripe_webhook_test_answer(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-    profile_text, command_lines = split_profile_and_commands(user_text)
-    if command_lines and profile_text.strip():
-        update_profile_from_text(user_id, profile_text)
-        answers = []
-        for command in command_lines:
-            answer = command_answer(user_id, command)
-            if answer:
-                answers.append(answer)
-        if answers:
-            await update.message.reply_text("\n\n".join(answers), disable_web_page_preview=True)
+        if lower.startswith("mērķis:") or lower.startswith("merkis:") or lower.startswith("šodienas mērķis:") or lower.startswith("sodienas merkis:"):
+            goal_text = user_text.split(":", 1)[1].strip() if ":" in user_text else ""
+            if goal_text:
+                ok = save_daily_goal(user_id, goal_text)
+                answer = nina_goal_saved_answer(goal_text) if ok else "Neizdevās saglabāt mērķi. Pamēģini vēlreiz."
+                await update.message.reply_text(answer, disable_web_page_preview=True)
+                return
+            await update.message.reply_text("Uzraksti šādi: mērķis: tavs šodienas mērķis", disable_web_page_preview=True)
             return
 
-    if lower in ["mans premium statuss", "premium statuss", "premium"]:
-        await update.message.reply_text(premium_status(user_id), disable_web_page_preview=True)
-        return
 
-    if lower in ["premium funkcijas"]:
-        await update.message.reply_text(premium_features(user_id), disable_web_page_preview=True)
-        return
-
-    if lower in ["premium limiti", "cik atmiņas man palicis"]:
-        await update.message.reply_text(premium_limits(user_id), disable_web_page_preview=True)
-        return
-
-    if lower == "premium beidzas":
-        await update.message.reply_text(premium_expiration_info(user_id), disable_web_page_preview=True)
-        return
-
-    if lower == "abonements":
-        await update.message.reply_text(append_bonus_notices(subscription_info(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["mans plāns", "mans plans"]:
-        await update.message.reply_text(append_bonus_notices(current_plan_answer(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["premium vēsture", "premium vesture"]:
-        await update.message.reply_text(append_bonus_notices(premium_history(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-    # V10.5.2 HARD FIX: catch Premium Welcome as a direct Telegram command
-    # before it can fall through to GPT chat mode.
-    if lower in ["premium welcome", "premium sveiciens", "premium starts", "premium sveiks"]:
-        await update.message.reply_text(append_bonus_notices(premium_welcome_answer(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["pirkt premium", "pirkt basic", "pirkt premium basic"]:
-        await update.message.reply_text(append_bonus_notices(stripe_checkout_answer(user_id, "basic"), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["pirkt plus", "pirkt premium plus"]:
-        await update.message.reply_text(append_bonus_notices(stripe_checkout_answer(user_id, "plus"), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower == "stripe statuss":
-        await update.message.reply_text(append_bonus_notices(stripe_status(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-    # V11.7: Stripe ENV must be separate from Stripe Setup Helper.
-    if lower in ["stripe webhook", "webhook", "webhook statuss", "stripe webhook statuss"]:
-        await update.message.reply_text(append_bonus_notices(stripe_webhook_status_answer(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["stripe env", "stripe environment", "stripe railway", "stripe konfigurācija", "stripe konfiguracija"]:
-        await update.message.reply_text(append_bonus_notices(stripe_env_guide_answer(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-    # V10.5.2: keep Stripe helper commands direct too, not only in command_answer().
-    if lower in ["stripe setup", "stripe palīgs", "stripe paligs", "stripe helper", "maksājumi", "maksajumi", "payment setup"]:
-        await update.message.reply_text(append_bonus_notices(stripe_setup_helper(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["revenue", "ieņēmumi", "ienemumi", "admin panelis", "premium ieņēmumi", "premium ienemumi"]:
-        await update.message.reply_text(append_bonus_notices(admin_revenue_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["revenue analytics", "income analytics", "premium analytics", "ieņēmumu analītika", "ienemumu analitika"]:
-        await update.message.reply_text(append_bonus_notices(admin_revenue_analytics(user_id, lower), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["revenue forecast", "income forecast", "mrr forecast", "ieņēmumu prognoze", "ienemumu prognoze"]:
-        await update.message.reply_text(append_bonus_notices(admin_revenue_forecast(user_id, lower), streak_notice), disable_web_page_preview=True)
-        return
-
-    # V10.25: KPI command routing fix — catch KPI before GPT fallback.
-    if lower in ["kpi", "admin kpi", "business dashboard", "admin kpi dashboard", "kpi dashboard", "biznesa panelis"]:
-        await update.message.reply_text(append_bonus_notices(admin_kpi_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
-        return
-
-    # V11.1: Alerts command routing fix — catch Alerts before GPT fallback.
-    if lower in ["alerts", "admin alerts", "system alerts", "brīdinājumi", "bridinajumi", "admin brīdinājumi", "admin bridinajumi"]:
-        await update.message.reply_text(append_bonus_notices(admin_alerts_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
-        return
-
-    # V11.1: Premium Conversion System routing — catch launch before GPT fallback.
-    if lower in ["launch", "launch dashboard", "production", "production launch", "palaišana", "palaisana"]:
-        await update.message.reply_text(append_bonus_notices(admin_launch_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["admin logs", "audit logs", "admin žurnāls", "admin zurnals"]:
-        await update.message.reply_text(append_bonus_notices(admin_audit_log_answer(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["audit stats", "admin statistika", "admin stats"]:
-        await update.message.reply_text(append_bonus_notices(admin_audit_stats_answer(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["health", "system status", "sistēmas statuss", "sistemas statuss", "veselība", "veseliba"]:
-        await update.message.reply_text(append_bonus_notices(system_health_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["analytics", "lietotāju statistika", "lietotaju statistika", "user stats", "user analytics"]:
-        await update.message.reply_text(append_bonus_notices(user_analytics_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["db backup", "database backup", "backup stats", "datubāzes backup", "datubazes backup"]:
-        await update.message.reply_text(append_bonus_notices(database_backup_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["auto backup", "backup scheduler", "backup grafiks", "automātiskais backup", "automatiskais backup"]:
-        await update.message.reply_text(append_bonus_notices(backup_scheduler_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["recovery", "recovery center", "restore backup", "backup restore"]:
-        await update.message.reply_text(append_bonus_notices(recovery_center_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["restore latest", "atjauno pēdējo", "atjauno pedejo"]:
-        await update.message.reply_text(append_bonus_notices(restore_latest_backup(user_id, lower), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["admin notifications", "notifications", "paziņojumi", "pazinojumi", "admin paziņojumi", "admin pazinojumi"]:
-        await update.message.reply_text(append_bonus_notices(admin_notifications_center(user_id, lower), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["activity", "admin activity", "activity feed", "aktivitāte", "aktivitate"]:
-        await update.message.reply_text(append_bonus_notices(admin_activity_feed(user_id, lower), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["user management", "admin users", "user dashboard", "lietotāju panelis", "lietotaju panelis"]:
-        await update.message.reply_text(append_bonus_notices(admin_user_management_dashboard(user_id, user_text), streak_notice), disable_web_page_preview=True)
-        return
-
-    if (
-        lower == "user actions"
-        or lower.startswith("grant premium")
-        or lower.startswith("remove premium")
-        or lower.startswith("add xp")
-        or lower.startswith("remove xp")
-        or lower.startswith("set level")
-        or lower.startswith("reset streak")
-    ):
-        await update.message.reply_text(append_bonus_notices(admin_user_action(user_id, user_text), streak_notice), disable_web_page_preview=True)
-        return
-
-    if (
-        lower.startswith("search user")
-        or lower.startswith("find user")
-        or lower.startswith("meklēt lietotāju")
-        or lower.startswith("meklet lietotaju")
-        or lower in ["lietotāji", "lietotaji"]
-    ):
-        await update.message.reply_text(append_bonus_notices(admin_user_search(user_id, user_text), streak_notice), disable_web_page_preview=True)
-        return
-
-    if (
-        lower in ["user lookup", "lietotājs", "lietotajs", "meklēt lietotāju", "meklet lietotaju"]
-        or lower.startswith("user ")
-        or lower.startswith("user lookup ")
-        or lower.startswith("lietotājs ")
-        or lower.startswith("lietotajs ")
-        or lower.startswith("meklēt lietotāju ")
-        or lower.startswith("meklet lietotaju ")
-    ):
-        await update.message.reply_text(append_bonus_notices(admin_user_lookup(user_id, user_text), streak_notice), disable_web_page_preview=True)
-        return
-
-    # V10.24 Command Routing Fix:
-    # Admin Command Center komandām jānostrādā pirms premium dashboard un pirms GPT fallback.
-    if lower in ["admin", "admin center", "admin command center", "command center", "dashboard"]:
-        await update.message.reply_text(append_bonus_notices(admin_command_center(user_id, lower), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["premium panelis", "mans panelis"]:
-        await update.message.reply_text(append_bonus_notices(premium_dashboard(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
-        return
-
-    if lower in ["mans līmenis", "mana pieredze", "xp"]:
-        await update.message.reply_text(append_bonus_notices(user_level_info(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
-        return
-
-    if lower in ["mani sasniegumi", "sasniegumi"]:
-        await update.message.reply_text(append_bonus_notices(achievements_answer(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
-        return
-
-    if lower == "sasniegumu progress":
-        await update.message.reply_text(append_bonus_notices(achievement_progress(user_id), streak_notice), disable_web_page_preview=True)
-        return
-
-    if lower in ["mans streak", "mana sērija", "streak"]:
-        await update.message.reply_text(append_bonus_notices(streak_info(user_id), check_achievements(user_id)), disable_web_page_preview=True)
-        return
-
-    if lower == "mana statistika":
-        await update.message.reply_text(user_statistics(user_id), disable_web_page_preview=True)
-        return
-
-    if lower == "mana aktivitāte":
-        await update.message.reply_text(user_activity(user_id), disable_web_page_preview=True)
-        return
-
-    if lower == "mana atmiņa":
-        await update.message.reply_text(user_memory_stats(user_id), disable_web_page_preview=True)
-        return
-
-    if lower in ["aktivizē premium", "aktivize premium", "ieslēdz premium"]:
-        await update.message.reply_text(activate_premium(user_id), disable_web_page_preview=True)
-        return
-
-    if lower in ["izslēdz premium", "atslēdz premium"]:
-        await update.message.reply_text(deactivate_premium(user_id), disable_web_page_preview=True)
-        return
-
-    if lower in ["eksportē atmiņu", "atmiņas eksports", "export memory", "eksports"]:
-        await update.message.reply_text(build_memory_export(user_id), disable_web_page_preview=True)
-        return
-
-    if lower in ["backup", "izveido backup", "rezerves kopija", "izveido rezerves kopiju"]:
-        await update.message.reply_text(create_backup_answer(user_id), disable_web_page_preview=True)
-        return
-
-    if lower in ["pēdējais backup", "parādi backup", "mans backup", "pēdējā rezerves kopija"]:
-        await update.message.reply_text(latest_backup_answer(user_id), disable_web_page_preview=True)
-        return
-
-    if lower in ["backup saraksts", "parādi backup sarakstu", "mani backup"]:
-        await update.message.reply_text(list_backups(user_id), disable_web_page_preview=True)
-        return
-
-    if lower in ["cik man ir backup"]:
-        await update.message.reply_text(backup_count(user_id), disable_web_page_preview=True)
-        return
-
-    if lower in ["backup statistika"]:
-        await update.message.reply_text(backup_stats(user_id), disable_web_page_preview=True)
-        return
-
-    if lower in ["jaunākais backup"]:
-        await update.message.reply_text(latest_backup_info(user_id), disable_web_page_preview=True)
-        return
-
-    if lower in ["dzēs visus backup", "izdzēs visus backup"]:
-        await update.message.reply_text(delete_all_backups(user_id), disable_web_page_preview=True)
-        return
-
-    if lower.startswith("dzēs backup") or lower.startswith("izdzēs backup"):
-        await update.message.reply_text(delete_backup(user_id, user_text), disable_web_page_preview=True)
-        return
-
-    if lower.startswith("atjauno no backup"):
-        await update.message.reply_text(restore_backup(user_id, user_text), disable_web_page_preview=True)
-        return
-
-    if lower.startswith("atgādini man"):
-        await update.message.reply_text(add_reminder(user_id, user_text), disable_web_page_preview=True)
-        return
-
-    if lower in ["mani atgādinājumi", "parādi atgādinājumus", "atgādinājumi"]:
-        await update.message.reply_text(list_reminders(user_id), disable_web_page_preview=True)
-        return
-
-    if lower.startswith("dzēs atgādinājumu") or lower.startswith("izdzēs atgādinājumu"):
-        await update.message.reply_text(delete_reminder(user_id, user_text), disable_web_page_preview=True)
-        return
-
-    if lower.startswith("aizmirsti atgādinājumu"):
-        await update.message.reply_text(delete_reminder(user_id, user_text), disable_web_page_preview=True)
-        return
-
-    if lower.startswith("aizmirsti"):
-        await update.message.reply_text(forget_from_profile(user_id, user_text), disable_web_page_preview=True)
-        return
-
-    if lower in ["atjauno kopsavilkumu", "izveido kopsavilkumu", "atjauno atmiņu"]:
-        await update.message.reply_text(build_summary(user_id), disable_web_page_preview=True)
-        return
-
-    if lower in ["mans kopsavilkums", "parādi kopsavilkumu", "ilgtermiņa atmiņa"]:
-        await update.message.reply_text(show_summary(user_id), disable_web_page_preview=True)
-        return
-
-    update_profile_from_text(user_id, user_text)
-    user = get_user(user_id)
-
-    if "mana laika zona" in lower or "kur es dzīvoju" in lower or "es dzīvoju" in lower:
-        await update.message.reply_text(f"Saglabāju. Tava laika zona: {user['timezone']}", disable_web_page_preview=True)
-        return
-
-    if "kā mani sauc" in lower:
-        await update.message.reply_text(f"Tevi sauc {user['name']}. 😊" if user["name"] else "Tu vēl neesi pateicis savu vārdu. 😊", disable_web_page_preview=True)
-        return
-
-    if (
-        "ko tu par mani zini" in lower
-        or "ko tu par manīm zini" in lower
-        or "ko tu par mani atceries" in lower
-        or "ko tu par manīm atceries" in lower
-        or "ko tu atceries" in lower
-        or "kas man patīk" in lower
-        or "ko par mani zini" in lower
-        or "ko par manīm zini" in lower
-    ):
-        await update.message.reply_text(profile_answer(user), disable_web_page_preview=True)
-        return
-
-    save_message(user_id, "Lietotājs", user_text)
-    add_xp(user_id, 1)
-    user = get_user(user_id)
-    conversation = get_recent_messages(user_id)
-
-    profile_info = f"""
-Lietotāja profils:
-Vārds: {user["name"]}
-Pilsēta: {user["city"]}
-Laika zona: {user["timezone"]}
-Patīk: {user["hobbies"]}
-Svarīgi fakti: {user["facts"]}
-Mērķi: {user["goals"]}
-Projekti: {user["projects"]}
-Sapņi: {user["dreams"]}
-Svarīgi datumi: {user["important_dates"]}
-Mājdzīvnieki: {user["pets"]}
-Ģimene: {user["family"]}
-Profesija: {user["profession"]}
-Mīļākais auto: {user["favorite_car"]}
-Mīļākā krāsa: {user["favorite_color"]}
-Mīļākā mūzika: {user["favorite_music"]}
-Premium: {user["premium"]}
-Premium līdz: {user["premium_until"]}
-
-Ilgtermiņa kopsavilkums:
-{user["summary"]}
-Kopsavilkums atjaunots:
-{user.get("summary_updated_at", "")}
-"""
-
-    try:
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=(
-                f"{NINA_PROMPT}\n\n"
-                f"{profile_info}\n\n"
-                f"Sarunas vēsture:\n{conversation}\n\n"
-                f"Atbildi uz pēdējo ziņu dabiski."
+        # V15.8.1: Natural conversation auto-handle.
+        natural_kind = classify_natural_message(user_text)
+
+        if natural_kind == "goal":
+            goal_text = user_text.strip()
+            ok = save_daily_goal(user_id, goal_text)
+            answer = build_auto_goal_answer(goal_text, version="V15.8.1") if ok else "Neizdevās saglabāt mērķi. Pamēģini vēlreiz."
+            await update.message.reply_text(answer, disable_web_page_preview=True)
+            return
+
+        if natural_kind == "memory":
+            memory_text = user_text.strip()
+            saved = save_natural_memory(user_id, "atceries, ka " + memory_text)
+            if saved:
+                record_memory_topics(user_id, saved)
+            answer = build_auto_memory_answer(saved or memory_text, version="V15.8.1") if saved else "Neizdevās saglabāt. Pamēģini vēlreiz."
+            await update.message.reply_text(answer, disable_web_page_preview=True)
+            return
+
+        if lower in ["labrīt", "labrit", "labrīt nina", "labrit nina", "morning"]:
+            await update.message.reply_text(
+                append_bonus_notices(nina_morning_answer(user_id), streak_notice),
+                disable_web_page_preview=True
             )
-        )
-        answer = response.output_text
+            return
+
+        if lower in ["vakars", "vakara pārskats", "vakara parskats", "good night", "evening"]:
+            await update.message.reply_text(
+                append_bonus_notices(nina_evening_answer(user_id), streak_notice),
+                disable_web_page_preview=True
+            )
+            return
+
+        if lower in ["šodienas mērķis", "sodienas merkis", "dienas mērķis", "dienas merkis", "mērķis", "merkis"]:
+            await update.message.reply_text(
+                append_bonus_notices(nina_today_goal_answer(user_id), streak_notice),
+                disable_web_page_preview=True
+            )
+            return
+
+        # V12.6: Daily Habit commands.
+        if lower in ["mana diena", "diena", "my day"]:
+            await update.message.reply_text(
+                append_bonus_notices(nina_daily_habit_answer(user_id), streak_notice),
+                disable_web_page_preview=True
+            )
+            return
+
+        if lower in ["atceries", "ko atceries", "remember"]:
+            await update.message.reply_text(
+                append_bonus_notices(nina_remember_prompt_answer(user_id), streak_notice),
+                disable_web_page_preview=True
+            )
+            return
+
+        if lower in ["invite", "uzaicini", "ielūgt", "ielugt"]:
+            await update.message.reply_text(
+                append_bonus_notices(nina_launch_invite_text(user_id), streak_notice),
+                disable_web_page_preview=True
+            )
+            return
+
+
+        # V12.5: Stripe production commands.
+        if lower in ["stripe production", "stripe live", "stripe setup production", "production stripe"]:
+            await update.message.reply_text(
+                append_bonus_notices(stripe_production_setup_answer(user_id), streak_notice),
+                disable_web_page_preview=True
+            )
+            return
+
+        if lower in ["first payment", "pirmais maksājums", "pirmais maksajums"]:
+            await update.message.reply_text(
+                append_bonus_notices(first_payment_plan_answer(user_id), streak_notice),
+                disable_web_page_preview=True
+            )
+            return
+
+
+        if lower in ["referral reward test", "reward test"]:
+            await update.message.reply_text(
+                append_bonus_notices(referral_reward_test_answer(user_id), streak_notice),
+                disable_web_page_preview=True
+            )
+            return
+
+
+        # V12.3.1: capture referral from /start NINA-XXXX before normal chat logic.
+        referral_code = parse_referral_code_from_text(user_text)
+        if referral_code:
+            await update.message.reply_text(
+                append_bonus_notices(referral_capture_welcome_answer(user_id, referral_code), streak_notice),
+                disable_web_page_preview=True
+            )
+            return
+
+        if lower in ["referral", "referral stats", "mans referral"]:
+            await update.message.reply_text(
+                append_bonus_notices(referral_stats_answer(user_id), streak_notice),
+                disable_web_page_preview=True
+            )
+            return
+
+
+        # V12.1.2 SAFE ROUTER — public monetization commands before all other logic.
+        if lower == "launch":
+            await update.message.reply_text(append_bonus_notices(safe_launch_answer(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower == "sales":
+            await update.message.reply_text(append_bonus_notices(safe_sales_answer(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["invite", "referral"]:
+            await update.message.reply_text(append_bonus_notices(safe_invite_answer(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower == "earn":
+            await update.message.reply_text(append_bonus_notices(safe_earn_answer(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+
+        # V11.9 HARD FIX: catch Stripe test before GPT fallback.
+        if lower in ["stripe test", "webhook test", "test webhook", "stripe webhook test"]:
+            await update.message.reply_text(append_bonus_notices(stripe_webhook_test_answer(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+        profile_text, command_lines = split_profile_and_commands(user_text)
+        if command_lines and profile_text.strip():
+            update_profile_from_text(user_id, profile_text)
+            answers = []
+            for command in command_lines:
+                answer = command_answer(user_id, command)
+                if answer:
+                    answers.append(answer)
+            if answers:
+                await update.message.reply_text("\n\n".join(answers), disable_web_page_preview=True)
+                return
+
+        if lower in ["mans premium statuss", "premium statuss", "premium"]:
+            await update.message.reply_text(premium_status(user_id), disable_web_page_preview=True)
+            return
+
+        if lower in ["premium funkcijas"]:
+            await update.message.reply_text(premium_features(user_id), disable_web_page_preview=True)
+            return
+
+        if lower in ["premium limiti", "cik atmiņas man palicis"]:
+            await update.message.reply_text(premium_limits(user_id), disable_web_page_preview=True)
+            return
+
+        if lower == "premium beidzas":
+            await update.message.reply_text(premium_expiration_info(user_id), disable_web_page_preview=True)
+            return
+
+        if lower == "abonements":
+            await update.message.reply_text(append_bonus_notices(subscription_info(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["mans plāns", "mans plans"]:
+            await update.message.reply_text(append_bonus_notices(current_plan_answer(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["premium vēsture", "premium vesture"]:
+            await update.message.reply_text(append_bonus_notices(premium_history(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+        # V10.5.2 HARD FIX: catch Premium Welcome as a direct Telegram command
+        # before it can fall through to GPT chat mode.
+        if lower in ["premium welcome", "premium sveiciens", "premium starts", "premium sveiks"]:
+            await update.message.reply_text(append_bonus_notices(premium_welcome_answer(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["pirkt premium", "pirkt basic", "pirkt premium basic"]:
+            await update.message.reply_text(append_bonus_notices(stripe_checkout_answer(user_id, "basic"), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["pirkt plus", "pirkt premium plus"]:
+            await update.message.reply_text(append_bonus_notices(stripe_checkout_answer(user_id, "plus"), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower == "stripe statuss":
+            await update.message.reply_text(append_bonus_notices(stripe_status(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+        # V11.7: Stripe ENV must be separate from Stripe Setup Helper.
+        if lower in ["stripe webhook", "webhook", "webhook statuss", "stripe webhook statuss"]:
+            await update.message.reply_text(append_bonus_notices(stripe_webhook_status_answer(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["stripe env", "stripe environment", "stripe railway", "stripe konfigurācija", "stripe konfiguracija"]:
+            await update.message.reply_text(append_bonus_notices(stripe_env_guide_answer(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+        # V10.5.2: keep Stripe helper commands direct too, not only in command_answer().
+        if lower in ["stripe setup", "stripe palīgs", "stripe paligs", "stripe helper", "maksājumi", "maksajumi", "payment setup"]:
+            await update.message.reply_text(append_bonus_notices(stripe_setup_helper(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["revenue", "ieņēmumi", "ienemumi", "admin panelis", "premium ieņēmumi", "premium ienemumi"]:
+            await update.message.reply_text(append_bonus_notices(admin_revenue_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["revenue analytics", "income analytics", "premium analytics", "ieņēmumu analītika", "ienemumu analitika"]:
+            await update.message.reply_text(append_bonus_notices(admin_revenue_analytics(user_id, lower), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["revenue forecast", "income forecast", "mrr forecast", "ieņēmumu prognoze", "ienemumu prognoze"]:
+            await update.message.reply_text(append_bonus_notices(admin_revenue_forecast(user_id, lower), streak_notice), disable_web_page_preview=True)
+            return
+
+        # V10.25: KPI command routing fix — catch KPI before GPT fallback.
+        if lower in ["kpi", "admin kpi", "business dashboard", "admin kpi dashboard", "kpi dashboard", "biznesa panelis"]:
+            await update.message.reply_text(append_bonus_notices(admin_kpi_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
+            return
+
+        # V11.1: Alerts command routing fix — catch Alerts before GPT fallback.
+        if lower in ["alerts", "admin alerts", "system alerts", "brīdinājumi", "bridinajumi", "admin brīdinājumi", "admin bridinajumi"]:
+            await update.message.reply_text(append_bonus_notices(admin_alerts_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
+            return
+
+        # V11.1: Premium Conversion System routing — catch launch before GPT fallback.
+        if lower in ["launch", "launch dashboard", "production", "production launch", "palaišana", "palaisana"]:
+            await update.message.reply_text(append_bonus_notices(admin_launch_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["admin logs", "audit logs", "admin žurnāls", "admin zurnals"]:
+            await update.message.reply_text(append_bonus_notices(admin_audit_log_answer(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["audit stats", "admin statistika", "admin stats"]:
+            await update.message.reply_text(append_bonus_notices(admin_audit_stats_answer(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["health", "system status", "sistēmas statuss", "sistemas statuss", "veselība", "veseliba"]:
+            await update.message.reply_text(append_bonus_notices(system_health_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["analytics", "lietotāju statistika", "lietotaju statistika", "user stats", "user analytics"]:
+            await update.message.reply_text(append_bonus_notices(user_analytics_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["db backup", "database backup", "backup stats", "datubāzes backup", "datubazes backup"]:
+            await update.message.reply_text(append_bonus_notices(database_backup_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["auto backup", "backup scheduler", "backup grafiks", "automātiskais backup", "automatiskais backup"]:
+            await update.message.reply_text(append_bonus_notices(backup_scheduler_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["recovery", "recovery center", "restore backup", "backup restore"]:
+            await update.message.reply_text(append_bonus_notices(recovery_center_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["restore latest", "atjauno pēdējo", "atjauno pedejo"]:
+            await update.message.reply_text(append_bonus_notices(restore_latest_backup(user_id, lower), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["admin notifications", "notifications", "paziņojumi", "pazinojumi", "admin paziņojumi", "admin pazinojumi"]:
+            await update.message.reply_text(append_bonus_notices(admin_notifications_center(user_id, lower), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["activity", "admin activity", "activity feed", "aktivitāte", "aktivitate"]:
+            await update.message.reply_text(append_bonus_notices(admin_activity_feed(user_id, lower), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["user management", "admin users", "user dashboard", "lietotāju panelis", "lietotaju panelis"]:
+            await update.message.reply_text(append_bonus_notices(admin_user_management_dashboard(user_id, user_text), streak_notice), disable_web_page_preview=True)
+            return
+
+        if (
+            lower == "user actions"
+            or lower.startswith("grant premium")
+            or lower.startswith("remove premium")
+            or lower.startswith("add xp")
+            or lower.startswith("remove xp")
+            or lower.startswith("set level")
+            or lower.startswith("reset streak")
+        ):
+            await update.message.reply_text(append_bonus_notices(admin_user_action(user_id, user_text), streak_notice), disable_web_page_preview=True)
+            return
+
+        if (
+            lower.startswith("search user")
+            or lower.startswith("find user")
+            or lower.startswith("meklēt lietotāju")
+            or lower.startswith("meklet lietotaju")
+            or lower in ["lietotāji", "lietotaji"]
+        ):
+            await update.message.reply_text(append_bonus_notices(admin_user_search(user_id, user_text), streak_notice), disable_web_page_preview=True)
+            return
+
+        if (
+            lower in ["user lookup", "lietotājs", "lietotajs", "meklēt lietotāju", "meklet lietotaju"]
+            or lower.startswith("user ")
+            or lower.startswith("user lookup ")
+            or lower.startswith("lietotājs ")
+            or lower.startswith("lietotajs ")
+            or lower.startswith("meklēt lietotāju ")
+            or lower.startswith("meklet lietotaju ")
+        ):
+            await update.message.reply_text(append_bonus_notices(admin_user_lookup(user_id, user_text), streak_notice), disable_web_page_preview=True)
+            return
+
+        # V10.24 Command Routing Fix:
+        # Admin Command Center komandām jānostrādā pirms premium dashboard un pirms GPT fallback.
+        if lower in ["admin", "admin center", "admin command center", "command center", "dashboard"]:
+            await update.message.reply_text(append_bonus_notices(admin_command_center(user_id, lower), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["premium panelis", "mans panelis"]:
+            await update.message.reply_text(append_bonus_notices(premium_dashboard(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
+            return
+
+        if lower in ["mans līmenis", "mana pieredze", "xp"]:
+            await update.message.reply_text(append_bonus_notices(user_level_info(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
+            return
+
+        if lower in ["mani sasniegumi", "sasniegumi"]:
+            await update.message.reply_text(append_bonus_notices(achievements_answer(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
+            return
+
+        if lower == "sasniegumu progress":
+            await update.message.reply_text(append_bonus_notices(achievement_progress(user_id), streak_notice), disable_web_page_preview=True)
+            return
+
+        if lower in ["mans streak", "mana sērija", "streak"]:
+            await update.message.reply_text(append_bonus_notices(streak_info(user_id), check_achievements(user_id)), disable_web_page_preview=True)
+            return
+
+        if lower == "mana statistika":
+            await update.message.reply_text(user_statistics(user_id), disable_web_page_preview=True)
+            return
+
+        if lower == "mana aktivitāte":
+            await update.message.reply_text(user_activity(user_id), disable_web_page_preview=True)
+            return
+
+        if lower == "mana atmiņa":
+            await update.message.reply_text(user_memory_stats(user_id), disable_web_page_preview=True)
+            return
+
+        if lower in ["aktivizē premium", "aktivize premium", "ieslēdz premium"]:
+            await update.message.reply_text(activate_premium(user_id), disable_web_page_preview=True)
+            return
+
+        if lower in ["izslēdz premium", "atslēdz premium"]:
+            await update.message.reply_text(deactivate_premium(user_id), disable_web_page_preview=True)
+            return
+
+        if lower in ["eksportē atmiņu", "atmiņas eksports", "export memory", "eksports"]:
+            await update.message.reply_text(build_memory_export(user_id), disable_web_page_preview=True)
+            return
+
+        if lower in ["backup", "izveido backup", "rezerves kopija", "izveido rezerves kopiju"]:
+            await update.message.reply_text(create_backup_answer(user_id), disable_web_page_preview=True)
+            return
+
+        if lower in ["pēdējais backup", "parādi backup", "mans backup", "pēdējā rezerves kopija"]:
+            await update.message.reply_text(latest_backup_answer(user_id), disable_web_page_preview=True)
+            return
+
+        if lower in ["backup saraksts", "parādi backup sarakstu", "mani backup"]:
+            await update.message.reply_text(list_backups(user_id), disable_web_page_preview=True)
+            return
+
+        if lower in ["cik man ir backup"]:
+            await update.message.reply_text(backup_count(user_id), disable_web_page_preview=True)
+            return
+
+        if lower in ["backup statistika"]:
+            await update.message.reply_text(backup_stats(user_id), disable_web_page_preview=True)
+            return
+
+        if lower in ["jaunākais backup"]:
+            await update.message.reply_text(latest_backup_info(user_id), disable_web_page_preview=True)
+            return
+
+        if lower in ["dzēs visus backup", "izdzēs visus backup"]:
+            await update.message.reply_text(delete_all_backups(user_id), disable_web_page_preview=True)
+            return
+
+        if lower.startswith("dzēs backup") or lower.startswith("izdzēs backup"):
+            await update.message.reply_text(delete_backup(user_id, user_text), disable_web_page_preview=True)
+            return
+
+        if lower.startswith("atjauno no backup"):
+            await update.message.reply_text(restore_backup(user_id, user_text), disable_web_page_preview=True)
+            return
+
+        if lower.startswith("atgādini man"):
+            await update.message.reply_text(add_reminder(user_id, user_text), disable_web_page_preview=True)
+            return
+
+        if lower in ["mani atgādinājumi", "parādi atgādinājumus", "atgādinājumi"]:
+            await update.message.reply_text(list_reminders(user_id), disable_web_page_preview=True)
+            return
+
+        if lower.startswith("dzēs atgādinājumu") or lower.startswith("izdzēs atgādinājumu"):
+            await update.message.reply_text(delete_reminder(user_id, user_text), disable_web_page_preview=True)
+            return
+
+        if lower.startswith("aizmirsti atgādinājumu"):
+            await update.message.reply_text(delete_reminder(user_id, user_text), disable_web_page_preview=True)
+            return
+
+        if lower.startswith("aizmirsti"):
+            await update.message.reply_text(forget_from_profile(user_id, user_text), disable_web_page_preview=True)
+            return
+
+        if lower in ["atjauno kopsavilkumu", "izveido kopsavilkumu", "atjauno atmiņu"]:
+            await update.message.reply_text(build_summary(user_id), disable_web_page_preview=True)
+            return
+
+        if lower in ["mans kopsavilkums", "parādi kopsavilkumu", "ilgtermiņa atmiņa"]:
+            await update.message.reply_text(show_summary(user_id), disable_web_page_preview=True)
+            return
+
+        update_profile_from_text(user_id, user_text)
+        user = get_user(user_id)
+
+        if "mana laika zona" in lower or "kur es dzīvoju" in lower or "es dzīvoju" in lower:
+            await update.message.reply_text(f"Saglabāju. Tava laika zona: {user['timezone']}", disable_web_page_preview=True)
+            return
+
+        if "kā mani sauc" in lower:
+            await update.message.reply_text(f"Tevi sauc {user['name']}. 😊" if user["name"] else "Tu vēl neesi pateicis savu vārdu. 😊", disable_web_page_preview=True)
+            return
+
+        if (
+            "ko tu par mani zini" in lower
+            or "ko tu par manīm zini" in lower
+            or "ko tu par mani atceries" in lower
+            or "ko tu par manīm atceries" in lower
+            or "ko tu atceries" in lower
+            or "kas man patīk" in lower
+            or "ko par mani zini" in lower
+            or "ko par manīm zini" in lower
+        ):
+            await update.message.reply_text(profile_answer(user), disable_web_page_preview=True)
+            return
+
+        save_message(user_id, "Lietotājs", user_text)
+        add_xp(user_id, 1)
+        user = get_user(user_id)
+        conversation = get_recent_messages(user_id)
+
+        profile_info = f"""
+    Lietotāja profils:
+    Vārds: {user["name"]}
+    Pilsēta: {user["city"]}
+    Laika zona: {user["timezone"]}
+    Patīk: {user["hobbies"]}
+    Svarīgi fakti: {user["facts"]}
+    Mērķi: {user["goals"]}
+    Projekti: {user["projects"]}
+    Sapņi: {user["dreams"]}
+    Svarīgi datumi: {user["important_dates"]}
+    Mājdzīvnieki: {user["pets"]}
+    Ģimene: {user["family"]}
+    Profesija: {user["profession"]}
+    Mīļākais auto: {user["favorite_car"]}
+    Mīļākā krāsa: {user["favorite_color"]}
+    Mīļākā mūzika: {user["favorite_music"]}
+    Premium: {user["premium"]}
+    Premium līdz: {user["premium_until"]}
+
+    Ilgtermiņa kopsavilkums:
+    {user["summary"]}
+    Kopsavilkums atjaunots:
+    {user.get("summary_updated_at", "")}
+    """
+
+        try:
+            response = client.responses.create(
+                model="gpt-4.1-mini",
+                input=(
+                    f"{NINA_PROMPT}\n\n"
+                    f"{profile_info}\n\n"
+                    f"Sarunas vēsture:\n{conversation}\n\n"
+                    f"Atbildi uz pēdējo ziņu dabiski."
+                )
+            )
+            answer = response.output_text
+
+        except Exception as e:
+            print("Kļūda:", e)
+            answer = "Piedod, man šobrīd kaut kas aizķērās. Pamēģini vēlreiz pēc brīža. 🌷"
+
+        achievements = check_achievements(user_id)
+        answer = append_bonus_notices(answer, streak_notice, achievements)
+        save_message(user_id, "Nina", answer)
+        await update.message.reply_text(answer, disable_web_page_preview=True)
+
+
 
     except Exception as e:
-        print("Kļūda:", e)
-        answer = "Piedod, man šobrīd kaut kas aizķērās. Pamēģini vēlreiz pēc brīža. 🌷"
-
-    achievements = check_achievements(user_id)
-    answer = append_bonus_notices(answer, streak_notice, achievements)
-    save_message(user_id, "Nina", answer)
-    await update.message.reply_text(answer, disable_web_page_preview=True)
-
-
+        print("Publiskā reply kļūda:", e)
+        await safe_reply_text(update, public_test_fallback_answer())
+        return
 
 
 def activate_premium_from_stripe(user_id, plan_key="basic", stripe_session_id="", stripe_event_id="", customer_email=""):
@@ -7328,7 +7362,7 @@ def stripe_webhook_status_answer(user_id=None):
         "2. nolasa telegram_user_id\n"
         "3. ieslēdz Premium uz 30 dienām\n"
         "4. saglabā premium_transactions\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 
@@ -7517,7 +7551,7 @@ def payment_cancel_page():
 
 @app.route("/")
 def home():
-    return "Nina7727 V15.7 Premium Sales Text darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V15.8.1 Premium Sales Text darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -7540,7 +7574,7 @@ def run_flask_server():
 
 
 if __name__ == "__main__":
-    print("Nina7727 V15.7 Premium Sales Text darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V15.8.1 Premium Sales Text darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
     # Stripe webhook vajag HTTP serveri. Telegram botam vienlaikus vajag polling.
     # Tāpēc Flask palaižam background threadā, bet Telegram polling atstājam galvenajā procesā.
@@ -7582,7 +7616,7 @@ def stripe_production_checklist_answer(user_id=None):
         "5. Testē: stripe test",
         "6. Testē: pirkt basic",
         "",
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     ])
     return "\\n".join(lines)
 
@@ -7605,7 +7639,7 @@ def revenue_dashboard_answer(user_id=None):
         "referral\n"
         "invite\n"
         "sales\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 def referral_answer(user_id):
@@ -7614,7 +7648,7 @@ def referral_answer(user_id):
         f"Tavs referral kods: NINA-{user_id}\n\n"
         "Dalies ar Ninu un aicini draugus.\n"
         "Nākamais solis: pieslēgt automātisku referral uzskaiti.\n\n"
-        "Versija: V15.7"
+        "Versija: V15.8.1"
     )
 
 # =========================
