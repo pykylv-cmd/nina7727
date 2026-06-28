@@ -967,6 +967,22 @@ def v20_is_price_question(text):
     return any(w in lower for w in price_words)
 
 
+
+def v21_should_offer_reminder(text):
+    lower=(text or "").strip().lower()
+    if "?" in lower: return False
+    words=["rīt","rit","pirmdien","otrdien","trešdien","tresdien","ceturtdien","piektdien","sestdien","svētdien","svetdien","jāzvana","jazvana","jāsatiek","jasatiek","ārsts","arsts","klient"]
+    return any(w in lower for w in words)
+
+def v21_memory_answer(memory_text,version="V21.0"):
+    return (
+        "🧠 Saglabāju. ✅\n\n"
+        f"Atcerēšos: {memory_text}\n\n"
+        "💬 Vai gribi, lai es tev par to arī atgādinu īstajā laikā?\n"
+        "Ja jā, vienkārši uzraksti, piemēram: atgādini rīt 10:00\n\n"
+        f"Versija: {version}"
+    )
+
 app = Flask(__name__)
 
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
