@@ -6,6 +6,7 @@ import asyncio
 import threading
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+from io import BytesIO
 
 try:
     import psycopg2
@@ -7357,9 +7358,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo = update.message.photo[-1]
         tg_file = await context.bot.get_file(photo.file_id)
 
-        data = bytearray()
-        await tg_file.download_to_memory(out=data)
-        image_bytes = bytes(data)
+        buffer = BytesIO()
+        await tg_file.download_to_memory(out=buffer)
+        image_bytes = buffer.getvalue()
 
         answer = build_vision_answer_from_openai(
             client=client,
@@ -7376,7 +7377,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_reply_text(update, answer)
 
     except Exception as e:
-        print("handle_photo kļūda:", e)
+        print("handle_photo kļūda:", repr(e))
         await safe_reply_text(
             update,
             "Bildīti saņēmu, bet šoreiz neizdevās to apstrādāt. Pamēģini atsūtīt vēlreiz. 😊\n\nVersija: V23.0"
