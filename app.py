@@ -24,7 +24,7 @@ from telegram.ext import Application, MessageHandler, CommandHandler, filters, C
 from openai import OpenAI
 
 
-# V80.0 Safe User Profile Engine Import
+# V80.1 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
         detect_profile_fact,
@@ -50,7 +50,7 @@ except Exception as e:
             return {"type": "profession", "value": raw[lower.find("es stradaju ") + len("es stradaju "):].strip(" .,!?:;")[:80]}
         return {"type": "", "value": ""}
 
-    def build_profile_saved_answer(fact_type, value, version="V80.0"):
+    def build_profile_saved_answer(fact_type, value, version="V80.1"):
         if fact_type == "name":
             return f"Patīkami, {value}. 😊\n\nPaturēšu tavu vārdu prātā.\n\nVersija: {version}"
         if fact_type == "profession":
@@ -63,23 +63,23 @@ except Exception as e:
     def profile_summary(profile):
         return str(profile)
 
-# V80.0 Safe Vision Engine Import
+# V80.1 Safe Vision Engine Import
 try:
     from vision_engine import build_vision_answer_from_openai, build_no_vision_fallback
 except Exception as e:
     print("vision_engine.py imports nav pieejams:", e)
 
-    def build_vision_answer_from_openai(client, image_bytes, caption="", version="V80.0"):
+    def build_vision_answer_from_openai(client, image_bytes, caption="", version="V80.1"):
         return build_no_vision_fallback(version=version)
 
-    def build_no_vision_fallback(version="V80.0"):
+    def build_no_vision_fallback(version="V80.1"):
         return (
             "Es redzu, ka atsūtīji bildi. 😊\n\n"
             "Šobrīd attēlu saprašana vēl nav pilnībā pieslēgta, bet mēs to jau slēdzam klāt.\n\n"
             f"Versija: {version}"
         )
 
-# V80.0 Safe Daily Module Import
+# V80.1 Safe Daily Module Import
 # Ja daily.py vēl nav augšupielādēts, app.py joprojām startē ar iebūvētiem fallback tekstiem.
 try:
     from daily import (
@@ -91,7 +91,7 @@ try:
 except Exception as e:
     print("daily.py imports nav pieejams, izmantoju fallback:", e)
 
-    def build_daily_answer(name="", plan="Free", is_premium=False, goals=None, memories=None, reminders=0, version="V80.0"):
+    def build_daily_answer(name="", plan="Free", is_premium=False, goals=None, memories=None, reminders=0, version="V80.1"):
         goals = goals or []
         memories = memories or []
         greeting = f"👋 Sveiks, {name}!" if name else "👋 Sveiks!"
@@ -130,7 +130,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_morning_answer(name="", version="V80.0"):
+    def build_morning_answer(name="", version="V80.1"):
         greeting = f"🌅 Labrīt, {name}!" if name else "🌅 Labrīt!"
         return (
             f"{greeting}\n\n"
@@ -147,7 +147,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_evening_answer(version="V80.0"):
+    def build_evening_answer(version="V80.1"):
         return (
             "🌙 Vakara pārskats ar Ninu\n\n"
             "Pirms diena beidzas, vari man īsi uzrakstīt:\n"
@@ -160,7 +160,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_goal_prompt_answer(version="V80.0"):
+    def build_goal_prompt_answer(version="V80.1"):
         return (
             "🎯 Šodienas mērķis\n\n"
             "Uzraksti vienu galveno lietu, ko šodien gribi paveikt.\n\n"
@@ -173,7 +173,7 @@ except Exception as e:
 
 
 
-# V80.0 Safe Memory Module Import
+# V80.1 Safe Memory Module Import
 # Ja memory.py vēl nav augšupielādēts, app.py joprojām strādā ar fallback loģiku.
 try:
     from memory import (
@@ -187,7 +187,7 @@ try:
 except Exception as e:
     print("memory.py imports nav pieejams, izmantoju fallback:", e)
 
-    def build_memory_saved_answer(saved_text, version="V80.0"):
+    def build_memory_saved_answer(saved_text, version="V80.1"):
         return (
             "🧠 Pierakstīju. ✅\n\n"
             f"Atcerēšos: {saved_text}\n\n"
@@ -195,7 +195,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_goal_saved_answer(goal_text, version="V80.0"):
+    def build_goal_saved_answer(goal_text, version="V80.1"):
         return (
             "🎯 Saglabāju šodienas mērķi. ✅\n\n"
             f"Mērķis: {goal_text}\n\n"
@@ -310,7 +310,7 @@ except Exception as e:
             return []
 
 
-# V80.0 Safe Conversation Module Import
+# V80.1 Safe Conversation Module Import
 # Ja conversation.py vēl nav augšupielādēts, app.py joprojām strādā ar fallback.
 try:
     from conversation import (
@@ -350,7 +350,7 @@ except Exception as e:
 
         return "none"
 
-    def build_auto_memory_answer(memory_text, version="V80.0"):
+    def build_auto_memory_answer(memory_text, version="V80.1"):
         return (
             "🧠 Saglabāju. ✅\n\n"
             f"Atcerēšos: {memory_text}\n\n"
@@ -358,7 +358,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_auto_goal_answer(goal_text, version="V80.0"):
+    def build_auto_goal_answer(goal_text, version="V80.1"):
         return (
             "🎯 Labi, šo iestatīju kā tavas dienas galveno mērķi. ✅\n\n"
             f"Mērķis: {goal_text}\n\n"
@@ -368,7 +368,7 @@ except Exception as e:
 
 
 
-# V80.0 Safe Coach Module Import
+# V80.1 Safe Coach Module Import
 try:
     from coach import build_daily_coach_tip
 except Exception as e:
@@ -400,7 +400,7 @@ except Exception as e:
 
 
 
-# V80.0 Safe Personality Module Import
+# V80.1 Safe Personality Module Import
 try:
     from personality import nina_daily_closing_line
 except Exception as e:
@@ -411,7 +411,7 @@ except Exception as e:
 
 
 
-# V80.0 Safe Reminders Module Import
+# V80.1 Safe Reminders Module Import
 # Nina AI Platform: atgādinājumu loģika atsevišķā modulī.
 try:
     from reminders import (
@@ -462,7 +462,7 @@ except Exception as e:
             print("Reminder fallback save kļūda:", e)
             return False
 
-    def build_reminder_saved_answer(reminder_text, human_time="", version="V80.0"):
+    def build_reminder_saved_answer(reminder_text, human_time="", version="V80.1"):
         if human_time:
             return (
                 "⏰ Atgādinājums saglabāts. ✅\n\n"
@@ -477,7 +477,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_reminder_help_answer(version="V80.0"):
+    def build_reminder_help_answer(version="V80.1"):
         return (
             "⏰ Raksti šādi:\n\n"
             "atgādini rīt 10:00 piezvanīt klientam\n"
@@ -488,7 +488,7 @@ except Exception as e:
 
 
 
-# V80.0 Safe Brain Module Import
+# V80.1 Safe Brain Module Import
 try:
     from brain import build_brain_summary, detect_topics, analyze_memories
 except Exception as e:
@@ -505,7 +505,7 @@ except Exception as e:
 
 
 
-# V80.0 Safe Analytics Module Import
+# V80.1 Safe Analytics Module Import
 # Nina AI Platform: progress un aktivitātes pārskati.
 try:
     from analytics import (
@@ -526,7 +526,7 @@ except Exception as e:
             "level": int(level or 1),
         }
 
-    def build_weekly_progress_text(snapshot, topic_counts=None, version="V80.0"):
+    def build_weekly_progress_text(snapshot, topic_counts=None, version="V80.1"):
         return (
             "📊 Tavs progress ar Ninu\n\n"
             f"🧠 Atmiņas: {snapshot.get('memories_count', 0)}\n"
@@ -538,7 +538,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_empty_progress_text(version="V80.0"):
+    def build_empty_progress_text(version="V80.1"):
         return (
             "📊 Tavs progress ar Ninu\n\n"
             "Vēl nav pietiekami daudz datu. Sāc ar vienu mērķi, atmiņu vai atgādinājumu.\n\n"
@@ -547,7 +547,7 @@ except Exception as e:
 
 
 
-# V80.0 Safe Dialog Module Import
+# V80.1 Safe Dialog Module Import
 # Dialogs labo to, lai Nina nav robots un nejauc jautājumus ar atmiņām.
 try:
     from dialog import (
@@ -571,7 +571,7 @@ except Exception as e:
             return "question"
         return "none"
 
-    def build_capabilities_answer(version="V80.0"):
+    def build_capabilities_answer(version="V80.1"):
         return (
             "Es varu tev palīdzēt nevis tikai čatot, bet reāli sakārtot ikdienu. 😉\n\n"
             "Piemēram:\n"
@@ -585,7 +585,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_playful_rough_answer(version="V80.0"):
+    def build_playful_rough_answer(version="V80.1"):
         return (
             "Hei, hei 😄 Es vēl mācos, bet mājās man viss ir.\n\n"
             "Ja atbildu pārāk robotiski, saki tieši — es kļūšu dzīvāka.\n"
@@ -593,7 +593,7 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def build_smalltalk_answer(user_text="", version="V80.0"):
+    def build_smalltalk_answer(user_text="", version="V80.1"):
         return (
             "Esmu te. 😊\n\n"
             "Vari man vienkārši pastāstīt, kas jāizdara, ko nedrīkst aizmirst, vai pajautāt, ko es māku.\n\n"
@@ -602,7 +602,7 @@ except Exception as e:
 
 
 
-# V80.0 Safe Charm Module Import
+# V80.1 Safe Charm Module Import
 try:
     from charm import (
         charm_capabilities_answer,
@@ -614,7 +614,7 @@ try:
 except Exception as e:
     print("charm.py imports nav pieejams, izmantoju fallback:", e)
 
-    def charm_capabilities_answer(version="V80.0"):
+    def charm_capabilities_answer(version="V80.1"):
         return (
             "Es varu būt tavs mazais ikdienas haosa menedžeris. 😉\n\n"
             "Pasaki, ko nedrīkst aizmirst, kas šodien jāizdara vai par ko galva kūp — es palīdzēšu sakārtot.\n\n"
@@ -622,14 +622,14 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-    def charm_smalltalk_answer(user_text="", version="V80.0"):
+    def charm_smalltalk_answer(user_text="", version="V80.1"):
         return (
             "Čau. 😊 Esmu te.\n\n"
             "Vari runāt ar mani normāli, nevis kā ar robotu. Kas šodien jāsakārto?\n\n"
             f"Versija: {version}"
         )
 
-    def charm_rough_answer(version="V80.0"):
+    def charm_rough_answer(version="V80.1"):
         return (
             "😄 Nu labi, saņēmu. Es vēl mācos nebūt koka robots.\n\n"
             "Dod man vienu normālu uzdevumu, un es mēģināšu pierādīt, ka neesmu tikai skaista poga Telegramā. 😉\n\n"
@@ -644,7 +644,7 @@ except Exception as e:
 
 
 
-# V80.0 Safe Persona Engine Import
+# V80.1 Safe Persona Engine Import
 try:
     from persona_engine import memory_saved_extra, goal_saved_extra
 except Exception as e:
@@ -658,7 +658,7 @@ except Exception as e:
 
 
 
-# V80.0 Living Conversation Core
+# V80.1 Living Conversation Core
 # Šis ir galvenais slānis, kas liek Ninai reaģēt kā sarunas biedram, nevis robotam.
 try:
     from conversation_engine import build_reply as conversation_engine_reply
@@ -668,7 +668,7 @@ except Exception as e:
         return (
             "Esmu te. 😊\n\n"
             "Pasaki, kas šodien jāatceras, jāizdara vai vienkārši jāizrunā.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
 try:
@@ -689,7 +689,7 @@ except Exception as e:
 
 
 def v18_should_use_human_mode(text):
-    """V80.0: nosaka, kad Nina runā kā cilvēks, nevis ar vecām robota atbildēm."""
+    """V80.1: nosaka, kad Nina runā kā cilvēks, nevis ar vecām robota atbildēm."""
     lower = (text or "").strip().lower()
     if not lower:
         return True
@@ -721,7 +721,7 @@ def v18_should_use_human_mode(text):
 
 
 def v18_human_mode_answer(text):
-    """V80.0 Human Mode: fokusējas uz cilvēku, emociju un nākamo ziņu."""
+    """V80.1 Human Mode: fokusējas uz cilvēku, emociju un nākamo ziņu."""
     lower = (text or "").strip().lower()
     emotion = detect_emotion(text)
     topic = detect_topic(text)
@@ -742,20 +742,20 @@ def v18_human_mode_answer(text):
                 "• aizmirstas lietas?\n"
                 "• haoss galvā?\n"
                 "• vai vienkārši gribi pārbaudīt, vai es neesmu garlaicīgs bots? 😄\n\n"
-                "Versija: V80.0"
+                "Versija: V80.1"
             ),
             (
                 "Varu pastāstīt, bet labāk parādīt. 😏\n\n"
                 "Iedod man vienu īstu lietu no savas dienas — darbu, domu vai kaut ko, ko nedrīkst aizmirst. "
                 "Es mēģināšu to sakārtot tā, lai tev paliek vieglāk.\n\n"
                 "Ar ko sākam?\n\n"
-                "Versija: V80.0"
+                "Versija: V80.1"
             ),
             (
                 "Es varu būt tā, kas palīdz noķert lietas, kuras parasti aizskrien garām. 😊\n\n"
                 "Bet man interesē nevis lielīties, bet saprast tevi. "
                 "Kas tev šobrīd būtu vērtīgāk — atgādinājumi, dienas plāns vai vienkārši saruna, lai sakārtotu domas?\n\n"
-                "Versija: V80.0"
+                "Versija: V80.1"
             ),
         ]
         try:
@@ -773,19 +773,19 @@ def v18_human_mode_answer(text):
                 "Jūtu, ka tur ir dusmas. Tas ir ok. 😕\n\n"
                 "Es netēlošu gudru robotu un nemetīšos ar padomiem. "
                 "Pasaki man vienu lietu: kas tieši šobrīd visvairāk kaitina?\n\n"
-                "Versija: V80.0"
+                "Versija: V80.1"
             )
         if emotion == "tired" or any(x in lower for x in ["noguris", "nogurusi", "nav spēka", "nav speka"]):
             return (
                 "Izklausās, ka esi noguris. Tad neejam ar lieliem plāniem. 😊\n\n"
                 "Šodien varbūt pietiek ar vienu mazu soli. "
                 "Kas visvairāk paņēma spēku?\n\n"
-                "Versija: V80.0"
+                "Versija: V80.1"
             )
         return (
             "Hmm... izklausās, ka diena nav bijusi viegla. 😔\n\n"
             "Es nesteigšos ar padomiem. Pastāsti, kas tieši notika?\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     # Testēšana / provokācija
@@ -794,7 +794,7 @@ def v18_human_mode_answer(text):
             "Droši testē. 😄\n\n"
             "Man patīk, kad mani pārbauda pa īstam, nevis tikai ar skaistiem jautājumiem. "
             "Iedod man vienu reālu situāciju, un skatīsimies, vai esmu noderīga.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     # Rupjš / provokatīvs teksts
@@ -804,15 +804,15 @@ def v18_human_mode_answer(text):
             "Labi, šo ieskaitīšu kā kvalitātes testu. "
             "Dod man vienu īstu uzdevumu, un pēc tam godīgi pateiksi, vai es vēl esmu tik garlaicīga.\n\n"
             "Deal? 😉\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     # Sveicieni
     if lower in ["čau", "cau", "sveika", "sveiks", "hi", "hello", "hei", "labdien"]:
         variants = [
-            "Čau. 😊\n\nEs klausos. Kas šobrīd tev ir svarīgākais?\n\nVersija: V80.0",
-            "Hei. 😊\n\nKas šodien notiek tavā pasaulē — darbi, haoss vai vienkārši gribi mani patestēt? 😉\n\nVersija: V80.0",
-            "Čau, prieks tevi redzēt. 🙂\n\nAr ko sākam — kaut ko atcerēties, saplānot vai vienkārši izrunāt?\n\nVersija: V80.0",
+            "Čau. 😊\n\nEs klausos. Kas šobrīd tev ir svarīgākais?\n\nVersija: V80.1",
+            "Hei. 😊\n\nKas šodien notiek tavā pasaulē — darbi, haoss vai vienkārši gribi mani patestēt? 😉\n\nVersija: V80.1",
+            "Čau, prieks tevi redzēt. 🙂\n\nAr ko sākam — kaut ko atcerēties, saplānot vai vienkārši izrunāt?\n\nVersija: V80.1",
         ]
         try:
             import random
@@ -830,11 +830,11 @@ def v18_human_mode_answer(text):
         return (
             "Es tevi dzirdu. 😊\n\n"
             "Pasaki mazliet konkrētāk: tu gribi, lai es kaut ko atceros, palīdzētu saplānot, vai vienkārši palīdzētu sakārtot domas?\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     if "Versija:" not in answer:
-        answer = answer.rstrip() + "\n\nVersija: V80.0"
+        answer = answer.rstrip() + "\n\nVersija: V80.1"
 
     return answer
 
@@ -843,7 +843,7 @@ def v18_human_mode_answer(text):
 
 
 def v18_human_capabilities_answer():
-    """V80.0: īpaši cilvēcisks teksts jautājumam 'ko vari darīt?'."""
+    """V80.1: īpaši cilvēcisks teksts jautājumam 'ko vari darīt?'."""
     try:
         import random
         variants = [
@@ -856,20 +856,20 @@ def v18_human_capabilities_answer():
                 "• aizmirstas lietas?\n"
                 "• haoss galvā?\n"
                 "• vai vienkārši gribi pārbaudīt, vai es neesmu garlaicīgs bots? 😄\n\n"
-                "Versija: V80.0"
+                "Versija: V80.1"
             ),
             (
                 "Varu pastāstīt, bet labāk parādīt. 😏\n\n"
                 "Iedod man vienu īstu lietu no savas dienas — darbu, domu vai kaut ko, ko nedrīkst aizmirst. "
                 "Es mēģināšu to sakārtot tā, lai tev paliek vieglāk.\n\n"
                 "Ar ko sākam?\n\n"
-                "Versija: V80.0"
+                "Versija: V80.1"
             ),
             (
                 "Es varu būt noderīga dažādos veidos, bet svarīgākais nav saraksts. 😊\n\n"
                 "Svarīgākais ir tas, kas tev šobrīd sēž galvā. "
                 "Pasaki vienu lietu, ko gribi sakārtot, un es parādīšu, kā varu palīdzēt.\n\n"
-                "Versija: V80.0"
+                "Versija: V80.1"
             ),
         ]
         return random.choice(variants)
@@ -877,13 +877,13 @@ def v18_human_capabilities_answer():
         return (
             "Varu pastāstīt, bet labāk parādīt. 😊\n\n"
             "Pasaki vienu lietu, ko gribi sakārtot, un es mēģināšu palīdzēt.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
 
 
 def save_conversation_state(user_id, user_text, nina_text="", intent="", emotion="", topic=""):
-    """V80.0: saglabā īstermiņa sarunas kontekstu."""
+    """V80.1: saglabā īstermiņa sarunas kontekstu."""
     try:
         conn = get_db()
         c = conn.cursor()
@@ -905,7 +905,7 @@ def save_conversation_state(user_id, user_text, nina_text="", intent="", emotion
 
 
 def latest_conversation_state(user_id, limit=3):
-    """V80.0: nolasa pēdējo sarunas kontekstu."""
+    """V80.1: nolasa pēdējo sarunas kontekstu."""
     try:
         conn = get_db()
         c = conn.cursor()
@@ -952,7 +952,7 @@ def v19_detect_followup_context(previous_rows):
 
 
 def v19_human_mode_answer_with_memory(user_id, text):
-    """V80.0: Human Mode + īstermiņa sarunas atmiņa."""
+    """V80.1: Human Mode + īstermiņa sarunas atmiņa."""
     lower = (text or "").strip().lower()
     emotion = detect_emotion(text)
     topic = detect_topic(text)
@@ -970,7 +970,7 @@ def v19_human_mode_answer_with_memory(user_id, text):
             "Tāpēc nesākšu no nulles. 🙂\n\n"
             f"Tu tagad pieminēji: {text}\n\n"
             "Kas šajā situācijā bija pats smagākais — tas, kas notika, vai tas, kā tu pēc tam juties?\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
         save_conversation_state(user_id, text, answer, "followup", emotion, topic)
         return answer
@@ -983,7 +983,7 @@ def v19_human_mode_answer_with_memory(user_id, text):
 
 
 def v20_smart_price_answer(user_id=None):
-    """V80.0: atbild uz cenu/tarifu jautājumiem cilvēciski un komerciāli."""
+    """V80.1: atbild uz cenu/tarifu jautājumiem cilvēciski un komerciāli."""
     try:
         user = get_user(str(user_id)) if user_id else {"premium": 0}
         if user.get("premium"):
@@ -991,7 +991,7 @@ def v20_smart_price_answer(user_id=None):
                 "Tu jau esi Premium režīmā. 💎\n\n"
                 "Tas nozīmē: vairāk atmiņas, vairāk atgādinājumu un mazāk ierobežojumu, kad tev mani tiešām vajag.\n\n"
                 "Ja gribi, vari uzrakstīt: mans plāns\n\n"
-                "Versija: V80.0"
+                "Versija: V80.1"
             )
     except Exception:
         pass
@@ -1008,7 +1008,7 @@ def v20_smart_price_answer(user_id=None):
         "💬 mazāk ierobežojumu, kad tev mani vajag.\n\n"
         "Bet nesteidzies. Pamēģini mani ar īstu lietu, un tad izlem. 😉\n\n"
         "Ja gribi pirkt, raksti: pirkt basic\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -1031,7 +1031,7 @@ def v21_should_offer_reminder(text):
     words=["rīt","rit","pirmdien","otrdien","trešdien","tresdien","ceturtdien","piektdien","sestdien","svētdien","svetdien","jāzvana","jazvana","jāsatiek","jasatiek","ārsts","arsts","klient"]
     return any(w in lower for w in words)
 
-def v21_memory_answer(memory_text,version="V80.0"):
+def v21_memory_answer(memory_text,version="V80.1"):
     return (
         "🧠 Saglabāju. ✅\n\n"
         f"Atcerēšos: {memory_text}\n\n"
@@ -1057,7 +1057,7 @@ def v21_is_future_memory_text(text):
     return any(m in lower for m in markers)
 
 
-def v21_build_memory_answer(memory_text, version="V80.0"):
+def v21_build_memory_answer(memory_text, version="V80.1"):
     memory_text = (memory_text or "").strip()
     if v21_is_future_memory_text(memory_text):
         return (
@@ -1086,7 +1086,7 @@ def v21_flow_answer(user_id, user_text):
             "Man viss labi. 😊\n\n"
             "Bet man interesantāk ir, kā iet tev. "
             "Kas šodien tev vairāk prasa uzmanību — darbi, cilvēki vai galvā vienkārši haoss?\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     if any(x in lower for x in ["man smagi", "smagi", "grūti", "gruti", "nav viegli", "slikti jūtos", "slikti jutos"]):
@@ -1094,7 +1094,7 @@ def v21_flow_answer(user_id, user_text):
             "Izklausās, ka tev šobrīd nav viegli. 😔\n\n"
             "Es nesteigšos ar padomiem. "
             "Gribi vienkārši izstāstīt, kas notika, vai mēģinām to sadalīt pa mazākiem gabaliem?\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     return None
@@ -1114,7 +1114,7 @@ def v24_append_unique_text(old_value, new_value, max_items=20):
 
 
 def v24_save_profile_fact_to_db(user_id, fact_type, value):
-    """V80.0: saglabā profila faktu users tabulā, lai Nina to atceras pēc restartēšanas."""
+    """V80.1: saglabā profila faktu users tabulā, lai Nina to atceras pēc restartēšanas."""
     value = (value or "").strip()
     if not value:
         return False
@@ -1144,7 +1144,7 @@ def v24_save_profile_fact_to_db(user_id, fact_type, value):
 
 
 def v24_profile_answer_from_fact(user_id, user_text):
-    """V80.0: atpazīst profila faktus un uzreiz saglabā datubāzē."""
+    """V80.1: atpazīst profila faktus un uzreiz saglabā datubāzē."""
     fact = detect_profile_fact(user_text)
     fact_type = fact.get("type", "")
     value = (fact.get("value", "") or "").strip()
@@ -1157,11 +1157,11 @@ def v24_profile_answer_from_fact(user_id, user_text):
     except Exception as e:
         print("v24_save_profile_fact_to_db kļūda:", repr(e))
 
-    return build_profile_saved_answer(fact_type, value, version="V80.0")
+    return build_profile_saved_answer(fact_type, value, version="V80.1")
 
 
 def v24_profile_recall_answer(user_id):
-    """V80.0: parāda, ko Nina jau zina par lietotāju."""
+    """V80.1: parāda, ko Nina jau zina par lietotāju."""
     user = get_user(str(user_id))
     lines = ["👤 Ko es par tevi atceros"]
 
@@ -1188,14 +1188,14 @@ def v24_profile_recall_answer(user_id):
     lines.append("es strādāju celtniecībā")
     lines.append("man patīk AI un bizness")
     lines.append("")
-    lines.append("Versija: V80.0")
+    lines.append("Versija: V80.1")
 
     return "\n".join(lines)
 
 
 
 # =========================
-# V80.0 STABLE PLATFORM ROUTER
+# V80.1 STABLE PLATFORM ROUTER
 # =========================
 
 def v301_split_items(value):
@@ -1234,12 +1234,12 @@ def v301_relationship_greeting(user_id):
     interests = v301_split_items(user.get("hobbies", ""))
     hello = f"Čau, {name}! 😊" if name else "Čau! 😊"
     if projects:
-        return f"{hello}\n\nKā virzās šis projekts: {projects[-1]}?\n\nVai šodien tur vajag vienu konkrētu soli, ko sakārtot?\n\nVersija: V80.0"
+        return f"{hello}\n\nKā virzās šis projekts: {projects[-1]}?\n\nVai šodien tur vajag vienu konkrētu soli, ko sakārtot?\n\nVersija: V80.1"
     if prof:
-        return f"{hello}\n\nKā šodien iet ar tavu jomu — {prof}?\n\nKas šobrīd svarīgākais: darbi, klienti vai plānošana?\n\nVersija: V80.0"
+        return f"{hello}\n\nKā šodien iet ar tavu jomu — {prof}?\n\nKas šobrīd svarīgākais: darbi, klienti vai plānošana?\n\nVersija: V80.1"
     if interests:
-        return f"{hello}\n\nAtceros, ka tev interesē {interests[-1]}. Ko šodien gribi ar to pavirzīt uz priekšu?\n\nVersija: V80.0"
-    return f"{hello}\n\nEs esmu te. Kas šodien jāsakārto — darbi, atgādinājumi vai domas galvā?\n\nVersija: V80.0"
+        return f"{hello}\n\nAtceros, ka tev interesē {interests[-1]}. Ko šodien gribi ar to pavirzīt uz priekšu?\n\nVersija: V80.1"
+    return f"{hello}\n\nEs esmu te. Kas šodien jāsakārto — darbi, atgādinājumi vai domas galvā?\n\nVersija: V80.1"
 
 
 def v301_capabilities(user_id):
@@ -1249,16 +1249,16 @@ def v301_capabilities(user_id):
     if prof: lines.append(f"💼 pielāgoties tavai jomai: {prof};")
     if projects: lines.append(f"🚀 turpināt sarunu par projektu: {projects[-1]};")
     if interests: lines.append(f"✨ ņemt vērā tavas intereses: {', '.join(interests[:2])};")
-    lines += ["", "Tev nav jāiegaumē komandas. Raksti normāli, piemēram:", "rīt jāzvana klientam", "man šodien daudz darbu", "apskati šo bildi", "", "Versija: V80.0"]
+    lines += ["", "Tev nav jāiegaumē komandas. Raksti normāli, piemēram:", "rīt jāzvana klientam", "man šodien daudz darbu", "apskati šo bildi", "", "Versija: V80.1"]
     return "\n".join(lines)
 
 
 def v301_daily_direction(user_id):
     user=get_user(str(user_id)); name=v301_name(user); prof=(user.get('profession') or '').strip(); projects=v301_split_items(user.get('projects',''))
     prefix=f"{name}, " if name else ""
-    if projects: return f"{prefix}šodien es sāktu ar vienu soli pie projekta: {projects[-1]}.\n\nKas tur šobrīd bremzē visvairāk?\n\nVersija: V80.0"
-    if prof: return f"{prefix}ņemot vērā tavu jomu ({prof}), izvēlamies vienu praktisku prioritāti.\n\nKas svarīgāk: klients, termiņš vai dokumenti?\n\nVersija: V80.0"
-    return f"{prefix}izvēlamies vienu galveno lietu šodienai.\n\nKas būtu jāizdara, lai vakarā justos, ka diena nav pagājusi tukši?\n\nVersija: V80.0"
+    if projects: return f"{prefix}šodien es sāktu ar vienu soli pie projekta: {projects[-1]}.\n\nKas tur šobrīd bremzē visvairāk?\n\nVersija: V80.1"
+    if prof: return f"{prefix}ņemot vērā tavu jomu ({prof}), izvēlamies vienu praktisku prioritāti.\n\nKas svarīgāk: klients, termiņš vai dokumenti?\n\nVersija: V80.1"
+    return f"{prefix}izvēlamies vienu galveno lietu šodienai.\n\nKas būtu jāizdara, lai vakarā justos, ka diena nav pagājusi tukši?\n\nVersija: V80.1"
 
 
 def v301_conversation_answer(user_id, text):
@@ -1266,13 +1266,13 @@ def v301_conversation_answer(user_id, text):
     if lower in ['čau','cau','sveika','sveiks','hi','hello','hei','labdien'] or lower.startswith(('čau','cau','sveika','sveiks','labdien')): return v301_relationship_greeting(user_id)
     if any(x in lower for x in ['ko vari','ko tu vari','ko māki','ko maki']): return v301_capabilities(user_id)
     if any(x in lower for x in ['kā tev iet','ka tev iet','kā iet','ka iet']):
-        if name and projects: return f"Man viss labi, {name}. 😊\n\nBet svarīgāk — kā iet ar projektu: {projects[-1]}?\n\nVai šodien vajag palīdzēt to pavirzīt uz priekšu?\n\nVersija: V80.0"
-        if name: return f"Man viss labi, {name}. 😊\n\nBet man interesē, kā iet tev. Kas šodien vairāk spiež — darbi, cilvēki vai haoss galvā?\n\nVersija: V80.0"
-        return "Man viss labi. 😊\n\nBet man interesē, kā iet tev. Kas šodien vairāk spiež — darbi, cilvēki vai haoss galvā?\n\nVersija: V80.0"
+        if name and projects: return f"Man viss labi, {name}. 😊\n\nBet svarīgāk — kā iet ar projektu: {projects[-1]}?\n\nVai šodien vajag palīdzēt to pavirzīt uz priekšu?\n\nVersija: V80.1"
+        if name: return f"Man viss labi, {name}. 😊\n\nBet man interesē, kā iet tev. Kas šodien vairāk spiež — darbi, cilvēki vai haoss galvā?\n\nVersija: V80.1"
+        return "Man viss labi. 😊\n\nBet man interesē, kā iet tev. Kas šodien vairāk spiež — darbi, cilvēki vai haoss galvā?\n\nVersija: V80.1"
     if any(x in lower for x in ['ko man darīt','ko man darit','ar ko sākt','ar ko sakt','ko šodien']): return v301_daily_direction(user_id)
     if any(x in lower for x in ['man smagi','smagi','grūti','gruti','slikta diena','noguris','nogurusi']):
-        who=f"{name}, " if name else ""; return f"{who}izklausās, ka šobrīd nav viegli. 😔\n\nEs nemetīšos ar gudriem padomiem. Gribi, lai es vienkārši paklausos, vai sadalām problēmu mazākos gabalos?\n\nVersija: V80.0"
-    if any(x in lower for x in ['testēju','testeju','pārbaudu','parbaudu']): return "Droši testē. 😄\n\nMan patīk, kad mani pārbauda pa īstam. Iedod vienu reālu situāciju, un skatāmies, vai esmu noderīga.\n\nVersija: V80.0"
+        who=f"{name}, " if name else ""; return f"{who}izklausās, ka šobrīd nav viegli. 😔\n\nEs nemetīšos ar gudriem padomiem. Gribi, lai es vienkārši paklausos, vai sadalām problēmu mazākos gabalos?\n\nVersija: V80.1"
+    if any(x in lower for x in ['testēju','testeju','pārbaudu','parbaudu']): return "Droši testē. 😄\n\nMan patīk, kad mani pārbauda pa īstam. Iedod vienu reālu situāciju, un skatāmies, vai esmu noderīga.\n\nVersija: V80.1"
     return None
 
 
@@ -1313,13 +1313,13 @@ def v301_save_profile_fact(user_id, fact_type, value):
 
 def v301_profile_saved_answer(user_id, fact_type, value):
     user=get_user(str(user_id)); name=v301_name(user); prefix=f"{name}, " if name and fact_type!='name' else ''
-    if fact_type=='name': return f"Patīkami, {value}. 😊\n\nTagad runāšu ar tevi kā ar pazīstamu cilvēku, nevis kā ar svešinieku.\n\nVersija: V80.0"
-    if fact_type=='profession': return f"{prefix}sapratu. 💼\n\nPaturēšu prātā, ka tava joma ir: {value}.\n\nTurpmāk mēģināšu ieteikumus vairāk pieskaņot tavai reālajai dzīvei.\n\nVersija: V80.0"
-    if fact_type=='interest': return f"{prefix}noķēru interesi. 🙂\n\nTev svarīga tēma: {value}.\n\nTas man palīdzēs runāt precīzāk.\n\nVersija: V80.0"
-    if fact_type=='project': return f"{prefix}piefiksēju šo kā projekta tēmu. 🧠\n\n{value}\n\nVēlāk varēšu atgriezties pie šī un pajautāt, kā virzās.\n\nVersija: V80.0"
-    if fact_type=='family': return f"{prefix}piefiksēju. 💙\n\nPersonīgās lietas ir svarīgas, tāpēc runāšu uzmanīgi un bez liekas uzbāzības.\n\nVersija: V80.0"
-    if fact_type=='client_topic': return f"{prefix}saprotu, te ir klientu tēma. 🤝\n\nTādas lietas bieži ir vērts pārvērst konkrētā plānā vai atgādinājumā.\n\nVersija: V80.0"
-    return f"{prefix}piefiksēju. 😊\n\nVersija: V80.0"
+    if fact_type=='name': return f"Patīkami, {value}. 😊\n\nTagad runāšu ar tevi kā ar pazīstamu cilvēku, nevis kā ar svešinieku.\n\nVersija: V80.1"
+    if fact_type=='profession': return f"{prefix}sapratu. 💼\n\nPaturēšu prātā, ka tava joma ir: {value}.\n\nTurpmāk mēģināšu ieteikumus vairāk pieskaņot tavai reālajai dzīvei.\n\nVersija: V80.1"
+    if fact_type=='interest': return f"{prefix}noķēru interesi. 🙂\n\nTev svarīga tēma: {value}.\n\nTas man palīdzēs runāt precīzāk.\n\nVersija: V80.1"
+    if fact_type=='project': return f"{prefix}piefiksēju šo kā projekta tēmu. 🧠\n\n{value}\n\nVēlāk varēšu atgriezties pie šī un pajautāt, kā virzās.\n\nVersija: V80.1"
+    if fact_type=='family': return f"{prefix}piefiksēju. 💙\n\nPersonīgās lietas ir svarīgas, tāpēc runāšu uzmanīgi un bez liekas uzbāzības.\n\nVersija: V80.1"
+    if fact_type=='client_topic': return f"{prefix}saprotu, te ir klientu tēma. 🤝\n\nTādas lietas bieži ir vērts pārvērst konkrētā plānā vai atgādinājumā.\n\nVersija: V80.1"
+    return f"{prefix}piefiksēju. 😊\n\nVersija: V80.1"
 
 
 def v301_enhance_vision_answer(user_id, answer, caption=''):
@@ -1329,7 +1329,7 @@ def v301_enhance_vision_answer(user_id, answer, caption=''):
     extra=[f"{name}, es bildi apskatījos praktiski, ne tikai formāli." if name else "Bildīti apskatījos praktiski, ne tikai formāli."]
     if prof and any(x in prof.lower() for x in ['celtn','būv','buv','fasād','fasad']): extra.append('Ja šī bilde ir no darba vai objekta, vari atsūtīt vēl tuvplānu — mēģināšu palīdzēt saprast detaļas.')
     extra.append('Ko tu gribi, lai es ar šo bildi izdaru: aprakstu, novērtēju situāciju vai palīdzu pieņemt lēmumu?')
-    return answer.rstrip()+'\n\n'+'\n'.join(extra)+'\n\nVersija: V80.0'
+    return answer.rstrip()+'\n\n'+'\n'.join(extra)+'\n\nVersija: V80.1'
 
 
 def v301_run_regression_tests():
@@ -1341,17 +1341,17 @@ def v301_run_regression_tests():
         'man patīk AI un bizness': v301_detect_profile_fact_safe('man patīk AI un bizness').get('type')=='interest',
     }
     failed=[k for k,ok in tests.items() if not ok]
-    print('V80.0 regression failed: '+str(failed) if failed else 'V80.0 regression OK')
+    print('V80.1 regression failed: '+str(failed) if failed else 'V80.1 regression OK')
     return not failed
 
 try:
     v301_run_regression_tests()
 except Exception as e:
-    print('V80.0 regression check kļūda:', repr(e))
+    print('V80.1 regression check kļūda:', repr(e))
 
 
 # =========================
-# V80.0 REVENUE PLATFORM RELEASE
+# V80.1 REVENUE PLATFORM RELEASE
 # Usage Engine + Premium Score + Soft Sales + Referral + Admin Stats
 # =========================
 
@@ -1447,7 +1447,7 @@ def v40_premium_offer(user_id, reason=""):
         return (
             f"{name + ', ' if name else ''}tu jau esi Premium režīmā. 💎\n\n"
             "Ja gribi, varu parādīt, kā vislabāk izmantot Premium ikdienā.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     score = v40_premium_score(user_id)
@@ -1459,7 +1459,7 @@ def v40_premium_offer(user_id, reason=""):
         f"Tavs Premium Score: {score}/100.\n\n"
         f"{v40_plan_text()}\n\n"
         "Ja gribi, varu parādīt pirkšanas iespējas. Raksti: gribu Premium\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -1492,7 +1492,7 @@ def v40_usage_answer(user_id):
         f"👤 Profila papildinājumi: {s['profile']}\n\n"
         f"💎 Premium Score: {score}/100\n\n"
         "Jo vairāk es tev reāli palīdzu, jo vairāk jēgas ir Premium iespējām.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -1509,7 +1509,7 @@ def v40_referral_answer(user_id):
         f"{name + ', ' if name else ''}ja zini kādu, kam noderētu tāds palīgs kā Nina, vari mani ieteikt tālāk. 🙂\n\n"
         f"Referral saite:\n{link}\n\n"
         "Vēlāk par uzaicinājumiem varēsim dot bonusus vai Premium dienas.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -1534,12 +1534,12 @@ def v40_checkin_permission_answer(user_id, enable=True):
             "Sarunāts. 😊\n\n"
             "Ja kādu laiku nerakstīsi, es drīkstēšu reizēm maigi painteresēties, kā tev iet. "
             "Nebūšu uzbāzīga — tikai lai nepazūd svarīgās lietas.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
     return (
         "Labi, check-in izslēgts. 🔕\n\n"
         "Es pati nerakstīšu, ja nebūsi man to atļāvis.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -1576,10 +1576,10 @@ def v40_admin_stats():
             f"⏰ Aktīvie atgādinājumi: {reminders}\n"
             f"📈 Usage events: {usage}\n\n"
             "Šis ir pirmais Revenue Dashboard pamats.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
     except Exception as e:
-        return f"Admin stats kļūda: {repr(e)}\n\nVersija: V80.0"
+        return f"Admin stats kļūda: {repr(e)}\n\nVersija: V80.1"
 
 
 def v40_revenue_router(user_id, text):
@@ -1610,7 +1610,7 @@ def v40_revenue_router(user_id, text):
 
 
 # =========================
-# V80.0 STABLE INTENT ENGINE
+# V80.1 STABLE INTENT ENGINE
 # Practical Help + Business Goals + Safer Profile Filter
 # =========================
 
@@ -1663,7 +1663,7 @@ def v401_project_help_answer(user_id, text):
         "2. Kas šobrīd visvairāk bremzē?\n"
         "3. Kāds ir tuvākais termiņš?\n\n"
         "Pēc tam es tev salikšu īsu rīcības plānu pa soļiem.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -1678,7 +1678,7 @@ def v401_business_goal_answer(user_id, text):
         "2. Kas tev pietrūkst vairāk — klientu, laika, piedāvājuma vai disciplīnas?\n"
         "3. Kādu vienu produktu vai pakalpojumu varam pārvērst naudā tuvākajās 7 dienās?\n\n"
         "Ja gribi, uzraksti: mans bizness ir... un es palīdzēšu salikt pirmo naudas plānu.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -1744,19 +1744,19 @@ def v401_regression_check():
     }
     failed = [k for k, ok in tests.items() if not ok]
     if failed:
-        print("V80.0 regression failed:", failed)
+        print("V80.1 regression failed:", failed)
     else:
-        print("V80.0 regression OK")
+        print("V80.1 regression OK")
     return not failed
 
 try:
     v401_regression_check()
 except Exception as e:
-    print('V80.0 regression check kļūda:', repr(e))
+    print('V80.1 regression check kļūda:', repr(e))
 
 
 # =========================
-# V80.0 AI ASSISTANT PLATFORM RELEASE
+# V80.1 AI ASSISTANT PLATFORM RELEASE
 # Long-Term Memory + Smart Check-in + Premium Flow 2.0 + Admin 2.0
 # =========================
 
@@ -1893,7 +1893,7 @@ def v50_checkin_status_answer(user_id):
         return (
             "🤝 Šobrīd nav ieplānotu check-in.\n\n"
             "Ja gribi, raksti: atgādini man painteresēties pēc 3 dienām par klientu.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     lines = ["🤝 Ieplānotie check-in:"]
@@ -1904,7 +1904,7 @@ def v50_checkin_status_answer(user_id):
         except Exception:
             pass
     lines.append("")
-    lines.append("Versija: V80.0")
+    lines.append("Versija: V80.1")
     return "\n".join(lines)
 
 
@@ -1946,7 +1946,7 @@ def v50_premium_checkout_answer(user_id):
         lines.append("")
         lines.append("Pēc maksājuma Premium statusu varēsim pieslēgt automātiski ar Stripe webhook vai manuāli admin panelī.")
         lines.append("")
-        lines.append("Versija: V80.0")
+        lines.append("Versija: V80.1")
         return "\n".join(lines)
 
     return (
@@ -1955,7 +1955,7 @@ def v50_premium_checkout_answer(user_id):
         "STRIPE_BASIC_CHECKOUT_URL\n"
         "STRIPE_PLUS_CHECKOUT_URL\n\n"
         "Pagaidām Premium var testēt ar tekstu un admin statusu.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -1997,10 +1997,10 @@ def v50_admin_dashboard_answer():
             f"🤝 Pending check-ins: {checkins}\n"
             f"🔥 Premium leads: {leads}\n"
             f"📈 Usage events: {usage}\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
     except Exception as e:
-        return f"V50 admin dashboard kļūda: {repr(e)}\n\nVersija: V80.0"
+        return f"V50 admin dashboard kļūda: {repr(e)}\n\nVersija: V80.1"
 
 
 def v50_memory_answer(user_id):
@@ -2012,7 +2012,7 @@ def v50_memory_answer(user_id):
             "mans bizness ir fasādes\n"
             "mans galvenais projekts ir Nina platforma\n"
             "man svarīgi ir nopelnīt ar AI darbiniekiem\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     lines = ["🧬 Ko es atceros ilgtermiņā:"]
@@ -2023,7 +2023,7 @@ def v50_memory_answer(user_id):
         except Exception:
             pass
     lines.append("")
-    lines.append("Versija: V80.0")
+    lines.append("Versija: V80.1")
     return "\n".join(lines)
 
 
@@ -2047,7 +2047,7 @@ def v50_assistant_router(user_id, text):
     if lower in ["v50 admin", "admin dashboard", "platform dashboard", "dashboard"]:
         if is_admin(user_id):
             return v50_admin_dashboard_answer()
-        return "Šī komanda ir tikai adminam.\n\nVersija: V80.0"
+        return "Šī komanda ir tikai adminam.\n\nVersija: V80.1"
 
     return None
 
@@ -2068,7 +2068,7 @@ def v50_enhance_answer_with_memory(user_id, answer, user_text):
 
     if checkin_line and "Versija:" in answer:
         answer = re.sub(r"\n\nVersija:\s*V[0-9.]+", "", answer).rstrip()
-        return answer + checkin_line + "\n\nVersija: V80.0"
+        return answer + checkin_line + "\n\nVersija: V80.1"
 
     return answer
 
@@ -2090,7 +2090,7 @@ except Exception as e:
 
 
 # =========================
-# V80.0 INTELLIGENCE + NAVIGATION RELEASE
+# V80.1 INTELLIGENCE + NAVIGATION RELEASE
 # Intent Engine 2.0 + Location Engine + Variation Engine + Smarter Safety
 # =========================
 
@@ -2185,7 +2185,7 @@ def v60_location_profile_answer(user_id):
             "es dzīvoju Baldonē\n"
             "mana mājas adrese ir ...\n"
             "mans darbs ir ...\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     location_text, lat, lon, created_at = home
@@ -2193,7 +2193,7 @@ def v60_location_profile_answer(user_id):
         "📍 Ko es zinu par tavām vietām\n\n"
         f"🏠 Mājas: {location_text or 'nav teksta'}\n\n"
         "Ja vēlāk rakstīsi 'atrod ceļu mājās', es vispirms prasīšu, kur tu esi tagad, un tad palīdzēšu ar maršrutu.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -2261,14 +2261,14 @@ def v60_navigation_answer(user_id, text):
                 "Tagad man vajag vienu lietu: kur tu šobrīd atrodies?\n"
                 "Vari Telegramā atsūtīt lokāciju vai uzrakstīt adresi/vietu.\n\n"
                 "Kad zināšu starta punktu, varēšu palīdzēt salikt maršrutu.\n\n"
-                "Versija: V80.0"
+                "Versija: V80.1"
             )
         return (
             f"{prefix}varu palīdzēt, bet es vēl nezinu, kur tev ir mājas. 📍\n\n"
             "Uzraksti, piemēram:\n"
             "es dzīvoju Baldonē\n\n"
             "Un pēc tam: atrod man ceļu mājās.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     return (
@@ -2277,7 +2277,7 @@ def v60_navigation_answer(user_id, text):
         "1. Kur tu esi tagad?\n"
         "2. Kur jānokļūst?\n\n"
         "Piemēram: esmu Rīgas centrā, jābrauc uz Baldoni.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -2295,7 +2295,7 @@ def v60_urgent_help_answer(user_id, text):
         "Ja nav fizisku briesmu, bet ir panika vai haoss, raksti man vienā teikumā:\n"
         "kas notika, kur tu esi, un kas ir pirmais, ko vajag atrisināt.\n\n"
         "Es palīdzēšu soli pa solim.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -2313,20 +2313,20 @@ def v60_is_nonsense_or_play(text):
 
 def v60_fun_answer(user_id, text):
     variants = [
-        "😄 Labi, šo ieskaitu kā radošo testu. Tagad dod man vienu īstu uzdevumu, lai varu pierādīt, ka neesmu tikai smuka poga Telegramā.\n\nVersija: V80.0",
-        "Haha, pieņemu. 😄 Bet es tevi noķēru — tu testē, vai es atkārtojos. Ne tik ātri. Kas ir īstais uzdevums?\n\nVersija: V80.0",
-        "Okei, kosmoss pieņemts. 🚀 Tagad atgriežamies uz Zemes: kas šodien jāsakārto?\n\nVersija: V80.0",
-        "😏 Tu man met muļķības, es metu atpakaļ jautājumu: gribi mani testēt vai tiešām vajag palīdzību?\n\nVersija: V80.0",
+        "😄 Labi, šo ieskaitu kā radošo testu. Tagad dod man vienu īstu uzdevumu, lai varu pierādīt, ka neesmu tikai smuka poga Telegramā.\n\nVersija: V80.1",
+        "Haha, pieņemu. 😄 Bet es tevi noķēru — tu testē, vai es atkārtojos. Ne tik ātri. Kas ir īstais uzdevums?\n\nVersija: V80.1",
+        "Okei, kosmoss pieņemts. 🚀 Tagad atgriežamies uz Zemes: kas šodien jāsakārto?\n\nVersija: V80.1",
+        "😏 Tu man met muļķības, es metu atpakaļ jautājumu: gribi mani testēt vai tiešām vajag palīdzību?\n\nVersija: V80.1",
     ]
     return v60_pick(user_id, "fun", variants)
 
 
 def v60_better_smalltalk_answer(user_id, text):
     variants = [
-        "Esmu te. 😊 Pasaki konkrēti — vajag palīdzību, plānu, atgādinājumu vai vienkārši izrunāt galvu?\n\nVersija: V80.0",
-        "Klausos. 🙂 Dod man vienu reālu situāciju, un es mēģināšu to sakārtot pa soļiem.\n\nVersija: V80.0",
-        "Labi, ejam praktiski. Kas šobrīd ir pirmais, ko vajag atrisināt?\n\nVersija: V80.0",
-        "Es varu palīdzēt, bet man vajag mazliet kontekstu. Kas notiek?\n\nVersija: V80.0",
+        "Esmu te. 😊 Pasaki konkrēti — vajag palīdzību, plānu, atgādinājumu vai vienkārši izrunāt galvu?\n\nVersija: V80.1",
+        "Klausos. 🙂 Dod man vienu reālu situāciju, un es mēģināšu to sakārtot pa soļiem.\n\nVersija: V80.1",
+        "Labi, ejam praktiski. Kas šobrīd ir pirmais, ko vajag atrisināt?\n\nVersija: V80.1",
+        "Es varu palīdzēt, bet man vajag mazliet kontekstu. Kas notiek?\n\nVersija: V80.1",
     ]
     return v60_pick(user_id, "smalltalk", variants)
 
@@ -2339,7 +2339,7 @@ def v60_location_received_answer(user_id, latitude, longitude):
         "uz mājām\n"
         "uz darbu\n"
         "uz Baldoni\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -2352,12 +2352,12 @@ def v60_intent_router(user_id, text):
             return (
                 f"📍 Piefiksēju: tavas mājas ir {loc_text}.\n\n"
                 "Tagad, ja rakstīsi 'atrod man ceļu mājās', es zināšu galamērķi un pajautāšu tikai, kur tu esi tagad.\n\n"
-                "Versija: V80.0"
+                "Versija: V80.1"
             )
         return (
             f"📍 Piefiksēju vietu: {loc_text}.\n\n"
             "Varēšu to izmantot navigācijas un profila kontekstā.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     lower = (text or "").strip().lower()
@@ -2399,7 +2399,7 @@ except Exception as e:
 
 
 # =========================
-# V80.0 NAVIGATION HOTFIX
+# V80.1 NAVIGATION HOTFIX
 # Navigation priority above generic help/project intent
 # =========================
 
@@ -2425,7 +2425,7 @@ def v601_navigation_capability_answer(user_id):
         "Pamēģini rakstīt:\n"
         "no Baldones uz Rīgu\n"
         "vai: atrod man ceļu mājās\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -2531,7 +2531,7 @@ def v601_navigation_answer(user_id, text):
             f"2. Ievadi: {start} → {dest}.\n"
             "3. Izvēlies auto, sabiedrisko vai kājām.\n\n"
             "Nākamajā versijā pieslēgsim karšu servisu, lai es varu dot tiešu linku/maršrutu.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     if dest:
@@ -2544,7 +2544,7 @@ def v601_navigation_answer(user_id, text):
                 f"{prefix}saprotu — jāpalīdz nokļūt mājās. 📍\n\n"
                 f"Mājas: {home_text}\n\n"
                 "Tagad man vajag starta punktu. Atsūti Telegram lokāciju vai uzraksti, kur tu esi tagad.\n\n"
-                "Versija: V80.0"
+                "Versija: V80.1"
             )
 
         return (
@@ -2553,14 +2553,14 @@ def v601_navigation_answer(user_id, text):
             "Uzraksti, piemēram:\n"
             f"esmu Baldonē, jābrauc uz {dest}\n"
             "vai atsūti Telegram lokāciju.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     # home route
     lower = (text or "").lower()
     if any(x in lower for x in ["mājās", "majas", "uz mājām", "uz majam"]):
         try:
-            return v60_navigation_answer(user_id, text).replace("V80.0", "V80.0")
+            return v60_navigation_answer(user_id, text).replace("V80.1", "V80.1")
         except Exception:
             pass
 
@@ -2570,7 +2570,7 @@ def v601_navigation_answer(user_id, text):
         "no Baldones uz Rīgu\n"
         "vai: esmu Baldonē, jābrauc uz Rīgu\n\n"
         "Tad es sapratīšu startu un galamērķi.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -2578,7 +2578,7 @@ def v601_intent_router(user_id, text):
     # Emergency still first
     try:
         if v60_is_urgent_help(text):
-            return v60_urgent_help_answer(user_id, text).replace("V80.0", "V80.0")
+            return v60_urgent_help_answer(user_id, text).replace("V80.1", "V80.1")
     except Exception:
         pass
 
@@ -2596,7 +2596,7 @@ def v601_intent_router(user_id, text):
                 return (
                     f"📍 Piefiksēju: tavas mājas ir {loc_text}.\n\n"
                     "Tagad, ja rakstīsi 'atrod man ceļu mājās', es zināšu galamērķi un pajautāšu tikai, kur tu esi tagad.\n\n"
-                    "Versija: V80.0"
+                    "Versija: V80.1"
                 )
     except Exception:
         pass
@@ -2613,19 +2613,19 @@ def v601_regression_check():
     }
     failed = [k for k, ok in tests.items() if not ok]
     if failed:
-        print("V80.0 regression failed:", failed)
+        print("V80.1 regression failed:", failed)
     else:
-        print("V80.0 regression OK")
+        print("V80.1 regression OK")
     return not failed
 
 try:
     v601_regression_check()
 except Exception as e:
-    print('V80.0 regression check kļūda:', repr(e))
+    print('V80.1 regression check kļūda:', repr(e))
 
 
 # =========================
-# V80.0 NAVIGATION POLISH
+# V80.1 NAVIGATION POLISH
 # Place normalization + better route parser
 # =========================
 
@@ -2756,7 +2756,7 @@ def v602_route_ui(start, dest):
         f"{dest}\n\n"
         "Precīzam laikam, kilometriem un kartei vēl jāpieslēdz Google Maps vai OpenStreetMap.\n"
         "Bet maršruta virzienu es jau saprotu korekti.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -2770,7 +2770,7 @@ def v602_navigation_answer(user_id, text):
                 "• ceļu uz Rīgu no Baldones\n"
                 "• palīdzi man nokļūt Rīgā\n\n"
                 "Šobrīd es vēl nedodu dzīvu kartes aprēķinu ar minūtēm, bet nākamais solis ir pieslēgt Google Maps vai OpenStreetMap.\n\n"
-                "Versija: V80.0"
+                "Versija: V80.1"
             )
     except Exception:
         pass
@@ -2787,28 +2787,28 @@ def v602_navigation_answer(user_id, text):
             "Uzraksti, piemēram:\n"
             f"no Baldones uz {dest}\n"
             "vai atsūti Telegram lokāciju.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     try:
-        return v601_navigation_answer(user_id, text).replace("V80.0", "V80.0")
+        return v601_navigation_answer(user_id, text).replace("V80.1", "V80.1")
     except Exception:
         try:
-            return v60_navigation_answer(user_id, text).replace("V80.0", "V80.0").replace("V80.0", "V80.0")
+            return v60_navigation_answer(user_id, text).replace("V80.1", "V80.1").replace("V80.1", "V80.1")
         except Exception:
             return (
                 "📍 Sapratu, ka prasi navigāciju.\n\n"
                 "Raksti šādi:\n"
                 "no Baldones uz Rīgu\n"
                 "vai: ceļu uz Rīgu no Baldones\n\n"
-                "Versija: V80.0"
+                "Versija: V80.1"
             )
 
 
 def v602_intent_router(user_id, text):
     try:
         if v60_is_urgent_help(text):
-            return v60_urgent_help_answer(user_id, text).replace("V80.0", "V80.0").replace("V80.0", "V80.0")
+            return v60_urgent_help_answer(user_id, text).replace("V80.1", "V80.1").replace("V80.1", "V80.1")
     except Exception:
         pass
 
@@ -2837,19 +2837,19 @@ def v602_regression_check():
     }
     failed = [k for k, ok in tests.items() if not ok]
     if failed:
-        print("V80.0 regression failed:", failed)
+        print("V80.1 regression failed:", failed)
     else:
-        print("V80.0 regression OK")
+        print("V80.1 regression OK")
     return not failed
 
 try:
     v602_regression_check()
 except Exception as e:
-    print('V80.0 regression check kļūda:', repr(e))
+    print('V80.1 regression check kļūda:', repr(e))
 
 
 # =========================
-# V80.0 RELATIONSHIP + SMART MEMORY
+# V80.1 RELATIONSHIP + SMART MEMORY
 # Smart Memory 2.0 + Relationship Engine 2.0
 # =========================
 
@@ -2995,7 +2995,7 @@ def v80_memory_summary(user_id):
         lines.append("Vēl nav pietiekami daudz datu. Pasaki, piemēram: mans bizness ir fasādes")
 
     lines.append("")
-    lines.append("Versija: V80.0")
+    lines.append("Versija: V80.1")
     return "\n".join(lines)
 
 
@@ -3036,15 +3036,15 @@ def v80_relationship_greeting(user_id):
             pass
 
     if goal:
-        variants.append(f"{hello}\n\nAtceros tavu mērķi: {goal}.\nKā tur virzās — ir progress vai kaut kas bremzē?\n\nVersija: V80.0")
+        variants.append(f"{hello}\n\nAtceros tavu mērķi: {goal}.\nKā tur virzās — ir progress vai kaut kas bremzē?\n\nVersija: V80.1")
     if subject:
-        variants.append(f"{hello}\n\nAtceros, ka tev svarīga tēma ir {subject}. Šodien tur vairāk vajag klientus, piedāvājumu vai plānu?\n\nVersija: V80.0")
+        variants.append(f"{hello}\n\nAtceros, ka tev svarīga tēma ir {subject}. Šodien tur vairāk vajag klientus, piedāvājumu vai plānu?\n\nVersija: V80.1")
     if project:
-        variants.append(f"{hello}\n\nAtceros projektu: {project}.\nKas šodien tam dos vienu konkrētu soli uz priekšu?\n\nVersija: V80.0")
+        variants.append(f"{hello}\n\nAtceros projektu: {project}.\nKas šodien tam dos vienu konkrētu soli uz priekšu?\n\nVersija: V80.1")
 
     variants += [
-        f"{hello}\n\nKas šodien jāsakārto — darbi, nauda, cilvēki vai galvā haoss?\n\nVersija: V80.0",
-        f"{hello}\n\nDod man vienu reālu lietu no šodienas, un es palīdzēšu to sadalīt pa soļiem.\n\nVersija: V80.0",
+        f"{hello}\n\nKas šodien jāsakārto — darbi, nauda, cilvēki vai galvā haoss?\n\nVersija: V80.1",
+        f"{hello}\n\nDod man vienu reālu lietu no šodienas, un es palīdzēšu to sadalīt pa soļiem.\n\nVersija: V80.1",
     ]
     return v80_pick(user_id, "relationship_greeting", variants)
 
@@ -3073,14 +3073,14 @@ def v80_contextual_business_answer(user_id, text):
             "3. Īsa ziņa, ko viņiem nosūtīt.\n\n"
             "Uzraksti: uzraksti klientu ziņu\n"
             "un es sagatavošu tekstu tieši šai tēmai.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     return (
         f"{prefix}vajag vairāk klientu — sapratu. 💼\n\n"
         "Pasaki vienā teikumā, ko tu pārdod un kam tas visvairāk vajadzīgs.\n"
         "Piemēram: mans pakalpojums ir fasādes privātmājām.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -3091,7 +3091,7 @@ def v80_client_message_answer(user_id):
         f"Labdien! Piedāvāju {subject}. Varu apskatīt situāciju, ieteikt risinājumu un sagatavot saprotamu piedāvājumu. "
         "Ja jums šobrīd tas ir aktuāli, varam sarunāt īsu zvanu vai apskati.\n\n"
         "Ja gribi, varu uztaisīt arī draudzīgāku, agresīvāku vai profesionālāku versiju.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -3110,19 +3110,19 @@ def v80_followup_answer(user_id, text):
         return (
             "Turpinām par klientiem. 💼\n\n"
             "Nākamais solis: uzraksti, kādu pakalpojumu piedāvā, vai raksti: uzraksti klientu ziņu.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
     if "maršrut" in blob or "marsrut" in blob or "rīga" in blob or "riga" in blob:
         return (
             "Turpinām par maršrutu. 📍\n\n"
             "Uzraksti startu un galamērķi šādi: no Baldones uz Rīgu.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
     if "smagi" in blob or "slikti" in blob or "stress" in blob:
         return (
             "Turpinām mierīgi. 😊\n\n"
             "Nosauc vienu lietu, kas šobrīd visvairāk spiež. Tikai vienu.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
     return None
 
@@ -3177,6 +3177,206 @@ try:
     v80_regression_check()
 except Exception as e:
     print('V80 regression check kļūda:', repr(e))
+
+
+# =========================
+# V80.1 QUICK POLISH
+# Better business memory reply + personal greeting + client message styles
+# =========================
+
+def v801_detect_business_fact(text):
+    raw = (text or "").strip()
+    lower = raw.lower()
+    markers = [
+        "mans bizness ir ",
+        "mans pakalpojums ir ",
+        "mana nozare ir ",
+        "es nodarbojos ar ",
+        "strādāju ar ",
+        "stradaju ar ",
+    ]
+    for marker in markers:
+        if lower.startswith(marker):
+            val = raw[len(marker):].strip(" .,!?:;")
+            if val:
+                return val
+    return ""
+
+
+def v801_business_fact_answer(user_id, text):
+    val = v801_detect_business_fact(text)
+    if not val:
+        return None
+    try:
+        v80_save_smart_memory(user_id, "business", val, 5)
+    except Exception:
+        pass
+    try:
+        user = get_user(str(user_id))
+        user["hobbies"] = v24_append_unique_text(user.get("hobbies", ""), val)
+        update_user(str(user_id), user)
+    except Exception:
+        pass
+    return (
+        f"Piefiksēju. 🧠\n\n"
+        f"Atcerēšos, ka tavs bizness ir: {val}.\n\n"
+        "Kad runāsim par klientiem, piedāvājumiem vai naudu, es šo ņemšu vērā.\n\n"
+        "Versija: V80.1"
+    )
+
+
+def v801_business_subject(user_id):
+    try:
+        s = v80_business_subject(user_id)
+        if s:
+            return s
+    except Exception:
+        pass
+    try:
+        rows = v80_latest_smart_memories(user_id, 10)
+        for row in rows:
+            cat, val, weight, created_at = row
+            if cat in ["business", "service"] and val:
+                return val
+    except Exception:
+        pass
+    return ""
+
+
+def v801_relationship_greeting(user_id):
+    try:
+        ctx = v80_user_context(user_id)
+    except Exception:
+        ctx = {}
+    name = (ctx.get("name") or "").strip()
+    hello = f"Čau, {name}. 😊" if name else "Čau. 😊"
+    subject = v801_business_subject(user_id)
+    if subject:
+        return v80_pick(user_id, "v801_greeting_business", [
+            f"{hello}\n\nAtceros, ka tavs bizness ir {subject}. Kā šodien iet ar klientiem, objektiem vai piedāvājumiem?\n\nVersija: V80.1",
+            f"{hello}\n\nTuram prātā {subject}. Šodien vairāk vajag jaunus klientus, labāku piedāvājumu vai plānu darbiem?\n\nVersija: V80.1",
+            f"{hello}\n\nAtceros tēmu: {subject}. Kas šodien dos vislielāko kustību — klienti, zvani vai piedāvājumi?\n\nVersija: V80.1",
+        ])
+    try:
+        return v80_relationship_greeting(user_id).replace("V80.1", "V80.1")
+    except Exception:
+        return "Čau. 😊\n\nKas šodien jāsakārto?\n\nVersija: V80.1"
+
+
+def v801_client_message_style(text):
+    lower = (text or "").strip().lower()
+    if any(x in lower for x in ["draudzīg", "draudzig", "maigi", "silti"]):
+        return "friendly"
+    if any(x in lower for x in ["agresīv", "agresiv", "pārdošanas", "pardosanas", "spēcīg", "specig"]):
+        return "sales"
+    if any(x in lower for x in ["profesionāl", "profesional", "oficiāl", "oficial"]):
+        return "professional"
+    return "menu"
+
+
+def v801_client_message_answer(user_id, text):
+    subject = v801_business_subject(user_id) or "pakalpojumu"
+    style = v801_client_message_style(text)
+    if style == "friendly":
+        return (
+            "Draudzīgāka klientu ziņa:\n\n"
+            f"Sveiki! Es nodarbojos ar {subject}. Ja tuvākajā laikā vajag apskatīt, sakārtot vai uzlabot šo jautājumu, droši varam parunāt. "
+            "Varu apskatīt situāciju un ieteikt saprātīgāko risinājumu bez liekas sarežģīšanas.\n\n"
+            "Versija: V80.1"
+        )
+    if style == "sales":
+        return (
+            "Spēcīgāka pārdošanas ziņa:\n\n"
+            f"Labdien! Palīdzu klientiem ar {subject} — no situācijas apskates līdz skaidram piedāvājumam un izpildei. "
+            "Ja šobrīd plānojat darbus vai gribat saprast izmaksas, varu ātri apskatīt situāciju un sagatavot konkrētu piedāvājumu.\n\n"
+            "Versija: V80.1"
+        )
+    if style == "professional":
+        return (
+            "Profesionāla klientu ziņa:\n\n"
+            f"Labdien! Piedāvāju {subject}. Varu izvērtēt esošo situāciju, ieteikt piemērotāko risinājumu un sagatavot saprotamu piedāvājumu. "
+            "Ja šis jums ir aktuāli, varam vienoties par īsu sarunu vai objekta apskati.\n\n"
+            "Versija: V80.1"
+        )
+    return (
+        "Varu uzrakstīt klientu ziņu 3 stilos:\n\n"
+        "1. profesionāla\n"
+        "2. draudzīga\n"
+        "3. pārdošanas/spēcīgāka\n\n"
+        "Raksti, piemēram:\n"
+        "profesionāla klientu ziņa\n"
+        "draudzīga klientu ziņa\n"
+        "spēcīga pārdošanas ziņa\n\n"
+        f"Zinu tēmu: {subject}\n\n"
+        "Versija: V80.1"
+    )
+
+
+def v801_followup_answer(user_id, text):
+    lower = (text or "").strip().lower()
+    if lower not in ["jā", "ja", "ok", "labi", "turpinām", "turpinam", "ko tālāk", "ko talak", "nu", "un"]:
+        return None
+    subject = v801_business_subject(user_id)
+    try:
+        previous = latest_conversation_state(user_id, 5)
+        blob = " ".join([str(x) for row in previous for x in row]).lower() if previous else ""
+    except Exception:
+        blob = ""
+    if "klient" in blob or "piedāv" in blob or "piedav" in blob or "biznes" in blob or subject:
+        return v80_pick(user_id, "v801_business_followup", [
+            "Turpinām par klientiem. 💼\n\nNākamais solis: izvēlies ziņas stilu — profesionāla, draudzīga vai spēcīga pārdošanas ziņa.\n\nVersija: V80.1",
+            f"Labi, ejam tālāk. Ja tēma ir {subject or 'tavs pakalpojums'}, tad tagad jāizvēlas, kam rakstām: privātpersonām, uzņēmumiem vai apsaimniekotājiem?\n\nVersija: V80.1",
+            "Ok. Tad nākamais praktiskais solis: sagatavojam vienu īsu ziņu un 10 cilvēkus/uzņēmumus, kam to nosūtīt.\n\nVersija: V80.1",
+        ])
+    try:
+        old = v80_followup_answer(user_id, text)
+        if old:
+            return old.replace("V80.1", "V80.1")
+    except Exception:
+        pass
+    return None
+
+
+def v801_intent_router(user_id, text):
+    lower = (text or "").strip().lower()
+
+    ans = v801_business_fact_answer(user_id, text)
+    if ans:
+        return ans
+
+    if lower in ["čau", "cau", "sveika", "sveiks", "hi", "hello", "hei", "labdien"]:
+        return v801_relationship_greeting(user_id)
+
+    if any(x in lower for x in [
+        "klientu ziņa", "klientu zinu", "uzraksti klientu ziņu", "uzraksti klientu zinu",
+        "profesionāla klientu", "profesionala klientu", "draudzīga klientu", "draudziga klientu",
+        "pārdošanas ziņa", "pardosanas zina", "spēcīga pārdošanas", "speciga pardosanas"
+    ]):
+        return v801_client_message_answer(user_id, text)
+
+    follow = v801_followup_answer(user_id, text)
+    if follow:
+        return follow
+
+    return None
+
+
+def v801_regression_check():
+    tests = {
+        "biz_fact": v801_detect_business_fact("mans bizness ir fasādes") == "fasādes",
+        "client_menu": "3 stilos" in v801_client_message_answer("test-user", "uzraksti klientu ziņu"),
+    }
+    failed = [k for k, ok in tests.items() if not ok]
+    if failed:
+        print("V80.1 regression failed:", failed)
+    else:
+        print("V80.1 regression OK")
+    return not failed
+
+try:
+    v801_regression_check()
+except Exception as e:
+    print('V80.1 regression check kļūda:', repr(e))
 
 app = Flask(__name__)
 
@@ -3415,7 +3615,7 @@ def init_db():
 
 
 
-    # V80.0 Short Conversation Memory
+    # V80.1 Short Conversation Memory
     db_execute(c, """
         CREATE TABLE IF NOT EXISTS conversation_state (
             id SERIAL PRIMARY KEY,
@@ -3429,7 +3629,7 @@ def init_db():
         )
     """)
 
-    # V80.0 Daily Goals
+    # V80.1 Daily Goals
     db_execute(c, """
         CREATE TABLE IF NOT EXISTS daily_goals (
             id SERIAL PRIMARY KEY,
@@ -3442,7 +3642,7 @@ def init_db():
     """)
 
 
-    # V80.0 Memory Intelligence topic statistics
+    # V80.1 Memory Intelligence topic statistics
     db_execute(c, """
         CREATE TABLE IF NOT EXISTS user_topic_stats (
             id SERIAL PRIMARY KEY,
@@ -3467,7 +3667,7 @@ def init_db():
     """)
 
 
-    # V80.0 Revenue Core: usage events and commercial signals
+    # V80.1 Revenue Core: usage events and commercial signals
     db_execute(c, """
         CREATE TABLE IF NOT EXISTS usage_events (
             id SERIAL PRIMARY KEY,
@@ -3499,7 +3699,7 @@ def init_db():
     """)
 
 
-    # V80.0 Assistant Platform tables
+    # V80.1 Assistant Platform tables
     db_execute(c, """
         CREATE TABLE IF NOT EXISTS long_term_memories (
             id SERIAL PRIMARY KEY,
@@ -3537,7 +3737,7 @@ def init_db():
     """)
 
 
-    # V80.0 Intelligence Layer: locations and conversation quality
+    # V80.1 Intelligence Layer: locations and conversation quality
     db_execute(c, """
         CREATE TABLE IF NOT EXISTS user_locations (
             id SERIAL PRIMARY KEY,
@@ -3561,7 +3761,7 @@ def init_db():
     """)
 
 
-    # V80.0 Relationship + Smart Memory tables
+    # V80.1 Relationship + Smart Memory tables
     db_execute(c, """
         CREATE TABLE IF NOT EXISTS smart_memory_profile (
             id SERIAL PRIMARY KEY,
@@ -3804,7 +4004,7 @@ def latest_premium_transaction(user_id):
 
 
 def subscription_info(user_id=None):
-    """V80.0: Premium pārdošanas teksts ar cilvēkam saprotamu vērtību."""
+    """V80.1: Premium pārdošanas teksts ar cilvēkam saprotamu vērtību."""
     plan = current_plan_name(user_id) if user_id else PLAN_FREE
     user = get_user(user_id) if user_id else {"premium": 0, "premium_until": ""}
 
@@ -3823,7 +4023,7 @@ def subscription_info(user_id=None):
             "mana diena\n"
             "premium vēsture\n"
             "mans plāns\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     return (
@@ -3841,13 +4041,13 @@ def subscription_info(user_id=None):
         "pirkt basic\n\n"
         "Ja gribi paskatīties savu plānu:\n"
         "mans plāns\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
 
 def premium_conversion_answer(user_id):
-    """V80.0: labāks Free -> Premium pārdošanas teksts."""
+    """V80.1: labāks Free -> Premium pārdošanas teksts."""
     user = get_user(user_id)
     if user.get("premium"):
         return subscription_info(user_id)
@@ -3880,7 +4080,7 @@ def premium_conversion_answer(user_id):
         f"💶 Cena: {PREMIUM_BASIC_PRICE:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
         "Ja gribi, lai Nina kļūst par tavu ikdienas palīgu, raksti:\n"
         "pirkt basic\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -3905,7 +4105,7 @@ def premium_buy_intent_answer(user_id, plan_key="basic"):
         f"{benefit}\n\n"
         "Pēc apmaksas Premium aktivizēsies automātiski, ja Stripe webhook ir pieslēgts.\n\n"
         f"{checkout}\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -4252,7 +4452,7 @@ def system_health_answer(user_id, command_text="health"):
         f"Aktīvie atgādinājumi: {active_reminders}\n"
         f"Backup kopā: {backups_total}\n"
         f"Audit ieraksti: {audit_total}\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -4332,7 +4532,7 @@ def user_analytics_answer(user_id, command_text="analytics"):
         f"Vidējais XP: {avg_xp:.1f}\n"
         f"Vidējais līmenis: {avg_level:.1f}\n"
         f"Vidējais streak: {avg_streak:.1f}\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -4404,7 +4604,7 @@ def database_backup_dashboard(user_id, command_text="db backup"):
         f"Pēdējais backup: {latest_backup}\n"
         f"Pēdējā ziņa: {latest_message}\n"
         f"Pēdējais audit: {latest_audit}\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -4630,7 +4830,7 @@ def backup_scheduler_answer(user_id, command_text="auto backup"):
         f"{max(total_runs, auto_count)}\n\n"
         "Audit action:\n"
         "auto_backup_run\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -4737,7 +4937,7 @@ def recovery_center_answer(user_id, command_text="recovery"):
         "",
         f"Restore mēģinājumi: {restore_logs}",
         "Statuss: Ready",
-        "Versija: V80.0",
+        "Versija: V80.1",
     ])
 
     return "\n".join(lines)
@@ -4771,7 +4971,7 @@ def restore_latest_backup(user_id, command_text="restore latest"):
             f"{result}\n\n"
             f"Backup ID: #{backup_id}\n"
             "Statuss: Restored\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     log_restore_action(user_id, backup_id, "failed")
@@ -4819,7 +5019,7 @@ def admin_command_center(user_id, command_text="admin"):
         "Drošība:\n"
         f"🔒 Admin Lock: {admin_lock_status}\n"
         f"📋 Audit Log: {audit_status}\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -4896,7 +5096,7 @@ def admin_notifications_center(user_id, command_text="notifications"):
         f"• Restore kļūdas: {restore_errors}\n"
         f"• Maksājumu kļūdas: {payment_errors}\n\n"
         f"Statuss: {icon} {status}\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -4959,7 +5159,7 @@ def admin_activity_feed(user_id, command_text="activity", limit=10):
     lines.extend([
         f"Kopā ieraksti: {total}",
         "",
-        "Versija: V80.0",
+        "Versija: V80.1",
     ])
 
     return "\n".join(lines).strip()
@@ -5038,7 +5238,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
             "Norādi lietotāja ID.\n\n"
             "Piemērs:\n"
             "user 5138563912\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     log_admin_action(user_id, "user_lookup_view", "allowed", command_text)
@@ -5050,7 +5250,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
             f"User ID: {target_user_id}\n"
             "Statuss: nav atrasts\n\n"
             "Šāds lietotājs vēl nav Nina datubāzē.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     messages_total = _count_table_rows("messages", "WHERE user_id = %s", (str(target_user_id),))
@@ -5088,7 +5288,7 @@ def admin_user_lookup(user_id, command_text="user lookup"):
         f"Backup: {backups_total}\n"
         f"Atgādinājumi: {reminders_total}\n"
         f"Aktīvie atgādinājumi: {active_reminders}\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -5205,7 +5405,7 @@ def admin_user_search(user_id, command_text="search user"):
             "find user 5138563912",
             "lietotāji",
             "",
-            "Versija: V80.0",
+            "Versija: V80.1",
         ])
         return "\n".join(lines)
 
@@ -5224,7 +5424,7 @@ def admin_user_search(user_id, command_text="search user"):
         lines.append(f"Streak: {int(streak_days or 0)}")
         lines.append("")
 
-    lines.append("Versija: V80.0")
+    lines.append("Versija: V80.1")
     return "\n".join(lines).strip()
 
 
@@ -5257,7 +5457,7 @@ def admin_user_actions_help(user_id, command_text="user actions"):
         "Nodzēš lietotāja streak.\n\n"
         "Drošība:\n"
         "Visas darbības ir tikai administratoram un tiek ierakstītas Audit Log.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -5280,7 +5480,7 @@ def admin_user_action(user_id, command_text="user actions"):
             "Trūkst lietotāja ID.\n\n"
             "Piemērs:\n"
             "grant premium 5138563912\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     target_user_id = numbers[0]
@@ -5292,7 +5492,7 @@ def admin_user_action(user_id, command_text="user actions"):
             f"User ID: {target_user_id}\n"
             "Statuss: nav atrasts\n\n"
             "Šāds lietotājs vēl nav Nina datubāzē.\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     try:
@@ -5334,7 +5534,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         elif lower.startswith("add xp"):
             if len(numbers) < 2:
-                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nadd xp 5138563912 100\n\nVersija: V80.0"
+                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nadd xp 5138563912 100\n\nVersija: V80.1"
             amount = max(0, int(numbers[1]))
             new_xp = int(target.get("xp", 0) or 0) + amount
             target["xp"] = new_xp
@@ -5345,7 +5545,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         elif lower.startswith("remove xp"):
             if len(numbers) < 2:
-                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nremove xp 5138563912 50\n\nVersija: V80.0"
+                return "🧰 Nina Admin User Actions\n\nTrūkst XP daudzuma.\n\nPiemērs:\nremove xp 5138563912 50\n\nVersija: V80.1"
             amount = max(0, int(numbers[1]))
             new_xp = max(0, int(target.get("xp", 0) or 0) - amount)
             target["xp"] = new_xp
@@ -5356,7 +5556,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         elif lower.startswith("set level"):
             if len(numbers) < 2:
-                return "🧰 Nina Admin User Actions\n\nTrūkst līmeņa.\n\nPiemērs:\nset level 5138563912 5\n\nVersija: V80.0"
+                return "🧰 Nina Admin User Actions\n\nTrūkst līmeņa.\n\nPiemērs:\nset level 5138563912 5\n\nVersija: V80.1"
             new_level = max(1, int(numbers[1]))
             new_xp = (new_level - 1) * XP_PER_LEVEL
             target["level"] = new_level
@@ -5374,7 +5574,7 @@ def admin_user_action(user_id, command_text="user actions"):
 
         else:
             log_admin_action(user_id, "user_action_execute", "failed_unknown_action", command_text)
-            return "🧰 Nina Admin User Actions\n\nDarbība nav atpazīta.\n\nRaksti: user actions\n\nVersija: V80.0"
+            return "🧰 Nina Admin User Actions\n\nDarbība nav atpazīta.\n\nRaksti: user actions\n\nVersija: V80.1"
 
         log_admin_action(user_id, f"user_action_{action_name}", "success", command_text)
         updated = _fetch_user_row_for_admin(target_user_id) or target
@@ -5390,7 +5590,7 @@ def admin_user_action(user_id, command_text="user actions"):
             f"XP: {updated.get('xp', 0)}\n"
             f"Līmenis: {updated.get('level', 1)}\n"
             f"Streak: {updated.get('streak_days', 0)}\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     except Exception as e:
@@ -5400,7 +5600,7 @@ def admin_user_action(user_id, command_text="user actions"):
             "🧰 Nina Admin User Actions\n\n"
             "Darbība neizdevās tehniskas kļūdas dēļ.\n\n"
             f"Iemesls: {e}\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
 
@@ -5486,7 +5686,7 @@ def admin_user_management_dashboard(user_id, command_text="user management"):
         "Admin Lock: Aktīvs",
         f"Audit ieraksti: {audit_total}",
         "",
-        "Versija: V80.0",
+        "Versija: V80.1",
     ])
 
     return "\n".join(lines)
@@ -5737,7 +5937,7 @@ def admin_revenue_analytics(user_id, command_text="revenue analytics"):
 
     lines.extend([
         "",
-        "Versija: V80.0",
+        "Versija: V80.1",
     ])
 
     return "\n".join(lines)
@@ -6006,7 +6206,7 @@ def stripe_setup_helper(user_id=None):
 
     lines.extend([
         "",
-        "Versija: V80.0",
+        "Versija: V80.1",
     ])
 
     return "\n".join(lines)
@@ -6042,7 +6242,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             "Apmaksas links:\n"
             f"{static_url}\n\n"
             "Pēc apmaksas Premium aktivizēsies automātiski, ja Stripe webhook ir pieslēgts.\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     # 2) Dynamic Stripe Checkout Sessions
@@ -6075,7 +6275,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             "Dinamiskam checkout pievieno Railway: STRIPE_SECRET_KEY, STRIPE_BASIC_PRICE_ID/STRIPE_PLUS_PRICE_ID, STRIPE_SUCCESS_URL, STRIPE_CANCEL_URL\n"
             "Vai statiskam linkam pievieno: STRIPE_BASIC_CHECKOUT_URL / STRIPE_PLUS_CHECKOUT_URL\n\n"
             f"Iemesls: {reason}\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     try:
@@ -6114,7 +6314,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             "Apmaksas links:\n"
             f"{checkout_url}\n\n"
             "Pēc apmaksas Premium aktivizēsies automātiski, ja Stripe webhook ir pieslēgts.\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     except Exception as e:
@@ -6133,7 +6333,7 @@ def stripe_checkout_answer(user_id, plan_key="basic"):
             f"Cena: {amount:.2f} {PREMIUM_CURRENCY}/mēn\n\n"
             "Stripe checkout izveide neizdevās.\n"
             f"Iemesls: {str(e)}\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
 
@@ -7259,7 +7459,7 @@ def premium_features(user_id=None):
         "Sākt:\n"
         "pirkt basic\n"
         "pirkt plus\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -7586,7 +7786,7 @@ def premium_status(user_id):
             "premium panelis\n"
             "premium vēsture\n"
             "mans plāns\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     return premium_conversion_answer(user_id)
@@ -7896,7 +8096,7 @@ def admin_revenue_forecast(user_id, command_text="revenue forecast"):
         f"Ieņēmumi: {last_30_revenue:.2f} {PREMIUM_CURRENCY}\n"
         f"Checkout konversijas signāls: {conversion_hint:.1f}%\n\n"
         f"Statuss: {status}\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -8124,7 +8324,7 @@ def admin_kpi_dashboard(user_id, command_text="kpi"):
         f"Audit ieraksti: {audit_total}\n"
         f"Premium darījumi: {premium_transactions_total}\n\n"
         f"Statuss: {system_status}\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -8269,7 +8469,7 @@ def admin_alerts_dashboard(user_id, command_text="alerts"):
         "",
         f"Kopā alert skaits: {total_alerts}",
         f"Audit ieraksti kopā: {total_audit}",
-        "Versija: V80.0",
+        "Versija: V80.1",
     ])
 
     return "\n".join(lines)
@@ -8446,7 +8646,7 @@ def admin_launch_dashboard(user_id, command_text="launch"):
         "3. Notestē: pirkt premium / pirkt plus",
         "4. Aicini pirmos 5–10 lietotājus",
         "",
-        "Versija: V80.0",
+        "Versija: V80.1",
     ])
 
     return "\n".join(lines)
@@ -8711,7 +8911,7 @@ def stripe_env_guide_answer(user_id=None):
         "Svarīgi:",
         "Ja redzi ❌ stripe package, Railway projektā vajag requirements.txt ar rindu: stripe",
         "",
-        "Versija: V80.0",
+        "Versija: V80.1",
     ])
     return "\n".join(lines)
 
@@ -8733,7 +8933,7 @@ def stripe_webhook_test_answer(user_id):
             "🧪 Stripe Webhook Test Mode\n\n"
             "Tests neizdevās.\n"
             f"Iemesls: {result}\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     return (
@@ -8746,7 +8946,7 @@ def stripe_webhook_test_answer(user_id):
         "premium\n"
         "mans plāns\n"
         "premium vēsture\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -8777,7 +8977,7 @@ def safe_launch_answer(user_id=None):
         "sales\n"
         "invite\n"
         "earn\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -8794,7 +8994,7 @@ def safe_sales_answer(user_id=None):
         "4. 100 EUR MRR\n\n"
         "Galvenā komanda lietotājam:\n"
         "pirkt basic\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -8808,7 +9008,7 @@ def safe_invite_answer(user_id=None):
         f"{link}\n\n"
         "Teksts draugam:\n"
         "Pamēģini Ninu — Telegram AI palīgs ar atmiņu, atgādinājumiem un Premium režīmu.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -8823,7 +9023,7 @@ def safe_earn_answer(user_id=None):
         "6. Premium ieslēdzas automātiski\n\n"
         "Tagad galvenais fokuss:\n"
         "Stripe + Telegram izplatīšana + pirmie maksājumi.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -8909,7 +9109,7 @@ def referral_capture_welcome_answer(user_id, referral_code):
             "Vai apskati:\n"
             "launch\n"
             "invite\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     if result == "self_referral_blocked":
@@ -8918,7 +9118,7 @@ def referral_capture_welcome_answer(user_id, referral_code):
             "Referral netika saglabāts, jo nevar uzaicināt pats sevi.\n\n"
             "Sāc ar komandu:\n"
             "premium\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     if result == "already_registered":
@@ -8928,7 +9128,7 @@ def referral_capture_welcome_answer(user_id, referral_code):
             "Komandas:\n"
             "premium\n"
             "invite\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     return (
@@ -8936,7 +9136,7 @@ def referral_capture_welcome_answer(user_id, referral_code):
         "Referral kodu neizdevās saglabāt, bet vari lietot Ninu tālāk.\n\n"
         "Sāc ar komandu:\n"
         "premium\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -8970,7 +9170,7 @@ def referral_stats_answer(user_id):
         f"Premium konvertēti: {converted}\n\n"
         "Nākamais solis V12.4:\n"
         "ja uzaicinātais nopērk Premium, uzaicinātājs saņem bonusu.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -8999,53 +9199,53 @@ def nina_start_answer(user_id=None):
         "premium\n\n"
         "Ja gribi uzaicināt draugu:\n"
         "invite\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
 
 # =========================
-# V80.0 NATURAL MEMORY + DAILY GOALS
+# V80.1 NATURAL MEMORY + DAILY GOALS
 # =========================
 
 def save_daily_goal(user_id, goal_text):
-    """V80.0: dienas mērķa saglabāšana pārvietota uz memory.py loģiku."""
+    """V80.1: dienas mērķa saglabāšana pārvietota uz memory.py loģiku."""
     return save_daily_goal_logic(get_db, db_execute, DEFAULT_TIMEZONE, user_id, goal_text)
 
 
 
 def latest_daily_goals(user_id, limit=3):
-    """V80.0: dienas mērķu nolasīšana pārvietota uz memory.py loģiku."""
+    """V80.1: dienas mērķu nolasīšana pārvietota uz memory.py loģiku."""
     return latest_daily_goals_logic(get_db, db_execute, DEFAULT_TIMEZONE, user_id, limit)
 
 
 
 def save_natural_memory(user_id, memory_text):
-    """V80.0: dabiskās atmiņas saglabāšana pārvietota uz memory.py loģiku."""
+    """V80.1: dabiskās atmiņas saglabāšana pārvietota uz memory.py loģiku."""
     return save_natural_memory_logic(get_db, db_execute, user_id, memory_text)
 
 
 
 def latest_natural_memories(user_id, limit=3):
-    """V80.0: pēdējo atmiņu nolasīšana pārvietota uz memory.py loģiku."""
+    """V80.1: pēdējo atmiņu nolasīšana pārvietota uz memory.py loģiku."""
     return latest_natural_memories_logic(get_db, db_execute, user_id, limit)
 
 
 
 def nina_memory_saved_answer(saved_text):
-    """V80.0: atmiņas saglabāšanas teksts no memory.py vai fallback."""
-    return build_memory_saved_answer(saved_text, version="V80.0")
+    """V80.1: atmiņas saglabāšanas teksts no memory.py vai fallback."""
+    return build_memory_saved_answer(saved_text, version="V80.1")
 
 
 
 def nina_goal_saved_answer(goal_text):
-    """V80.0: mērķa saglabāšanas teksts no memory.py vai fallback."""
-    return build_goal_saved_answer(goal_text, version="V80.0")
+    """V80.1: mērķa saglabāšanas teksts no memory.py vai fallback."""
+    return build_goal_saved_answer(goal_text, version="V80.1")
 
 
 
 def nina_daily_habit_answer(user_id):
-    """V80.0: Daily Assistant ar coach.py + brain.py secinājumiem."""
+    """V80.1: Daily Assistant ar coach.py + brain.py secinājumiem."""
     try:
         user = get_user(str(user_id))
     except Exception as e:
@@ -9093,7 +9293,7 @@ def nina_daily_habit_answer(user_id):
         goals=goals,
         memories=memories[:3],
         reminders=reminders,
-        version="V80.0",
+        version="V80.1",
     )
 
     try:
@@ -9111,25 +9311,25 @@ def nina_daily_habit_answer(user_id):
 
 
 def nina_morning_answer(user_id):
-    """V80.0: labrīta teksts no daily.py vai fallback."""
+    """V80.1: labrīta teksts no daily.py vai fallback."""
     try:
         user = get_user(str(user_id))
         name = (user.get("name") or "").strip()
     except Exception:
         name = ""
-    return build_morning_answer(name=name, version="V80.0")
+    return build_morning_answer(name=name, version="V80.1")
 
 
 
 def nina_evening_answer(user_id):
-    """V80.0: vakara teksts no daily.py vai fallback."""
-    return build_evening_answer(version="V80.0")
+    """V80.1: vakara teksts no daily.py vai fallback."""
+    return build_evening_answer(version="V80.1")
 
 
 
 def nina_today_goal_answer(user_id):
-    """V80.0: mērķa teksta sagatave no daily.py vai fallback."""
-    return build_goal_prompt_answer(version="V80.0")
+    """V80.1: mērķa teksta sagatave no daily.py vai fallback."""
+    return build_goal_prompt_answer(version="V80.1")
 
 
 
@@ -9141,7 +9341,7 @@ def nina_remember_prompt_answer(user_id=None):
         "Atceries, ka man patīk melna BMW krāsa.\n"
         "Atceries, ka šonedēļ jāizdara projekta plāns.\n\n"
         "Ja tā ir svarīga doma, uzdevums vai fakts — uztici to man.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -9164,7 +9364,7 @@ def nina_launch_invite_text(user_id):
         "• būt tavs ikdienas AI palīgs.\n\n"
         "Sākt var bez maksas:\n"
         f"{link}\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -9183,7 +9383,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "mana diena\n"
             "atceries\n"
             "premium\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
     else:
         answer = nina_start_answer(user_id)
@@ -9291,7 +9491,7 @@ def referral_reward_test_answer(user_id):
             "Bonuss:\n"
             f"+{REFERRAL_BONUS_DAYS} Premium dienas\n"
             f"+{REFERRAL_BONUS_XP} XP\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
 
     return (
@@ -9299,7 +9499,7 @@ def referral_reward_test_answer(user_id):
         "Bonuss netika piešķirts.\n"
         f"Iemesls: {result}\n\n"
         "Tas ir normāli, ja šim lietotājam nav referral ieraksta vai bonuss jau piešķirts.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -9361,7 +9561,7 @@ def stripe_production_setup_answer(user_id=None):
         "pirkt basic",
         "stripe webhook",
         "",
-        "Versija: V80.0",
+        "Versija: V80.1",
     ])
     return "\n".join(lines)
 
@@ -9382,17 +9582,17 @@ def first_payment_plan_answer(user_id=None):
         "9. Veic testa maksājumu\n"
         "10. Pārbaudi: premium un premium vēsture\n\n"
         "Nākamais biznesa mērķis pēc tam: 10 maksājumi.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
 
-# V80.0 natural conversation logic is in conversation.py
+# V80.1 natural conversation logic is in conversation.py
 
 
 
 def record_memory_topics(user_id, memory_text):
-    """V80.0: pēc atmiņas saglabāšanas pieraksta tēmas brain/analytics vajadzībām."""
+    """V80.1: pēc atmiņas saglabāšanas pieraksta tēmas brain/analytics vajadzībām."""
     try:
         topics = detect_topics(memory_text)
     except Exception as e:
@@ -9434,7 +9634,7 @@ def record_memory_topics(user_id, memory_text):
 
 
 def user_topic_counts(user_id, limit=5):
-    """V80.0: atgriež lietotāja dominējošo tēmu skaitītāju."""
+    """V80.1: atgriež lietotāja dominējošo tēmu skaitītāju."""
     conn = None
     try:
         conn = get_db()
@@ -9466,7 +9666,7 @@ def user_topic_counts(user_id, limit=5):
 
 
 def nina_progress_answer(user_id):
-    """V80.0: lietotāja progress ar analytics.py + brain.py."""
+    """V80.1: lietotāja progress ar analytics.py + brain.py."""
     try:
         user = get_user(str(user_id))
     except Exception as e:
@@ -9509,14 +9709,14 @@ def nina_progress_answer(user_id):
     )
 
     if not memories and not goals and reminders == 0:
-        return build_empty_progress_text(version="V80.0")
+        return build_empty_progress_text(version="V80.1")
 
-    return build_weekly_progress_text(snapshot, topic_counts=topic_counts, version="V80.0")
+    return build_weekly_progress_text(snapshot, topic_counts=topic_counts, version="V80.1")
 
 
 
 async def safe_reply_text(update, text, disable_web_page_preview=True):
-    """V80.0: publiskā testa drošība — nekad neatstāj lietotāju bez atbildes."""
+    """V80.1: publiskā testa drošība — nekad neatstāj lietotāju bez atbildes."""
     try:
         if update and update.message:
             await update.message.reply_text(
@@ -9535,7 +9735,7 @@ def public_test_fallback_answer():
 
 
 def nina_public_offer_answer(user_text=""):
-    """V80.0: jebkuram lietotājam dzīva atbilde un piedāvājums."""
+    """V80.1: jebkuram lietotājam dzīva atbilde un piedāvājums."""
     clean = (user_text or "").strip()
     if clean:
         return (
@@ -9547,14 +9747,14 @@ def nina_public_offer_answer(user_text=""):
             "rīt jāzvana klientam\n"
             "vai:\n"
             "atgādini rīt 10:00 piezvanīt klientam\n\n"
-            "Versija: V80.0"
+            "Versija: V80.1"
         )
-    return charm_smalltalk_answer(version="V80.0")
+    return charm_smalltalk_answer(version="V80.1")
 
 
 
 def nina_rough_message_answer():
-    return charm_rough_answer(version="V80.0")
+    return charm_rough_answer(version="V80.1")
 
 
 
@@ -9585,7 +9785,7 @@ def is_short_unknown_message(text):
 
 
 async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """V80.0: Telegram location support."""
+    """V80.1: Telegram location support."""
     try:
         user_id = update.effective_user.id if update.effective_user else "unknown"
         loc = update.message.location if update.message else None
@@ -9596,13 +9796,13 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print("handle_location kļūda:", repr(e))
         try:
-            await safe_reply_text(update, "Lokāciju saņēmu, bet šoreiz neizdevās apstrādāt.\n\nVersija: V80.0")
+            await safe_reply_text(update, "Lokāciju saņēmu, bet šoreiz neizdevās apstrādāt.\n\nVersija: V80.1")
         except Exception:
             pass
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """V80.0: Telegram foto apstrāde ar Vision Engine."""
+    """V80.1: Telegram foto apstrāde ar Vision Engine."""
     try:
         user_id = str(update.effective_user.id)
         caption = (update.message.caption or "").strip() if update.message else ""
@@ -9621,11 +9821,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             client=client,
             image_bytes=image_bytes,
             caption=caption,
-            version="V80.0"
+            version="V80.1"
         )
 
         
-        # V80.0: enhance Vision answer
+        # V80.1: enhance Vision answer
         answer = v301_enhance_vision_answer(user_id, answer, caption)
         try:
             v40_log_usage(user_id, "vision", caption)
@@ -9639,18 +9839,18 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("handle_photo kļūda:", repr(e))
         await safe_reply_text(
             update,
-            "Bildīti saņēmu, bet šoreiz neizdevās to apstrādāt. Pamēģini atsūtīt vēlreiz. 😊\n\nVersija: V80.0"
+            "Bildīti saņēmu, bet šoreiz neizdevās to apstrādāt. Pamēģini atsūtīt vēlreiz. 😊\n\nVersija: V80.1"
         )
 
 
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # V80.0 public reply wrapper
+    # V80.1 public reply wrapper
     try:
         user_text = update.message.text
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
 
-        # V80.0 Relationship + Smart Memory Router.
+        # V80.1 Relationship + Smart Memory Router.
         v80_answer = v80_intent_router(user_id, user_text)
         if v80_answer:
             try:
@@ -9665,7 +9865,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 
-        # V80.0 Navigation Polish Router.
+        # V80.1 Navigation Polish Router.
         v602_answer = v602_intent_router(user_id, user_text)
         if v602_answer:
             try:
@@ -9675,8 +9875,22 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, v602_answer)
             return
 
+        # V80.1 Quick Polish Router.
+        v801_answer = v801_intent_router(user_id, user_text)
+        if v801_answer:
+            try:
+                v40_log_usage(user_id, "v801_polish", user_text)
+            except Exception:
+                pass
+            try:
+                save_conversation_state(user_id, user_text, v801_answer, "v801", v80_mood(user_text), "polish")
+            except Exception:
+                pass
+            await safe_reply_text(update, v801_answer)
+            return
 
-        # V80.0 Navigation Hotfix Router: emergency/navigation before generic help.
+
+        # V80.1 Navigation Hotfix Router: emergency/navigation before generic help.
         v601_answer = v601_intent_router(user_id, user_text)
         if v601_answer:
             try:
@@ -9687,7 +9901,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 
-        # V80.0 Intelligence + Navigation Router.
+        # V80.1 Intelligence + Navigation Router.
         v60_answer = v60_intent_router(user_id, user_text)
         if v60_answer:
             try:
@@ -9698,7 +9912,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 
-        # V80.0 Assistant Platform Router.
+        # V80.1 Assistant Platform Router.
         v50_answer = v50_assistant_router(user_id, user_text)
         if v50_answer:
             try:
@@ -9709,7 +9923,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 
-        # V80.0 Stable Intent Router: practical help before profile/revenue.
+        # V80.1 Stable Intent Router: practical help before profile/revenue.
         v401_answer = v401_intent_router(user_id, user_text)
         if v401_answer:
             v40_log_usage(user_id, "intent_help", user_text)
@@ -9717,12 +9931,12 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 
-        # V80.0 Revenue Priority Router.
+        # V80.1 Revenue Priority Router.
         if lower in ["admin stats", "admin revenue", "platform stats", "v40 stats"]:
             if is_admin(user_id):
                 await safe_reply_text(update, v40_admin_stats())
             else:
-                await safe_reply_text(update, "Šī komanda ir tikai adminam.\n\nVersija: V80.0")
+                await safe_reply_text(update, "Šī komanda ir tikai adminam.\n\nVersija: V80.1")
             return
 
         v40_log_usage(user_id, "message", user_text)
@@ -9732,7 +9946,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 
-        # V80.0 Stable Priority Router: conversation first, profile second.
+        # V80.1 Stable Priority Router: conversation first, profile second.
         if any(x in lower for x in ["ko tu par mani atceries", "ko atceries par mani", "mans profils", "profils"]):
             await safe_reply_text(update, v24_profile_recall_answer(user_id))
             return
@@ -9747,13 +9961,13 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 v301_save_profile_fact(user_id, v301_fact["type"], v301_fact["value"])
             except Exception as e:
-                print("V80.0 profile save kļūda:", repr(e))
+                print("V80.1 profile save kļūda:", repr(e))
             v40_log_usage(user_id, "profile", v301_fact["type"])
             await safe_reply_text(update, v50_enhance_answer_with_memory(user_id, v301_profile_saved_answer(user_id, v301_fact["type"], v301_fact["value"]) + v40_soft_sales_line(user_id), user_text))
             return
 
 
-        # V80.0: User Profile DB route.
+        # V80.1: User Profile DB route.
         if any(x in lower for x in ["ko tu par mani atceries", "ko atceries par mani", "mans profils", "profils"]):
             await safe_reply_text(update, v24_profile_recall_answer(user_id))
             return
@@ -9764,13 +9978,13 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 
-        # V80.0: hard conversation flow route.
+        # V80.1: hard conversation flow route.
         flow_answer = v21_flow_answer(user_id, user_text)
         if flow_answer:
             await safe_reply_text(update, flow_answer)
             return
 
-        # V80.0: hard future-memory reminder offer route.
+        # V80.1: hard future-memory reminder offer route.
         if v21_is_future_memory_text(user_text) and not lower.startswith(("atgādini", "atgadini")):
             try:
                 saved = save_natural_memory_logic(get_db, db_execute, user_id, user_text)
@@ -9780,13 +9994,13 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 
-        # V80.0: Smart Sales price/tariff route.
+        # V80.1: Smart Sales price/tariff route.
         if v20_is_price_question(user_text):
             await safe_reply_text(update, v20_smart_price_answer(user_id))
             return
 
 
-        # V80.0: HARD priority capabilities route before old dialog/charm.
+        # V80.1: HARD priority capabilities route before old dialog/charm.
         if any(x in lower for x in ["ko vari", "ko tu vari", "ko māki", "ko maki", "ko vari darīt", "ko vari darit"]):
             cap_answer = v18_human_capabilities_answer()
             save_conversation_state(user_id, user_text, cap_answer, "capabilities", detect_emotion(user_text), detect_topic(user_text))
@@ -9794,40 +10008,40 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 
-        # V80.0: Human Mode priority route. Tam jābūt pirms vecā dialog.py.
+        # V80.1: Human Mode priority route. Tam jābūt pirms vecā dialog.py.
         if v18_should_use_human_mode(user_text):
             await safe_reply_text(update, v19_human_mode_answer_with_memory(user_id, user_text))
             return
 
 
-        # V80.0: Living Conversation Core priority route.
+        # V80.1: Living Conversation Core priority route.
         if v18_should_use_human_mode(user_text):
             await safe_reply_text(update, v19_human_mode_answer_with_memory(user_id, user_text))
             return
 
 
-        # V80.0: Dialog smart route. Jautājumi nav atmiņas.
+        # V80.1: Dialog smart route. Jautājumi nav atmiņas.
         dialog_kind = classify_dialog_message(user_text)
         if dialog_kind == "capabilities" or dialog_kind == "question":
-            await safe_reply_text(update, build_capabilities_answer(version="V80.0"))
+            await safe_reply_text(update, build_capabilities_answer(version="V80.1"))
             return
 
         if dialog_kind == "rough_playful":
-            await safe_reply_text(update, build_playful_rough_answer(version="V80.0"))
+            await safe_reply_text(update, build_playful_rough_answer(version="V80.1"))
             return
 
         if dialog_kind == "smalltalk":
-            await safe_reply_text(update, build_smalltalk_answer(user_text, version="V80.0"))
+            await safe_reply_text(update, build_smalltalk_answer(user_text, version="V80.1"))
             return
 
 
-        # V80.0: Always Reply public safety.
+        # V80.1: Always Reply public safety.
         if looks_like_rough_message(user_text):
             await safe_reply_text(update, nina_rough_message_answer())
             return
 
 
-        # V80.0: Progress command.
+        # V80.1: Progress command.
         if lower in ["progress", "progresss", "mans progress", "mans progress", "progress report", "statistika", "mana statistika"]:
             await update.message.reply_text(
                 nina_progress_answer(user_id),
@@ -9836,11 +10050,11 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 
-        # V80.0: Reminder command.
+        # V80.1: Reminder command.
         reminder_data = parse_reminder_request(user_text, DEFAULT_TIMEZONE)
         if reminder_data is not None:
             if not reminder_data.get("ok"):
-                await update.message.reply_text(build_reminder_help_answer(version="V80.0"), disable_web_page_preview=True)
+                await update.message.reply_text(build_reminder_help_answer(version="V80.1"), disable_web_page_preview=True)
                 return
 
             ok = save_reminder_logic(
@@ -9857,7 +10071,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     build_reminder_saved_answer(
                         reminder_data.get("text") or user_text,
                         reminder_data.get("human_time") or "",
-                        version="V80.0",
+                        version="V80.1",
                     ),
                     disable_web_page_preview=True
                 )
@@ -9868,7 +10082,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-        # V80.0: Mana diena top-priority route.
+        # V80.1: Mana diena top-priority route.
         if lower in ["mana diena", "diena", "my day"]:
             await update.message.reply_text(
                 nina_daily_habit_answer(user_id),
@@ -9876,7 +10090,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # V80.0: Natural memory and daily goal capture — immediate replies.
+        # V80.1: Natural memory and daily goal capture — immediate replies.
         if lower.startswith("atceries,") or lower.startswith("atceries ka") or lower.startswith("atceries "):
             saved = save_natural_memory(user_id, user_text)
             if saved:
@@ -9898,13 +10112,13 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 
-        # V80.0: Natural conversation auto-handle.
+        # V80.1: Natural conversation auto-handle.
         natural_kind = classify_natural_message(user_text)
 
         if natural_kind == "goal":
             goal_text = user_text.strip()
             ok = save_daily_goal(user_id, goal_text)
-            answer = build_auto_goal_answer(goal_text, version="V80.0") if ok else "Neizdevās saglabāt mērķi. Pamēģini vēlreiz."
+            answer = build_auto_goal_answer(goal_text, version="V80.1") if ok else "Neizdevās saglabāt mērķi. Pamēģini vēlreiz."
             await update.message.reply_text(answer, disable_web_page_preview=True)
             return
 
@@ -9913,7 +10127,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             saved = save_natural_memory(user_id, "atceries, ka " + memory_text)
             if saved:
                 record_memory_topics(user_id, saved)
-            answer = build_auto_memory_answer(saved or memory_text, version="V80.0") if saved else "Neizdevās saglabāt. Pamēģini vēlreiz."
+            answer = build_auto_memory_answer(saved or memory_text, version="V80.1") if saved else "Neizdevās saglabāt. Pamēģini vēlreiz."
             await update.message.reply_text(answer, disable_web_page_preview=True)
             return
 
@@ -10394,7 +10608,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-        # V80.0: Final catch-all so Nina never stays silent.
+        # V80.1: Final catch-all so Nina never stays silent.
         if is_short_unknown_message(user_text):
             await safe_reply_text(update, nina_public_offer_answer(user_text))
             return
@@ -10468,7 +10682,7 @@ def stripe_webhook_status_answer(user_id=None):
         "2. nolasa telegram_user_id\n"
         "3. ieslēdz Premium uz 30 dienām\n"
         "4. saglabā premium_transactions\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 
@@ -10657,7 +10871,7 @@ def payment_cancel_page():
 
 @app.route("/")
 def home():
-    return "Nina7727 V80.0 Premium Sales Text darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "Nina7727 V80.1 Premium Sales Text darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -10682,7 +10896,7 @@ def run_flask_server():
 
 
 if __name__ == "__main__":
-    print("Nina7727 V80.0 Premium Sales Text darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("Nina7727 V80.1 Premium Sales Text darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
     # Stripe webhook vajag HTTP serveri. Telegram botam vienlaikus vajag polling.
     # Tāpēc Flask palaižam background threadā, bet Telegram polling atstājam galvenajā procesā.
@@ -10724,7 +10938,7 @@ def stripe_production_checklist_answer(user_id=None):
         "5. Testē: stripe test",
         "6. Testē: pirkt basic",
         "",
-        "Versija: V80.0"
+        "Versija: V80.1"
     ])
     return "\\n".join(lines)
 
@@ -10747,7 +10961,7 @@ def revenue_dashboard_answer(user_id=None):
         "referral\n"
         "invite\n"
         "sales\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 def referral_answer(user_id):
@@ -10756,7 +10970,7 @@ def referral_answer(user_id):
         f"Tavs referral kods: NINA-{user_id}\n\n"
         "Dalies ar Ninu un aicini draugus.\n"
         "Nākamais solis: pieslēgt automātisku referral uzskaiti.\n\n"
-        "Versija: V80.0"
+        "Versija: V80.1"
     )
 
 # =========================
