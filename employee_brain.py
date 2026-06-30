@@ -1,12 +1,12 @@
 """
 employee_brain.py
-Nina Core Evolution 2.4 — Employee Brain + Think Engine + Learning Engine
+Nina Core Evolution 2.5 — Employee Brain + Think Engine + Learning Engine + Quality Engine
 
 Šajā versijā Employee Brain vairs nemēģina pats minēt visu ar haotiskiem if.
 Vispirms Think Engine nosaka nodomu, tikai tad Employee Brain veido atbildi.
 """
 
-CORE_VERSION = "Core Evolution 2.4"
+CORE_VERSION = "Core Evolution 2.5"
 
 try:
     from think_engine import classify_intent, THINK_VERSION
@@ -31,6 +31,21 @@ except Exception as e:
 
     def current_learning_focus():
         return "Learning Engine nav pieslēgts."
+
+try:
+    from quality_engine import evaluate_answer, improve_answer as quality_improve_answer, format_quality_review, QUALITY_VERSION
+except Exception as e:
+    print("quality_engine.py imports nav pieejams:", e)
+    QUALITY_VERSION = "Quality Engine nav pieslēgts"
+
+    def evaluate_answer(answer, context=None, thought=None):
+        return {"score": 75, "status": "PASS", "issues": [], "version": QUALITY_VERSION}
+
+    def quality_improve_answer(answer, context=None, thought=None, review=None):
+        return answer or "Es sapratu. Nākamais solis: izvēlamies konkrētu darbu."
+
+    def format_quality_review(review):
+        return f"Quality Engine nav pieslēgts. Score: {review.get('score', 0)}"
 
 
 def _clean(value):
@@ -67,14 +82,14 @@ def build_employee_context(user=None):
             "kur cilvēki, uzņēmumi, AI darbinieki un nākotnē arī roboti sadarbojas vienotā sistēmā. "
             "Mēs neaizstājam cilvēkus — mēs palīdzam viņiem būt tehnoloģiju virsotnē."
         ),
-        "current_work": "Core Evolution 2.4 — Learning Engine",
+        "current_work": "Core Evolution 2.5 — Quality Engine",
         "current_priority": (
-            "iemācīt Ninai konkrēti fiksēt, ko viņa iemācījās, "
-            "ko nedrīkst atkārtot un kā mainās nākamā rīcība"
+            "iemācīt Ninai pārbaudīt atbildi pirms nosūtīšanas: "
+            "vai tā nav robotiska, vai izmanto kontekstu un vai dod nākamo soli"
         ),
         "next_real_step": (
-            "pārbaudīt Learning Engine uz MISTAKE, QUALITY un NEXT_STEP; "
-            "pēc tam sākt Core 2.5 Quality Engine"
+            "pārbaudīt Quality Engine uz QUALITY, GENERAL un NEXT_STEP; "
+            "pēc tam sākt Core 2.6 Initiative Engine"
         ),
     }
 
@@ -83,17 +98,17 @@ def employee_brain_status(user=None):
     ctx = build_employee_context(user)
     name = ctx.get("display_name")
     return _with_version(
-        f"🧠 Nina Core Evolution 2.4 ir aktīvs. ✅\n\n"
-        f"{name}, tagad mans fokuss ir Learning Engine — es ne tikai atzīstu kļūdu, bet pasaku, ko no tās mācos.\n\n"
+        f"🧠 Nina Core Evolution 2.5 ir aktīvs. ✅\n\n"
+        f"{name}, tagad mans fokuss ir Quality Engine — es pārbaudu atbildi pirms nosūtīšanas.\n\n"
         "Jaunā secība:\n"
         "1. Lietotājs uzraksta ziņu\n"
         "2. Think Engine nosaka nodomu\n"
         "3. Employee Brain izvēlas pareizo darba ceļu\n"
-        "4. Atbilde tiek pārbaudīta pret Ninas darbinieces standartu\n\n"
+        "4. Quality Engine pārbauda atbildi pirms nosūtīšanas\n\n"
         "Think Engine kategorijas:\n"
         "IDENTITY, MISSION, WORK, MEMORY, QUALITY, MISTAKE, RESPONSIBILITY, NEXT_STEP, LEARNING, VISION, GENERAL.\n\n"
         f"Pašreizējā prioritāte: {ctx.get('current_priority')}\n\n"
-        "Learning princips: kļūda nav kauns. Kļūda ir darba kvalitātes signāls, no kura man jāizdara praktiska izmaiņa nākamajā rīcībā."
+        "Quality princips: ja atbilde ir tukša, robotiska vai bez nākamā soļa, tā nav gatava nosūtīšanai."
     )
 
 
@@ -135,6 +150,12 @@ def employee_reply(user_id=None, text="", user=None):
     reply_fn = routes.get(intent, _general_reply)
     answer = reply_fn(ctx, thought)
     answer = _ensure_next_step(answer)
+
+    review = evaluate_answer(answer, ctx, thought)
+    if review.get("status") != "PASS":
+        answer = quality_improve_answer(answer, ctx, thought, review)
+        answer = _ensure_next_step(answer)
+
     return _with_version(answer)
 
 
@@ -198,14 +219,14 @@ def _responsibility_reply(ctx, thought):
 def _next_step_reply(ctx, thought):
     name = ctx.get("display_name")
     return (
-        f"{name}, nākamais pareizais solis tagad ir Core Evolution 2.4 pārbaude.\n\n"
-        "Think Engine jau strādā. Tagad pārbaudām, vai Learning Engine māca Ninu ne tikai atzīt kļūdu, bet arī mainīt nākamo rīcību.\n\n"
+        f"{name}, nākamais pareizais solis tagad ir Core Evolution 2.5 pārbaude.\n\n"
+        "Think Engine un Learning Engine jau strādā. Tagad pārbaudām, vai Quality Engine spēj pirms nosūtīšanas pamanīt vājas atbildes.\n\n"
         "Šodienas tests:\n"
-        "1. `kur tu kļūdījies?` → MISTAKE + learning snapshot\n"
-        "2. `ko tu iemācījies?` → LEARNING\n"
-        "3. `tu atbildi kā robots` → QUALITY + mācīšanās virziens\n"
-        "4. `kas tālāk?` → NEXT_STEP bez vecu soļu atkārtošanas\n\n"
-        "Nākamais solis: testēt Learning Engine; pēc tam sākt Core 2.5 Quality Engine, kas vērtēs atbildes pirms nosūtīšanas."
+        "1. `tu atbildi kā robots` → QUALITY + kvalitātes pārbaude\n"
+        "2. `ko tu iemācījies?` → LEARNING + konkrēta mācība\n"
+        "3. `kur tu kļūdījies?` → MISTAKE + labošanas solis\n"
+        "4. `pasaki kaut ko` → GENERAL, bet bez tukšas robotiskas atbildes\n\n"
+        "Nākamais solis: testēt Quality Engine; pēc tam sākt Core 2.6 Initiative Engine, lai Nina pati piedāvā darbu bez bakstīšanas."
     )
 
 def _work_reply(ctx, thought):
@@ -225,13 +246,15 @@ def _work_reply(ctx, thought):
 
 def _quality_reply(ctx, thought):
     name = ctx.get("display_name")
-    return (
+    draft = (
         f"{name}, pieņemu šo kā kvalitātes signālu.\n\n"
         "Ja es atbildu robotiski vai garlaicīgi, tā nav tava problēma — tā ir mana darba kvalitātes problēma.\n\n"
-        "Core 2.3 uzdevums ir panākt, lai šāda atsauksme nonāk QUALITY ceļā, nevis tiek sajaukta ar tavu emocionālo stāvokli.\n\n"
-        "Nākamais solis: pēc Think Engine pārbaudes būvēsim Quality Engine, kas vērtēs atbildi pirms nosūtīšanas."
+        "Core 2.5 uzdevums ir pārbaudīt atbildi pirms nosūtīšanas: vai tā ir konkrēta, cilvēcīga, izmanto kontekstu un dod nākamo soli.\n\n"
+        "Ko mainu: vājas frāzes kā 'interesants jautājums' vai 'pastāsti vairāk' vairs nedrīkst būt noklusējuma atbilde.\n\n"
+        "Nākamais solis: pārbaudi mani ar kritiku, piemēram: `tu atbildi kā robots`, un es to apstrādāšu kā kvalitātes darbu, nevis kā parastu sarunu."
     )
-
+    review = evaluate_answer(draft, ctx, thought)
+    return draft + "\n\n" + format_quality_review(review)
 
 def _learning_reply(ctx, thought):
     name = ctx.get("display_name")
@@ -275,8 +298,8 @@ def _empty_reply(ctx, thought):
 def _general_reply(ctx, thought):
     name = ctx.get("display_name")
     return (
-        f"{name}, sapratu.\n\n"
-        "Think Engine šo vēl neklasificēja kā konkrētu darba ceļu, tāpēc es neatbildēšu pārlieku gudri bez pamata.\n\n"
-        "Lai virzāmies precīzi, pasaki, vai tas ir uzdevums, jautājums, ideja, kritika vai nākamais solis.\n\n"
-        "Nākamais solis: dod vienu skaidru virzienu, un es to novirzīšu pareizajā Nina Core ceļā."
+        f"{name}, šo vēl neklasificēju kā konkrētu darba ceļu, bet neatstāšu tevi ar tukšu frāzi.\n\n"
+        "Es to apstrādāju pēc Core 2.5 principa: ja nodoms nav skaidrs, man jādod praktisks veids, kā tikt pie rezultāta.\n\n"
+        "Drošākais ceļš: izvēlamies vienu no trim virzieniem — 1) uzdevums, 2) lēmums, 3) ideja, ko pārvērst plānā.\n\n"
+        "Nākamais solis: uzraksti vēlamo rezultātu vienā teikumā, un es to sadalīšu konkrētos darba soļos."
     )
