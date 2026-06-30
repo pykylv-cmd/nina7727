@@ -23,6 +23,13 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 from openai import OpenAI
 
+# Core Evolution 2.0 — Employee Brain Import
+try:
+    from employee_brain import employee_reply
+except Exception as e:
+    print("employee_brain.py imports nav pieejams:", e)
+    employee_reply = None
+
 
 # V114.0 Safe User Profile Engine Import
 try:
@@ -11941,7 +11948,7 @@ def v1151_status_answer():
         "50 Human Conversation\n"
         "10 Legacy fallback\n\n"
         "Darbinieces princips: saprast, atcerēties, domāt stratēģiski un dot nākamo soli, nevis pļāpāt.\n\n"
-        "Versija: V115.2"
+        "Versija: V115.3"
     )
 
 
@@ -12479,6 +12486,41 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_text = update.message.text
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
+
+        # Core Evolution 2.0 — Employee Brain test layer
+        # Šis slānis pagaidām apstrādā tikai Core/mission/next-step ziņas,
+        # lai droši testētu jauno Nina domāšanas centru, nesalaužot vecās funkcijas.
+        if employee_reply and (
+            lower in ["core 2.0", "core evolution", "employee status", "core status", "nina core"]
+            or "ninaos misija" in lower
+            or "mūsu misija" in lower
+            or "musu misija" in lower
+            or "kas tālāk" in lower
+            or "kas talak" in lower
+            or "ko šodien darām" in lower
+            or "ko sodien daram" in lower
+            or "ko tu iesaki" in lower
+        ):
+            try:
+                user = get_user(str(user_id))
+            except Exception:
+                user = {}
+
+            answer = employee_reply(user_id=user_id, text=user_text, user=user)
+
+            try:
+                v40_log_usage(user_id, "employee_brain_core_2_0", user_text)
+            except Exception:
+                pass
+
+            try:
+                save_conversation_state(user_id, user_text, answer, "employee_brain_core_2_0", v80_mood(user_text), "core_evolution")
+            except Exception:
+                pass
+
+            await safe_reply_text(update, answer)
+            return
+
 
         # V115.2 Nina Core: natural conversation, identity first and employee brain.
         v1151_answer = v1151_master_core(user_id, user_text)
