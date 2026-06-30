@@ -1,97 +1,129 @@
 """
 employee_brain.py
-Nina Core Evolution 2.0
+Nina Core Evolution 2.1 — Identity + Employee State
 
-Ninas jaunais domāšanas centrs.
-Mērķis: nevis vienkārši atbildēt, bet domāt kā AI darbiniece.
+Ninas domāšanas centrs.
+Mērķis: Nina nav čatbots. Nina ir AI darbiniece, kas saprot cilvēku,
+atceras virzienu, dod nākamo soli un uzņemas darba kvalitāti.
 """
 
-CORE_VERSION = "Core Evolution 2.0"
+CORE_VERSION = "Core Evolution 2.1"
 
 
-def employee_brain_status():
+def _clean(value):
+    return (value or "").strip()
+
+
+def _split_items(value):
+    value = _clean(value)
+    if not value:
+        return []
+    import re
+    return [p.strip() for p in re.split(r"[;\n|]+", value) if p.strip()]
+
+
+def employee_brain_status(user=None):
+    ctx = build_employee_context(user)
+    name = ctx.get("display_name")
     return (
-        "🧠 Nina Core Evolution 2.0 ir aktīvs. ✅\n\n"
-        "Es vairs nedomāju kā parasts čatbots.\n"
-        "Mana domāšanas secība:\n\n"
-        "1. Saprast cilvēku\n"
-        "2. Atcerēties kontekstu\n"
-        "3. Saprast īsto mērķi\n"
-        "4. Izvēlēties praktisku nākamo soli\n"
-        "5. Pārbaudīt, vai atbilde ir noderīga\n\n"
-        "Mērķis: kļūt par AI darbinieci, kurai cilvēks uztic darbu.\n\n"
+        f"🧠 Nina Core Evolution 2.1 ir aktīvs. ✅\n\n"
+        f"{name}, tagad mans fokuss ir Employee State — es ne tikai atbildu, bet sekoju, pie kā mēs strādājam.\n\n"
+        "Domāšanas secība:\n"
+        "1. Kas ir cilvēks?\n"
+        "2. Ko es par viņu zinu?\n"
+        "3. Pie kā mēs šobrīd strādājam?\n"
+        "4. Kas ir īstais mērķis?\n"
+        "5. Kāds ir praktiskais nākamais solis?\n"
+        "6. Vai atbilde ir darbinieces līmenī?\n\n"
+        f"Pašreizējā prioritāte: {ctx.get('current_priority')}\n\n"
         f"Versija: {CORE_VERSION}"
     )
 
 
 def detect_employee_intent(text):
-    lower = (text or "").strip().lower()
-
+    lower = _clean(text).lower()
     if not lower:
         return "empty"
 
-    if lower in ["core status", "employee status", "nina core", "core 2.0", "core evolution"]:
+    if lower in [
+        "core status", "employee status", "nina core", "core 2.0", "core 2.1",
+        "core evolution", "employee brain", "core"
+    ]:
         return "status"
 
     if any(x in lower for x in [
-        "ko šodien darām", "ko sodien daram",
-        "kas tālāk", "kas talak",
-        "nākamais solis", "nakamais solis",
-        "ko iesaki", "ko tu iesaki"
+        "ko šodien darām", "ko sodien daram", "kas tālāk", "kas talak",
+        "nākamais solis", "nakamais solis", "ko iesaki", "ko tu iesaki",
+        "turpinam", "turpinām"
     ]):
         return "next_step"
 
     if any(x in lower for x in [
-        "ninaos mērķis", "ninaos merkis",
-        "ninaos misija",
-        "kāda ir misija", "kada ir misija",
-        "mūsu misija", "musu misija"
+        "ninaos misija", "ninaos mērķis", "ninaos merkis",
+        "kāda ir misija", "kada ir misija", "mūsu misija", "musu misija",
+        "projekta misija", "kas ir ninaos"
     ]):
         return "mission"
 
-    if "ninaos" in lower and any(x in lower for x in ["palīdzi", "palidzi", "būv", "buv", "sasniegt"]):
-        return "work_request"
-
     if any(x in lower for x in [
-        "tu esi robots", "kā robots", "ka robots",
-        "garlaicīgi", "garlaicigi",
-        "nepareizi", "slikti atbildi",
-        "tev jāmācās", "tev jamacas"
+        "tu esi robots", "kā robots", "ka robots", "garlaicīgi", "garlaicigi",
+        "nepareizi", "slikti atbildi", "tev jāmācās", "tev jamacas",
+        "nav labi", "šādi nedrīkst", "sadi nedrikst", "tu kļūdies", "tu kludies"
     ]):
         return "quality_feedback"
 
     if any(x in lower for x in [
-        "palīdzi", "palidzi",
-        "vajag uztaisīt", "vajag uztaisit",
-        "vajag pabeigt",
-        "strādājam", "stradajam"
+        "palīdzi", "palidzi", "vajag uztaisīt", "vajag uztaisit",
+        "vajag pabeigt", "strādājam", "stradajam", "būvēt ninaos",
+        "buvet ninaos", "taisam", "sākam", "sakam"
     ]):
         return "work_request"
+
+    if any(x in lower for x in [
+        "kā mani sauc", "ka mani sauc", "zini manu vārdu", "zini manu vardu",
+        "mans vārds", "mans vards"
+    ]):
+        return "identity_question"
 
     return "general"
 
 
 def build_employee_context(user=None):
     user = user or {}
+    name = _clean(user.get("name"))
+    profession = _clean(user.get("profession"))
+    projects = _clean(user.get("projects"))
+    facts = _clean(user.get("facts"))
+    hobbies = _clean(user.get("hobbies"))
 
-    name = (user.get("name") or "").strip()
-    profession = (user.get("profession") or "").strip()
-    projects = (user.get("projects") or "").strip()
-    facts = (user.get("facts") or "").strip()
+    project_items = _split_items(projects)
+    fact_items = _split_items(facts)
+
+    current_work = "Core Evolution 2.1 — Identity + Employee State"
+    current_priority = (
+        "nostiprināt Ninas domāšanas kodolu, lai viņa runā kā gudra AI darbiniece, "
+        "izmanto identitāti un zina aktuālo darba virzienu"
+    )
 
     return {
         "name": name,
+        "display_name": name or "kolēģi",
         "profession": profession,
         "projects": projects,
+        "project_items": project_items,
         "facts": facts,
+        "fact_items": fact_items,
+        "hobbies": hobbies,
         "mission": (
             "NinaOS mērķis ir izveidot pasaulē labāko AI darbinieku platformu, "
-            "kur cilvēki, uzņēmumi, AI darbinieki un nākotnē arī roboti sadarbojas "
-            "vienotā sistēmā. Nina ir pirmais AI darbinieks un kvalitātes paraugs."
+            "kur cilvēki, uzņēmumi, AI darbinieki un nākotnē arī roboti sadarbojas vienotā sistēmā. "
+            "Mēs neaizstājam cilvēkus — mēs palīdzam viņiem būt tehnoloģiju virsotnē."
         ),
-        "current_priority": (
-            "Šobrīd galvenā prioritāte ir Core Evolution 2.0 — padarīt Ninu par "
-            "gudru, uzticamu, praktisku AI darbinieci, nevis tikai funkciju botu."
+        "current_work": current_work,
+        "current_priority": current_priority,
+        "next_real_step": (
+            "pārbaudīt, vai Core 2.1 izmanto vārdu, misiju un aktuālo darba stāvokli; "
+            "pēc tam sākt Core 2.2 Responsibility Brain"
         )
     }
 
@@ -99,92 +131,104 @@ def build_employee_context(user=None):
 def quality_check(answer):
     if not answer:
         return False
-
-    weak_phrases = [
-        "pastāsti vairāk",
-        "pastasti vairak",
-        "interesants jautājums",
-        "interesants jautajums",
-        "esmu tikai ai",
-    ]
-
     lower = answer.lower()
+    weak_phrases = [
+        "pastāsti vairāk", "pastasti vairak", "interesants jautājums", "interesants jautajums",
+        "esmu tikai ai", "kā ai valodas modelis", "ka ai valodas modelis"
+    ]
     if any(p in lower for p in weak_phrases):
         return False
-
     if "nākamais" not in lower and "solis" not in lower and "darām" not in lower and "daram" not in lower:
         return False
-
     return True
 
 
 def improve_answer(answer):
     if not answer:
         answer = "Es sapratu. Tagad jāizvēlas praktisks nākamais solis."
-
-    if "nākamais" not in answer.lower() and "solis" not in answer.lower():
+    lower = answer.lower()
+    if "nākamais" not in lower and "solis" not in lower:
         answer = answer.rstrip() + "\n\nNākamais solis: pasaki vienu konkrētu lietu, ko gribi tagad virzīt uz priekšu."
-
     return answer
 
 
 def employee_reply(user_id=None, text="", user=None):
-    context = build_employee_context(user)
+    ctx = build_employee_context(user)
     intent = detect_employee_intent(text)
-    name = context.get("name") or "kolēģi"
+    name = ctx.get("display_name")
 
     if intent == "status":
-        return employee_brain_status()
+        return employee_brain_status(user)
 
-    if intent == "mission":
+    if intent == "identity_question":
+        if ctx.get("name"):
+            answer = (
+                f"Jā, {ctx.get('name')}. Es zinu tavu vārdu. 🙂\n\n"
+                "Tas man nav jāmin no jauna — tā ir identitāte, un man tā jāizmanto sarunā, kad tas palīdz.\n\n"
+                f"Pašreizējais darbs: {ctx.get('current_work')}.\n\n"
+                "Nākamais solis: turpinām pārbaudīt, vai es izmantoju identitāti arī sarežģītākās sarunās."
+            )
+        else:
+            answer = (
+                "Es vēl droši nezinu tavu vārdu.\n\n"
+                "Uzraksti, piemēram: mani sauc Jānis. Tad es to izmantošu kā identitāti, nevis kā parastu atmiņu.\n\n"
+                "Nākamais solis: pasaki savu vārdu, un es to turpmāk lietošu sarunā."
+            )
+
+    elif intent == "mission":
         answer = (
             f"{name}, NinaOS misija nav uztaisīt vēl vienu čatbotu.\n\n"
-            "Misija ir izveidot pasaulē labāko AI darbinieku platformu — sistēmu, "
-            "kur AI darbinieki palīdz cilvēkiem būt tehnoloģiju virsotnē, nevis aizstāj viņus.\n\n"
-            "Nina ir pirmais darbinieks un kvalitātes paraugs. Ja Nina kļūs izcila, "
+            f"{ctx.get('mission')}\n\n"
+            "Nina ir pirmais AI darbinieks un kvalitātes paraugs. Ja Nina kļūs izcila, "
             "pārējie AI darbinieki varēs mantot šo domāšanas kodolu.\n\n"
-            "Nākamais solis: pabeidzam Core Evolution 2.0, lai Nina vispirms kļūst par uzticamu darbinieci."
+            f"Pašreizējais darbs: {ctx.get('current_work')}.\n\n"
+            "Nākamais solis: pabeidzam Core Evolution 2.1 testu un tad būvējam Responsibility Brain, "
+            "lai Nina ne tikai atbild, bet arī uzņemas darba kvalitāti."
         )
 
     elif intent == "next_step":
         answer = (
-            f"{name}, nākamais pareizais solis ir nevis jauna funkcija, bet Core Evolution 2.0 nostiprināšana.\n\n"
+            f"{name}, nākamais pareizais solis tagad ir Core Evolution 2.1 pārbaude.\n\n"
+            "Mēs jau pieslēdzām employee_brain.py pie app.py, tāpēc vairs neatkārtošu veco soli.\n\n"
             "Šodienas darbs:\n"
-            "1. Pieslēgt employee_brain.py pie app.py.\n"
-            "2. Pārbaudīt, vai Nina atbild caur jauno domāšanas ciklu.\n"
-            "3. Testēt: vārds, misija, kritika, nākamais solis, darba pieprasījums.\n\n"
-            "Nākamais solis: testējam Telegramā komandas `core 2.0`, `ninaos misija`, `kas tālāk?`."
+            "1. Pārbaudīt, vai es izmantoju tavu vārdu.\n"
+            "2. Pārbaudīt, vai es atceros NinaOS misiju.\n"
+            "3. Pārbaudīt, vai uz darba pieprasījumu dodu konkrētu virzienu, nevis pļāpāju.\n\n"
+            f"Nākamais solis: {ctx.get('next_real_step')}."
         )
 
     elif intent == "quality_feedback":
         answer = (
-            f"{name}, pieņemu šo kā kvalitātes signālu, nevis kā parastu sarunu.\n\n"
-            "Ja es atbildu robotiski, problēma nav tikai tekstā — problēma ir domāšanas procesā. "
-            "Tāpēc Core Evolution 2.0 mērķis ir pirms katras atbildes pārbaudīt: "
-            "vai es sapratu cilvēku, izmantoju atmiņu un devu praktisku nākamo soli.\n\n"
-            "Nākamais solis: turpinām trenēt Employee Brain, lai katra atbilde kļūst konkrētāka un noderīgāka."
+            f"{name}, pieņemu šo kā kvalitātes signālu.\n\n"
+            "Ja es atbildu robotiski vai garlaicīgi, tā nav tikai teksta problēma — tā ir domāšanas procesa problēma. "
+            "Core Evolution nozīmē, ka pirms atbildes man jāpārbauda: vai sapratu cilvēku, izmantoju atmiņu, "
+            "devu praktisku nākamo soli un runāju kā kolēģe.\n\n"
+            "Nākamais solis: turpinām trenēt Employee Brain ar reāliem piemēriem, nevis teoriju."
         )
 
     elif intent == "work_request":
         answer = (
-            f"{name}, pieņemu uzdevumu kā AI darbiniece.\n\n"
-            "Es neskaitīšu tikai idejas. Es virzīšu darbu tā, lai tas tuvina NinaOS misijai.\n\n"
-            "Šobrīd praktiskais fokuss ir viens: Core Evolution 2.0. "
-            "Kad tas būs stabils, tikai tad būs jēga likt klāt e-pastus, dokumentus, balsi un zvanus.\n\n"
-            "Nākamais solis: pārbaudām, vai employee_brain.py korekti atbild Telegramā."
+            f"{name}, uzdevumu pieņemu.\n\n"
+            "Es to neuztveru kā parastu sarunu. Mans darbs ir virzīt NinaOS uz mērķi, nevis skaitīt idejas.\n\n"
+            f"Pašreizējais darbs: {ctx.get('current_work')}.\n"
+            f"Pašreizējā prioritāte: {ctx.get('current_priority')}.\n\n"
+            "Ko darām tagad:\n"
+            "1. Nostiprinām Core 2.1.\n"
+            "2. Pēc tam būvējam Core 2.2 Responsibility Brain.\n"
+            "3. Tikai pēc tam ejam uz darba prasmēm: e-pasti, dokumenti, balss, zvani.\n\n"
+            f"Nākamais solis: {ctx.get('next_real_step')}."
         )
 
     else:
         answer = (
-            f"{name}, es sapratu.\n\n"
-            "Es skatīšos uz šo nevis kā parasts čatbots, bet kā AI darbiniece: "
-            "kas tev palīdzēs ātrāk nonākt pie mērķa?\n\n"
-            "Nākamais solis: uzraksti, vai šis ir uzdevums, ideja, kritika vai jautājums — un es to apstrādāšu pēc pareizā domāšanas ceļa."
+            f"{name}, sapratu.\n\n"
+            "Es šo apstrādāšu kā AI darbiniece: vispirms saprotu nodomu, tad skatos kontekstu, "
+            "tad dodu praktisku nākamo soli.\n\n"
+            f"Pašreizējais darbs: {ctx.get('current_work')}.\n\n"
+            "Nākamais solis: pasaki, vai tas ir uzdevums, ideja, jautājums vai kvalitātes komentārs — un es to virzīšu pareizajā ceļā."
         )
 
     answer = improve_answer(answer)
-
     if f"Versija: {CORE_VERSION}" not in answer:
         answer = answer.rstrip() + f"\n\nVersija: {CORE_VERSION}"
-
     return answer
