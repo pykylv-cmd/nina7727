@@ -1,0 +1,49 @@
+{
+  "project": {
+    "name": "NinaOS",
+    "product": "Nina AI",
+    "type": "AI employee operating system",
+    "telegram_role": "test environment only"
+  },
+  "status": {
+    "app_version": "V115.2",
+    "current_core": "2.6",
+    "current_task": "2.6.1 Initiative Detector",
+    "reply_builder": "active",
+    "initiative_engine": "in_progress",
+    "last_updated_utc": "2026-06-30T18:32:22Z"
+  },
+  "architecture_rules": {
+    "app_py_role": "router",
+    "reply_builder_role": "only final reply generator",
+    "initiative_engine_role": "creates structured initiative objects, not final text",
+    "new_business_logic": "separate modules, not inside app.py",
+    "user_edits": "user never edits single lines; full files are replaced in GitHub"
+  },
+  "core_evolution": {
+    "2.0": "Employee Brain - done",
+    "2.1": "Identity + Employee State - done",
+    "2.2": "Responsibility Brain - done",
+    "2.3": "Think Engine - done",
+    "2.4": "Learning Engine - done",
+    "2.5": "Quality Engine - done",
+    "2.5.1": "Reply Builder - done",
+    "2.6": "Initiative Engine - in progress",
+    "2.6.1": "Initiative Detector - next implementation",
+    "2.6.2": "Initiative Generator - planned",
+    "2.6.3": "Initiative Memory - planned",
+    "2.7": "Context Engine 2.0 - planned",
+    "2.8": "Memory Intelligence - planned",
+    "3.0": "Employee Brain v3 - planned"
+  },
+  "next_steps": [
+    "Create initiative_engine.py",
+    "Connect initiative_engine.py in app.py router",
+    "Ensure test commands do not go through old V115.2 conversation route",
+    "Test: core 2.6.1",
+    "Test: initiative detector status",
+    "Update NINA_SYSTEM.md",
+    "Update NINA_CHANGELOG.md",
+    "Update NINA_MANIFEST.json"
+  ]
+}
