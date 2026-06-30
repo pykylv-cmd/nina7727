@@ -1,13 +1,13 @@
 """
 think_engine.py
-Nina Core Evolution 2.5 — Think Engine
+Nina Core Evolution 2.6.1 — Think Engine
 
 Šis fails neatbild lietotājam.
 Tas tikai nosaka, kas patiesībā notiek lietotāja ziņā.
 Employee Brain pēc tam izvēlas pareizo atbildes ceļu.
 """
 
-THINK_VERSION = "Think Engine 2.5"
+THINK_VERSION = "Think Engine 2.6.1"
 
 
 def _clean(text):
@@ -36,8 +36,16 @@ def classify_intent(text):
     # 1) Statuss un Core komandas
     if lower in [
         "core", "core status", "employee status", "employee brain", "nina core",
-        "core 2.0", "core 2.1", "core 2.2", "core 2.3", "core 2.4", "core 2.5", "quality engine", "quality status", "learning engine", "learning status", "core evolution",
-        "think engine", "think status"
+        "core 2.0", "core 2.1", "core 2.2", "core 2.3", "core 2.4",
+        "core 2.5", "core 2.5.1", "core 2.6", "core 2.6.1",
+        "quality engine", "quality status",
+        "learning engine", "learning status",
+        "core evolution",
+        "think engine", "think status",
+        "reply builder", "reply builder status",
+        "initiative engine", "initiative status",
+        "initiative detector", "initiative detector status",
+        "nina debug", "debug nina", "debug"
     ]:
         return _result("STATUS", raw, confidence=1.0, reason="Core statusa pieprasījums")
 
