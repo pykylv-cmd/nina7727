@@ -49,6 +49,9 @@ def detect_employee_intent(text):
     ]):
         return "mission"
 
+    if "ninaos" in lower and any(x in lower for x in ["palīdzi", "palidzi", "būv", "buv", "sasniegt"]):
+        return "work_request"
+
     if any(x in lower for x in [
         "tu esi robots", "kā robots", "ka robots",
         "garlaicīgi", "garlaicigi",
