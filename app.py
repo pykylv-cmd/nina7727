@@ -11871,6 +11871,405 @@ def is_short_unknown_message(text):
 
 
 
+# =========================
+# V115.1 NINA CORE — Employee Brain
+# =========================
+# Mērķis: Nina vispirms saprot cilvēku, identitāti un nodomu, tikai tad atbild.
+# Šis slānis apzināti stāv pirms vecajiem V114 routeriem, lai dabiskā saruna
+# vairs nekrīt nejaušos if/elif zaros.
+
+V1151_VERSION = "V115.1"
+
+
+def v1151_clean_version(text, version=V1151_VERSION):
+    text = (text or "").strip()
+    if not text:
+        text = "Esmu te. Pasaki, kas jāatrisina."
+    text = re.sub(r"\n\nVersija:\s*V\d+(?:\.\d+)?", "", text).strip()
+    text = re.sub(r"Versija:\s*V\d+(?:\.\d+)?", "", text).strip()
+    return text.rstrip() + f"\n\nVersija: {version}"
+
+
+def v1151_user(user_id):
+    try:
+        return get_user(str(user_id)) or {}
+    except Exception as e:
+        print("v1151_user kļūda:", repr(e))
+        return {}
+
+
+def v1151_name(user):
+    return ((user or {}).get("name") or "").strip()
+
+
+def v1151_split(value):
+    value = (value or "").strip()
+    if not value:
+        return []
+    return [p.strip() for p in re.split(r"[;\n|]+", value) if p.strip()]
+
+
+def v1151_is_legacy_command(lower):
+    """Lietas, kuras atstājam vecajai funkciju sistēmai: admin, maksājumi, health, tiešas komandas."""
+    lower = (lower or "").strip().lower()
+    if not lower:
+        return False
+    starts = (
+        "/start", "premium", "pirkt", "stripe", "admin", "health", "system status",
+        "kpi", "alerts", "backup", "restore", "recovery", "analytics", "revenue",
+        "user management", "grant premium", "remove premium", "add xp", "remove xp",
+        "set level", "reset streak", "search user", "find user", "lietotāji", "lietotaji",
+        "referral", "invite", "launch", "production", "webhook", "db backup",
+        "auto backup", "activity", "notifications", "audit", "mans plāns", "mans plans",
+        "abonements", "premium funkcijas", "premium limiti", "premium beidzas"
+    )
+    return lower.startswith(starts)
+
+
+def v1151_status_answer():
+    return (
+        "🧠 Nina Core V115.1 ir aktīvs. ✅\n\n"
+        "Galvenais noteikums: vispirms saprast cilvēku, tad atbildēt.\n\n"
+        "Prioritātes:\n"
+        "100 Identity First\n"
+        "95 Question Router\n"
+        "90 Critique Engine\n"
+        "85 Employee Brain\n"
+        "80 Memory ar filtriem\n"
+        "70 Vision Smart Reply\n"
+        "50 Human Conversation\n"
+        "10 Legacy fallback\n\n"
+        "Mērķis: Nina nav funkciju saraksts. Nina ir darbiniece, kas atceras, domā un atbild praktiski.\n\n"
+        "Versija: V115.1"
+    )
+
+
+def v1151_identity_question(lower):
+    lower = (lower or "").strip().lower()
+    patterns = [
+        "kā mani sauc", "ka mani sauc", "zini manu vārdu", "zini manu vardu",
+        "atceries manu vārdu", "atceries manu vardu", "a vārdu tagad zini", "a vardu tagad zini",
+        "vai tu zini manu vārdu", "vai tu zini manu vardu", "mans vārds?", "mans vards?"
+    ]
+    return any(p in lower for p in patterns)
+
+
+def v1151_profile_question(lower):
+    lower = (lower or "").strip().lower()
+    patterns = [
+        "ko tu par mani zini", "ko par mani zini", "ko tu par mani atceries",
+        "ko atceries par mani", "mans profils", "parādi manu profilu", "paradi manu profilu",
+        "kas man patīk", "kas man patik", "kur es dzīvoju", "kur es dzivoju",
+        "kur es strādāju", "kur es stradaju", "kāda ir mana joma", "kada ir mana joma"
+    ]
+    return any(p in lower for p in patterns)
+
+
+def v1151_identity_answer(user_id, text):
+    user = v1151_user(user_id)
+    name = v1151_name(user)
+    lower = (text or "").strip().lower()
+
+    if v1151_identity_question(lower):
+        if name:
+            return v1151_clean_version(f"Jā, atceros. Tevi sauc {name}. 🙂\n\nTas ir tieši tas, kas man jāzina bez minēšanas un bez liekas pļāpāšanas.")
+        return v1151_clean_version("Tavu vārdu vēl neesmu saglabājusi. Uzraksti, piemēram: mani sauc Jānis — un pēc tam es to izmantošu sarunā.")
+
+    if v1151_profile_question(lower):
+        lines = ["👤 Ko es par tevi zinu"]
+        if name: lines.append(f"Vārds: {name}")
+        if user.get("city"): lines.append(f"Dzīvesvieta/pilsēta: {user.get('city')}")
+        if user.get("profession"): lines.append(f"Joma/profesija: {user.get('profession')}")
+        if user.get("hobbies"): lines.append(f"Intereses: {user.get('hobbies')}")
+        if user.get("projects"): lines.append(f"Projekti: {user.get('projects')}")
+        if user.get("goals"): lines.append(f"Mērķi: {user.get('goals')}")
+        if user.get("facts"): lines.append(f"Svarīgi fakti: {user.get('facts')}")
+        if len(lines) == 1:
+            lines.append("Vēl maz. Bet vari man pateikt vārdu, jomu, projektu vai mērķi, un es to izmantošu nākamajās atbildēs.")
+        lines.append("")
+        lines.append("Ja kaut kas nav pareizi, pasaki tieši — es to labošu.")
+        return v1151_clean_version("\n".join(lines))
+
+    return None
+
+
+def v1151_fact_capture(user_id, text):
+    lower = (text or "").strip().lower()
+    if "?" in lower:
+        return None
+    try:
+        fact = v401_safe_profile_fact(text)
+    except Exception:
+        fact = {}
+    ftype = (fact or {}).get("type") or ""
+    value = ((fact or {}).get("value") or "").strip()
+    if not ftype or not value:
+        return None
+    try:
+        v301_save_profile_fact(user_id, ftype, value)
+    except Exception:
+        try:
+            v24_save_profile_fact_to_db(user_id, ftype, value)
+        except Exception as e:
+            print("v1151_fact_capture save kļūda:", repr(e))
+    user = v1151_user(user_id)
+    name = v1151_name(user)
+    if ftype == "name":
+        return v1151_clean_version(f"Patīkami, {value}. 🙂\n\nTagad tas nav tikai pierakstīts — man tas jāizmanto sarunā. Ja vēlāk pajautāsi, kā tevi sauc, man jāatbild bez kļūdām.")
+    if ftype == "profession":
+        return v1151_clean_version(f"Sapratu. Tava joma/profesija: {value}.\n\nTurpmāk atbildēs mēģināšu domāt praktiskāk un tuvāk tavai realitātei, nevis vispārīgi.")
+    if ftype == "project":
+        prefix = f"{name}, " if name else ""
+        return v1151_clean_version(f"{prefix}piefiksēju projektu: {value}.\n\nTagad man jāpalīdz to virzīt uz priekšu, nevis tikai par to parunāt.")
+    return v1151_clean_version(f"Piefiksēju: {value}.\n\nJa tas būs svarīgi nākamajā sarunā, man tas jāņem vērā.")
+
+
+def v1151_is_critique(lower):
+    lower = (lower or "").strip().lower()
+    words = [
+        "nepareizi", "kļūdies", "kludies", "nedrīksti", "nedriksti", "tā nedrīkst", "ta nedrikst",
+        "runā normāli", "runa normali", "runā precīzāk", "runa precizak", "garlaicīga", "garlaiciga",
+        "dumja", "stulba", "neatceries", "nemāki", "nemaki", "slikta atbilde", "nav labi",
+        "tev sen bija", "klientam tu nedrīksti", "klientām tu nēdrīksti", "šita klient", "šitā klient"
+    ]
+    # Kritika par Ninu, nevis cilvēka emocionāla problēma.
+    return any(w in lower for w in words) and any(x in lower for x in ["tu", "nina", "atbild", "runā", "runa", "neatceries", "nemāki", "nemaki", "klient"])
+
+
+def v1151_critique_answer(user_id, text):
+    user = v1151_user(user_id)
+    name = v1151_name(user)
+    prefix = f"{name}, " if name else ""
+    return v1151_clean_version(
+        f"{prefix}piekrītu — šāda atbilde nav pietiekami laba.\n\n"
+        "Ja es neatceros elementāras lietas, sajaucu jautājumu ar atmiņu vai atbildu kā garlaicīgs bots, tas nav Nina līmenis.\n\n"
+        "Pareizā reakcija no manas puses ir:\n"
+        "1. atzīt kļūdu;\n"
+        "2. saprast, kas tieši bija nepareizi;\n"
+        "3. nākamajā atbildē būt īsākai, precīzākai un praktiskākai.\n\n"
+        "Šo uztveru kā darba kvalitātes labojumu, nevis kā tavu emociju problēmu."
+    )
+
+
+def v1151_is_memory_command(lower):
+    lower = (lower or "").strip().lower()
+    return lower.startswith(("atceries ka", "atceries, ka", "atceries ", "nina atceries"))
+
+
+def v1151_memory_answer(user_id, text):
+    lower = (text or "").strip().lower()
+    # Ja cilvēks jautā, nevis dod faktu — nedrīkst saglabāt kā atmiņu.
+    if "?" in lower or any(p in lower for p in ["kā mani sauc", "ka mani sauc", "ko tu", "vai tu", "zini manu"]):
+        id_ans = v1151_identity_answer(user_id, text)
+        if id_ans:
+            return id_ans
+        return v1151_clean_version("Tas izklausās pēc jautājuma, nevis jaunas atmiņas. Pajautā tieši, ko gribi pārbaudīt, un es atbildēšu no tā, ko jau zinu.")
+
+    cleaned = re.sub(r"^(nina[, ]*)?atceries[, ]*(ka)?\s*", "", text, flags=re.IGNORECASE).strip(" .")
+    if not cleaned:
+        return v1151_clean_version("Pasaki, ko tieši man jāatceras. Piemēram: atceries, ka rīt jāzvana klientam.")
+    try:
+        saved = save_natural_memory(user_id, "atceries, ka " + cleaned)
+    except Exception:
+        try:
+            saved = save_natural_memory_logic(get_db, db_execute, user_id, cleaned)
+        except Exception:
+            saved = cleaned
+    saved = saved or cleaned
+    try:
+        record_memory_topics(user_id, saved)
+    except Exception:
+        pass
+    return v1151_clean_version(
+        f"Pierakstīju. 🧠\n\nAtcerēšos: {saved}\n\n"
+        "Svarīgi: ja tas ir uzdevums ar laiku, es labāk to pārvērtīšu par atgādinājumu, nevis tikai glabāšu atmiņā."
+    )
+
+
+def v1151_recent_context(user_id):
+    try:
+        rows = latest_conversation_state(user_id, limit=4)
+    except Exception:
+        rows = []
+    parts = []
+    for r in reversed(rows or []):
+        try:
+            u, n, intent, emotion, topic, created = r
+            if u: parts.append(f"Cilvēks: {u}")
+            if n: parts.append(f"Nina: {str(n)[:250]}")
+        except Exception:
+            pass
+    return "\n".join(parts[-8:])
+
+
+def v1151_memory_snapshot(user_id):
+    items=[]
+    try:
+        for row in latest_natural_memories(user_id, limit=5) or []:
+            if row and row[0]: items.append(str(row[0]))
+    except Exception:
+        pass
+    return "\n".join(f"- {x}" for x in items[:5])
+
+
+def v1151_profile_block(user_id):
+    user = v1151_user(user_id)
+    keys = ["name", "city", "timezone", "profession", "hobbies", "facts", "goals", "projects", "dreams", "family", "favorite_car"]
+    lines=[]
+    for k in keys:
+        v=(user.get(k) or "").strip() if isinstance(user.get(k), str) else user.get(k)
+        if v:
+            lines.append(f"{k}: {v}")
+    if not lines:
+        return "Par cilvēku vēl gandrīz nekas nav zināms."
+    return "\n".join(lines)
+
+
+def v1151_rule_based_smalltalk(user_id, text):
+    lower = (text or "").strip().lower()
+    user = v1151_user(user_id)
+    name = v1151_name(user)
+    n = f", {name}" if name else ""
+    if lower in ["čau", "cau", "sveika", "sveiks", "hi", "hello", "hei", "labdien"]:
+        return v1151_clean_version(f"Čau{n}. 🙂\n\nEsmu te. Dod man vienu īstu lietu — ko šodien vajag sakārtot, atcerēties vai izlemt?")
+    if any(x in lower for x in ["ko vari", "ko tu vari", "ko māki", "ko maki"]):
+        return v1151_clean_version(
+            f"{name + ', ' if name else ''}es negribu tikai nosaukt funkcijas. Labāk īsi:\n\n"
+            "Es varu būt tava AI darbiniece:\n"
+            "• atcerēties svarīgo;\n"
+            "• palīdzēt sakārtot domas un darbus;\n"
+            "• rakstīt tekstus klientiem;\n"
+            "• analizēt bildes/dokumentus;\n"
+            "• atgādināt lietas;\n"
+            "• palīdzēt virzīt projektu uz priekšu.\n\n"
+            "Bet labākais tests ir viens īsts uzdevums. Iedod man situāciju, un es parādīšu."
+        )
+    if any(x in lower for x in ["kā tev iet", "ka tev iet", "kā iet", "ka iet"]):
+        return v1151_clean_version(f"Man viss labi{n}. Bet mans darbs nav runāt par sevi — mans darbs ir palīdzēt tev.\n\nKas šodien ir svarīgākais, ko vajag pavirzīt?")
+    return None
+
+
+def v1151_llm_employee_answer(user_id, text):
+    profile = v1151_profile_block(user_id)
+    memories = v1151_memory_snapshot(user_id)
+    recent = v1151_recent_context(user_id)
+    system = f"""
+Tu esi Nina — AI darbiniece, nevis parasts čatbots.
+Galvenais mērķis: kļūt par asistenti, kuru cilvēki grib lietot katru dienu.
+
+Nina Core noteikumi:
+1. Vispirms saproti cilvēka īsto nodomu.
+2. Izmanto profilu un atmiņu, ja tie palīdz.
+3. Ja cilvēks jautā par sevi, atbildi no profila, nevis minē.
+4. Ja cilvēks kritizē Ninu, atzīsti kvalitātes problēmu un labo kursu.
+5. Neesi garlaicīga. Neesi pārspīlēti salda. Esi silta, tieša, praktiska.
+6. Atbildi īsi, bet ar jēgu. Parasti 3-8 teikumi.
+7. Neizdomā faktus. Ja nezini, pasaki skaidri.
+8. Neuzdod daudz jautājumu. Uzdod ne vairāk kā vienu labu jautājumu.
+9. Tu esi darbiniece: domā par nākamo praktisko soli.
+10. Neraksti vispārīgus AI padomus, ja cilvēks prasa konkrētu lietu.
+
+Lietotāja profils:
+{profile}
+
+Pēdējās atmiņas:
+{memories or 'Nav.'}
+
+Īstermiņa sarunas konteksts:
+{recent or 'Nav.'}
+""".strip()
+    try:
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=f"{system}\n\nCilvēka pēdējā ziņa: {text}\n\nAtbildi kā Nina."
+        )
+        answer = (response.output_text or "").strip()
+    except Exception as e:
+        print("v1151_llm_employee_answer kļūda:", repr(e))
+        small = v1151_rule_based_smalltalk(user_id, text)
+        if small:
+            return small
+        answer = "Es tevi dzirdu. Šoreiz man aizķērās gudrā atbilde, bet nepazaudēsim domu: kas ir galvenais, ko te vajag atrisināt?"
+    return v1151_clean_version(answer)
+
+
+def v1151_master_core(user_id, user_text):
+    """Atgriež atbildi, ja V115.1 Nina Core pārņem ziņu. Ja None — lai iet vecā sistēma."""
+    raw = (user_text or "").strip()
+    lower = raw.lower()
+    if not raw:
+        return v1151_clean_version("Esmu te. Uzraksti vienu lietu, ko vajag sakārtot.")
+
+    if lower in ["v115 status", "v115.1 status", "nina core", "core status", "v1151 status"]:
+        return v1151_status_answer()
+
+    if v1151_is_legacy_command(lower):
+        return None
+
+    # Tiešās funkcijas, kur vecā sistēma jau strādā labi, bet atbildei jābūt V115.1 plūsmā.
+    if lower.startswith(("atgādini", "atgadini")):
+        return None
+    if lower.startswith(("mērķis:", "merkis:", "šodienas mērķis:", "sodienas merkis:")):
+        return None
+    if lower in ["mana diena", "diena", "progress", "statistika", "labrīt", "labrit", "vakars"]:
+        return None
+
+    id_answer = v1151_identity_answer(user_id, raw)
+    if id_answer:
+        return id_answer
+
+    if v1151_is_critique(lower):
+        return v1151_critique_answer(user_id, raw)
+
+    if v1151_is_memory_command(lower):
+        return v1151_memory_answer(user_id, raw)
+
+    fact_answer = v1151_fact_capture(user_id, raw)
+    if fact_answer:
+        return fact_answer
+
+    small = v1151_rule_based_smalltalk(user_id, raw)
+    if small:
+        return small
+
+    # Dabiskai sarunai Nina Core pārņem vadību, lai vecie V114 zari vairs nerada nejaušas atbildes.
+    return v1151_llm_employee_answer(user_id, raw)
+
+
+def v1151_vision_smart_reply(user_id, raw_answer, caption=""):
+    """Noņem Vision pļāpāšanu un padara atbildi praktisku."""
+    raw_answer = (raw_answer or "").strip()
+    caption = (caption or "").strip()
+    user = v1151_user(user_id)
+    name = v1151_name(user)
+    prefix = f"{name}, " if name else ""
+
+    # Ja Vision atdeva pārāk garu vai vispārīgu tekstu, pārformulējam ar LLM.
+    try:
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=(
+                "Tu esi Nina Vision Smart Reply. Pārveido attēla analīzi īsā, praktiskā atbildē latviski. "
+                "Neizdomā lietas, nedod nejaušus padomus par ēdienu/dzērienu, ja lietotājs to neprasa. "
+                "Pasaki, ko redzi, un pajautā vienu praktisku jautājumu, ko ar bildi darīt tālāk. "
+                "Atbilde 4-7 teikumi.\n\n"
+                f"Lietotāja vārds: {name or 'nav zināms'}\n"
+                f"Bildes paraksts: {caption or 'nav'}\n"
+                f"Sākotnējā analīze:\n{raw_answer}"
+            )
+        )
+        answer = response.output_text.strip()
+    except Exception as e:
+        print("v1151_vision_smart_reply kļūda:", repr(e))
+        answer = (
+            f"{prefix}bildi apskatījos praktiski.\n\n"
+            f"{raw_answer[:700]}\n\n"
+            "Ko gribi, lai es ar šo bildi izdaru: aprakstu, pārbaudu kādu detaļu vai palīdzu pieņemt lēmumu?"
+        )
+
+    return v1151_clean_version(answer)
+
+
 
 async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """V114.0: Telegram location support."""
@@ -11909,12 +12308,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             client=client,
             image_bytes=image_bytes,
             caption=caption,
-            version="V114.0"
+            version="V115.1"
         )
 
-        
-        # V114.0: enhance Vision answer
-        answer = v301_enhance_vision_answer(user_id, answer, caption)
+        # V115.1: Vision Smart Reply — no random generic advice
+        answer = v1151_vision_smart_reply(user_id, answer, caption)
         try:
             v40_log_usage(user_id, "vision", caption)
             save_conversation_state(user_id, "[PHOTO] " + caption, answer, "photo", "neutral", "vision")
@@ -11931,189 +12329,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-
-
-# =========================
-# V115.0 MASTER BRAIN ROUTER
-# =========================
-# NinaOS V115 ievieš vienu centrālo maršrutētāju pirms vecās V114 paralēlās loģikas.
-# Mērķis: katrs modulis iesniedz kandidātu, Master Brain izvēlas atbildi pēc prioritātes.
-
-def v115_safe_call(route_name, fn, *args, priority=10, module="", intent=""):
-    """Drošs moduļa izsaukums Master Brain kandidātu sistēmai."""
-    try:
-        answer = fn(*args)
-        if answer:
-            return {
-                "ok": True,
-                "route": route_name,
-                "module": module or route_name,
-                "intent": intent or route_name,
-                "priority": int(priority),
-                "answer": answer,
-            }
-    except Exception as e:
-        print(f"V115 Master Brain route kļūda [{route_name}]:", repr(e))
-    return None
-
-
-def v115_master_brain_status(user_id=None):
-    return (
-        "🧠 NinaOS V115 Master Brain ir aktīvs. ✅\n\n"
-        "Tagad ziņas vispirms iet caur vienu centrālo maršrutētāju, nevis haotiski caur daudziem moduļiem.\n\n"
-        "Prioritātes:\n"
-        "100 Identity\n"
-        "95 Relationship\n"
-        "90 Memory\n"
-        "85 Goals\n"
-        "80 Context\n"
-        "75 Vision\n"
-        "70 Business\n"
-        "60 Navigation\n"
-        "50 Human Chat\n"
-        "10 LLM fallback\n\n"
-        "Versija: V115.0"
-    )
-
-
-def v115_profile_recall_requested(lower):
-    return any(x in lower for x in [
-        "ko tu par mani atceries", "ko atceries par mani", "mans profils", "profils",
-        "ko tu par mani zini", "ko par mani zini", "ko tu zini par mani"
-    ])
-
-
-def v115_master_brain_router(user_id, user_text):
-    """
-    V115.0 Master Brain.
-    Atgriež dict ar izvēlēto atbildi vai None.
-    Šis slānis atstāj veco V114 kodu kā fallback, bet svarīgākos moduļus vada centrāli.
-    """
-    user_text = (user_text or "").strip()
-    lower = user_text.lower()
-    if not user_text:
-        return {"route":"empty", "module":"human_chat", "intent":"empty", "priority":50, "answer":v301_relationship_greeting(user_id)}
-
-    # Admin/debug statuss.
-    if lower in ["v115", "v115 status", "master brain", "masterbrain", "brain status"]:
-        return {"route":"v115_status", "module":"master_brain", "intent":"status", "priority":1000, "answer":v115_master_brain_status(user_id)}
-
-    candidates = []
-
-    # 100 — Identity. Tiešs profils/identitāte pirms čata.
-    if v115_profile_recall_requested(lower):
-        candidates.append({
-            "route":"identity_recall", "module":"identity", "intent":"profile_recall",
-            "priority":100, "answer":v24_profile_recall_answer(user_id)
-        })
-
-    # Profila fakta saglabāšana ir identitāte, nevis human chat.
-    try:
-        fact = v401_safe_profile_fact(user_text)
-        if fact.get("type") and fact.get("value"):
-            def _save_fact_answer():
-                try:
-                    v301_save_profile_fact(user_id, fact["type"], fact["value"])
-                except Exception as e:
-                    print("V115 profile save kļūda:", repr(e))
-                return v301_profile_saved_answer(user_id, fact["type"], fact["value"])
-            candidates.append({
-                "route":"identity_save", "module":"identity", "intent":"profile_save",
-                "priority":100, "answer":_save_fact_answer()
-            })
-    except Exception as e:
-        print("V115 identity fact detect kļūda:", repr(e))
-
-    candidates.append(v115_safe_call("rel114", rel114_intent_router, user_id, user_text, priority=95, module="relationship", intent="relationship"))
-
-    # 90 — Memory / reminders / goals. Šiem jānotiek pirms Human Engine.
-    if lower.startswith(("atgādini", "atgadini")):
-        try:
-            data = parse_reminder_request(user_text, DEFAULT_TIMEZONE)
-            if data is not None:
-                if not data.get("ok"):
-                    candidates.append({"route":"reminder_help", "module":"memory", "intent":"reminder_help", "priority":90, "answer":build_reminder_help_answer(version="V115.0")})
-                else:
-                    ok = save_reminder_logic(get_db, db_execute, user_id, data.get("text") or user_text, data.get("remind_at") or "", data.get("local_time") or "")
-                    if ok:
-                        candidates.append({"route":"reminder_save", "module":"memory", "intent":"reminder_save", "priority":90, "answer":build_reminder_saved_answer(data.get("text") or user_text, data.get("human_time") or "", version="V115.0")})
-        except Exception as e:
-            print("V115 reminder kļūda:", repr(e))
-
-    if lower.startswith(("atceries,", "atceries ka", "atceries ")):
-        try:
-            saved = save_natural_memory(user_id, user_text)
-            if saved:
-                try: record_memory_topics(user_id, saved)
-                except Exception: pass
-                candidates.append({"route":"memory_save", "module":"memory", "intent":"memory_save", "priority":90, "answer":nina_memory_saved_answer(saved)})
-        except Exception as e:
-            print("V115 memory save kļūda:", repr(e))
-
-    if lower.startswith(("mērķis:", "merkis:", "šodienas mērķis:", "sodienas merkis:")):
-        goal_text = user_text.split(":", 1)[1].strip() if ":" in user_text else ""
-        if goal_text:
-            try:
-                ok = save_daily_goal(user_id, goal_text)
-                if ok:
-                    candidates.append({"route":"goal_save", "module":"goals", "intent":"goal_save", "priority":85, "answer":nina_goal_saved_answer(goal_text)})
-            except Exception as e:
-                print("V115 goal save kļūda:", repr(e))
-
-    # 80 — Context.
-    candidates.append(v115_safe_call("ctx112", ctx112_intent_router, user_id, user_text, priority=80, module="context", intent="context"))
-
-    # 70/60 — Platform, AI core, navigation, business/revenue.
-    candidates.append(v115_safe_call("ninaos", ninaos_intent_router, user_id, user_text, priority=70, module="platform_core", intent="ninaos"))
-    candidates.append(v115_safe_call("v90_core", v90_intent_router, user_id, user_text, priority=68, module="ai_core", intent="v90"))
-    candidates.append(v115_safe_call("v80_relationship", v80_intent_router, user_id, user_text, priority=66, module="relationship_memory", intent="v80"))
-    candidates.append(v115_safe_call("v602_navigation", v602_intent_router, user_id, user_text, priority=60, module="navigation", intent="v602"))
-    candidates.append(v115_safe_call("v601_navigation", v601_intent_router, user_id, user_text, priority=59, module="navigation", intent="v601"))
-    candidates.append(v115_safe_call("v60_intent", v60_intent_router, user_id, user_text, priority=58, module="navigation", intent="v60"))
-    candidates.append(v115_safe_call("v50_assistant", v50_assistant_router, user_id, user_text, priority=57, module="assistant", intent="v50"))
-    candidates.append(v115_safe_call("v401_help", v401_intent_router, user_id, user_text, priority=56, module="assistant", intent="help"))
-
-    # 50 — Human Chat tikai pēc augstākām prioritātēm.
-    candidates.append(v115_safe_call("human111", human111_intent_router, user_id, user_text, priority=50, module="human_chat", intent="human"))
-    if v301_is_core_conversation(lower):
-        candidates.append(v115_safe_call("v301_conversation", v301_conversation_answer, user_id, user_text, priority=49, module="human_chat", intent="conversation"))
-
-    # Noņem tukšos kandidātus un izvēlas augstāko prioritāti.
-    candidates = [c for c in candidates if c and c.get("answer")]
-    if not candidates:
-        return None
-
-    chosen = sorted(candidates, key=lambda c: int(c.get("priority", 0)), reverse=True)[0]
-    answer = chosen.get("answer") or ""
-    if chosen.get("route") == "v401_help":
-        try:
-            answer = v50_enhance_answer_with_memory(user_id, answer + v40_soft_sales_line(user_id), user_text)
-        except Exception:
-            pass
-    if "Versija:" in answer:
-        answer = re.sub(r"Versija:\s*V114\.0", "Versija: V115.0", answer)
-    chosen["answer"] = answer
-    return chosen
-
-
-def v115_log_and_save(user_id, user_text, chosen):
-    """Vienota V115 žurnāla un sarunas stāvokļa saglabāšana."""
-    try:
-        v40_log_usage(user_id, "v115_" + str(chosen.get("route", "master")), user_text)
-    except Exception:
-        pass
-    try:
-        save_conversation_state(
-            user_id,
-            user_text,
-            chosen.get("answer", ""),
-            "v115:" + str(chosen.get("intent", "")),
-            v80_mood(user_text),
-            str(chosen.get("module", "master_brain")),
-        )
-    except Exception:
-        pass
-
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
     try:
@@ -12121,11 +12336,18 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
 
-        # V115.0 Master Brain Router — central priority layer before old V114 fallback.
-        v115_chosen = v115_master_brain_router(user_id, user_text)
-        if v115_chosen:
-            v115_log_and_save(user_id, user_text, v115_chosen)
-            await safe_reply_text(update, v115_chosen.get("answer", ""))
+        # V115.1 Nina Core: natural conversation and identity first.
+        v1151_answer = v1151_master_core(user_id, user_text)
+        if v1151_answer:
+            try:
+                v40_log_usage(user_id, "v1151_nina_core", user_text)
+            except Exception:
+                pass
+            try:
+                save_conversation_state(user_id, user_text, v1151_answer, "v1151_nina_core", v80_mood(user_text), "nina_core")
+            except Exception:
+                pass
+            await safe_reply_text(update, v1151_answer)
             return
 
         # V114.0 Relationship Engine Router.
