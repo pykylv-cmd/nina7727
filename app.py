@@ -12500,6 +12500,11 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             or "ko šodien darām" in lower
             or "ko sodien daram" in lower
             or "ko tu iesaki" in lower
+            or "ninaos" in lower
+            or "palīdzi būvēt" in lower
+            or "palidzi buvet" in lower
+            or "palīdzi uzbūvēt" in lower
+            or "palidzi uzbuvet" in lower
         ):
             try:
                 user = get_user(str(user_id))
