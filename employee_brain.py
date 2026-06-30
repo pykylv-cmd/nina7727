@@ -6,7 +6,7 @@ Nina Core Evolution 2.5 — Employee Brain + Think Engine + Learning Engine + Qu
 Vispirms Think Engine nosaka nodomu, tikai tad Employee Brain veido atbildi.
 """
 
-CORE_VERSION = "Core Evolution 2.5"
+CORE_VERSION = "Core Evolution 2.6.1"
 
 try:
     from think_engine import classify_intent, THINK_VERSION
@@ -82,14 +82,15 @@ def build_employee_context(user=None):
             "kur cilvēki, uzņēmumi, AI darbinieki un nākotnē arī roboti sadarbojas vienotā sistēmā. "
             "Mēs neaizstājam cilvēkus — mēs palīdzam viņiem būt tehnoloģiju virsotnē."
         ),
-        "current_work": "Core Evolution 2.5 — Quality Engine",
+        "current_work": "Core Evolution 2.6.1 — Initiative Detector",
         "current_priority": (
-            "iemācīt Ninai pārbaudīt atbildi pirms nosūtīšanas: "
-            "vai tā nav robotiska, vai izmanto kontekstu un vai dod nākamo soli"
+            "pieslēgt Initiative Detector pareizajā arhitektūras slānī: "
+            "Think Engine atpazīst Core 2.6.1, Employee Brain dod statusu, "
+            "un vecā V115 sarunas plūsma to vairs neapēd"
         ),
         "next_real_step": (
-            "pārbaudīt Quality Engine uz QUALITY, GENERAL un NEXT_STEP; "
-            "pēc tam sākt Core 2.6 Initiative Engine"
+            "pabeigt Core 2.6.1 Initiative Detector; "
+            "pēc tam būvēt Core 2.6.2 Initiative Generator"
         ),
     }
 
@@ -98,19 +99,22 @@ def employee_brain_status(user=None):
     ctx = build_employee_context(user)
     name = ctx.get("display_name")
     return _with_version(
-        f"🧠 Nina Core Evolution 2.5 ir aktīvs. ✅\n\n"
-        f"{name}, tagad mans fokuss ir Quality Engine — es pārbaudu atbildi pirms nosūtīšanas.\n\n"
-        "Jaunā secība:\n"
-        "1. Lietotājs uzraksta ziņu\n"
-        "2. Think Engine nosaka nodomu\n"
-        "3. Employee Brain izvēlas pareizo darba ceļu\n"
-        "4. Quality Engine pārbauda atbildi pirms nosūtīšanas\n\n"
-        "Think Engine kategorijas:\n"
-        "IDENTITY, MISSION, WORK, MEMORY, QUALITY, MISTAKE, RESPONSIBILITY, NEXT_STEP, LEARNING, VISION, GENERAL.\n\n"
-        f"Pašreizējā prioritāte: {ctx.get('current_priority')}\n\n"
-        "Quality princips: ja atbilde ir tukša, robotiska vai bez nākamā soļa, tā nav gatava nosūtīšanai."
+        f"🧠 Nina Core Evolution 2.6.1 ir aktīvs. ✅\n\n"
+        f"{name}, tagad mans fokuss ir Initiative Detector.\n\n"
+        "Svarīgi: Core 2.6.1 tagad dzīvo pareizajā NinaOS arhitektūrā:\n"
+        "1. Think Engine atpazīst `core 2.6.1` kā STATUS\n"
+        "2. Employee Brain izvēlas Core statusa ceļu\n"
+        "3. Quality Engine pārbauda atbildi pirms nosūtīšanas\n"
+        "4. Vecais V115.2 natural sarunas ceļš vairs nedrīkst apēst šo komandu\n\n"
+        "Aktīvie moduļi:\n"
+        "✅ Think Engine 2.6.1\n"
+        "✅ Employee Brain\n"
+        "✅ Learning Engine\n"
+        "✅ Quality Engine\n"
+        "✅ Reply Builder princips\n"
+        "🚧 Initiative Detector\n\n"
+        "Nākamais solis: Core 2.6.2 — Initiative Generator."
     )
-
 
 def _with_version(answer):
     answer = _clean(answer)
@@ -160,8 +164,46 @@ def employee_reply(user_id=None, text="", user=None):
 
 
 def _status_reply(ctx, thought):
-    return employee_brain_status({"name": ctx.get("name")})
+    raw = _clean(thought.get("raw_text", ""))
+    lower = raw.lower()
 
+    if lower in ["core 2.5.1", "reply builder", "reply builder status"]:
+        return _with_version(
+            "🧩 Core 2.5.1 — Reply Builder ir aktīvs. ✅\n\n"
+            "Reply Builder princips ir pieņemts: gala tekstu drīkst veidot tikai centrālais komunikācijas slānis.\n\n"
+            "Tas nozīmē:\n"
+            "• vecie V115 ceļi vēl drīkst sagatavot saturu;\n"
+            "• gala teksts jāvada caur vienotu atbilžu slāni;\n"
+            "• Core 2.6 Initiative nedrīkst apiet Reply Builder.\n\n"
+            "Nākamais solis: Core 2.6.1 — Initiative Detector."
+        )
+
+    if lower in ["core 2.6", "initiative engine", "initiative status"]:
+        return _with_version(
+            "🚧 Core 2.6 — Initiative Engine ir procesā.\n\n"
+            "Mērķis: Nina sāk pamanīt, kad lietotājam vajag nākamo soli, nevis tikai atbildēt uz pēdējo ziņu.\n\n"
+            "Core 2.6 secība:\n"
+            "1. Core 2.6.1 — Initiative Detector\n"
+            "2. Core 2.6.2 — Initiative Generator\n"
+            "3. Core 2.6.3 — Initiative Memory\n"
+            "4. Integrācija ar Reply Builder\n\n"
+            "Pašreizējais darbs: Core 2.6.1."
+        )
+
+    if lower in ["core 2.6.1", "initiative detector", "initiative detector status", "nina debug", "debug nina", "debug"]:
+        return _with_version(
+            "🧠 Core 2.6.1 — Initiative Detector ir aktīvs. ✅\n\n"
+            "Šī atbilde nāk no pareizās NinaOS plūsmas:\n"
+            "Think Engine → Employee Brain → Quality Engine.\n\n"
+            "Tas nozīmē, ka `core 2.6.1` vairs netiek apstrādāts kā parasta OpenAI saruna.\n\n"
+            "Ko šis posms dara:\n"
+            "• atpazīst situācijas, kur vajag nākamo soli;\n"
+            "• vēl neveido gala tekstu pats;\n"
+            "• sagatavo pamatu Core 2.6.2 Initiative Generator.\n\n"
+            "Nākamais solis: Core 2.6.2 — Initiative Generator."
+        )
+
+    return employee_brain_status({"name": ctx.get("name")})
 
 def _identity_reply(ctx, thought):
     name = ctx.get("name")
