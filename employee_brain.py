@@ -1,12 +1,12 @@
 """
 employee_brain.py
-Nina Core Evolution 2.3 — Employee Brain + Think Engine
+Nina Core Evolution 2.4 — Employee Brain + Think Engine + Learning Engine
 
 Šajā versijā Employee Brain vairs nemēģina pats minēt visu ar haotiskiem if.
 Vispirms Think Engine nosaka nodomu, tikai tad Employee Brain veido atbildi.
 """
 
-CORE_VERSION = "Core Evolution 2.3"
+CORE_VERSION = "Core Evolution 2.4"
 
 try:
     from think_engine import classify_intent, THINK_VERSION
@@ -16,6 +16,21 @@ except Exception as e:
 
     def classify_intent(text):
         return {"intent": "GENERAL", "raw_text": text or "", "confidence": 0.0, "reason": "Think Engine fallback", "version": THINK_VERSION}
+
+try:
+    from learning_engine import build_learning_snapshot, format_learning_snapshot, current_learning_focus, LEARNING_VERSION
+except Exception as e:
+    print("learning_engine.py imports nav pieejams:", e)
+    LEARNING_VERSION = "Learning Engine nav pieslēgts"
+
+    def build_learning_snapshot(intent="GENERAL", issue=""):
+        return {"intent": intent, "issue": issue, "learned": "Mācīšanās modulis nav pieslēgts.", "avoid": "", "next_behavior": "", "principles": [], "version": LEARNING_VERSION}
+
+    def format_learning_snapshot(snapshot):
+        return snapshot.get("learned", "Mācīšanās modulis nav pieslēgts.")
+
+    def current_learning_focus():
+        return "Learning Engine nav pieslēgts."
 
 
 def _clean(value):
@@ -52,14 +67,14 @@ def build_employee_context(user=None):
             "kur cilvēki, uzņēmumi, AI darbinieki un nākotnē arī roboti sadarbojas vienotā sistēmā. "
             "Mēs neaizstājam cilvēkus — mēs palīdzam viņiem būt tehnoloģiju virsotnē."
         ),
-        "current_work": "Core Evolution 2.3 — Think Engine",
+        "current_work": "Core Evolution 2.4 — Learning Engine",
         "current_priority": (
-            "uzbūvēt skaidru domāšanas slāni, kas vispirms saprot lietotāja nodomu "
-            "un tikai pēc tam ļauj Employee Brain atbildēt"
+            "iemācīt Ninai konkrēti fiksēt, ko viņa iemācījās, "
+            "ko nedrīkst atkārtot un kā mainās nākamā rīcība"
         ),
         "next_real_step": (
-            "pārbaudīt Think Engine uz nodomiem MISTAKE, RESPONSIBILITY, MISSION, NEXT_STEP un WORK; "
-            "pēc tam sākt Core 2.4 Learning Engine"
+            "pārbaudīt Learning Engine uz MISTAKE, QUALITY un NEXT_STEP; "
+            "pēc tam sākt Core 2.5 Quality Engine"
         ),
     }
 
@@ -68,8 +83,8 @@ def employee_brain_status(user=None):
     ctx = build_employee_context(user)
     name = ctx.get("display_name")
     return _with_version(
-        f"🧠 Nina Core Evolution 2.3 ir aktīvs. ✅\n\n"
-        f"{name}, tagad mans fokuss ir Think Engine — es vispirms saprotu nodomu, tikai tad atbildu.\n\n"
+        f"🧠 Nina Core Evolution 2.4 ir aktīvs. ✅\n\n"
+        f"{name}, tagad mans fokuss ir Learning Engine — es ne tikai atzīstu kļūdu, bet pasaku, ko no tās mācos.\n\n"
         "Jaunā secība:\n"
         "1. Lietotājs uzraksta ziņu\n"
         "2. Think Engine nosaka nodomu\n"
@@ -78,7 +93,7 @@ def employee_brain_status(user=None):
         "Think Engine kategorijas:\n"
         "IDENTITY, MISSION, WORK, MEMORY, QUALITY, MISTAKE, RESPONSIBILITY, NEXT_STEP, LEARNING, VISION, GENERAL.\n\n"
         f"Pašreizējā prioritāte: {ctx.get('current_priority')}\n\n"
-        "Responsibility princips paliek spēkā: ja es kļūdos, man tas jāatzīst konkrēti, nevis jāslēpjas aiz vispārīga teksta."
+        "Learning princips: kļūda nav kauns. Kļūda ir darba kvalitātes signāls, no kura man jāizdara praktiska izmaiņa nākamajā rīcībā."
     )
 
 
@@ -156,17 +171,15 @@ def _mission_reply(ctx, thought):
 
 def _mistake_reply(ctx, thought):
     name = ctx.get("display_name")
+    snapshot = build_learning_snapshot("MISTAKE", thought.get("raw_text", ""))
+    learning_text = format_learning_snapshot(snapshot)
     return (
-        f"{name}, šeit mana kļūda bija arhitektūras līmenī.\n\n"
-        "Es mēģināju atpazīt pārāk daudz lietu pašā Employee Brain failā. Tāpēc jautājums `kur tu kļūdījies?` reizēm aizgāja uz vispārīgu atbildi, nevis uz kļūdas analīzi.\n\n"
-        "Ko es no tā mācos:\n"
-        "1. Vispirms jābūt Think Engine, kas nosaka nodomu.\n"
-        "2. Employee Brain nedrīkst minēt visu viens pats.\n"
-        "3. Kļūdu analīzei jābūt atsevišķam ceļam: MISTAKE.\n\n"
-        "Labošanas solis: Core 2.3 ievieš Think Engine. Tas šo ziņu klasificē kā MISTAKE, un tikai tad Employee Brain dod konkrētu kļūdas analīzi.\n\n"
-        "Nākamais solis: pārbaudām arī `ko tu uzņemies?`, `ninaos misija` un `kas tālāk?`, lai redzam, vai Think Engine pareizi maršrutē nodomus."
+        f"{name}, šeit es atzīstu kļūdu konkrēti, nevis vispārīgi.\n\n"
+        "Kļūda: iepriekš es dažas frāzes apstrādāju ar nepareizu ceļu — jautājums par kļūdu aizgāja uz vispārīgu atbildi.\n\n"
+        "Cēlonis: Employee Brain mēģināja pats minēt nodomu, nevis balstījās uz atsevišķu Think Engine.\n\n"
+        f"{learning_text}\n\n"
+        "Nākamais solis: testē arī `ko tu iemācījies?`, lai redzam, vai Learning Engine atbild ar mācīšanās protokolu."
     )
-
 
 def _responsibility_reply(ctx, thought):
     name = ctx.get("display_name")
@@ -185,17 +198,15 @@ def _responsibility_reply(ctx, thought):
 def _next_step_reply(ctx, thought):
     name = ctx.get("display_name")
     return (
-        f"{name}, nākamais pareizais solis tagad ir Core Evolution 2.3 pārbaude.\n\n"
-        "Mēs vairs nelāpām vienu atbildi. Mēs pārbaudām, vai Think Engine pareizi saprot nodomu.\n\n"
+        f"{name}, nākamais pareizais solis tagad ir Core Evolution 2.4 pārbaude.\n\n"
+        "Think Engine jau strādā. Tagad pārbaudām, vai Learning Engine māca Ninu ne tikai atzīt kļūdu, bet arī mainīt nākamo rīcību.\n\n"
         "Šodienas tests:\n"
-        "1. `kur tu kļūdījies?` → MISTAKE\n"
-        "2. `ko tu uzņemies?` → RESPONSIBILITY\n"
-        "3. `ninaos misija` → MISSION\n"
-        "4. `palīdzi būvēt NinaOS` → WORK\n"
-        "5. `kas tālāk?` → NEXT_STEP\n\n"
-        f"Nākamais solis: {ctx.get('next_real_step')}."
+        "1. `kur tu kļūdījies?` → MISTAKE + learning snapshot\n"
+        "2. `ko tu iemācījies?` → LEARNING\n"
+        "3. `tu atbildi kā robots` → QUALITY + mācīšanās virziens\n"
+        "4. `kas tālāk?` → NEXT_STEP bez vecu soļu atkārtošanas\n\n"
+        "Nākamais solis: testēt Learning Engine; pēc tam sākt Core 2.5 Quality Engine, kas vērtēs atbildes pirms nosūtīšanas."
     )
-
 
 def _work_reply(ctx, thought):
     name = ctx.get("display_name")
@@ -208,7 +219,7 @@ def _work_reply(ctx, thought):
         "1. Nostiprinām Think Engine.\n"
         "2. Pēc tam būvējam Learning Engine.\n"
         "3. Tikai pēc tam ejam uz darba prasmēm: e-pasti, dokumenti, balss, zvani.\n\n"
-        "Nākamais solis: pārbaudīt, vai Think Engine pareizi maršrutē darba pieprasījumus uz WORK ceļu."
+        "Nākamais solis: pārbaudīt, vai darba pieprasījumos es dodu ne tikai plānu, bet arī ko mācos un kā uzņemos atbildību."
     )
 
 
@@ -224,12 +235,15 @@ def _quality_reply(ctx, thought):
 
 def _learning_reply(ctx, thought):
     name = ctx.get("display_name")
+    snapshot = build_learning_snapshot(thought.get("intent", "LEARNING"), thought.get("raw_text", ""))
+    learning_text = format_learning_snapshot(snapshot)
     return (
-        f"{name}, mācīšanās Ninai nedrīkst nozīmēt tikai jaunu faktu glabāšanu.\n\n"
-        "Mācīšanās nozīmē: saprast kļūdu, noteikt cēloni un nākamajā reizē izvēlēties labāku rīcību.\n\n"
-        "Nākamais solis: pēc Think Engine pabeigšanas sākam Core 2.4 Learning Engine."
+        f"{name}, Core 2.4 nozīmē, ka es vairs tikai nesaku 'sapratu'.\n\n"
+        "Man jāpasaka, ko tieši iemācījos un kā tas maina manu nākamo rīcību.\n\n"
+        f"{learning_text}\n\n"
+        f"Pašreizējais fokuss: {current_learning_focus()}\n\n"
+        "Nākamais solis: pārbaudīt Learning Engine uz kļūdu, kvalitātes komentāru un nākamā soļa jautājumu."
     )
-
 
 def _memory_reply(ctx, thought):
     name = ctx.get("display_name")
