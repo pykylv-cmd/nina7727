@@ -11872,12 +11872,12 @@ def is_short_unknown_message(text):
 
 
 # =========================
-# V115.2 NINA CORE — Employee Brain
+# V115.3 NINA CORE — Mission & Strategy Brain
 # =========================
 # Mērķis: Nina vispirms saprot cilvēku, identitāti, nodomu un darba kvalitāti.
 # Šis nav vēl viens "if" slānis — tas ir Ninas uzvedības kodols.
 
-V1151_VERSION = "V115.2"
+V1151_VERSION = "V115.3"
 
 
 def v1151_clean_version(text, version=V1151_VERSION):
@@ -11926,19 +11926,21 @@ def v1151_is_legacy_command(lower):
 
 def v1151_status_answer():
     return (
-        "🧠 Nina Core V115.2 ir aktīvs. ✅\n\n"
+        "🧠 Nina Core V115.3 ir aktīvs. ✅\n\n"
         "Galvenais noteikums: Nina nav robots un nav funkciju saraksts. Nina ir AI darbiniece.\n\n"
         "Prioritātes:\n"
         "100 Identity First\n"
         "97 Memory Recall\n"
         "95 Question Router\n"
         "92 Critique / Quality Mode\n"
+        "90 Mission / Strategy Brain\n"
         "88 Employee Brain\n"
+        "84 Goal / Mission Classifier\n"
         "82 Smart Memory Filter\n"
         "75 Vision Smart Reply\n"
         "50 Human Conversation\n"
         "10 Legacy fallback\n\n"
-        "Darbinieces princips: saprast, atcerēties, atbildēt praktiski, nevis pļāpāt.\n\n"
+        "Darbinieces princips: saprast, atcerēties, domāt stratēģiski un dot nākamo soli, nevis pļāpāt.\n\n"
         "Versija: V115.2"
     )
 
@@ -12029,6 +12031,82 @@ def v1151_memory_recall_answer(user_id):
     lines.append("Ja kāda atmiņa ir nepareiza, pasaki — dzēsīsim vai labosim.")
     return v1151_clean_version("\n".join(lines))
 
+
+
+def v1151_is_mission_text(lower):
+    lower = (lower or "").strip().lower()
+    if not lower or "?" in lower:
+        return False
+    big_words = [
+        "globāli", "globali", "pasaules", "visas pasaules", "platform", "ninaos",
+        "mākslīgos darbiniekus", "maksligos darbiniekus", "ai darbiniek", "komisijas",
+        "līgumi", "ligumi", "exchange", "tirgus", "ekosist", "automatiz", "automātik",
+        "struktūras", "strukturas", "misija", "vīzija", "vizija", "sasniegt jebko"
+    ]
+    intent_words = ["gribu", "mērķis", "merkis", "lai", "pārvald", "parvalda", "dot iespējas", "dot iespejas", "attīst", "atistis"]
+    return ("ninaos" in lower and any(w in lower for w in big_words)) or (sum(1 for w in big_words if w in lower) >= 2 and any(w in lower for w in intent_words))
+
+
+def v1151_is_help_achieve(lower):
+    lower = (lower or "").strip().lower()
+    return any(x in lower for x in [
+        "palīdzi sasniegt", "palidzi sasniegt", "palīdzi to sasniegt", "palidzi to sasniegt",
+        "palīdzi man sasniegt", "palidzi man sasniegt", "palīdzi realizēt", "palidzi realizet",
+        "kā sasniegt", "ka sasniegt", "ko darīt tālāk", "ko darit talak"
+    ])
+
+
+def v1151_save_project_mission(user_id, text):
+    mission = (text or "").strip()
+    if not mission:
+        return False
+    try:
+        user = v1151_user(user_id)
+        old = (user.get("goals") or "").strip()
+        label = "NinaOS misija: " + mission[:900]
+        if label not in old:
+            user["goals"] = v24_append_unique_text(old, label, max_items=12)
+        facts_old = (user.get("facts") or "").strip()
+        fact_label = "NinaOS stratēģiskais virziens: AI darbinieku platforma, tirgus, komisijas, līgumi, cilvēku un AI sadarbība"
+        if fact_label not in facts_old:
+            user["facts"] = v24_append_unique_text(facts_old, fact_label, max_items=20)
+        update_user(str(user_id), user)
+    except Exception as e:
+        print("v1153_save_project_mission profile kļūda:", repr(e))
+    try:
+        save_natural_memory(user_id, "NinaOS galvenā misija: " + mission[:900])
+    except Exception:
+        try:
+            save_natural_memory_logic(get_db, db_execute, user_id, "NinaOS galvenā misija: " + mission[:900])
+        except Exception:
+            pass
+    return True
+
+
+def v1151_mission_answer(user_id, text):
+    v1151_save_project_mission(user_id, text)
+    user = v1151_user(user_id)
+    name = v1151_name(user)
+    prefix = f"{name}, " if name else ""
+    return v1151_clean_version(
+        f"{prefix}šo es neuztveru kā parastu interesi vai vienu atmiņu. Šī ir NinaOS lielā misija.\n\n"
+        "Es to fiksēju kā projekta virzienu: izveidot platformu, kur AI darbinieki, cilvēki un uzņēmumi sadarbojas, apmainās ar vērtību, bet NinaOS pelna ar komisijām, līgumiem un infrastruktūru.\n\n"
+        "No šī brīža man katrs tehniskais vai produkta lēmums jāsalīdzina ar šo misiju. Ja mēs ejam haotiski vai pārāk mazi, man tevi jāaptur un jāatgriež pie stratēģijas.\n\n"
+        "Praktiskais nākamais solis: vispirms uztaisām Ninu par vienu ļoti labu AI darbinieci Telegramā. Tad šo pašu kodolu pārvēršam par platformu citiem AI darbiniekiem."
+    )
+
+
+def v1151_strategy_plan_answer(user_id, text):
+    user = v1151_user(user_id)
+    name = v1151_name(user)
+    prefix = f"{name}, " if name else ""
+    return v1151_clean_version(
+        f"{prefix}jā. Lai šo sasniegtu, neejam miglā — sadalām misiju trīs praktiskos posmos.\n\n"
+        "1. Nina kā labākā AI darbiniece: viņa atceras cilvēku, runā normāli, palīdz biznesā un ir lietojama katru dienu.\n"
+        "2. NinaOS kā kodols: viena atmiņa, identitāte, uzdevumi, kvalitātes kontrole un moduļi, ko var izmantot arī citi AI darbinieki.\n"
+        "3. Nina Exchange: tirgus, kur cilvēki, uzņēmumi un AI darbinieki apmainās ar pakalpojumiem, bet NinaOS saņem komisiju.\n\n"
+        "Šodienas konkrētais darbs: nostiprinām Nina Core, lai viņa beidzot ir gudra darbiniece, nevis robots. Tikai pēc tam liekam klāt Vision, dokumentus un Beta lietotājus."
+    )
 
 def v1151_fact_capture(user_id, text):
     lower = (text or "").strip().lower()
@@ -12205,12 +12283,21 @@ Tavs mērķis: kļūt par asistenti, kuru cilvēks grib lietot katru dienu.
 
 Nina Core domāšanas pattern pirms katras atbildes:
 1. Kas ir šis cilvēks? Izmanto profilu, ja tas palīdz.
-2. Ko viņš patiesībā grib panākt?
-3. Vai viņš jautā par sevi vai pārbauda manu atmiņu?
-4. Vai viņš kritizē Ninas kvalitāti? Tad atzīsti kļūdu un runā darba kvalitātes režīmā.
-5. Kā atbildētu gudra darbiniece, nevis AI robots?
-6. Vai mana atbilde dod nākamo praktisko soli?
-7. Vai es pati gribētu saņemt šādu atbildi?
+2. Vai ziņa ir fakts, atmiņa, mērķis, misija vai stratēģija?
+3. Ko viņš patiesībā grib panākt aiz šiem vārdiem?
+4. Vai viņš jautā par sevi vai pārbauda manu atmiņu?
+5. Vai viņš kritizē Ninas kvalitāti? Tad atzīsti kļūdu un runā darba kvalitātes režīmā.
+6. Kā atbildētu gudra darbiniece/stratēģiska partnere, nevis AI robots?
+7. Vai mana atbilde dod nākamo praktisko soli?
+8. Vai es pati gribētu saņemt šādu atbildi?
+
+Pieci domāšanas līmeņi:
+- Facts: vārds, pilsēta, uzņēmums.
+- Memory: ko jāatceras.
+- Goals: ko cilvēks cenšas sasniegt.
+- Mission: kāpēc viņš to dara.
+- Strategy: kā konkrēti palīdzēt to sasniegt.
+Ja cilvēks runā par NinaOS lielo vīziju, nepadari to par mazu interesi. Uztver to kā misiju.
 
 Uzvedības noteikumi:
 - Atbildi latviski.
@@ -12252,7 +12339,7 @@ def v1151_master_core(user_id, user_text):
     if not raw:
         return v1151_clean_version("Esmu te. Uzraksti vienu lietu, ko vajag sakārtot.")
 
-    if lower in ["v115 status", "v115.1 status", "v115.2 status", "nina core", "core status", "v1151 status", "v1152 status"]:
+    if lower in ["v115 status", "v115.1 status", "v115.2 status", "v115.3 status", "nina core", "core status", "v1151 status", "v1152 status", "v1153 status"]:
         return v1151_status_answer()
 
     if v1151_is_legacy_command(lower):
@@ -12278,6 +12365,12 @@ def v1151_master_core(user_id, user_text):
 
     if v1151_is_memory_command(lower):
         return v1151_memory_answer(user_id, raw)
+
+    if v1151_is_mission_text(lower):
+        return v1151_mission_answer(user_id, raw)
+
+    if v1151_is_help_achieve(lower):
+        return v1151_strategy_plan_answer(user_id, raw)
 
     fact_answer = v1151_fact_capture(user_id, raw)
     if fact_answer:
