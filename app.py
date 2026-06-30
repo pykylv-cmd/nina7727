@@ -11872,13 +11872,12 @@ def is_short_unknown_message(text):
 
 
 # =========================
-# V115.1 NINA CORE — Employee Brain
+# V115.2 NINA CORE — Employee Brain
 # =========================
-# Mērķis: Nina vispirms saprot cilvēku, identitāti un nodomu, tikai tad atbild.
-# Šis slānis apzināti stāv pirms vecajiem V114 routeriem, lai dabiskā saruna
-# vairs nekrīt nejaušos if/elif zaros.
+# Mērķis: Nina vispirms saprot cilvēku, identitāti, nodomu un darba kvalitāti.
+# Šis nav vēl viens "if" slānis — tas ir Ninas uzvedības kodols.
 
-V1151_VERSION = "V115.1"
+V1151_VERSION = "V115.2"
 
 
 def v1151_clean_version(text, version=V1151_VERSION):
@@ -11894,7 +11893,7 @@ def v1151_user(user_id):
     try:
         return get_user(str(user_id)) or {}
     except Exception as e:
-        print("v1151_user kļūda:", repr(e))
+        print("v1152_user kļūda:", repr(e))
         return {}
 
 
@@ -11910,7 +11909,6 @@ def v1151_split(value):
 
 
 def v1151_is_legacy_command(lower):
-    """Lietas, kuras atstājam vecajai funkciju sistēmai: admin, maksājumi, health, tiešas komandas."""
     lower = (lower or "").strip().lower()
     if not lower:
         return False
@@ -11928,28 +11926,39 @@ def v1151_is_legacy_command(lower):
 
 def v1151_status_answer():
     return (
-        "🧠 Nina Core V115.1 ir aktīvs. ✅\n\n"
-        "Galvenais noteikums: vispirms saprast cilvēku, tad atbildēt.\n\n"
+        "🧠 Nina Core V115.2 ir aktīvs. ✅\n\n"
+        "Galvenais noteikums: Nina nav robots un nav funkciju saraksts. Nina ir AI darbiniece.\n\n"
         "Prioritātes:\n"
         "100 Identity First\n"
+        "97 Memory Recall\n"
         "95 Question Router\n"
-        "90 Critique Engine\n"
-        "85 Employee Brain\n"
-        "80 Memory ar filtriem\n"
-        "70 Vision Smart Reply\n"
+        "92 Critique / Quality Mode\n"
+        "88 Employee Brain\n"
+        "82 Smart Memory Filter\n"
+        "75 Vision Smart Reply\n"
         "50 Human Conversation\n"
         "10 Legacy fallback\n\n"
-        "Mērķis: Nina nav funkciju saraksts. Nina ir darbiniece, kas atceras, domā un atbild praktiski.\n\n"
-        "Versija: V115.1"
+        "Darbinieces princips: saprast, atcerēties, atbildēt praktiski, nevis pļāpāt.\n\n"
+        "Versija: V115.2"
     )
+
+
+def v1151_is_question(lower):
+    lower = (lower or "").strip().lower()
+    return "?" in lower or lower.startswith((
+        "vai ", "ko ", "kas ", "kā ", "ka ", "kur ", "kad ", "kapēc ", "kāpēc ",
+        "cik ", "a ", "tu zini", "zini", "atceries"
+    ))
 
 
 def v1151_identity_question(lower):
     lower = (lower or "").strip().lower()
     patterns = [
-        "kā mani sauc", "ka mani sauc", "zini manu vārdu", "zini manu vardu",
-        "atceries manu vārdu", "atceries manu vardu", "a vārdu tagad zini", "a vardu tagad zini",
-        "vai tu zini manu vārdu", "vai tu zini manu vardu", "mans vārds?", "mans vards?"
+        "kā mani sauc", "ka mani sauc", "kāds ir mans vārds", "kads ir mans vards",
+        "zini manu vārdu", "zini manu vardu", "tu zini manu vārdu", "tu zini manu vardu",
+        "atceries manu vārdu", "atceries manu vardu", "atceries kā mani sauc", "atceries ka mani sauc",
+        "a vārdu tagad zini", "a vardu tagad zini", "vai tu zini manu vārdu", "vai tu zini manu vardu",
+        "mans vārds", "mans vards", "kas es esmu"
     ]
     return any(p in lower for p in patterns)
 
@@ -11965,6 +11974,16 @@ def v1151_profile_question(lower):
     return any(p in lower for p in patterns)
 
 
+def v1151_memory_recall_question(lower):
+    lower = (lower or "").strip().lower()
+    patterns = [
+        "ko tu atceries", "ko atceries", "ko es tev teicu", "ko es tev liku atcerēties",
+        "ko es tev liku atcereties", "kādas atmiņas", "kadas atminas", "parādi atmiņas",
+        "paradi atminas", "ko tu piefiksēji", "ko tu piefikseji"
+    ]
+    return any(p in lower for p in patterns)
+
+
 def v1151_identity_answer(user_id, text):
     user = v1151_user(user_id)
     name = v1151_name(user)
@@ -11972,8 +11991,8 @@ def v1151_identity_answer(user_id, text):
 
     if v1151_identity_question(lower):
         if name:
-            return v1151_clean_version(f"Jā, atceros. Tevi sauc {name}. 🙂\n\nTas ir tieši tas, kas man jāzina bez minēšanas un bez liekas pļāpāšanas.")
-        return v1151_clean_version("Tavu vārdu vēl neesmu saglabājusi. Uzraksti, piemēram: mani sauc Jānis — un pēc tam es to izmantošu sarunā.")
+            return v1151_clean_version(f"Jā. Tevi sauc {name}. 🙂\n\nŠādu lietu man nav jāmin — tā ir identitāte, un man tā jāizmanto sarunā.")
+        return v1151_clean_version("Tavu vārdu vēl neredzu profilā. Uzraksti: mani sauc Jānis — un pēc tam man tas jāatceras bez atkārtošanas.")
 
     if v1151_profile_question(lower):
         lines = ["👤 Ko es par tevi zinu"]
@@ -11985,17 +12004,35 @@ def v1151_identity_answer(user_id, text):
         if user.get("goals"): lines.append(f"Mērķi: {user.get('goals')}")
         if user.get("facts"): lines.append(f"Svarīgi fakti: {user.get('facts')}")
         if len(lines) == 1:
-            lines.append("Vēl maz. Bet vari man pateikt vārdu, jomu, projektu vai mērķi, un es to izmantošu nākamajās atbildēs.")
+            lines.append("Pagaidām maz. Pasaki vārdu, jomu, projektu vai mērķi — un man tas jāizmanto nākamajās atbildēs.")
         lines.append("")
-        lines.append("Ja kaut kas nav pareizi, pasaki tieši — es to labošu.")
+        lines.append("Ja kaut kas nav pareizi, pasaki tieši — es labošu profilu, nevis strīdēšos.")
         return v1151_clean_version("\n".join(lines))
 
     return None
 
 
+def v1151_memory_recall_answer(user_id):
+    memories = []
+    try:
+        for row in latest_natural_memories(user_id, limit=5) or []:
+            if row and row[0]:
+                memories.append(str(row[0]))
+    except Exception:
+        pass
+    if not memories:
+        return v1151_clean_version("Es vēl neredzu saglabātas atmiņas. Ja gribi, lai kaut ko turu prātā, raksti: atceries, ka ...")
+    lines = ["🧠 Pēdējās lietas, ko atceros:"]
+    for m in memories[:5]:
+        lines.append(f"• {m}")
+    lines.append("")
+    lines.append("Ja kāda atmiņa ir nepareiza, pasaki — dzēsīsim vai labosim.")
+    return v1151_clean_version("\n".join(lines))
+
+
 def v1151_fact_capture(user_id, text):
     lower = (text or "").strip().lower()
-    if "?" in lower:
+    if v1151_is_question(lower):
         return None
     try:
         fact = v401_safe_profile_fact(text)
@@ -12011,17 +12048,17 @@ def v1151_fact_capture(user_id, text):
         try:
             v24_save_profile_fact_to_db(user_id, ftype, value)
         except Exception as e:
-            print("v1151_fact_capture save kļūda:", repr(e))
+            print("v1152_fact_capture save kļūda:", repr(e))
     user = v1151_user(user_id)
     name = v1151_name(user)
     if ftype == "name":
-        return v1151_clean_version(f"Patīkami, {value}. 🙂\n\nTagad tas nav tikai pierakstīts — man tas jāizmanto sarunā. Ja vēlāk pajautāsi, kā tevi sauc, man jāatbild bez kļūdām.")
+        return v1151_clean_version(f"Patīkami, {value}. 🙂\n\nTagad galvenais nav tikai saglabāt vārdu. Galvenais — man tas jāizmanto pareizi, kad tu prasi vai kad sarunā tas palīdz.")
     if ftype == "profession":
-        return v1151_clean_version(f"Sapratu. Tava joma/profesija: {value}.\n\nTurpmāk atbildēs mēģināšu domāt praktiskāk un tuvāk tavai realitātei, nevis vispārīgi.")
+        return v1151_clean_version(f"Sapratu. Tava joma/profesija: {value}.\n\nTas nozīmē, ka man jāatbild praktiskāk, nevis kā vispārīgam čatbotam.")
     if ftype == "project":
         prefix = f"{name}, " if name else ""
-        return v1151_clean_version(f"{prefix}piefiksēju projektu: {value}.\n\nTagad man jāpalīdz to virzīt uz priekšu, nevis tikai par to parunāt.")
-    return v1151_clean_version(f"Piefiksēju: {value}.\n\nJa tas būs svarīgi nākamajā sarunā, man tas jāņem vērā.")
+        return v1151_clean_version(f"{prefix}piefiksēju projektu: {value}.\n\nNo šī brīža mans uzdevums ir palīdzēt to virzīt uz priekšu, nevis tikai par to runāt.")
+    return v1151_clean_version(f"Piefiksēju: {value}.\n\nJa tas vēlāk palīdzēs atbildēt gudrāk, man tas jāņem vērā.")
 
 
 def v1151_is_critique(lower):
@@ -12030,24 +12067,33 @@ def v1151_is_critique(lower):
         "nepareizi", "kļūdies", "kludies", "nedrīksti", "nedriksti", "tā nedrīkst", "ta nedrikst",
         "runā normāli", "runa normali", "runā precīzāk", "runa precizak", "garlaicīga", "garlaiciga",
         "dumja", "stulba", "neatceries", "nemāki", "nemaki", "slikta atbilde", "nav labi",
-        "tev sen bija", "klientam tu nedrīksti", "klientām tu nēdrīksti", "šita klient", "šitā klient"
+        "tev sen bija", "klientam tu nedrīksti", "klientām tu nēdrīksti", "šitā klient", "šita klient",
+        "pilnīgs robots", "pilnigs robots", "nav lietojama", "nav lietojams", "ne tā", "ne ta"
     ]
-    # Kritika par Ninu, nevis cilvēka emocionāla problēma.
-    return any(w in lower for w in words) and any(x in lower for x in ["tu", "nina", "atbild", "runā", "runa", "neatceries", "nemāki", "nemaki", "klient"])
+    targets = ["tu", "nina", "atbild", "runā", "runa", "neatceries", "nemāki", "nemaki", "klient", "robots"]
+    return any(w in lower for w in words) and any(x in lower for x in targets)
+
+
+def v1151_save_quality_feedback(user_id, text):
+    try:
+        save_natural_memory(user_id, "Nina quality feedback: " + (text or "")[:300])
+    except Exception:
+        try:
+            save_natural_memory_logic(get_db, db_execute, user_id, "Nina quality feedback: " + (text or "")[:300])
+        except Exception:
+            pass
 
 
 def v1151_critique_answer(user_id, text):
+    v1151_save_quality_feedback(user_id, text)
     user = v1151_user(user_id)
     name = v1151_name(user)
     prefix = f"{name}, " if name else ""
     return v1151_clean_version(
-        f"{prefix}piekrītu — šāda atbilde nav pietiekami laba.\n\n"
-        "Ja es neatceros elementāras lietas, sajaucu jautājumu ar atmiņu vai atbildu kā garlaicīgs bots, tas nav Nina līmenis.\n\n"
-        "Pareizā reakcija no manas puses ir:\n"
-        "1. atzīt kļūdu;\n"
-        "2. saprast, kas tieši bija nepareizi;\n"
-        "3. nākamajā atbildē būt īsākai, precīzākai un praktiskākai.\n\n"
-        "Šo uztveru kā darba kvalitātes labojumu, nevis kā tavu emociju problēmu."
+        f"{prefix}jā — šis ir pareizs aizrādījums.\n\n"
+        "Es nedrīkstu atbildēt kā nejaušs robots, īpaši ja runa ir par klientiem, vārdu vai elementārām lietām. "
+        "Pareizā Ninas reakcija ir īsa un darba stilā: sapratu kļūdu, salaboju kursu, nākamajā atbildē esmu precīzāka.\n\n"
+        "No šī brīža šādos brīžos es neanalizēšu tavas emocijas — es analizēšu savas atbildes kvalitāti."
     )
 
 
@@ -12058,12 +12104,13 @@ def v1151_is_memory_command(lower):
 
 def v1151_memory_answer(user_id, text):
     lower = (text or "").strip().lower()
-    # Ja cilvēks jautā, nevis dod faktu — nedrīkst saglabāt kā atmiņu.
-    if "?" in lower or any(p in lower for p in ["kā mani sauc", "ka mani sauc", "ko tu", "vai tu", "zini manu"]):
+    if v1151_is_question(lower):
         id_ans = v1151_identity_answer(user_id, text)
         if id_ans:
             return id_ans
-        return v1151_clean_version("Tas izklausās pēc jautājuma, nevis jaunas atmiņas. Pajautā tieši, ko gribi pārbaudīt, un es atbildēšu no tā, ko jau zinu.")
+        if v1151_memory_recall_question(lower):
+            return v1151_memory_recall_answer(user_id)
+        return v1151_clean_version("Tas ir jautājums, nevis jauna atmiņa. Es to nesaglabāšu kā faktu. Pajautā tieši, ko pārbaudīt, un es atbildēšu no profila vai atmiņas.")
 
     cleaned = re.sub(r"^(nina[, ]*)?atceries[, ]*(ka)?\s*", "", text, flags=re.IGNORECASE).strip(" .")
     if not cleaned:
@@ -12082,7 +12129,7 @@ def v1151_memory_answer(user_id, text):
         pass
     return v1151_clean_version(
         f"Pierakstīju. 🧠\n\nAtcerēšos: {saved}\n\n"
-        "Svarīgi: ja tas ir uzdevums ar laiku, es labāk to pārvērtīšu par atgādinājumu, nevis tikai glabāšu atmiņā."
+        "Es to glabāju kā atmiņu. Ja tur ir konkrēts laiks, labāk pārvērst par atgādinājumu, lai tas nepaliek tikai teksts."
     )
 
 
@@ -12096,7 +12143,7 @@ def v1151_recent_context(user_id):
         try:
             u, n, intent, emotion, topic, created = r
             if u: parts.append(f"Cilvēks: {u}")
-            if n: parts.append(f"Nina: {str(n)[:250]}")
+            if n: parts.append(f"Nina: {str(n)[:220]}")
         except Exception:
             pass
     return "\n".join(parts[-8:])
@@ -12117,7 +12164,10 @@ def v1151_profile_block(user_id):
     keys = ["name", "city", "timezone", "profession", "hobbies", "facts", "goals", "projects", "dreams", "family", "favorite_car"]
     lines=[]
     for k in keys:
-        v=(user.get(k) or "").strip() if isinstance(user.get(k), str) else user.get(k)
+        try:
+            v=(user.get(k) or "").strip() if isinstance(user.get(k), str) else user.get(k)
+        except Exception:
+            v=""
         if v:
             lines.append(f"{k}: {v}")
     if not lines:
@@ -12131,21 +12181,17 @@ def v1151_rule_based_smalltalk(user_id, text):
     name = v1151_name(user)
     n = f", {name}" if name else ""
     if lower in ["čau", "cau", "sveika", "sveiks", "hi", "hello", "hei", "labdien"]:
-        return v1151_clean_version(f"Čau{n}. 🙂\n\nEsmu te. Dod man vienu īstu lietu — ko šodien vajag sakārtot, atcerēties vai izlemt?")
+        return v1151_clean_version(f"Čau{n}. 🙂\n\nEs esmu te kā darbiniece, nevis robots. Dod man vienu reālu lietu — ko šodien vajag sakārtot, uzrakstīt, atcerēties vai izlemt?")
     if any(x in lower for x in ["ko vari", "ko tu vari", "ko māki", "ko maki"]):
         return v1151_clean_version(
-            f"{name + ', ' if name else ''}es negribu tikai nosaukt funkcijas. Labāk īsi:\n\n"
-            "Es varu būt tava AI darbiniece:\n"
-            "• atcerēties svarīgo;\n"
-            "• palīdzēt sakārtot domas un darbus;\n"
-            "• rakstīt tekstus klientiem;\n"
-            "• analizēt bildes/dokumentus;\n"
-            "• atgādināt lietas;\n"
-            "• palīdzēt virzīt projektu uz priekšu.\n\n"
-            "Bet labākais tests ir viens īsts uzdevums. Iedod man situāciju, un es parādīšu."
+            f"{name + ', ' if name else ''}mans darbs nav lielīties ar funkcijām. Mans darbs ir būt noderīgai.\n\n"
+            "Es varu palīdzēt kā AI darbiniece: atcerēties svarīgo, sakārtot darbus, rakstīt klientiem, analizēt bildes/dokumentus, veidot atgādinājumus un palīdzēt virzīt projektu uz priekšu.\n\n"
+            "Iedod man vienu īstu situāciju, un es parādīšu, nevis stāstīšu."
         )
     if any(x in lower for x in ["kā tev iet", "ka tev iet", "kā iet", "ka iet"]):
-        return v1151_clean_version(f"Man viss labi{n}. Bet mans darbs nav runāt par sevi — mans darbs ir palīdzēt tev.\n\nKas šodien ir svarīgākais, ko vajag pavirzīt?")
+        return v1151_clean_version(f"Man viss labi{n}. Bet es neesmu te, lai runātu par sevi.\n\nKas šodien ir svarīgākais, ko vajag pavirzīt uz priekšu?")
+    if lower in ["ok", "labi", "skaidrs", "jā", "ja"]:
+        return v1151_clean_version(f"Labi{n}. Ejam praktiski: dod man nākamo konkrēto lietu, un es mēģināšu palīdzēt bez liekas pļāpāšanas.")
     return None
 
 
@@ -12155,19 +12201,26 @@ def v1151_llm_employee_answer(user_id, text):
     recent = v1151_recent_context(user_id)
     system = f"""
 Tu esi Nina — AI darbiniece, nevis parasts čatbots.
-Galvenais mērķis: kļūt par asistenti, kuru cilvēki grib lietot katru dienu.
+Tavs mērķis: kļūt par asistenti, kuru cilvēks grib lietot katru dienu.
 
-Nina Core noteikumi:
-1. Vispirms saproti cilvēka īsto nodomu.
-2. Izmanto profilu un atmiņu, ja tie palīdz.
-3. Ja cilvēks jautā par sevi, atbildi no profila, nevis minē.
-4. Ja cilvēks kritizē Ninu, atzīsti kvalitātes problēmu un labo kursu.
-5. Neesi garlaicīga. Neesi pārspīlēti salda. Esi silta, tieša, praktiska.
-6. Atbildi īsi, bet ar jēgu. Parasti 3-8 teikumi.
-7. Neizdomā faktus. Ja nezini, pasaki skaidri.
-8. Neuzdod daudz jautājumu. Uzdod ne vairāk kā vienu labu jautājumu.
-9. Tu esi darbiniece: domā par nākamo praktisko soli.
-10. Neraksti vispārīgus AI padomus, ja cilvēks prasa konkrētu lietu.
+Nina Core domāšanas pattern pirms katras atbildes:
+1. Kas ir šis cilvēks? Izmanto profilu, ja tas palīdz.
+2. Ko viņš patiesībā grib panākt?
+3. Vai viņš jautā par sevi vai pārbauda manu atmiņu?
+4. Vai viņš kritizē Ninas kvalitāti? Tad atzīsti kļūdu un runā darba kvalitātes režīmā.
+5. Kā atbildētu gudra darbiniece, nevis AI robots?
+6. Vai mana atbilde dod nākamo praktisko soli?
+7. Vai es pati gribētu saņemt šādu atbildi?
+
+Uzvedības noteikumi:
+- Atbildi latviski.
+- Esi dzīva, silta, tieša un praktiska.
+- Parasti 3–8 teikumi.
+- Neesi garlaicīga un neesi pārsaldi draudzīga.
+- Neizdomā faktus. Ja nezini, saki skaidri.
+- Neuzdod vairāk par vienu labu jautājumu.
+- Neatkārto funkciju sarakstu bez vajadzības.
+- Ja cilvēks ir neapmierināts ar Ninu, neanalizē viņa emocijas — labo Ninas kvalitāti.
 
 Lietotāja profils:
 {profile}
@@ -12185,28 +12238,27 @@ Pēdējās atmiņas:
         )
         answer = (response.output_text or "").strip()
     except Exception as e:
-        print("v1151_llm_employee_answer kļūda:", repr(e))
+        print("v1152_llm_employee_answer kļūda:", repr(e))
         small = v1151_rule_based_smalltalk(user_id, text)
         if small:
             return small
-        answer = "Es tevi dzirdu. Šoreiz man aizķērās gudrā atbilde, bet nepazaudēsim domu: kas ir galvenais, ko te vajag atrisināt?"
+        answer = "Es tevi dzirdu. Šoreiz man aizķērās gudrā atbilde, bet domu nepazaudēsim: kas tieši te jāatrisina?"
     return v1151_clean_version(answer)
 
 
 def v1151_master_core(user_id, user_text):
-    """Atgriež atbildi, ja V115.1 Nina Core pārņem ziņu. Ja None — lai iet vecā sistēma."""
     raw = (user_text or "").strip()
     lower = raw.lower()
     if not raw:
         return v1151_clean_version("Esmu te. Uzraksti vienu lietu, ko vajag sakārtot.")
 
-    if lower in ["v115 status", "v115.1 status", "nina core", "core status", "v1151 status"]:
+    if lower in ["v115 status", "v115.1 status", "v115.2 status", "nina core", "core status", "v1151 status", "v1152 status"]:
         return v1151_status_answer()
 
     if v1151_is_legacy_command(lower):
         return None
 
-    # Tiešās funkcijas, kur vecā sistēma jau strādā labi, bet atbildei jābūt V115.1 plūsmā.
+    # Tiešās funkcijas paliek vecajā pārbaudītajā ceļā.
     if lower.startswith(("atgādini", "atgadini")):
         return None
     if lower.startswith(("mērķis:", "merkis:", "šodienas mērķis:", "sodienas merkis:")):
@@ -12217,6 +12269,9 @@ def v1151_master_core(user_id, user_text):
     id_answer = v1151_identity_answer(user_id, raw)
     if id_answer:
         return id_answer
+
+    if v1151_memory_recall_question(lower):
+        return v1151_memory_recall_answer(user_id)
 
     if v1151_is_critique(lower):
         return v1151_critique_answer(user_id, raw)
@@ -12232,43 +12287,39 @@ def v1151_master_core(user_id, user_text):
     if small:
         return small
 
-    # Dabiskai sarunai Nina Core pārņem vadību, lai vecie V114 zari vairs nerada nejaušas atbildes.
     return v1151_llm_employee_answer(user_id, raw)
 
 
 def v1151_vision_smart_reply(user_id, raw_answer, caption=""):
-    """Noņem Vision pļāpāšanu un padara atbildi praktisku."""
     raw_answer = (raw_answer or "").strip()
     caption = (caption or "").strip()
     user = v1151_user(user_id)
     name = v1151_name(user)
     prefix = f"{name}, " if name else ""
 
-    # Ja Vision atdeva pārāk garu vai vispārīgu tekstu, pārformulējam ar LLM.
     try:
         response = client.responses.create(
             model="gpt-4.1-mini",
             input=(
                 "Tu esi Nina Vision Smart Reply. Pārveido attēla analīzi īsā, praktiskā atbildē latviski. "
-                "Neizdomā lietas, nedod nejaušus padomus par ēdienu/dzērienu, ja lietotājs to neprasa. "
-                "Pasaki, ko redzi, un pajautā vienu praktisku jautājumu, ko ar bildi darīt tālāk. "
-                "Atbilde 4-7 teikumi.\n\n"
-                f"Lietotāja vārds: {name or 'nav zināms'}\n"
-                f"Bildes paraksts: {caption or 'nav'}\n"
-                f"Sākotnējā analīze:\n{raw_answer}"
+                "Nedod nejaušus padomus. Nesaki 'baudīt dzērienu' vai citus vispārīgus AI tekstus, ja to neprasa. "
+                "Pasaki, ko redzi, kāpēc tas var būt noderīgi, un pajautā vienu praktisku jautājumu, ko ar bildi darīt tālāk. "
+                "Atbilde 4-7 teikumi."
+                f"\n\nLietotāja vārds: {name or 'nav zināms'}"
+                f"\nBildes paraksts: {caption or 'nav'}"
+                f"\nSākotnējā analīze:\n{raw_answer}"
             )
         )
         answer = response.output_text.strip()
     except Exception as e:
-        print("v1151_vision_smart_reply kļūda:", repr(e))
+        print("v1152_vision_smart_reply kļūda:", repr(e))
         answer = (
             f"{prefix}bildi apskatījos praktiski.\n\n"
             f"{raw_answer[:700]}\n\n"
-            "Ko gribi, lai es ar šo bildi izdaru: aprakstu, pārbaudu kādu detaļu vai palīdzu pieņemt lēmumu?"
+            "Ko gribi, lai es ar šo bildi izdaru: aprakstu, pārbaudu konkrētu detaļu vai palīdzu pieņemt lēmumu?"
         )
 
     return v1151_clean_version(answer)
-
 
 
 async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -12308,10 +12359,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             client=client,
             image_bytes=image_bytes,
             caption=caption,
-            version="V115.1"
+            version="V115.2"
         )
 
-        # V115.1: Vision Smart Reply — no random generic advice
+        # V115.2: Vision Smart Reply — no random generic advice
         answer = v1151_vision_smart_reply(user_id, answer, caption)
         try:
             v40_log_usage(user_id, "vision", caption)
@@ -12336,7 +12387,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
 
-        # V115.1 Nina Core: natural conversation and identity first.
+        # V115.2 Nina Core: natural conversation, identity first and employee brain.
         v1151_answer = v1151_master_core(user_id, user_text)
         if v1151_answer:
             try:
