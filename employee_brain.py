@@ -1,13 +1,13 @@
 """
 employee_brain.py
-Nina Core Evolution 2.1 — Identity + Employee State
+Nina Core Evolution 2.2 — Responsibility Brain
 
 Ninas domāšanas centrs.
 Mērķis: Nina nav čatbots. Nina ir AI darbiniece, kas saprot cilvēku,
 atceras virzienu, dod nākamo soli un uzņemas darba kvalitāti.
 """
 
-CORE_VERSION = "Core Evolution 2.1"
+CORE_VERSION = "Core Evolution 2.2"
 
 
 def _clean(value):
@@ -26,16 +26,18 @@ def employee_brain_status(user=None):
     ctx = build_employee_context(user)
     name = ctx.get("display_name")
     return (
-        f"🧠 Nina Core Evolution 2.1 ir aktīvs. ✅\n\n"
-        f"{name}, tagad mans fokuss ir Employee State — es ne tikai atbildu, bet sekoju, pie kā mēs strādājam.\n\n"
+        f"🧠 Nina Core Evolution 2.2 ir aktīvs. ✅\n\n"
+        f"{name}, tagad mans fokuss ir Responsibility Brain — es ne tikai atbildu, bet uzņemos darba kvalitāti.\n\n"
         "Domāšanas secība:\n"
         "1. Kas ir cilvēks?\n"
         "2. Ko es par viņu zinu?\n"
         "3. Pie kā mēs šobrīd strādājam?\n"
         "4. Kas ir īstais mērķis?\n"
         "5. Kāds ir praktiskais nākamais solis?\n"
-        "6. Vai atbilde ir darbinieces līmenī?\n\n"
+        "6. Vai atbilde ir darbinieces līmenī?\n"
+        "7. Vai es uzņēmos atbildību par nākamo soli?\n\n"
         f"Pašreizējā prioritāte: {ctx.get('current_priority')}\n\n"
+        "Responsibility Brain princips: ja es redzu kļūdu, es to pasaku; ja uzdevums ir mans, es to uzņemos; ja virziens kļūst haotisks, es atgriežu mūs pie mērķa.\n\n"
         f"Versija: {CORE_VERSION}"
     )
 
@@ -46,7 +48,7 @@ def detect_employee_intent(text):
         return "empty"
 
     if lower in [
-        "core status", "employee status", "nina core", "core 2.0", "core 2.1",
+        "core status", "employee status", "nina core", "core 2.0", "core 2.1", "core 2.2",
         "core evolution", "employee brain", "core"
     ]:
         return "status"
@@ -85,6 +87,13 @@ def detect_employee_intent(text):
     ]):
         return "identity_question"
 
+    if any(x in lower for x in [
+        "uzņemies", "uznemies", "paņem atbildību", "panem atbildibu",
+        "ko tu uzņemies", "ko tu uznemies", "kas ir tavs uzdevums",
+        "kur tu kļūdījies", "kur tu kludijies", "atbildība", "atbildiba"
+    ]):
+        return "responsibility"
+
     return "general"
 
 
@@ -99,7 +108,7 @@ def build_employee_context(user=None):
     project_items = _split_items(projects)
     fact_items = _split_items(facts)
 
-    current_work = "Core Evolution 2.1 — Identity + Employee State"
+    current_work = "Core Evolution 2.2 — Responsibility Brain"
     current_priority = (
         "nostiprināt Ninas domāšanas kodolu, lai viņa runā kā gudra AI darbiniece, "
         "izmanto identitāti un zina aktuālo darba virzienu"
@@ -188,7 +197,7 @@ def employee_reply(user_id=None, text="", user=None):
 
     elif intent == "next_step":
         answer = (
-            f"{name}, nākamais pareizais solis tagad ir Core Evolution 2.1 pārbaude.\n\n"
+            f"{name}, nākamais pareizais solis tagad ir Core Evolution 2.2 pārbaude.\n\n"
             "Mēs jau pieslēdzām employee_brain.py pie app.py, tāpēc vairs neatkārtošu veco soli.\n\n"
             "Šodienas darbs:\n"
             "1. Pārbaudīt, vai es izmantoju tavu vārdu.\n"
@@ -197,13 +206,27 @@ def employee_reply(user_id=None, text="", user=None):
             f"Nākamais solis: {ctx.get('next_real_step')}."
         )
 
+
+    elif intent == "responsibility":
+        answer = (
+            f"{name}, mans uzdevums šobrīd ir skaidrs.\n\n"
+            "Es uzņemos atbildību par Core Evolution kvalitāti: lai Nina kļūst par gudru AI darbinieci, "
+            "nevis vēl vienu čatbotu ar daudz funkcijām.\n\n"
+            "Ko es uzņemos praktiski:\n"
+            "1. Sekot, lai katra nākamā izmaiņa tuvina NinaOS misijai.\n"
+            "2. Brīdināt, ja sākam iet haotiski vai būvēt liekas funkcijas.\n"
+            "3. Atzīt kļūdas un pārlabot uzvedību, nevis aizbildināties.\n"
+            "4. Vienmēr dot skaidru nākamo soli.\n\n"
+            "Nākamais solis: testē mani ar frāzi — 'ko tu uzņemies?' vai 'kur tu kļūdījies?' — un pārbaudām, vai Responsibility Brain strādā."
+        )
+
     elif intent == "quality_feedback":
         answer = (
-            f"{name}, pieņemu šo kā kvalitātes signālu.\n\n"
-            "Ja es atbildu robotiski vai garlaicīgi, tā nav tikai teksta problēma — tā ir domāšanas procesa problēma. "
-            "Core Evolution nozīmē, ka pirms atbildes man jāpārbauda: vai sapratu cilvēku, izmantoju atmiņu, "
-            "devu praktisku nākamo soli un runāju kā kolēģe.\n\n"
-            "Nākamais solis: turpinām trenēt Employee Brain ar reāliem piemēriem, nevis teoriju."
+            f"{name}, pieņemu šo kā kvalitātes signālu un atbildību.\n\n"
+            "Ja es atbildu robotiski vai garlaicīgi, tā ir mana kvalitātes kļūda. Es to nefiksēju kā tavu emociju, bet kā uzlabojumu uzdevumu. "
+            "Core 2.2 nozīmē: kļūdu atzīt, saprast cēloni un nākamreiz atbildēt labāk.\n\n"
+            "Ko es darīšu: pārbaudīšu, vai atbildei ir skaidrs mērķis, konteksts un nākamais solis.\n\n"
+            "Nākamais solis: dod man vienu konkrētu sliktas atbildes piemēru, un es to pārvērtīšu par kvalitātes noteikumu."
         )
 
     elif intent == "work_request":
@@ -213,9 +236,9 @@ def employee_reply(user_id=None, text="", user=None):
             f"Pašreizējais darbs: {ctx.get('current_work')}.\n"
             f"Pašreizējā prioritāte: {ctx.get('current_priority')}.\n\n"
             "Ko darām tagad:\n"
-            "1. Nostiprinām Core 2.1.\n"
-            "2. Pēc tam būvējam Core 2.2 Responsibility Brain.\n"
-            "3. Tikai pēc tam ejam uz darba prasmēm: e-pasti, dokumenti, balss, zvani.\n\n"
+            "1. Nostiprinām Core 2.2 Responsibility Brain.\n"
+            "2. Pārbaudām, vai es uzņemos darbu un brīdinu par nepareizu virzienu.\n"
+            "3. Pēc tam būvējam Core 2.3 Learning Brain.\n\n"
             f"Nākamais solis: {ctx.get('next_real_step')}."
         )
 
