@@ -11483,7 +11483,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         answer = nina_start_answer(user_id)
 
-    await safe_reply_text(update, answer, disable_web_page_preview=True)
+    await update.message.reply_text(answer, disable_web_page_preview=True)
 
 
 def apply_referral_reward(invited_user_id):
@@ -11810,147 +11810,12 @@ def nina_progress_answer(user_id):
 
 
 
-# =========================
-# Core Evolution 2.5.1 — Reply Builder
-# =========================
-# Reply Builder ir centrālais NinaOS komunikācijas slānis.
-# No šī punkta gala teksts pirms sūtīšanas lietotājam iziet caur vienu vietu.
-
-REPLY_BUILDER_VERSION = "Core 2.5.1 — Reply Builder"
-APP_VERSION = "V115.2 + Core 2.5.1"
-
-
-def rb_clean_text(value):
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    # noņem vecās versijas rindas, lai gala tekstā nav vairākas versijas vienlaikus
-    text = re.sub(r"\n{0,2}Versija:\s*V[0-9.]+\s*$", "", text, flags=re.IGNORECASE).strip()
-    text = re.sub(r"\n{0,2}Versija:\s*V[0-9.]+\s*\+\s*Core\s*2\.5\.1\s*$", "", text, flags=re.IGNORECASE).strip()
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    return text
-
-
-def rb_detect_intent(text):
-    lower = (text or "").strip().lower()
-    if not lower:
-        return "empty"
-    if any(x in lower for x in ["premium", "abonements", "pirkt", "cena", "tarifs"]):
-        return "business"
-    if any(x in lower for x in ["atgādini", "atgadini", "rīt", "rit", "pirmdien", "otrdien", "trešdien", "tresdien"]):
-        return "memory_or_reminder"
-    if any(x in lower for x in ["core", "ninaos", "initiative", "think engine", "learning", "quality", "reply builder"]):
-        return "ninaos_core"
-    if any(x in lower for x in ["čau", "cau", "sveika", "sveiks", "hello", "hi", "kā tev iet", "ka tev iet"]):
-        return "conversation"
-    return "general"
-
-
-def rb_detect_tone(text):
-    lower = (text or "").strip().lower()
-    if any(x in lower for x in ["smagi", "grūti", "gruti", "slikti", "noguris", "nogurusi", "bēdīgi", "bedigi"]):
-        return "supportive"
-    if any(x in lower for x in ["premium", "cena", "tarifs", "pirkt", "abonements"]):
-        return "commercial_warm"
-    if any(x in lower for x in ["core", "ninaos", "architecture", "arhitekt", "engine"]):
-        return "architectural"
-    return "warm"
-
-
-def build_reply_object(main_message="", user_text="", source="legacy_router", intent="", tone="", channel="telegram", metadata=None):
-    return {
-        "intent": intent or rb_detect_intent(user_text or main_message),
-        "tone": tone or rb_detect_tone(user_text or main_message),
-        "priority": "normal",
-        "identity": "Nina — AI darbiniece NinaOS platformā",
-        "memory": {},
-        "knowledge": {},
-        "reasoning": {},
-        "facts": [],
-        "suggestions": [],
-        "questions": [],
-        "warnings": [],
-        "next_action": "reply",
-        "main_message": main_message or "",
-        "channel": channel or "telegram",
-        "metadata": metadata or {"source": source},
-    }
-
-
-def reply_builder_build(reply_object):
-    if isinstance(reply_object, str):
-        reply_object = build_reply_object(main_message=reply_object)
-    if not isinstance(reply_object, dict):
-        reply_object = build_reply_object(main_message=str(reply_object or ""))
-
-    text = rb_clean_text(reply_object.get("main_message", ""))
-    if not text:
-        text = "Esmu te. 😊\n\nPasaki, ko vajag sakārtot, un es palīdzēšu soli pa solim."
-
-    channel = (reply_object.get("channel") or "telegram").lower()
-
-    # Telegram tekstam jābūt īsam un skaidram. Pārāk garu tekstu droši apgriežam, lai nesalauž sūtīšanu.
-    if channel == "telegram" and len(text) > 3800:
-        text = text[:3700].rstrip() + "\n\n…"
-
-    if "Reply Builder" not in text:
-        text = text.rstrip() + f"\n\nVersija: {APP_VERSION}"
-
-    return {
-        "text": text,
-        "buttons": [],
-        "attachments": [],
-        "actions": [],
-        "metadata": {
-            "builder": REPLY_BUILDER_VERSION,
-            "intent": reply_object.get("intent", ""),
-            "tone": reply_object.get("tone", ""),
-            **(reply_object.get("metadata") or {}),
-        },
-    }
-
-
-def reply_builder_text(text, user_text="", source="legacy_router", channel="telegram"):
-    obj = build_reply_object(
-        main_message=text,
-        user_text=user_text,
-        source=source,
-        channel=channel,
-    )
-    return reply_builder_build(obj).get("text", "")
-
-
-def reply_builder_status_answer():
-    return reply_builder_text(
-        "🧩 Core 2.5.1 — Reply Builder ir aktīvs.\n\n"
-        "No šī brīža gala atbildes pirms sūtīšanas iet caur vienu centrālo komunikācijas slāni.\n\n"
-        "Tas nozīmē:\n"
-        "• vecie V115 ceļi vēl drīkst sagatavot saturu;\n"
-        "• gala tekstu sakārto Reply Builder;\n"
-        "• nākamais Core 2.6 — Initiative Engine jau varēs balstīties uz vienotu atbilžu ceļu.",
-        source="reply_builder_status",
-    )
-
-
-
 async def safe_reply_text(update, text, disable_web_page_preview=True):
-    """Core 2.5.1: vienīgā drošā izeja gala tekstam uz Telegram."""
+    """V114.0: publiskā testa drošība — nekad neatstāj lietotāju bez atbildes."""
     try:
         if update and update.message:
-            try:
-                user_text = update.message.text if getattr(update, "message", None) else ""
-            except Exception:
-                user_text = ""
-
-            final_text = reply_builder_text(
-                text,
-                user_text=user_text,
-                source="safe_reply_text",
-                channel="telegram",
-            )
-
             await update.message.reply_text(
-                final_text,
+                text,
                 disable_web_page_preview=disable_web_page_preview
             )
             return True
@@ -12622,10 +12487,6 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
 
-        if lower in ["reply builder", "core 2.5.1", "reply builder status", "core 251", "core 2.5.1 status"]:
-            await safe_reply_text(update, reply_builder_status_answer())
-            return
-
         # Core Evolution 2.0 — Employee Brain test layer
         # Šis slānis pagaidām apstrādā tikai Core/mission/next-step ziņas,
         # lai droši testētu jauno Nina domāšanas centru, nesalaužot vecās funkcijas.
@@ -12974,7 +12835,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # V114.0: Progress command.
         if lower in ["progress", "progresss", "mans progress", "mans progress", "progress report", "statistika", "mana statistika"]:
-            await safe_reply_text(update, 
+            await update.message.reply_text(
                 nina_progress_answer(user_id),
                 disable_web_page_preview=True
             )
@@ -12985,7 +12846,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reminder_data = parse_reminder_request(user_text, DEFAULT_TIMEZONE)
         if reminder_data is not None:
             if not reminder_data.get("ok"):
-                await safe_reply_text(update, build_reminder_help_answer(version="V114.0"), disable_web_page_preview=True)
+                await update.message.reply_text(build_reminder_help_answer(version="V114.0"), disable_web_page_preview=True)
                 return
 
             ok = save_reminder_logic(
@@ -12998,7 +12859,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
             if ok:
-                await safe_reply_text(update, 
+                await update.message.reply_text(
                     build_reminder_saved_answer(
                         reminder_data.get("text") or user_text,
                         reminder_data.get("human_time") or "",
@@ -13008,14 +12869,14 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-            await safe_reply_text(update, "Neizdevās saglabāt atgādinājumu. Pamēģini vēlreiz.", disable_web_page_preview=True)
+            await update.message.reply_text("Neizdevās saglabāt atgādinājumu. Pamēģini vēlreiz.", disable_web_page_preview=True)
             return
 
 
 
         # V114.0: Mana diena top-priority route.
         if lower in ["mana diena", "diena", "my day"]:
-            await safe_reply_text(update, 
+            await update.message.reply_text(
                 nina_daily_habit_answer(user_id),
                 disable_web_page_preview=True
             )
@@ -13029,7 +12890,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 answer = nina_memory_saved_answer(saved)
             else:
                 answer = "Neizdevās saglabāt. Pamēģini vēlreiz ar: atceries, ka ..."
-            await safe_reply_text(update, answer, disable_web_page_preview=True)
+            await update.message.reply_text(answer, disable_web_page_preview=True)
             return
 
         if lower.startswith("mērķis:") or lower.startswith("merkis:") or lower.startswith("šodienas mērķis:") or lower.startswith("sodienas merkis:"):
@@ -13037,9 +12898,9 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if goal_text:
                 ok = save_daily_goal(user_id, goal_text)
                 answer = nina_goal_saved_answer(goal_text) if ok else "Neizdevās saglabāt mērķi. Pamēģini vēlreiz."
-                await safe_reply_text(update, answer, disable_web_page_preview=True)
+                await update.message.reply_text(answer, disable_web_page_preview=True)
                 return
-            await safe_reply_text(update, "Uzraksti šādi: mērķis: tavs šodienas mērķis", disable_web_page_preview=True)
+            await update.message.reply_text("Uzraksti šādi: mērķis: tavs šodienas mērķis", disable_web_page_preview=True)
             return
 
 
@@ -13050,7 +12911,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             goal_text = user_text.strip()
             ok = save_daily_goal(user_id, goal_text)
             answer = build_auto_goal_answer(goal_text, version="V114.0") if ok else "Neizdevās saglabāt mērķi. Pamēģini vēlreiz."
-            await safe_reply_text(update, answer, disable_web_page_preview=True)
+            await update.message.reply_text(answer, disable_web_page_preview=True)
             return
 
         if natural_kind == "memory":
@@ -13059,25 +12920,25 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if saved:
                 record_memory_topics(user_id, saved)
             answer = build_auto_memory_answer(saved or memory_text, version="V114.0") if saved else "Neizdevās saglabāt. Pamēģini vēlreiz."
-            await safe_reply_text(update, answer, disable_web_page_preview=True)
+            await update.message.reply_text(answer, disable_web_page_preview=True)
             return
 
         if lower in ["labrīt", "labrit", "labrīt nina", "labrit nina", "morning"]:
-            await safe_reply_text(update, 
+            await update.message.reply_text(
                 append_bonus_notices(nina_morning_answer(user_id), streak_notice),
                 disable_web_page_preview=True
             )
             return
 
         if lower in ["vakars", "vakara pārskats", "vakara parskats", "good night", "evening"]:
-            await safe_reply_text(update, 
+            await update.message.reply_text(
                 append_bonus_notices(nina_evening_answer(user_id), streak_notice),
                 disable_web_page_preview=True
             )
             return
 
         if lower in ["šodienas mērķis", "sodienas merkis", "dienas mērķis", "dienas merkis", "mērķis", "merkis"]:
-            await safe_reply_text(update, 
+            await update.message.reply_text(
                 append_bonus_notices(nina_today_goal_answer(user_id), streak_notice),
                 disable_web_page_preview=True
             )
@@ -13085,21 +12946,21 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # V12.6: Daily Habit commands.
         if lower in ["mana diena", "diena", "my day"]:
-            await safe_reply_text(update, 
+            await update.message.reply_text(
                 append_bonus_notices(nina_daily_habit_answer(user_id), streak_notice),
                 disable_web_page_preview=True
             )
             return
 
         if lower in ["atceries", "ko atceries", "remember"]:
-            await safe_reply_text(update, 
+            await update.message.reply_text(
                 append_bonus_notices(nina_remember_prompt_answer(user_id), streak_notice),
                 disable_web_page_preview=True
             )
             return
 
         if lower in ["invite", "uzaicini", "ielūgt", "ielugt"]:
-            await safe_reply_text(update, 
+            await update.message.reply_text(
                 append_bonus_notices(nina_launch_invite_text(user_id), streak_notice),
                 disable_web_page_preview=True
             )
@@ -13108,14 +12969,14 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # V12.5: Stripe production commands.
         if lower in ["stripe production", "stripe live", "stripe setup production", "production stripe"]:
-            await safe_reply_text(update, 
+            await update.message.reply_text(
                 append_bonus_notices(stripe_production_setup_answer(user_id), streak_notice),
                 disable_web_page_preview=True
             )
             return
 
         if lower in ["first payment", "pirmais maksājums", "pirmais maksajums"]:
-            await safe_reply_text(update, 
+            await update.message.reply_text(
                 append_bonus_notices(first_payment_plan_answer(user_id), streak_notice),
                 disable_web_page_preview=True
             )
@@ -13123,7 +12984,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
         if lower in ["referral reward test", "reward test"]:
-            await safe_reply_text(update, 
+            await update.message.reply_text(
                 append_bonus_notices(referral_reward_test_answer(user_id), streak_notice),
                 disable_web_page_preview=True
             )
@@ -13133,14 +12994,14 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # V12.3.1: capture referral from /start NINA-XXXX before normal chat logic.
         referral_code = parse_referral_code_from_text(user_text)
         if referral_code:
-            await safe_reply_text(update, 
+            await update.message.reply_text(
                 append_bonus_notices(referral_capture_welcome_answer(user_id, referral_code), streak_notice),
                 disable_web_page_preview=True
             )
             return
 
         if lower in ["referral", "referral stats", "mans referral"]:
-            await safe_reply_text(update, 
+            await update.message.reply_text(
                 append_bonus_notices(referral_stats_answer(user_id), streak_notice),
                 disable_web_page_preview=True
             )
@@ -13149,25 +13010,25 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # V12.1.2 SAFE ROUTER — public monetization commands before all other logic.
         if lower == "launch":
-            await safe_reply_text(update, append_bonus_notices(safe_launch_answer(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(safe_launch_answer(user_id), streak_notice), disable_web_page_preview=True)
             return
 
         if lower == "sales":
-            await safe_reply_text(update, append_bonus_notices(safe_sales_answer(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(safe_sales_answer(user_id), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["invite", "referral"]:
-            await safe_reply_text(update, append_bonus_notices(safe_invite_answer(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(safe_invite_answer(user_id), streak_notice), disable_web_page_preview=True)
             return
 
         if lower == "earn":
-            await safe_reply_text(update, append_bonus_notices(safe_earn_answer(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(safe_earn_answer(user_id), streak_notice), disable_web_page_preview=True)
             return
 
 
         # V11.9 HARD FIX: catch Stripe test before GPT fallback.
         if lower in ["stripe test", "webhook test", "test webhook", "stripe webhook test"]:
-            await safe_reply_text(update, append_bonus_notices(stripe_webhook_test_answer(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(stripe_webhook_test_answer(user_id), streak_notice), disable_web_page_preview=True)
             return
 
         profile_text, command_lines = split_profile_and_commands(user_text)
@@ -13179,138 +13040,138 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if answer:
                     answers.append(answer)
             if answers:
-                await safe_reply_text(update, "\n\n".join(answers), disable_web_page_preview=True)
+                await update.message.reply_text("\n\n".join(answers), disable_web_page_preview=True)
                 return
 
         if lower in ["mans premium statuss", "premium statuss", "premium"]:
-            await safe_reply_text(update, premium_status(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(premium_status(user_id), disable_web_page_preview=True)
             return
 
         if lower in ["premium funkcijas"]:
-            await safe_reply_text(update, premium_features(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(premium_features(user_id), disable_web_page_preview=True)
             return
 
         if lower in ["premium limiti", "cik atmiņas man palicis"]:
-            await safe_reply_text(update, premium_limits(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(premium_limits(user_id), disable_web_page_preview=True)
             return
 
         if lower == "premium beidzas":
-            await safe_reply_text(update, premium_expiration_info(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(premium_expiration_info(user_id), disable_web_page_preview=True)
             return
 
         if lower == "abonements":
-            await safe_reply_text(update, append_bonus_notices(subscription_info(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(subscription_info(user_id), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["mans plāns", "mans plans"]:
-            await safe_reply_text(update, append_bonus_notices(current_plan_answer(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(current_plan_answer(user_id), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["premium vēsture", "premium vesture"]:
-            await safe_reply_text(update, append_bonus_notices(premium_history(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(premium_history(user_id), streak_notice), disable_web_page_preview=True)
             return
 
         # V10.5.2 HARD FIX: catch Premium Welcome as a direct Telegram command
         # before it can fall through to GPT chat mode.
         if lower in ["premium welcome", "premium sveiciens", "premium starts", "premium sveiks"]:
-            await safe_reply_text(update, append_bonus_notices(premium_welcome_answer(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(premium_welcome_answer(user_id), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["pirkt premium", "pirkt basic", "pirkt premium basic"]:
-            await safe_reply_text(update, append_bonus_notices(stripe_checkout_answer(user_id, "basic"), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(stripe_checkout_answer(user_id, "basic"), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["pirkt plus", "pirkt premium plus"]:
-            await safe_reply_text(update, append_bonus_notices(stripe_checkout_answer(user_id, "plus"), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(stripe_checkout_answer(user_id, "plus"), streak_notice), disable_web_page_preview=True)
             return
 
         if lower == "stripe statuss":
-            await safe_reply_text(update, append_bonus_notices(stripe_status(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(stripe_status(user_id), streak_notice), disable_web_page_preview=True)
             return
 
         # V11.7: Stripe ENV must be separate from Stripe Setup Helper.
         if lower in ["stripe webhook", "webhook", "webhook statuss", "stripe webhook statuss"]:
-            await safe_reply_text(update, append_bonus_notices(stripe_webhook_status_answer(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(stripe_webhook_status_answer(user_id), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["stripe env", "stripe environment", "stripe railway", "stripe konfigurācija", "stripe konfiguracija"]:
-            await safe_reply_text(update, append_bonus_notices(stripe_env_guide_answer(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(stripe_env_guide_answer(user_id), streak_notice), disable_web_page_preview=True)
             return
 
         # V10.5.2: keep Stripe helper commands direct too, not only in command_answer().
         if lower in ["stripe setup", "stripe palīgs", "stripe paligs", "stripe helper", "maksājumi", "maksajumi", "payment setup"]:
-            await safe_reply_text(update, append_bonus_notices(stripe_setup_helper(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(stripe_setup_helper(user_id), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["revenue", "ieņēmumi", "ienemumi", "admin panelis", "premium ieņēmumi", "premium ienemumi"]:
-            await safe_reply_text(update, append_bonus_notices(admin_revenue_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(admin_revenue_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["revenue analytics", "income analytics", "premium analytics", "ieņēmumu analītika", "ienemumu analitika"]:
-            await safe_reply_text(update, append_bonus_notices(admin_revenue_analytics(user_id, lower), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(admin_revenue_analytics(user_id, lower), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["revenue forecast", "income forecast", "mrr forecast", "ieņēmumu prognoze", "ienemumu prognoze"]:
-            await safe_reply_text(update, append_bonus_notices(admin_revenue_forecast(user_id, lower), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(admin_revenue_forecast(user_id, lower), streak_notice), disable_web_page_preview=True)
             return
 
         # V10.25: KPI command routing fix — catch KPI before GPT fallback.
         if lower in ["kpi", "admin kpi", "business dashboard", "admin kpi dashboard", "kpi dashboard", "biznesa panelis"]:
-            await safe_reply_text(update, append_bonus_notices(admin_kpi_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(admin_kpi_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
             return
 
         # V11.1: Alerts command routing fix — catch Alerts before GPT fallback.
         if lower in ["alerts", "admin alerts", "system alerts", "brīdinājumi", "bridinajumi", "admin brīdinājumi", "admin bridinajumi"]:
-            await safe_reply_text(update, append_bonus_notices(admin_alerts_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(admin_alerts_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
             return
 
         # V11.1: Premium Conversion System routing — catch launch before GPT fallback.
         if lower in ["launch", "launch dashboard", "production", "production launch", "palaišana", "palaisana"]:
-            await safe_reply_text(update, append_bonus_notices(admin_launch_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(admin_launch_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["admin logs", "audit logs", "admin žurnāls", "admin zurnals"]:
-            await safe_reply_text(update, append_bonus_notices(admin_audit_log_answer(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(admin_audit_log_answer(user_id), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["audit stats", "admin statistika", "admin stats"]:
-            await safe_reply_text(update, append_bonus_notices(admin_audit_stats_answer(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(admin_audit_stats_answer(user_id), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["health", "system status", "sistēmas statuss", "sistemas statuss", "veselība", "veseliba"]:
-            await safe_reply_text(update, append_bonus_notices(system_health_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(system_health_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["analytics", "lietotāju statistika", "lietotaju statistika", "user stats", "user analytics"]:
-            await safe_reply_text(update, append_bonus_notices(user_analytics_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(user_analytics_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["db backup", "database backup", "backup stats", "datubāzes backup", "datubazes backup"]:
-            await safe_reply_text(update, append_bonus_notices(database_backup_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(database_backup_dashboard(user_id, lower), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["auto backup", "backup scheduler", "backup grafiks", "automātiskais backup", "automatiskais backup"]:
-            await safe_reply_text(update, append_bonus_notices(backup_scheduler_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(backup_scheduler_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["recovery", "recovery center", "restore backup", "backup restore"]:
-            await safe_reply_text(update, append_bonus_notices(recovery_center_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(recovery_center_answer(user_id, lower), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["restore latest", "atjauno pēdējo", "atjauno pedejo"]:
-            await safe_reply_text(update, append_bonus_notices(restore_latest_backup(user_id, lower), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(restore_latest_backup(user_id, lower), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["admin notifications", "notifications", "paziņojumi", "pazinojumi", "admin paziņojumi", "admin pazinojumi"]:
-            await safe_reply_text(update, append_bonus_notices(admin_notifications_center(user_id, lower), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(admin_notifications_center(user_id, lower), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["activity", "admin activity", "activity feed", "aktivitāte", "aktivitate"]:
-            await safe_reply_text(update, append_bonus_notices(admin_activity_feed(user_id, lower), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(admin_activity_feed(user_id, lower), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["user management", "admin users", "user dashboard", "lietotāju panelis", "lietotaju panelis"]:
-            await safe_reply_text(update, append_bonus_notices(admin_user_management_dashboard(user_id, user_text), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(admin_user_management_dashboard(user_id, user_text), streak_notice), disable_web_page_preview=True)
             return
 
         if (
@@ -13322,7 +13183,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             or lower.startswith("set level")
             or lower.startswith("reset streak")
         ):
-            await safe_reply_text(update, append_bonus_notices(admin_user_action(user_id, user_text), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(admin_user_action(user_id, user_text), streak_notice), disable_web_page_preview=True)
             return
 
         if (
@@ -13332,7 +13193,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             or lower.startswith("meklet lietotaju")
             or lower in ["lietotāji", "lietotaji"]
         ):
-            await safe_reply_text(update, append_bonus_notices(admin_user_search(user_id, user_text), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(admin_user_search(user_id, user_text), streak_notice), disable_web_page_preview=True)
             return
 
         if (
@@ -13344,132 +13205,132 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             or lower.startswith("meklēt lietotāju ")
             or lower.startswith("meklet lietotaju ")
         ):
-            await safe_reply_text(update, append_bonus_notices(admin_user_lookup(user_id, user_text), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(admin_user_lookup(user_id, user_text), streak_notice), disable_web_page_preview=True)
             return
 
         # V10.24 Command Routing Fix:
         # Admin Command Center komandām jānostrādā pirms premium dashboard un pirms GPT fallback.
         if lower in ["admin", "admin center", "admin command center", "command center", "dashboard"]:
-            await safe_reply_text(update, append_bonus_notices(admin_command_center(user_id, lower), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(admin_command_center(user_id, lower), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["premium panelis", "mans panelis"]:
-            await safe_reply_text(update, append_bonus_notices(premium_dashboard(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(premium_dashboard(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
             return
 
         if lower in ["mans līmenis", "mana pieredze", "xp"]:
-            await safe_reply_text(update, append_bonus_notices(user_level_info(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(user_level_info(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
             return
 
         if lower in ["mani sasniegumi", "sasniegumi"]:
-            await safe_reply_text(update, append_bonus_notices(achievements_answer(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(achievements_answer(user_id), streak_notice, check_achievements(user_id)), disable_web_page_preview=True)
             return
 
         if lower == "sasniegumu progress":
-            await safe_reply_text(update, append_bonus_notices(achievement_progress(user_id), streak_notice), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(achievement_progress(user_id), streak_notice), disable_web_page_preview=True)
             return
 
         if lower in ["mans streak", "mana sērija", "streak"]:
-            await safe_reply_text(update, append_bonus_notices(streak_info(user_id), check_achievements(user_id)), disable_web_page_preview=True)
+            await update.message.reply_text(append_bonus_notices(streak_info(user_id), check_achievements(user_id)), disable_web_page_preview=True)
             return
 
         if lower == "mana statistika":
-            await safe_reply_text(update, user_statistics(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(user_statistics(user_id), disable_web_page_preview=True)
             return
 
         if lower == "mana aktivitāte":
-            await safe_reply_text(update, user_activity(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(user_activity(user_id), disable_web_page_preview=True)
             return
 
         if lower == "mana atmiņa":
-            await safe_reply_text(update, user_memory_stats(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(user_memory_stats(user_id), disable_web_page_preview=True)
             return
 
         if lower in ["aktivizē premium", "aktivize premium", "ieslēdz premium"]:
-            await safe_reply_text(update, activate_premium(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(activate_premium(user_id), disable_web_page_preview=True)
             return
 
         if lower in ["izslēdz premium", "atslēdz premium"]:
-            await safe_reply_text(update, deactivate_premium(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(deactivate_premium(user_id), disable_web_page_preview=True)
             return
 
         if lower in ["eksportē atmiņu", "atmiņas eksports", "export memory", "eksports"]:
-            await safe_reply_text(update, build_memory_export(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(build_memory_export(user_id), disable_web_page_preview=True)
             return
 
         if lower in ["backup", "izveido backup", "rezerves kopija", "izveido rezerves kopiju"]:
-            await safe_reply_text(update, create_backup_answer(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(create_backup_answer(user_id), disable_web_page_preview=True)
             return
 
         if lower in ["pēdējais backup", "parādi backup", "mans backup", "pēdējā rezerves kopija"]:
-            await safe_reply_text(update, latest_backup_answer(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(latest_backup_answer(user_id), disable_web_page_preview=True)
             return
 
         if lower in ["backup saraksts", "parādi backup sarakstu", "mani backup"]:
-            await safe_reply_text(update, list_backups(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(list_backups(user_id), disable_web_page_preview=True)
             return
 
         if lower in ["cik man ir backup"]:
-            await safe_reply_text(update, backup_count(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(backup_count(user_id), disable_web_page_preview=True)
             return
 
         if lower in ["backup statistika"]:
-            await safe_reply_text(update, backup_stats(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(backup_stats(user_id), disable_web_page_preview=True)
             return
 
         if lower in ["jaunākais backup"]:
-            await safe_reply_text(update, latest_backup_info(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(latest_backup_info(user_id), disable_web_page_preview=True)
             return
 
         if lower in ["dzēs visus backup", "izdzēs visus backup"]:
-            await safe_reply_text(update, delete_all_backups(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(delete_all_backups(user_id), disable_web_page_preview=True)
             return
 
         if lower.startswith("dzēs backup") or lower.startswith("izdzēs backup"):
-            await safe_reply_text(update, delete_backup(user_id, user_text), disable_web_page_preview=True)
+            await update.message.reply_text(delete_backup(user_id, user_text), disable_web_page_preview=True)
             return
 
         if lower.startswith("atjauno no backup"):
-            await safe_reply_text(update, restore_backup(user_id, user_text), disable_web_page_preview=True)
+            await update.message.reply_text(restore_backup(user_id, user_text), disable_web_page_preview=True)
             return
 
         if lower.startswith("atgādini man"):
-            await safe_reply_text(update, add_reminder(user_id, user_text), disable_web_page_preview=True)
+            await update.message.reply_text(add_reminder(user_id, user_text), disable_web_page_preview=True)
             return
 
         if lower in ["mani atgādinājumi", "parādi atgādinājumus", "atgādinājumi"]:
-            await safe_reply_text(update, list_reminders(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(list_reminders(user_id), disable_web_page_preview=True)
             return
 
         if lower.startswith("dzēs atgādinājumu") or lower.startswith("izdzēs atgādinājumu"):
-            await safe_reply_text(update, delete_reminder(user_id, user_text), disable_web_page_preview=True)
+            await update.message.reply_text(delete_reminder(user_id, user_text), disable_web_page_preview=True)
             return
 
         if lower.startswith("aizmirsti atgādinājumu"):
-            await safe_reply_text(update, delete_reminder(user_id, user_text), disable_web_page_preview=True)
+            await update.message.reply_text(delete_reminder(user_id, user_text), disable_web_page_preview=True)
             return
 
         if lower.startswith("aizmirsti"):
-            await safe_reply_text(update, forget_from_profile(user_id, user_text), disable_web_page_preview=True)
+            await update.message.reply_text(forget_from_profile(user_id, user_text), disable_web_page_preview=True)
             return
 
         if lower in ["atjauno kopsavilkumu", "izveido kopsavilkumu", "atjauno atmiņu"]:
-            await safe_reply_text(update, build_summary(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(build_summary(user_id), disable_web_page_preview=True)
             return
 
         if lower in ["mans kopsavilkums", "parādi kopsavilkumu", "ilgtermiņa atmiņa"]:
-            await safe_reply_text(update, show_summary(user_id), disable_web_page_preview=True)
+            await update.message.reply_text(show_summary(user_id), disable_web_page_preview=True)
             return
 
         update_profile_from_text(user_id, user_text)
         user = get_user(user_id)
 
         if "mana laika zona" in lower or "kur es dzīvoju" in lower or "es dzīvoju" in lower:
-            await safe_reply_text(update, f"Saglabāju. Tava laika zona: {user['timezone']}", disable_web_page_preview=True)
+            await update.message.reply_text(f"Saglabāju. Tava laika zona: {user['timezone']}", disable_web_page_preview=True)
             return
 
         if "kā mani sauc" in lower:
-            await safe_reply_text(update, f"Tevi sauc {user['name']}. 😊" if user["name"] else "Tu vēl neesi pateicis savu vārdu. 😊", disable_web_page_preview=True)
+            await update.message.reply_text(f"Tevi sauc {user['name']}. 😊" if user["name"] else "Tu vēl neesi pateicis savu vārdu. 😊", disable_web_page_preview=True)
             return
 
         if (
@@ -13482,7 +13343,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             or "ko par mani zini" in lower
             or "ko par manīm zini" in lower
         ):
-            await safe_reply_text(update, profile_answer(user), disable_web_page_preview=True)
+            await update.message.reply_text(profile_answer(user), disable_web_page_preview=True)
             return
 
         save_message(user_id, "Lietotājs", user_text)
@@ -13535,7 +13396,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         achievements = check_achievements(user_id)
         answer = append_bonus_notices(answer, streak_notice, achievements)
         save_message(user_id, "Nina", answer)
-        await safe_reply_text(update, answer, disable_web_page_preview=True)
+        await update.message.reply_text(answer, disable_web_page_preview=True)
 
 
 
