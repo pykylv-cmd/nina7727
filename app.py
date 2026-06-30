@@ -12491,7 +12491,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Šis slānis pagaidām apstrādā tikai Core/mission/next-step ziņas,
         # lai droši testētu jauno Nina domāšanas centru, nesalaužot vecās funkcijas.
         if employee_reply and (
-            lower in ["core 2.0", "core 2.1", "core evolution", "employee status", "core status", "nina core", "employee brain", "core"]
+            lower in ["core 2.0", "core 2.1", "core 2.2", "core evolution", "employee status", "core status", "nina core", "employee brain", "core"]
             or "ninaos misija" in lower
             or "mūsu misija" in lower
             or "musu misija" in lower
@@ -12511,6 +12511,13 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             or "zini manu vardu" in lower
             or "mans vārds" in lower
             or "mans vards" in lower
+            or "uzņemies" in lower
+            or "uznemies" in lower
+            or "atbildība" in lower
+            or "atbildiba" in lower
+            or "kur tu kļūdījies" in lower
+            or "kur tu kludijies" in lower
+            or "kas ir tavs uzdevums" in lower
         ):
             try:
                 user = get_user(str(user_id))
