@@ -1,13 +1,13 @@
 """
 employee_brain.py
-Nina Core Evolution 2.2 — Responsibility Brain
+Nina Core Evolution 2.2.1 — Responsibility Brain
 
 Ninas domāšanas centrs.
 Mērķis: Nina nav čatbots. Nina ir AI darbiniece, kas saprot cilvēku,
 atceras virzienu, dod nākamo soli un uzņemas darba kvalitāti.
 """
 
-CORE_VERSION = "Core Evolution 2.2"
+CORE_VERSION = "Core Evolution 2.2.1"
 
 
 def _clean(value):
@@ -68,6 +68,12 @@ def detect_employee_intent(text):
         return "mission"
 
     if any(x in lower for x in [
+        "kur tu kļūdījies", "kur tu kludijies", "kā tu kļūdījies", "ka tu kludijies",
+        "ko tu izdarīji nepareizi", "ko tu izdariji nepareizi", "kāda bija kļūda", "kada bija kluda"
+    ]):
+        return "mistake_review"
+
+    if any(x in lower for x in [
         "tu esi robots", "kā robots", "ka robots", "garlaicīgi", "garlaicigi",
         "nepareizi", "slikti atbildi", "tev jāmācās", "tev jamacas",
         "nav labi", "šādi nedrīkst", "sadi nedrikst", "tu kļūdies", "tu kludies"
@@ -90,7 +96,7 @@ def detect_employee_intent(text):
     if any(x in lower for x in [
         "uzņemies", "uznemies", "paņem atbildību", "panem atbildibu",
         "ko tu uzņemies", "ko tu uznemies", "kas ir tavs uzdevums",
-        "kur tu kļūdījies", "kur tu kludijies", "atbildība", "atbildiba"
+        "atbildība", "atbildiba"
     ]):
         return "responsibility"
 
@@ -108,7 +114,7 @@ def build_employee_context(user=None):
     project_items = _split_items(projects)
     fact_items = _split_items(facts)
 
-    current_work = "Core Evolution 2.2 — Responsibility Brain"
+    current_work = "Core Evolution 2.2.1 — Responsibility Brain"
     current_priority = (
         "nostiprināt Ninas domāšanas kodolu, lai viņa runā kā gudra AI darbiniece, "
         "izmanto identitāti un zina aktuālo darba virzienu"
@@ -131,8 +137,8 @@ def build_employee_context(user=None):
         "current_work": current_work,
         "current_priority": current_priority,
         "next_real_step": (
-            "pārbaudīt, vai Core 2.1 izmanto vārdu, misiju un aktuālo darba stāvokli; "
-            "pēc tam sākt Core 2.2 Responsibility Brain"
+            "pabeigt Core 2.2.1 kļūdu atzīšanas pārbaudi; "
+            "pēc tam sākt Core 2.3 Learning Brain, lai Nina mācās no atsauksmēm"
         )
     }
 
@@ -191,8 +197,8 @@ def employee_reply(user_id=None, text="", user=None):
             "Nina ir pirmais AI darbinieks un kvalitātes paraugs. Ja Nina kļūs izcila, "
             "pārējie AI darbinieki varēs mantot šo domāšanas kodolu.\n\n"
             f"Pašreizējais darbs: {ctx.get('current_work')}.\n\n"
-            "Nākamais solis: pabeidzam Core Evolution 2.1 testu un tad būvējam Responsibility Brain, "
-            "lai Nina ne tikai atbild, bet arī uzņemas darba kvalitāti."
+            "Nākamais solis: pabeidzam Core 2.2.1 kļūdu atzīšanas testu, "
+            "lai Nina ne tikai uzņemas atbildību, bet arī skaidri pasaka, kur kļūdījās."
         )
 
     elif intent == "next_step":
@@ -217,7 +223,7 @@ def employee_reply(user_id=None, text="", user=None):
             "2. Brīdināt, ja sākam iet haotiski vai būvēt liekas funkcijas.\n"
             "3. Atzīt kļūdas un pārlabot uzvedību, nevis aizbildināties.\n"
             "4. Vienmēr dot skaidru nākamo soli.\n\n"
-            "Nākamais solis: testē mani ar frāzi — 'ko tu uzņemies?' vai 'kur tu kļūdījies?' — un pārbaudām, vai Responsibility Brain strādā."
+            "Nākamais solis: testē mani ar frāzi 'kur tu kļūdījies?', lai pārbaudām, vai kļūdu analīze tagad ir atsevišķa no atbildības saraksta."
         )
 
     elif intent == "quality_feedback":
