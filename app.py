@@ -12491,7 +12491,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Šis slānis pagaidām apstrādā tikai Core/mission/next-step ziņas,
         # lai droši testētu jauno Nina domāšanas centru, nesalaužot vecās funkcijas.
         if employee_reply and (
-            lower in ["core 2.0", "core 2.1", "core 2.2", "core 2.3", "core 2.4", "think engine", "think status", "learning engine", "learning status", "core evolution", "employee status", "core status", "nina core", "employee brain", "core"]
+            lower in ["core 2.0", "core 2.1", "core 2.2", "core 2.3", "core 2.4", "core 2.5", "think engine", "think status", "learning engine", "learning status", "quality engine", "quality status", "core evolution", "employee status", "core status", "nina core", "employee brain", "core"]
             or "ninaos misija" in lower
             or "mūsu misija" in lower
             or "musu misija" in lower
