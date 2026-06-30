@@ -12491,7 +12491,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Šis slānis pagaidām apstrādā tikai Core/mission/next-step ziņas,
         # lai droši testētu jauno Nina domāšanas centru, nesalaužot vecās funkcijas.
         if employee_reply and (
-            lower in ["core 2.0", "core 2.1", "core 2.2", "core evolution", "employee status", "core status", "nina core", "employee brain", "core"]
+            lower in ["core 2.0", "core 2.1", "core 2.2", "core 2.3", "think engine", "think status", "core evolution", "employee status", "core status", "nina core", "employee brain", "core"]
             or "ninaos misija" in lower
             or "mūsu misija" in lower
             or "musu misija" in lower
@@ -12518,6 +12518,14 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             or "kur tu kļūdījies" in lower
             or "kur tu kludijies" in lower
             or "kas ir tavs uzdevums" in lower
+            or "ko tu iemācījies" in lower
+            or "ko tu iemacijies" in lower
+            or "mācies" in lower
+            or "macies" in lower
+            or "slikti atbildi" in lower
+            or "tu esi robots" in lower
+            or "garlaicīgi" in lower
+            or "garlaicigi" in lower
         ):
             try:
                 user = get_user(str(user_id))
@@ -12527,12 +12535,12 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             answer = employee_reply(user_id=user_id, text=user_text, user=user)
 
             try:
-                v40_log_usage(user_id, "employee_brain_core_2_1", user_text)
+                v40_log_usage(user_id, "employee_brain_core_2_3", user_text)
             except Exception:
                 pass
 
             try:
-                save_conversation_state(user_id, user_text, answer, "employee_brain_core_2_1", v80_mood(user_text), "core_evolution")
+                save_conversation_state(user_id, user_text, answer, "employee_brain_core_2_3", v80_mood(user_text), "core_evolution")
             except Exception:
                 pass
 
