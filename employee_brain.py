@@ -1,4 +1,4 @@
-a"""
+"""
 employee_brain.py
 Nina Core Evolution 2.5 — Employee Brain + Think Engine + Learning Engine + Quality Engine
 
