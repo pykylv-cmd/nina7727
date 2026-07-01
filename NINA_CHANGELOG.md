@@ -1,103 +1,40 @@
 # NINA_CHANGELOG.md
 
-# NinaOS Change Log
+# NinaOS Changelog
 
-Šis fails glabā īsu NinaOS izmaiņu vēsturi.
+## 2026-07-01 — Documentation Control System
 
-Detalizētā arhitektūra dzīvo failā:
-`NINA_SYSTEM.md`
+### Added
+- `NINA_SYSTEM.md`
+- `NINA_MANIFEST.json`
+- `NINA_REGISTRY.md`
+- `NINA_CHANGELOG.md`
+- `TEST_PROTOCOL.md`
 
----
+### Reason
+Projekts izauga no viena faila uz NinaOS modulāru arhitektūru.
+Lai jaunā čatā nezaudētu kontekstu, arhitektūra jāglabā GitHub dokumentos, nevis sarunā.
 
-## Core 2.5.1 — Reply Builder
+### Current issue
+`core 2.6.1` joprojām aiziet uz veco V115.2 sarunas ceļu, jo aktuālajā `app.py` Employee Brain vārtos bija tikai līdz `core 2.5`.
 
-Statuss: ✅ Ieviests
-
-Galvenās izmaiņas:
-- Ieviests centrālais Reply Builder slānis.
-- Gala atbildes pirms sūtīšanas iet caur vienu komunikācijas slāni.
-- Vecie V115 ceļi vēl drīkst sagatavot saturu.
-- Reply Builder sakārto gala tekstu.
-- Core 2.6 Initiative Engine var balstīties uz vienotu atbilžu ceļu.
-
-Tests:
-- `core 2.5.1`
-- `reply builder status`
-
-Rezultāts:
-- Tests veiksmīgs.
-
----
-
-## Core 2.6 — Initiative Engine
-
-Statuss: 🚧 Procesā
-
-Mērķis:
-- Pārvērst Ninu no reaģējoša asistenta par AI darbinieci, kas spēj ierosināt vērtīgus nākamos soļus.
-
-Svarīgs arhitektūras lēmums:
-- Initiative Engine neveido gala tekstu.
-- Initiative Engine sagatavo tikai strukturētu iniciatīvu.
-- Gala tekstu veido Reply Builder.
+### Next
+Salabot `app.py` router gate un tikai tad turpināt Core 2.6.2.
 
 ---
 
 ## Core 2.6.1 — Initiative Detector
 
-Statuss: ⚠️ Nav pabeigts
+Status: In progress.
 
-Kas notika:
-- Pirmais tests ar `core 2.6.1` aizgāja pa veco V115.2 sarunas ceļu.
-- Tas nozīmē, ka Initiative Detector vēl nav korekti pieslēgts darba plūsmai.
+Goal: Nina sāk pamanīt situācijas, kur lietotājam vajadzīgs nākamais solis.
 
-Secinājums:
-- Core 2.6.1 jāievieš kā atsevišķs modulis.
-- Nepareizs virziens ir turpināt visu likt tikai `app.py`.
-
-Nākamais pareizais solis:
-- Izveidot `initiative_engine.py`.
-- Pieslēgt to `app.py` router plūsmai.
-- Integrēt ar Reply Builder.
-- Atkārtot testu:
-  - `core 2.6.1`
-  - `initiative detector status`
+Rule: Initiative Engine neveido gala tekstu. Tas veido strukturētu iniciatīvas objektu, ko vēlāk apstrādā Reply Builder.
 
 ---
 
-## Project Control Files
+## Core 2.5.1 — Reply Builder
 
-### NINA_SYSTEM.md
+Status: Done / active.
 
-Statuss: ✅ Ieviests
-
-Mērķis:
-- Galvenais NinaOS manifests.
-- Glabā projekta misiju, arhitektūru, Core Evolution, noteikumus un zināmo kontekstu.
-
-Noteikums:
-- Pēc katra Core obligāti jāatjaunina `NINA_SYSTEM.md`.
-
-### NINA_CHANGELOG.md
-
-Statuss: ✅ Ieviests
-
-Mērķis:
-- Īss izmaiņu žurnāls.
-- Palīdz nepazaudēt, kas tieši tika izdarīts katrā Core posmā.
-
----
-
-## Darba noteikums
-
-Lietotājs nekad nelabo atsevišķas rindas.
-
-ChatGPT vienmēr sagatavo pilnus failus.
-
-GitHub tiek ielādēti pilni faili.
-
-Ja arhitektūra mainās:
-1. atjaunina kodu;
-2. atjaunina `NINA_SYSTEM.md`;
-3. atjaunina `NINA_CHANGELOG.md`;
-4. tikai tad iet tālāk.
+Goal: Visas gala atbildes ilgtermiņā iet caur vienu centrālu Reply Builder.
