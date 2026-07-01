@@ -12673,12 +12673,215 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+
+# =========================
+# NinaOS Memory/Profile Recovery
+# =========================
+
+def nina_recovery_extract_profile_fact(text):
+    raw = (text or "").strip()
+    lower = raw.lower()
+    if not lower:
+        return None
+
+    # Name
+    for marker in ["mani sauc ", "mans vārds ir ", "mans vards ir "]:
+        if lower.startswith(marker):
+            value = raw[len(marker):].strip(" .,!?:;")
+            if value:
+                return ("name", value[:80])
+
+    # Profession
+    for marker in ["es esmu ", "es strādāju ", "es stradaju ", "mans darbs ir ", "nodarbojos ar "]:
+        if lower.startswith(marker) or marker in lower:
+            idx = lower.find(marker)
+            value = raw[idx + len(marker):].strip(" .,!?:;")
+            if value:
+                # "es esmu programmētājs" can be profession
+                return ("profession", value[:120])
+
+    # Family / pets / personal facts
+    family_markers = [
+        "man ir suns", "man ir kaķis", "man ir kakis",
+        "man ir sieva", "man ir vīrs", "man ir virs",
+        "man ir meita", "man ir dēls", "man ir dels",
+    ]
+    if any(m in lower for m in family_markers):
+        return ("facts", raw[:300])
+
+    # Likes / favorites
+    like_markers = [
+        "man patīk", "man patik",
+        "mans mīļākais", "mans milakais",
+        "mana mīļākā", "mana milaka",
+    ]
+    if any(m in lower for m in like_markers):
+        return ("hobbies", raw[:300])
+
+    # Projects / goals
+    if any(m in lower for m in ["mans projekts", "projekts ir", "nina ai", "ninaos", "mans mērķis", "mans merkis", "mans sapnis"]):
+        if any(m in lower for m in ["mērķis", "merkis", "sapnis", "nopelnīt", "nopelnit"]):
+            return ("goals", raw[:500])
+        return ("projects", raw[:500])
+
+    return None
+
+
+def nina_recovery_apply_fact(user, fact):
+    if not fact:
+        return False
+    field, value = fact
+    value = (value or "").strip()
+    if not value:
+        return False
+
+    changed = False
+
+    if field in ["name", "profession", "city"]:
+        if not (user.get(field) or "").strip():
+            user[field] = value
+            changed = True
+    else:
+        old = (user.get(field) or "").strip()
+        try:
+            new_value = v24_append_unique_text(old, value, max_items=30)
+        except Exception:
+            parts = [p.strip() for p in old.split(";") if p.strip()]
+            if value not in parts:
+                parts.append(value)
+            new_value = "; ".join(parts[-30:])
+        if new_value != old:
+            user[field] = new_value
+            changed = True
+
+    return changed
+
+
+def nina_recover_profile_from_history(user_id, limit=500):
+    """
+    Atjauno profilu no conversation_state un memory_backups.
+    Šis ir drošs recovery slānis pēc arhitektūras maiņas:
+    neizdzēš esošo, tikai papildina tukšos/laukus ar atrastajiem faktiem.
+    """
+    user = get_user(str(user_id)) or {}
+    scanned = 0
+    recovered = 0
+    found_facts = []
+
+    # 1) conversation_state
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(
+            c,
+            """
+            SELECT user_text
+            FROM conversation_state
+            WHERE user_id = %s
+            ORDER BY id ASC
+            LIMIT %s
+            """,
+            (str(user_id), int(limit or 500))
+        )
+        rows = c.fetchall() or []
+        c.close()
+        conn.close()
+
+        for row in rows:
+            if not row:
+                continue
+            text = str(row[0] or "")
+            scanned += 1
+            fact = nina_recovery_extract_profile_fact(text)
+            if fact and nina_recovery_apply_fact(user, fact):
+                recovered += 1
+                found_facts.append(f"{fact[0]}: {fact[1]}")
+    except Exception as e:
+        print("nina_recover_profile_from_history conversation_state kļūda:", repr(e))
+
+    # 2) memory_backups
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(
+            c,
+            """
+            SELECT backup_text
+            FROM memory_backups
+            WHERE user_id = %s
+            ORDER BY id ASC
+            LIMIT %s
+            """,
+            (str(user_id), int(limit or 500))
+        )
+        rows = c.fetchall() or []
+        c.close()
+        conn.close()
+
+        for row in rows:
+            if not row:
+                continue
+            text = str(row[0] or "")
+            scanned += 1
+            fact = nina_recovery_extract_profile_fact(text)
+            if fact and nina_recovery_apply_fact(user, fact):
+                recovered += 1
+                found_facts.append(f"{fact[0]}: {fact[1]}")
+    except Exception as e:
+        print("nina_recover_profile_from_history memory_backups kļūda:", repr(e))
+
+    try:
+        update_user(str(user_id), user)
+    except Exception as e:
+        print("nina_recover_profile_from_history update_user kļūda:", repr(e))
+
+    return {
+        "scanned": scanned,
+        "recovered": recovered,
+        "facts": found_facts[:20],
+        "user": user,
+    }
+
+
+def nina_recovery_answer(user_id):
+    result = nina_recover_profile_from_history(user_id)
+    scanned = result.get("scanned", 0)
+    recovered = result.get("recovered", 0)
+    facts = result.get("facts") or []
+
+    lines = [
+        "🧠 Nina Memory/Profile Recovery",
+        "",
+        f"Pārskatītas rindas: {scanned}",
+        f"Atjaunoti profila fakti: {recovered}",
+    ]
+
+    if facts:
+        lines.append("")
+        lines.append("Atrasts:")
+        for item in facts[:10]:
+            lines.append(f"• {item}")
+    else:
+        lines.append("")
+        lines.append("Neatradu pietiekami daudz profila faktu vecajā vēsturē.")
+
+    lines.append("")
+    lines.append("Nākamais tests: `ko tu par mani zini`")
+    lines.append("")
+    lines.append("Versija: V115.2 + Memory Recovery")
+    return "\n".join(lines)
+
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
     try:
         user_text = update.message.text
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
+
+        if lower in ["nina recovery", "memory recovery", "profile recovery", "atjauno profilu", "atjauno atmiņu", "atjauno atminu"]:
+            await safe_reply_text(update, nina_recovery_answer(user_id))
+            return
 
         if lower in ["reply builder", "core 2.5.1", "reply builder status", "core 251", "core 2.5.1 status"]:
             await safe_reply_text(update, reply_builder_status_answer())
