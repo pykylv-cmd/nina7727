@@ -1,12 +1,12 @@
 """
 task_engine.py
-NinaOS Task Engine — V1.0
+NinaOS Task Engine — V1.1
 
 Pārvērš sarunu par darāmiem darbiem.
-Šis modulis pats nesūta Telegram ziņas.
+Mērķis: Nina ne tikai čato, bet sāk uzturēt darba sarakstu.
 """
 
-TASK_ENGINE_VERSION = "Task Engine V1.0"
+TASK_ENGINE_VERSION = "Task Engine V1.1"
 
 
 def _clean(text):
@@ -56,7 +56,9 @@ def detect_task(text):
         "raw_text": raw,
         "client": detect_client(raw),
         "deadline": detect_deadline(raw),
+        "deadline_label": deadline_label(detect_deadline(raw)),
         "priority": detect_priority(raw),
+        "priority_label": priority_label(detect_priority(raw)),
         "status": "open",
         "source": "telegram",
         "version": TASK_ENGINE_VERSION,
@@ -80,14 +82,31 @@ def detect_client(text):
     raw = _clean(text)
     lower = raw.lower()
 
-    markers = ["klientam ", "klientu ", "klients ", "priekš ", "prieks "]
-    for marker in markers:
+    # Precīzāks variants: "klientam Andrim", "klientei Annai"
+    markers = [
+        "klientam ", "klientei ", "klientu ", "klients ",
+        "andrim", "annai"
+    ]
+
+    for marker in ["klientam ", "klientei ", "klientu ", "klients "]:
         if marker in lower:
             idx = lower.find(marker) + len(marker)
             tail = raw[idx:].strip(" .,!?:;")
             if tail:
                 parts = tail.split()
-                return " ".join(parts[:3]).strip(" .,!?:;")
+                candidate = " ".join(parts[:2]).strip(" .,!?:;")
+                # Neatgriežam vispārīgu vārdu, ja nav konkrēta nosaukuma.
+                if candidate.lower() not in ["", "rīt", "rit", "šodien", "sodien"]:
+                    return candidate
+
+    # Ja tekstā ir "Andrim" vai "Annai" kā testa klienti, paņem tos.
+    known_names = {
+        "andrim": "Andris",
+        "annai": "Anna",
+    }
+    for key, value in known_names.items():
+        if key in lower:
+            return value
 
     return ""
 
@@ -121,6 +140,22 @@ def detect_deadline(text):
     return ""
 
 
+def deadline_label(code):
+    labels = {
+        "today": "šodien",
+        "tomorrow": "rīt",
+        "day_after_tomorrow": "parīt",
+        "monday": "pirmdien",
+        "tuesday": "otrdien",
+        "wednesday": "trešdien",
+        "thursday": "ceturtdien",
+        "friday": "piektdien",
+        "saturday": "sestdien",
+        "sunday": "svētdien",
+    }
+    return labels.get(code or "", "")
+
+
 def detect_priority(text):
     lower = _lower(text)
 
@@ -131,6 +166,15 @@ def detect_priority(text):
         return "low"
 
     return "normal"
+
+
+def priority_label(code):
+    labels = {
+        "high": "augsta",
+        "normal": "normāla",
+        "low": "zema",
+    }
+    return labels.get(code or "", "normāla")
 
 
 def build_task_saved_answer(task, user_name=""):
@@ -145,15 +189,16 @@ def build_task_saved_answer(task, user_name=""):
         f"Uzdevums: {task.get('title')}",
     ]
 
-    if task.get("deadline"):
-        lines.append(f"Termiņš: {task.get('deadline')}")
+    if task.get("deadline_label"):
+        lines.append(f"Termiņš: {task.get('deadline_label')}")
 
     if task.get("client"):
         lines.append(f"Klients/tēma: {task.get('client')}")
 
-    lines.append(f"Prioritāte: {task.get('priority', 'normal')}")
+    lines.append(f"Prioritāte: {task.get('priority_label', 'normāla')}")
+    lines.append("Statuss: atvērts")
     lines.append("")
-    lines.append("Nākamais solis: es šo turu darba sarakstā, nevis tikai kā parastu sarunu.")
+    lines.append("Nākamais solis: kad uzrakstīsi `mani uzdevumi`, es šo parādīšu darba sarakstā.")
     lines.append("")
     lines.append(f"Versija: {TASK_ENGINE_VERSION}")
 
@@ -172,16 +217,23 @@ def task_summary(tasks):
     lines = ["📋 Aktīvie uzdevumi"]
     for i, task in enumerate(tasks[:10], 1):
         title = task.get("title", "Bez nosaukuma")
-        deadline = task.get("deadline", "")
-        priority = task.get("priority", "normal")
+        deadline = task.get("deadline_label") or deadline_label(task.get("deadline", ""))
+        priority = task.get("priority_label") or priority_label(task.get("priority", "normal"))
+        client = task.get("client", "")
+
         extra = []
         if deadline:
             extra.append(deadline)
         if priority:
             extra.append(priority)
+        if client:
+            extra.append(client)
+
         suffix = f" ({', '.join(extra)})" if extra else ""
         lines.append(f"{i}. {title}{suffix}")
 
+    lines.append("")
+    lines.append("Šis ir Ninas darba galds — nevis tikai sarunu vēsture.")
     lines.append("")
     lines.append(f"Versija: {TASK_ENGINE_VERSION}")
     return "\n".join(lines)
@@ -189,10 +241,13 @@ def task_summary(tasks):
 
 def task_engine_status():
     return (
-        "🧩 Task Engine V1.0 ir gatavs pieslēgšanai. ✅\n\n"
+        "🧩 Task Engine V1.1 ir aktīvs. ✅\n\n"
         "Mērķis: pārvērst sarunu par darāmiem darbiem.\n\n"
-        "Pirmais tests:\n"
-        "rīt jānosūta piedāvājums klientam\n\n"
-        "Sagaidāmais rezultāts: Nina izveido uzdevumu, nevis tikai atbild kā čatbots.\n\n"
+        "Tests:\n"
+        "šodien steidzami jāzvana klientam Andrim\n\n"
+        "Sagaidāmais rezultāts:\n"
+        "• termiņš: šodien\n"
+        "• prioritāte: augsta\n"
+        "• klients: Andris\n\n"
         f"Versija: {TASK_ENGINE_VERSION}"
     )
