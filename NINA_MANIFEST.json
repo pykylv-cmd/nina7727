@@ -7,19 +7,39 @@
   },
   "status": {
     "app_version": "V115.2",
-    "current_core": "2.6",
-    "current_task": "2.6.1 Initiative Detector",
+    "current_core": "2.6.1",
+    "current_task": "Core 2.6.1 Initiative Detector",
     "reply_builder": "active",
     "initiative_engine": "in_progress",
-    "last_updated_utc": "2026-06-30T18:32:22Z"
+    "last_updated_utc": "2026-07-01T13:32:55.417253+00:00"
+  },
+  "source_of_truth": {
+    "system": "NINA_SYSTEM.md",
+    "manifest": "NINA_MANIFEST.json",
+    "registry": "NINA_REGISTRY.md",
+    "changelog": "NINA_CHANGELOG.md",
+    "test_protocol": "TEST_PROTOCOL.md"
   },
   "architecture_rules": {
     "app_py_role": "router",
     "reply_builder_role": "only final reply generator",
     "initiative_engine_role": "creates structured initiative objects, not final text",
     "new_business_logic": "separate modules, not inside app.py",
+    "telegram_role": "adapter/test channel only",
     "user_edits": "user never edits single lines; full files are replaced in GitHub"
   },
+  "routing_chain": [
+    "NinaOS",
+    "Nina Core",
+    "app.py router / channel adapter",
+    "employee_brain.py",
+    "think_engine.py",
+    "learning_engine.py",
+    "quality_engine.py",
+    "reply_builder.py",
+    "channel adapter",
+    "Telegram"
+  ],
   "core_evolution": {
     "2.0": "Employee Brain - done",
     "2.1": "Identity + Employee State - done",
@@ -29,21 +49,16 @@
     "2.5": "Quality Engine - done",
     "2.5.1": "Reply Builder - done",
     "2.6": "Initiative Engine - in progress",
-    "2.6.1": "Initiative Detector - next implementation",
+    "2.6.1": "Initiative Detector - current",
     "2.6.2": "Initiative Generator - planned",
     "2.6.3": "Initiative Memory - planned",
     "2.7": "Context Engine 2.0 - planned",
     "2.8": "Memory Intelligence - planned",
     "3.0": "Employee Brain v3 - planned"
   },
-  "next_steps": [
-    "Create initiative_engine.py",
-    "Connect initiative_engine.py in app.py router",
-    "Ensure test commands do not go through old V115.2 conversation route",
-    "Test: core 2.6.1",
-    "Test: initiative detector status",
-    "Update NINA_SYSTEM.md",
-    "Update NINA_CHANGELOG.md",
-    "Update NINA_MANIFEST.json"
-  ]
+  "current_known_issue": {
+    "symptom": "core 2.6.1 goes to old V115.2 conversation route",
+    "root_cause": "app.py Employee Brain gate included only up to core 2.5",
+    "fix_required": "app.py gate must include core 2.5.1, core 2.6, core 2.6.1 and initiative commands"
+  }
 }
