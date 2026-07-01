@@ -12630,7 +12630,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Šis slānis pagaidām apstrādā tikai Core/mission/next-step ziņas,
         # lai droši testētu jauno Nina domāšanas centru, nesalaužot vecās funkcijas.
         if employee_reply and (
-            lower in ["core 2.0", "core 2.1", "core 2.2", "core 2.3", "core 2.4", "core 2.5", "think engine", "think status", "learning engine", "learning status", "quality engine", "quality status", "core evolution", "employee status", "core status", "nina core", "employee brain", "core"]
+            lower in ["core 2.0", "core 2.1", "core 2.2", "core 2.3", "core 2.4", "core 2.5", "core 2.5.1", "core 2.6", "core 2.6.1", "reply builder", "reply builder status", "initiative engine", "initiative status", "initiative detector", "initiative detector status", "think engine", "think status", "learning engine", "learning status", "quality engine", "quality status", "core evolution", "employee status", "core status", "nina core", "employee brain", "core"]
             or "ninaos misija" in lower
             or "mūsu misija" in lower
             or "musu misija" in lower
@@ -12678,12 +12678,12 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             answer = employee_reply(user_id=user_id, text=user_text, user=user)
 
             try:
-                v40_log_usage(user_id, "employee_brain_core_2_4", user_text)
+                v40_log_usage(user_id, "employee_brain_core_router", user_text)
             except Exception:
                 pass
 
             try:
-                save_conversation_state(user_id, user_text, answer, "employee_brain_core_2_4", v80_mood(user_text), "core_evolution")
+                save_conversation_state(user_id, user_text, answer, "employee_brain_core_router", v80_mood(user_text), "core_evolution")
             except Exception:
                 pass
 
