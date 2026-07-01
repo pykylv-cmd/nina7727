@@ -31,6 +31,27 @@ except Exception as e:
     employee_reply = None
 
 
+
+# NinaOS Task Engine Import
+try:
+    from task_engine import detect_task, build_task_saved_answer, task_summary, task_engine_status, TASK_ENGINE_VERSION
+except Exception as e:
+    print("task_engine.py imports nav pieejams:", e)
+    TASK_ENGINE_VERSION = "Task Engine nav pieslēgts"
+
+    def detect_task(text):
+        return None
+
+    def build_task_saved_answer(task, user_name=""):
+        return ""
+
+    def task_summary(tasks):
+        return "Task Engine nav pieslēgts."
+
+    def task_engine_status():
+        return "Task Engine nav pieslēgts."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -12919,6 +12940,99 @@ def nina_seed_janis_profile(user_id):
     )
 
 
+
+# =========================
+# NinaOS Task Engine Bridge
+# =========================
+
+def nina_task_owner_name(user_id):
+    try:
+        user = get_user(str(user_id)) or {}
+        return (user.get("name") or "").strip()
+    except Exception:
+        return ""
+
+
+def nina_save_task_to_memory(user_id, task):
+    """
+    V1.0 safe persistence:
+    saglabā task kā JSON tekstu memory_backups tabulā ar source='task_engine'.
+    Tas dod uzdevumiem pastāvīgu atmiņu bez jaunas DB migrācijas.
+    """
+    if not task:
+        return False
+
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        import json
+        db_execute(
+            c,
+            """
+            INSERT INTO memory_backups (user_id, backup_text, source)
+            VALUES (%s, %s, %s)
+            """,
+            (str(user_id), json.dumps(task, ensure_ascii=False), "task_engine")
+        )
+        conn.commit()
+        c.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print("nina_save_task_to_memory kļūda:", repr(e))
+        return False
+
+
+def nina_latest_tasks(user_id, limit=10):
+    tasks = []
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(
+            c,
+            """
+            SELECT backup_text, created_at
+            FROM memory_backups
+            WHERE user_id = %s AND source = %s
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            (str(user_id), "task_engine", int(limit or 10))
+        )
+        rows = c.fetchall() or []
+        c.close()
+        conn.close()
+
+        import json
+        for row in rows:
+            if not row or not row[0]:
+                continue
+            try:
+                obj = json.loads(str(row[0]))
+                if isinstance(obj, dict):
+                    tasks.append(obj)
+            except Exception:
+                tasks.append({"title": str(row[0]), "priority": "normal"})
+    except Exception as e:
+        print("nina_latest_tasks kļūda:", repr(e))
+
+    return tasks
+
+
+def nina_task_answer(user_id, user_text):
+    task = detect_task(user_text)
+    if not task:
+        return None
+
+    nina_save_task_to_memory(user_id, task)
+    name = nina_task_owner_name(user_id)
+    return build_task_saved_answer(task, user_name=name)
+
+
+def nina_task_list_answer(user_id):
+    return task_summary(nina_latest_tasks(user_id, limit=10))
+
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
     try:
@@ -12941,6 +13055,27 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if lower in ["reply builder", "core 2.5.1", "reply builder status", "core 251", "core 2.5.1 status"]:
             await safe_reply_text(update, reply_builder_status_answer())
+            return
+
+        if lower in ["task engine", "task status", "uzdevumu dzinējs", "uzdevumu dzinejs"]:
+            await safe_reply_text(update, task_engine_status())
+            return
+
+        if lower in ["mani uzdevumi", "uzdevumi", "task list", "tasks"]:
+            await safe_reply_text(update, nina_task_list_answer(user_id))
+            return
+
+        task_answer = nina_task_answer(user_id, user_text)
+        if task_answer:
+            try:
+                v40_log_usage(user_id, "task_engine", user_text)
+            except Exception:
+                pass
+            try:
+                save_conversation_state(user_id, user_text, task_answer, "task_engine", v80_mood(user_text), "task")
+            except Exception:
+                pass
+            await safe_reply_text(update, task_answer)
             return
 
         # Core Evolution 2.0 — Employee Brain test layer
