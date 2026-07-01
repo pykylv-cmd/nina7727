@@ -12129,26 +12129,84 @@ def v1151_memory_recall_question(lower):
 
 
 def v1151_identity_answer(user_id, text):
+    """
+    V115.3 Profile Bridge.
+    Viena droša vieta profila jautājumiem:
+    - lasa users tabulas laukus;
+    - ja profils tukšs, lasa arī natural memory;
+    - neļauj Ninai teikt "pagaidām maz", ja kaut kas jau ir atmiņā.
+    """
     user = v1151_user(user_id)
     name = v1151_name(user)
     lower = (text or "").strip().lower()
 
     if v1151_identity_question(lower):
         if name:
-            return v1151_clean_version(f"Jā. Tevi sauc {name}. 🙂\n\nŠādu lietu man nav jāmin — tā ir identitāte, un man tā jāizmanto sarunā.")
-        return v1151_clean_version("Tavu vārdu vēl neredzu profilā. Uzraksti: mani sauc Jānis — un pēc tam man tas jāatceras bez atkārtošanas.")
+            return v1151_clean_version(
+                f"Jā. Tevi sauc {name}. 🙂\n\n"
+                "Šādu lietu man nav jāmin — tā ir identitāte, un man tā jāizmanto sarunā."
+            )
+        return v1151_clean_version(
+            "Tavu vārdu vēl neredzu profilā.\n\n"
+            "Uzraksti: mani sauc Jānis — un pēc tam man tas jāatceras bez atkārtošanas."
+        )
 
     if v1151_profile_question(lower):
         lines = ["👤 Ko es par tevi zinu"]
-        if name: lines.append(f"Vārds: {name}")
-        if user.get("city"): lines.append(f"Dzīvesvieta/pilsēta: {user.get('city')}")
-        if user.get("profession"): lines.append(f"Joma/profesija: {user.get('profession')}")
-        if user.get("hobbies"): lines.append(f"Intereses: {user.get('hobbies')}")
-        if user.get("projects"): lines.append(f"Projekti: {user.get('projects')}")
-        if user.get("goals"): lines.append(f"Mērķi: {user.get('goals')}")
-        if user.get("facts"): lines.append(f"Svarīgi fakti: {user.get('facts')}")
-        if len(lines) == 1:
-            lines.append("Pagaidām maz. Pasaki vārdu, jomu, projektu vai mērķi — un man tas jāizmanto nākamajās atbildēs.")
+        found = False
+
+        if name:
+            lines.append(f"Vārds: {name}")
+            found = True
+
+        if user.get("city"):
+            lines.append(f"Dzīvesvieta/pilsēta: {user.get('city')}")
+            found = True
+
+        if user.get("profession"):
+            lines.append(f"Joma/profesija: {user.get('profession')}")
+            found = True
+
+        if user.get("hobbies"):
+            lines.append(f"Intereses: {user.get('hobbies')}")
+            found = True
+
+        if user.get("projects"):
+            lines.append(f"Projekti: {user.get('projects')}")
+            found = True
+
+        if user.get("goals"):
+            lines.append(f"Mērķi: {user.get('goals')}")
+            found = True
+
+        if user.get("facts"):
+            lines.append(f"Svarīgi fakti: {user.get('facts')}")
+            found = True
+
+        # Memory bridge: ja users profils ir tukšs, Nina pārbauda arī natural memory.
+        memories = []
+        try:
+            for row in latest_natural_memories(user_id, limit=8) or []:
+                if row and row[0]:
+                    value = str(row[0]).strip()
+                    if value and value not in memories:
+                        memories.append(value)
+        except Exception as e:
+            print("v1151 profile memory bridge kļūda:", repr(e))
+
+        if memories:
+            lines.append("Atmiņas:")
+            for m in memories[:8]:
+                lines.append(f"• {m}")
+            found = True
+
+        if not found:
+            lines.append(
+                "Pagaidām profilā neredzu pietiekami daudz datu.\n\n"
+                "Svarīgi: tas nozīmē, ka šobrīd jānostiprina Memory/Profile slānis, "
+                "nevis jāizliekas, ka viss ir kārtībā."
+            )
+
         lines.append("")
         lines.append("Ja kaut kas nav pareizi, pasaki tieši — es labošu profilu, nevis strīdēšos.")
         return v1151_clean_version("\n".join(lines))
