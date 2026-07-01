@@ -1,0 +1,44 @@
+{
+  "project": "NinaOS",
+  "identity": {
+    "company": "NinaOS",
+    "platform": "AI Economy Operating System",
+    "first_worker": "Nina",
+    "telegram_role": "test and communication channel only"
+  },
+  "current_versions": {
+    "blueprint": "1.1",
+    "app_router": "V116 Router Priority",
+    "core": "2.6.1 Initiative Detector",
+    "employee_brain": "Core Evolution 2.6.1",
+    "think_engine": "2.6.1",
+    "profile": "restored",
+    "premium": "working"
+  },
+  "fixed_bugs": {
+    "BUG-001": "core 2.6.1 routing fixed",
+    "BUG-002": "profile/memory restored with seed and bridge",
+    "BUG-003": "premium responds and uses profile name"
+  },
+  "current_focus": [
+    "Stabilize Nina AI as first worker",
+    "Move routing logic from app.py into router.py",
+    "Keep app.py as adapter only",
+    "Maintain documentation before code changes"
+  ],
+  "next_tests": [
+    "core 2.6.1",
+    "ko tu par mani zini",
+    "premium",
+    "kā mani sauc"
+  ],
+  "source_of_truth": [
+    "NINA_START.md",
+    "NinaOS_Blueprint_1.1.md",
+    "NINA_PROJECT_STATE.json",
+    "NINA_MANIFEST.json",
+    "NINA_BUG_TRACKER.md",
+    "TEST_PROTOCOL.md"
+  ],
+  "last_updated_utc": "2026-07-01T18:52:52.226606+00:00"
+}
