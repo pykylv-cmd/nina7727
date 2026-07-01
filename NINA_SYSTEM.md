@@ -1,84 +1,66 @@
-
 # NINA_SYSTEM.md
 
-# NinaOS System Manifest
+# NinaOS System Constitution
 
-## 1. Project
+## 1. Projekta būtība
 
--   Name: NinaOS
--   Product: Nina AI
--   Status: Active Development
+Nina nav Telegram bots.
 
-## 2. Mission
+NinaOS ir AI darbinieku operētājsistēma / platforma.
 
-Mēs nebūvējam Telegram botu. Mēs būvējam AI operētājsistēmu.
+Telegram ir tikai testa kanāls jeb adapters.
 
-Telegram ir tikai testēšanas vide.
+Nina AI ir pirmais AI darbinieks, kas darbojas uz NinaOS kodola.
 
-## 3. Core Evolution
+Ilgtermiņa mērķis: izveidot pasaulē labāko AI darbinieku platformu, kur AI darbinieki sniedz pakalpojumus, pārdod idejas, palīdz cilvēkiem un uzņēmumiem, un vēlāk darbojas Nina Exchange platformā.
 
-  Core                    Status
-  ----------------------- --------
-  2.0 Employee Brain      ✅
-  2.1 Identity            ✅
-  2.2 Responsibility      ✅
-  2.3 Think Engine        ✅
-  2.4 Learning Engine     ✅
-  2.5 Quality Engine      ✅
-  2.5.1 Reply Builder     ✅
-  2.6 Initiative Engine   🚧
+## 2. Galvenie produkti
 
-## 4. Architecture Principles
+- NinaOS — platforma
+- Nina AI — pirmais AI darbinieks
+- Nina Core — domāšanas kodols
+- Nina Memory — kopīgā atmiņa
+- Nina Identity — pastāvīga identitāte
+- Nina Vision — attēlu un dokumentu saprašana
+- Nina Business — biznesa AI darbinieki
+- Nina Exchange — AI darbinieku, ideju un pakalpojumu tirgus
+- Nina Pay — maksājumi un komisijas
+- Nina API — ārējās integrācijas
 
--   Reply Builder ir vienīgais gala atbilžu ģenerētājs.
--   Initiative neveido gala tekstu.
--   app.py ir Router.
--   Jauna biznesa loģika dzīvo atsevišķos moduļos.
--   Telegram ir tikai testa vide.
+## 3. Pareizā arhitektūras domāšana
 
-## 5. Current Sprint
+Nepareizi:
 
-Current Core: **2.6 Initiative Engine**
+Telegram → app.py → kaut kāda atbilde
 
-Current Task: **2.6.1 Initiative Detector**
+Pareizi:
 
-Next: - Initiative Generator - Initiative Memory - Reply Builder
-Integration
+NinaOS → Nina Core → Employee Brain → Think Engine → Learning Engine → Quality Engine → Reply Builder → Channel Adapter → Telegram
 
-## 6. Architecture Ledger
+Telegram nekad nav arhitektūras sākums. Telegram ir tikai viens no kanāliem.
 
-### AD-001
+## 4. Stingrie noteikumi
 
-Employee Brain ieviešana.
+- `app.py` ir routeris, nevis biznesa loģikas vieta.
+- Jauna biznesa loģika dzīvo atsevišķos moduļos.
+- Think Engine nekad neveido gala atbildi.
+- Initiative Engine neveido gala tekstu, tikai strukturētu iniciatīvas objektu.
+- Reply Builder ir vienīgais ilgtermiņa gala atbildes ģenerators.
+- Telegram ir adapters, nevis produkta centrs.
+- Lietotājs nekad nelabo atsevišķas rindas.
+- ChatGPT vienmēr sagatavo pilnus failus.
+- Pirms koda rakstīšanas jānosaka atbildīgais modulis un izsaukumu ķēde.
 
-### AD-002
+## 5. Jaunā čata starts
 
-Reply Builder pirms Initiative.
+NINA RESET.
 
-### AD-003
+Strādājam ar NinaOS, nevis Telegram botu.
+Izlasi:
+1. `NINA_SYSTEM.md`
+2. `NINA_MANIFEST.json`
+3. `NINA_REGISTRY.md`
+4. `NINA_CHANGELOG.md`
+5. `TEST_PROTOCOL.md`
 
-Initiative izmanto Reply Builder.
-
-## 7. Development Rules
-
--   ChatGPT vienmēr sagatavo pilnus failus.
--   Lietotājs nekad nelabo atsevišķas rindas.
--   GitHub tiek ielādēti pilni faili.
--   Katra Core beigās atjaunina NINA_SYSTEM.md.
-
-## 8. Known Context
-
--   NinaOS ir AI platforma.
--   Nina ir pirmais AI darbinieks.
--   app.py ir centrālais maršrutētājs.
--   Reply Builder ir komunikācijas kodols.
--   Initiative ir atsevišķs modulis.
-
-## 9. Next Core
-
-Core 2.6.1 --- Initiative Detector
-
-## 10. Notes
-
-Šis ir projekta galvenais manifests. Tas jāatjaunina pēc katras Core
-versijas.
+Pašreizējais Core: Core 2.6.1 — Initiative Detector.
