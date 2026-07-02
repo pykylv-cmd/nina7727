@@ -52,6 +52,21 @@ except Exception as e:
         return "Task Engine nav pieslēgts."
 
 
+
+# NinaOS Work Engine Import
+try:
+    from work_engine import work_plan, work_engine_status, WORK_ENGINE_VERSION
+except Exception as e:
+    print("work_engine.py imports nav pieejams:", e)
+    WORK_ENGINE_VERSION = "Work Engine nav pieslēgts"
+
+    def work_plan(tasks, user_name=""):
+        return "Work Engine nav pieslēgts."
+
+    def work_engine_status():
+        return "Work Engine nav pieslēgts."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -13031,6 +13046,17 @@ def nina_task_answer(user_id, user_text):
 
 def nina_task_list_answer(user_id):
     return task_summary(nina_latest_tasks(user_id, limit=10))
+
+
+
+# =========================
+# NinaOS Work Engine Bridge
+# =========================
+
+def nina_work_plan_answer(user_id):
+    name = nina_task_owner_name(user_id)
+    tasks = nina_latest_tasks(user_id, limit=20)
+    return work_plan(tasks, user_name=name)
 
 
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
