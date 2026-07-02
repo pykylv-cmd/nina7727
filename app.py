@@ -13285,8 +13285,142 @@ def nina_relation_label_lv(code):
         "project": "projekts",
         "car": "auto",
         "important_person_or_topic": "svarīga persona/tēma",
+        "klients": "klients",
+        "sieva": "sieva",
+        "suns": "suns",
     }
     return mapping.get((code or "").strip().lower(), code or "")
+
+
+def nina_parse_relationship_facts_from_user(user):
+    facts = (user or {}).get("facts") or ""
+    results = []
+
+    for part in re.split(r"[;\n|]+", facts):
+        item = (part or "").strip()
+        if not item or "→" not in item:
+            continue
+        left, right = item.split("→", 1)
+        subject = left.strip()
+        relation = right.strip().lower()
+        rel_map = {
+            "client": "client", "klients": "client",
+            "wife": "wife", "sieva": "wife",
+            "husband": "husband", "vīrs": "husband", "virs": "husband",
+            "dog": "dog", "suns": "dog",
+            "cat": "cat", "kaķis": "cat", "kakis": "cat",
+            "project": "project", "projekts": "project",
+        }
+        if subject:
+            results.append({"subject": subject, "relation": rel_map.get(relation, relation), "source": "users.facts"})
+
+    return results
+
+
+def nina_recover_relationships_from_memory_any_source(user_id, limit=300):
+    """
+    Profile Summary V1.3 recovery:
+    lasa ne tikai source='relationship_engine', bet arī vecos memory_backups un conversation_state.
+    Tas vajadzīgs, ja attiecību routes strādāja, bet profils vēl neredz datus.
+    """
+    found = []
+
+    # 1) relationship_engine oficial memory
+    try:
+        found.extend(nina_latest_relationships(user_id, limit=100) or [])
+    except Exception as e:
+        print("profile v13 latest relationships kļūda:", repr(e))
+
+    # 2) scan all memory_backups for JSON or text relationships
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(
+            c,
+            """
+            SELECT backup_text, source, created_at
+            FROM memory_backups
+            WHERE user_id = %s
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            (str(user_id), int(limit or 300))
+        )
+        rows = c.fetchall() or []
+        c.close()
+        conn.close()
+
+        for row in rows:
+            if not row or not row[0]:
+                continue
+            text = str(row[0] or "").strip()
+
+            # JSON relationship
+            try:
+                obj = json.loads(text)
+                if isinstance(obj, dict) and obj.get("type") == "relationship":
+                    found.append(obj)
+                    continue
+            except Exception:
+                pass
+
+            # Text relationship
+            try:
+                rel = detect_relationship(text)
+                if rel:
+                    found.append(rel)
+            except Exception:
+                pass
+    except Exception as e:
+        print("profile v13 memory_backups scan kļūda:", repr(e))
+
+    # 3) scan conversation_state for texts like "Andris ir mans klients"
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(
+            c,
+            """
+            SELECT user_text, created_at
+            FROM conversation_state
+            WHERE user_id = %s
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            (str(user_id), int(limit or 300))
+        )
+        rows = c.fetchall() or []
+        c.close()
+        conn.close()
+
+        for row in rows:
+            if not row or not row[0]:
+                continue
+            text = str(row[0] or "").strip()
+            try:
+                rel = detect_relationship(text)
+                if rel:
+                    found.append(rel)
+            except Exception:
+                pass
+    except Exception as e:
+        print("profile v13 conversation_state scan kļūda:", repr(e))
+
+    # dedupe
+    final = []
+    seen = set()
+    for rel in found:
+        subject = (rel.get("subject") or "").strip()
+        relation = (rel.get("relation") or "").strip()
+        if not subject or not relation:
+            continue
+        key = f"{subject}|{relation}".lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        final.append(rel)
+
+    return final
 
 
 def nina_profile_summary_v11(user_id):
@@ -13297,7 +13431,7 @@ def nina_profile_summary_v11(user_id):
     profession = (user.get("profession") or "").strip()
     projects = (user.get("projects") or "").strip()
     goals = (user.get("goals") or "").strip()
-    interests = (user.get("interests") or "").strip()
+    interests = (user.get("interests") or user.get("hobbies") or "").strip()
 
     if name:
         lines.append(f"Vārds: {name}")
@@ -13305,11 +13439,8 @@ def nina_profile_summary_v11(user_id):
         lines.append(f"Joma/profesija: {profession}")
 
     rels = []
-    try:
-        rels = nina_latest_relationships(user_id, limit=100)
-    except Exception as e:
-        print("nina_profile_summary_v11 relationships kļūda:", repr(e))
-        rels = []
+    rels.extend(nina_parse_relationship_facts_from_user(user))
+    rels.extend(nina_recover_relationships_from_memory_any_source(user_id, limit=300))
 
     grouped = {
         "client": [],
@@ -13363,7 +13494,6 @@ def nina_profile_summary_v11(user_id):
     if projects:
         project_items.extend([p.strip() for p in re.split(r"[;,]", projects) if p.strip()])
     project_items.extend(grouped["project"])
-    # dedupe preserve order
     proj_seen = set()
     final_projects = []
     for p in project_items:
@@ -13380,9 +13510,13 @@ def nina_profile_summary_v11(user_id):
         lines.append(f"Intereses: {interests}")
 
     if len(lines) == 1:
-        lines.append("Pagaidām profilā neredzu pietiekami daudz datu.")
-        lines.append("")
-        lines.append("Svarīgi: tas nozīmē, ka šobrīd jānostiprina Memory/Profile slānis, nevis jāizliekas, ka viss ir kārtībā.")
+        raw_facts = (user.get("facts") or "").strip()
+        if raw_facts:
+            lines.append(f"Svarīgi fakti: {raw_facts}")
+        else:
+            lines.append("Pagaidām profilā neredzu pietiekami daudz datu.")
+            lines.append("")
+            lines.append("Svarīgi: tas nozīmē, ka šobrīd jānostiprina Memory/Profile slānis, nevis jāizliekas, ka viss ir kārtībā.")
     else:
         extra = grouped["important_person_or_topic"] + grouped["car"]
         if extra:
@@ -13390,7 +13524,10 @@ def nina_profile_summary_v11(user_id):
 
     lines.append("")
     lines.append("Ja kaut kas nav pareizi, pasaki tieši — es labošu profilu, nevis strīdēšos.")
+    lines.append("")
+    lines.append("Profile Summary: V1.3")
     return "\n".join(lines)
+
 
 
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -13403,6 +13540,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if lower in ["ko tu par mani zini", "ko tu zini par mani", "mans profils", "manas atmiņas", "manas atminas"]:
             await safe_reply_text(update, nina_profile_summary_v11(user_id))
             return
+
 
 
         # =========================
