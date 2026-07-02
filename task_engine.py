@@ -1,12 +1,15 @@
 """
 task_engine.py
-NinaOS Task Engine — V1.1
+NinaOS Task Engine — V1.2
 
 Pārvērš sarunu par darāmiem darbiem.
-Mērķis: Nina ne tikai čato, bet sāk uzturēt darba sarakstu.
+V1.2:
+- normalizē vārdus: Andrim -> Andris, Annai -> Anna, Jānim -> Jānis
+- uzdevumu sarakstā nerāda pabeigtos darbus
+- saglabā statusus: open / completed
 """
 
-TASK_ENGINE_VERSION = "Task Engine V1.1"
+TASK_ENGINE_VERSION = "Task Engine V1.2"
 
 
 def _clean(text):
@@ -19,6 +22,47 @@ def _lower(text):
 
 def _contains_any(lower, words):
     return any(w in lower for w in words)
+
+
+def normalize_person_name(name):
+    raw = _clean(name)
+    if not raw:
+        return ""
+
+    lower = raw.lower().strip(" .,!?:;")
+
+    known = {
+        "andrim": "Andris",
+        "andri": "Andris",
+        "andris": "Andris",
+        "annai": "Anna",
+        "annu": "Anna",
+        "anna": "Anna",
+        "jānim": "Jānis",
+        "janim": "Jānis",
+        "jāni": "Jānis",
+        "jani": "Jānis",
+        "jānis": "Jānis",
+        "janis": "Jānis",
+    }
+
+    if lower in known:
+        return known[lower]
+
+    # Vienkāršs latviešu datīva heuristisks labojums vīriešu vārdiem.
+    if lower.endswith("im") and len(raw) > 4:
+        base = raw[:-2]
+        return base[:1].upper() + base[1:] + "is"
+
+    if lower.endswith("am") and len(raw) > 4:
+        base = raw[:-2]
+        return base[:1].upper() + base[1:] + "s"
+
+    if lower.endswith("ai") and len(raw) > 4:
+        base = raw[:-2]
+        return base[:1].upper() + base[1:] + "a"
+
+    return raw[:1].upper() + raw[1:]
 
 
 def detect_task(text):
@@ -50,16 +94,20 @@ def detect_task(text):
     if not _contains_any(lower, task_markers):
         return None
 
+    deadline = detect_deadline(raw)
+    priority = detect_priority(raw)
+
     return {
         "type": "task",
         "title": build_task_title(raw),
         "raw_text": raw,
         "client": detect_client(raw),
-        "deadline": detect_deadline(raw),
-        "deadline_label": deadline_label(detect_deadline(raw)),
-        "priority": detect_priority(raw),
-        "priority_label": priority_label(detect_priority(raw)),
+        "deadline": deadline,
+        "deadline_label": deadline_label(deadline),
+        "priority": priority,
+        "priority_label": priority_label(priority),
         "status": "open",
+        "status_label": "atvērts",
         "source": "telegram",
         "version": TASK_ENGINE_VERSION,
     }
@@ -82,31 +130,19 @@ def detect_client(text):
     raw = _clean(text)
     lower = raw.lower()
 
-    # Precīzāks variants: "klientam Andrim", "klientei Annai"
-    markers = [
-        "klientam ", "klientei ", "klientu ", "klients ",
-        "andrim", "annai"
-    ]
-
     for marker in ["klientam ", "klientei ", "klientu ", "klients "]:
         if marker in lower:
             idx = lower.find(marker) + len(marker)
             tail = raw[idx:].strip(" .,!?:;")
             if tail:
                 parts = tail.split()
-                candidate = " ".join(parts[:2]).strip(" .,!?:;")
-                # Neatgriežam vispārīgu vārdu, ja nav konkrēta nosaukuma.
+                candidate = parts[0].strip(" .,!?:;")
                 if candidate.lower() not in ["", "rīt", "rit", "šodien", "sodien"]:
-                    return candidate
+                    return normalize_person_name(candidate)
 
-    # Ja tekstā ir "Andrim" vai "Annai" kā testa klienti, paņem tos.
-    known_names = {
-        "andrim": "Andris",
-        "annai": "Anna",
-    }
-    for key, value in known_names.items():
-        if key in lower:
-            return value
+    for candidate in ["andrim", "andris", "annai", "anna", "jānim", "janim", "jānis", "janis"]:
+        if candidate in lower:
+            return normalize_person_name(candidate)
 
     return ""
 
@@ -177,6 +213,29 @@ def priority_label(code):
     return labels.get(code or "", "normāla")
 
 
+def task_key(task):
+    return _lower((task or {}).get("title") or (task or {}).get("raw_text") or "")
+
+
+def active_tasks(tasks):
+    """
+    Ņem task ierakstus jaunākie -> vecākie.
+    Ja jaunākais statuss šim title ir completed, veco open vairs nerāda.
+    """
+    result = []
+    seen = set()
+
+    for task in tasks or []:
+        key = task_key(task)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if (task or {}).get("status", "open") != "completed":
+            result.append(task)
+
+    return result
+
+
 def build_task_saved_answer(task, user_name=""):
     if not task:
         return ""
@@ -198,7 +257,7 @@ def build_task_saved_answer(task, user_name=""):
     lines.append(f"Prioritāte: {task.get('priority_label', 'normāla')}")
     lines.append("Statuss: atvērts")
     lines.append("")
-    lines.append("Nākamais solis: kad uzrakstīsi `mani uzdevumi`, es šo parādīšu darba sarakstā.")
+    lines.append("Nākamais solis: kad uzrakstīsi `sakārto manu dienu`, es pateikšu, ar ko sākt.")
     lines.append("")
     lines.append(f"Versija: {TASK_ENGINE_VERSION}")
 
@@ -206,11 +265,12 @@ def build_task_saved_answer(task, user_name=""):
 
 
 def task_summary(tasks):
-    tasks = tasks or []
+    tasks = active_tasks(tasks or [])
+
     if not tasks:
         return (
             "📋 Šobrīd neredzu aktīvus uzdevumus.\n\n"
-            "Uzraksti, piemēram: rīt jānosūta piedāvājums klientam.\n\n"
+            "Uzraksti, piemēram: šodien steidzami jāzvana klientam Andrim.\n\n"
             f"Versija: {TASK_ENGINE_VERSION}"
         )
 
@@ -241,13 +301,10 @@ def task_summary(tasks):
 
 def task_engine_status():
     return (
-        "🧩 Task Engine V1.1 ir aktīvs. ✅\n\n"
-        "Mērķis: pārvērst sarunu par darāmiem darbiem.\n\n"
+        "🧩 Task Engine V1.2 ir aktīvs. ✅\n\n"
+        "Jaunums: vārdu normalizācija un pabeigto uzdevumu filtrēšana.\n\n"
         "Tests:\n"
         "šodien steidzami jāzvana klientam Andrim\n\n"
-        "Sagaidāmais rezultāts:\n"
-        "• termiņš: šodien\n"
-        "• prioritāte: augsta\n"
-        "• klients: Andris\n\n"
+        "Sagaidāmais: klients = Andris, nevis Andrim.\n\n"
         f"Versija: {TASK_ENGINE_VERSION}"
     )
