@@ -13087,6 +13087,22 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, task_engine_status())
             return
 
+        if lower in ["work engine", "work status", "darba dzinējs", "darba dzinejs"]:
+            await safe_reply_text(update, work_engine_status())
+            return
+
+        if lower in [
+            "sakārto manu dienu",
+            "sakarto manu dienu",
+            "saplāno manu dienu",
+            "saplano manu dienu",
+            "mana darba diena",
+            "darba plāns",
+            "darba plans"
+        ]:
+            await safe_reply_text(update, nina_work_plan_answer(user_id))
+            return
+
         if lower in ["mani uzdevumi", "uzdevumi", "task list", "tasks"]:
             await safe_reply_text(update, nina_task_list_answer(user_id))
             return
