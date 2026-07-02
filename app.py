@@ -13532,10 +13532,84 @@ def nina_profile_summary_v11(user_id):
 
 
 # =========================
-# NinaOS Memory Router Fix — V1.0
+# NinaOS Persistence Health Check — V1.0
 # =========================
 
-def nina_clean_natural_memory_text_v10(text):
+def nina_persistence_health_answer():
+    try:
+        db_mode = "PostgreSQL" if USE_POSTGRES else "SQLite local file"
+        database_url_status = "IR" if bool(DATABASE_URL) else "NAV"
+        psycopg2_status = "IR" if bool(psycopg2) else "NAV"
+
+        user_count = "?"
+        memory_count = "?"
+        relationship_count = "?"
+        task_count = "?"
+
+        try:
+            conn = get_db()
+            c = conn.cursor()
+
+            db_execute(c, "SELECT COUNT(*) FROM users")
+            row = c.fetchone()
+            user_count = row[0] if row else 0
+
+            db_execute(c, "SELECT COUNT(*) FROM memory_backups")
+            row = c.fetchone()
+            memory_count = row[0] if row else 0
+
+            db_execute(c, "SELECT COUNT(*) FROM memory_backups WHERE source = %s", ("relationship_engine",))
+            row = c.fetchone()
+            relationship_count = row[0] if row else 0
+
+            db_execute(c, "SELECT COUNT(*) FROM memory_backups WHERE source = %s", ("task_engine",))
+            row = c.fetchone()
+            task_count = row[0] if row else 0
+
+            c.close()
+            conn.close()
+        except Exception as e:
+            print("Persistence DB count kļūda:", repr(e))
+
+        warning = ""
+        if not USE_POSTGRES:
+            warning = (
+                "\n⚠️ Brīdinājums:\n"
+                "Šobrīd Nina izmanto lokālu SQLite failu. Railway redeploy/restart gadījumā dati var pazust vai būt tukši.\n\n"
+                "Lai atmiņa būtu droša, vajag pieslēgt Railway PostgreSQL un DATABASE_URL."
+            )
+        else:
+            warning = (
+                "\n✅ Labi:\n"
+                "Nina izmanto PostgreSQL. Tas ir pareizais virziens pastāvīgai atmiņai."
+            )
+
+        return (
+            "🧪 NinaOS Persistence Health Check\n\n"
+            f"DB režīms: {db_mode}\n"
+            f"DATABASE_URL: {database_url_status}\n"
+            f"psycopg2: {psycopg2_status}\n\n"
+            f"Lietotāji users: {user_count}\n"
+            f"Atmiņas memory_backups: {memory_count}\n"
+            f"Attiecības relationship_engine: {relationship_count}\n"
+            f"Uzdevumi task_engine: {task_count}\n"
+            f"{warning}\n\n"
+            "Versija: Persistence Health V1.0"
+        )
+    except Exception as e:
+        return (
+            "🧪 NinaOS Persistence Health Check\n\n"
+            "Nevarēju pilnībā pārbaudīt datubāzi.\n\n"
+            f"Kļūda: {repr(e)}\n\n"
+            "Versija: Persistence Health V1.0"
+        )
+
+
+# =========================
+# NinaOS Memory Router Fix — V1.1
+# =========================
+
+def nina_clean_natural_memory_text_v11(text):
     raw = (text or "").strip()
     lower = raw.lower()
 
@@ -13558,12 +13632,10 @@ def nina_clean_natural_memory_text_v10(text):
     return raw.strip(" .,!?:;")
 
 
-def nina_is_natural_memory_request_v10(text):
+def nina_is_natural_memory_request_v11(text):
     lower = (text or "").strip().lower()
-
     if not lower:
         return False
-
     markers = [
         "nina, atceries",
         "nina atceries",
@@ -13573,21 +13645,20 @@ def nina_is_natural_memory_request_v10(text):
         "paturi prātā",
         "paturi prata",
     ]
-
     return any(lower.startswith(m) for m in markers)
 
 
-def nina_memory_router_answer_v10(user_id, user_text):
-    if not nina_is_natural_memory_request_v10(user_text):
+def nina_memory_router_answer_v11(user_id, user_text):
+    if not nina_is_natural_memory_request_v11(user_text):
         return None
 
-    cleaned = nina_clean_natural_memory_text_v10(user_text)
+    cleaned = nina_clean_natural_memory_text_v11(user_text)
 
     if not cleaned:
         return (
             "🧠 Saki, ko tieši man atcerēties.\n\n"
             "Piemēram: Nina, atceries, ka man patīk BMW\n\n"
-            "Versija: Memory Router Fix V1.0"
+            "Versija: Memory Router Fix V1.1"
         )
 
     saved = ""
@@ -13605,25 +13676,156 @@ def nina_memory_router_answer_v10(user_id, user_text):
         print("Memory Router Fix profile bridge kļūda:", repr(e))
 
     final_text = saved or cleaned
-
     return (
         "🧠 Paturēšu prātā. ✅\n\n"
         f"Atcerēšos: {final_text}\n\n"
         "Tagad tā nav tikai saruna — tā ir Ninas atmiņā.\n\n"
-        "Versija: Memory Router Fix V1.0"
+        "Versija: Memory Router Fix V1.1"
     )
 
 
-def nina_memory_router_status_v10():
+def nina_memory_router_status_v11():
     return (
-        "🧠 Memory Router Fix V1.0 ir aktīvs. ✅\n\n"
+        "🧠 Memory Router Fix V1.1 ir aktīvs. ✅\n\n"
         "Mērķis: frāzes ar `atceries` un `neaizmirst` saglabāt kā atmiņu, nevis projektu.\n\n"
         "Tests:\n"
         "Nina, atceries, ka man patīk BMW\n\n"
         "Sagaidāmais rezultāts:\n"
         "Atcerēšos: man patīk BMW\n\n"
-        "Versija: Memory Router Fix V1.0"
+        "Versija: Memory Router Fix V1.1"
     )
+
+
+# =========================
+# NinaOS Profile Summary V1.6
+# =========================
+
+def nina_profile_split_items_v16(value):
+    value = (value or "").strip()
+    if not value:
+        return []
+    return [p.strip() for p in re.split(r"[;\n|,]+", value) if p.strip()]
+
+
+def nina_profile_summary_v16(user_id):
+    user = get_user(str(user_id)) or {}
+    lines = ["👤 Ko es par tevi zinu"]
+
+    name = (user.get("name") or "").strip()
+    profession = (user.get("profession") or "").strip()
+    projects = nina_profile_split_items_v16(user.get("projects", ""))
+    hobbies = (user.get("hobbies") or user.get("interests") or "").strip()
+    facts = nina_profile_split_items_v16(user.get("facts", ""))
+
+    if name:
+        lines.append(f"Vārds: {name}")
+    if profession:
+        lines.append(f"Joma/profesija: {profession}")
+
+    relationships = []
+    try:
+        relationships = nina_latest_relationships(user_id, limit=100) or []
+    except Exception as e:
+        print("Profile Summary V1.6 relationship read kļūda:", repr(e))
+        relationships = []
+
+    clients, family, pets, rel_projects, other = [], [], [], [], []
+    seen = set()
+
+    for rel in relationships:
+        subject = (rel.get("subject") or "").strip()
+        relation = (rel.get("relation") or "").strip().lower()
+        if not subject or not relation:
+            continue
+        key = f"{subject}|{relation}".lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        if relation == "client":
+            clients.append(subject)
+        elif relation == "wife":
+            family.append(f"{subject} (sieva)")
+        elif relation == "husband":
+            family.append(f"{subject} (vīrs)")
+        elif relation == "daughter":
+            family.append(f"{subject} (meita)")
+        elif relation == "son":
+            family.append(f"{subject} (dēls)")
+        elif relation == "dog":
+            pets.append(f"{subject} (suns)")
+        elif relation == "cat":
+            pets.append(f"{subject} (kaķis)")
+        elif relation == "project":
+            rel_projects.append(subject)
+        else:
+            other.append(subject)
+
+    if clients:
+        lines.append("Klienti: " + "; ".join(clients))
+    if family:
+        lines.append("Ģimene: " + "; ".join(family))
+    if pets:
+        lines.append("Mājdzīvnieki: " + "; ".join(pets))
+
+    # Filter out polluted project fragments from old broken router.
+    bad_project_words = {"nina", "atceries", "ka man patīk bmw", "ka man patik bmw", "atceries ka", "nina atceries"}
+    clean_projects = []
+    proj_seen = set()
+    for p in projects + rel_projects:
+        k = p.strip().lower()
+        if not k or k in bad_project_words or "atceries" in k:
+            continue
+        if k not in proj_seen:
+            proj_seen.add(k)
+            clean_projects.append(p)
+
+    if clean_projects:
+        lines.append("Projekti: " + "; ".join(clean_projects))
+
+    if hobbies:
+        lines.append(f"Intereses: {hobbies}")
+
+    # Show personal memories/facts that are not relationship arrows and not polluted fragments.
+    clean_facts = []
+    fact_seen = set()
+    for f in facts:
+        k = f.lower()
+        if "→" in f:
+            continue
+        if k in bad_project_words or "atceries" in k:
+            continue
+        if k not in fact_seen:
+            fact_seen.add(k)
+            clean_facts.append(f)
+
+    if clean_facts:
+        lines.append("Svarīgas atmiņas: " + "; ".join(clean_facts[:10]))
+
+    if other:
+        lines.append("Svarīgi cilvēki/tēmas: " + "; ".join(other))
+
+    if len(lines) == 1:
+        lines.append("Pagaidām profilā neredzu pietiekami daudz datu.")
+        lines.append("")
+        lines.append("Svarīgi: tas nozīmē, ka šobrīd jānostiprina Memory/Profile slānis, nevis jāizliekas, ka viss ir kārtībā.")
+
+    lines.append("")
+    lines.append("Ja kaut kas nav pareizi, pasaki tieši — es labošu profilu, nevis strīdēšos.")
+    lines.append("")
+    lines.append("Profile Summary: V1.6")
+    return "\n".join(lines)
+
+
+def nina_profile_summary_v15(user_id):
+    return nina_profile_summary_v16(user_id)
+
+def nina_profile_summary_v14(user_id):
+    return nina_profile_summary_v16(user_id)
+
+def nina_profile_summary_v11(user_id):
+    return nina_profile_summary_v16(user_id)
+
 
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
@@ -13632,11 +13834,15 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
 
-        if lower in ["memory router", "memory router status", "atmiņas router", "atminas router"]:
-            await safe_reply_text(update, nina_memory_router_status_v10())
+        if lower in ["persistence health", "db health", "database health", "atmiņas health", "atminas health", "db statuss", "datubāzes statuss", "datubazes statuss"]:
+            await safe_reply_text(update, nina_persistence_health_answer())
             return
 
-        memory_router_answer = nina_memory_router_answer_v10(user_id, user_text)
+        if lower in ["memory router", "memory router status", "atmiņas router", "atminas router"]:
+            await safe_reply_text(update, nina_memory_router_status_v11())
+            return
+
+        memory_router_answer = nina_memory_router_answer_v11(user_id, user_text)
         if memory_router_answer:
             try:
                 v40_log_usage(user_id, "memory_router_fix", user_text)
@@ -13649,10 +13855,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, memory_router_answer)
             return
 
-
         if lower in ["ko tu par mani zini", "ko tu zini par mani", "mans profils", "manas atmiņas", "manas atminas"]:
-            await safe_reply_text(update, nina_profile_summary_v11(user_id))
+            await safe_reply_text(update, nina_profile_summary_v16(user_id))
             return
+
 
 
 
