@@ -11,7 +11,7 @@ Piemērs:
 piektdien jāpajautā Andrim par atbildi
 """
 
-FOLLOWUP_ENGINE_VERSION = "Follow-up Engine V1.1"
+FOLLOWUP_ENGINE_VERSION = "Follow-up Engine V1.2"
 
 
 def _clean(text):
@@ -26,6 +26,10 @@ def is_followup_text(text):
     lower = _lower(text)
 
     if not lower:
+        return False
+
+    # Exact commands are not tasks.
+    if lower in ["follow-up", "followup", "follow up", "follow-up engine", "followup engine", "follow up engine"]:
         return False
 
     markers = [
@@ -219,7 +223,7 @@ def build_followup_saved_answer(task):
 
 def build_followup_status_answer():
     return (
-        "🔁 Follow-up Engine V1.1 ir aktīvs. ✅\n\n"
+        "🔁 Follow-up Engine V1.2 ir aktīvs. ✅\n\n"
         "Mērķis: follow-up tekstu pārvērst par īstu uzdevumu.\n\n"
         "Tests:\n"
         "piektdien jāpajautā Andrim par atbildi\n\n"
