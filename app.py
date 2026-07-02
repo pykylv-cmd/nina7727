@@ -13273,11 +13273,6 @@ def nina_relationships_answer(user_id):
 # NinaOS Profile Summary V1.1
 # =========================
 
-
-# =========================
-# NinaOS Profile Summary V1.4 FINAL
-# =========================
-
 def nina_relation_label_lv(code):
     mapping = {
         "client": "klients",
@@ -13305,11 +13300,9 @@ def nina_parse_relationship_facts_from_user(user):
         item = (part or "").strip()
         if not item or "→" not in item:
             continue
-
         left, right = item.split("→", 1)
         subject = left.strip()
         relation = right.strip().lower()
-
         rel_map = {
             "client": "client", "klients": "client",
             "wife": "wife", "sieva": "wife",
@@ -13318,27 +13311,27 @@ def nina_parse_relationship_facts_from_user(user):
             "cat": "cat", "kaķis": "cat", "kakis": "cat",
             "project": "project", "projekts": "project",
         }
-
         if subject:
-            results.append({
-                "subject": subject,
-                "relation": rel_map.get(relation, relation),
-                "source": "users.facts",
-            })
+            results.append({"subject": subject, "relation": rel_map.get(relation, relation), "source": "users.facts"})
 
     return results
 
 
 def nina_recover_relationships_from_memory_any_source(user_id, limit=300):
+    """
+    Profile Summary V1.3 recovery:
+    lasa ne tikai source='relationship_engine', bet arī vecos memory_backups un conversation_state.
+    Tas vajadzīgs, ja attiecību routes strādāja, bet profils vēl neredz datus.
+    """
     found = []
 
-    # 1) relationship_engine official memory
+    # 1) relationship_engine oficial memory
     try:
         found.extend(nina_latest_relationships(user_id, limit=100) or [])
     except Exception as e:
-        print("profile v14 latest relationships kļūda:", repr(e))
+        print("profile v13 latest relationships kļūda:", repr(e))
 
-    # 2) scan memory_backups from all sources
+    # 2) scan all memory_backups for JSON or text relationships
     try:
         conn = get_db()
         c = conn.cursor()
@@ -13360,9 +13353,9 @@ def nina_recover_relationships_from_memory_any_source(user_id, limit=300):
         for row in rows:
             if not row or not row[0]:
                 continue
-
             text = str(row[0] or "").strip()
 
+            # JSON relationship
             try:
                 obj = json.loads(text)
                 if isinstance(obj, dict) and obj.get("type") == "relationship":
@@ -13371,6 +13364,7 @@ def nina_recover_relationships_from_memory_any_source(user_id, limit=300):
             except Exception:
                 pass
 
+            # Text relationship
             try:
                 rel = detect_relationship(text)
                 if rel:
@@ -13378,7 +13372,7 @@ def nina_recover_relationships_from_memory_any_source(user_id, limit=300):
             except Exception:
                 pass
     except Exception as e:
-        print("profile v14 memory_backups scan kļūda:", repr(e))
+        print("profile v13 memory_backups scan kļūda:", repr(e))
 
     # 3) scan conversation_state for texts like "Andris ir mans klients"
     try:
@@ -13402,9 +13396,7 @@ def nina_recover_relationships_from_memory_any_source(user_id, limit=300):
         for row in rows:
             if not row or not row[0]:
                 continue
-
             text = str(row[0] or "").strip()
-
             try:
                 rel = detect_relationship(text)
                 if rel:
@@ -13412,30 +13404,27 @@ def nina_recover_relationships_from_memory_any_source(user_id, limit=300):
             except Exception:
                 pass
     except Exception as e:
-        print("profile v14 conversation_state scan kļūda:", repr(e))
+        print("profile v13 conversation_state scan kļūda:", repr(e))
 
+    # dedupe
     final = []
     seen = set()
-
     for rel in found:
         subject = (rel.get("subject") or "").strip()
         relation = (rel.get("relation") or "").strip()
         if not subject or not relation:
             continue
-
         key = f"{subject}|{relation}".lower()
         if key in seen:
             continue
-
         seen.add(key)
         final.append(rel)
 
     return final
 
 
-def nina_profile_summary_v14(user_id):
+def nina_profile_summary_v11(user_id):
     user = get_user(str(user_id)) or {}
-
     lines = ["👤 Ko es par tevi zinu"]
 
     name = (user.get("name") or "").strip()
@@ -13446,7 +13435,6 @@ def nina_profile_summary_v14(user_id):
 
     if name:
         lines.append(f"Vārds: {name}")
-
     if profession:
         lines.append(f"Joma/profesija: {profession}")
 
@@ -13466,20 +13454,16 @@ def nina_profile_summary_v14(user_id):
         "car": [],
         "important_person_or_topic": [],
     }
-
     seen = set()
 
     for rel in rels or []:
         subject = (rel.get("subject") or "").strip()
         relation = (rel.get("relation") or "").strip()
-
         if not subject or not relation:
             continue
-
         key = f"{subject}|{relation}".lower()
         if key in seen:
             continue
-
         seen.add(key)
         grouped.setdefault(relation, []).append(subject)
 
@@ -13487,7 +13471,6 @@ def nina_profile_summary_v14(user_id):
         lines.append(f"Klienti: {'; '.join(grouped['client'])}")
 
     family_parts = []
-
     if grouped["wife"]:
         family_parts.extend([f"{x} (sieva)" for x in grouped["wife"]])
     if grouped["husband"]:
@@ -13496,42 +13479,33 @@ def nina_profile_summary_v14(user_id):
         family_parts.extend([f"{x} (meita)" for x in grouped["daughter"]])
     if grouped["son"]:
         family_parts.extend([f"{x} (dēls)" for x in grouped["son"]])
-
     if family_parts:
         lines.append(f"Ģimene: {'; '.join(family_parts)}")
 
     pet_parts = []
-
     if grouped["dog"]:
         pet_parts.extend([f"{x} (suns)" for x in grouped["dog"]])
     if grouped["cat"]:
         pet_parts.extend([f"{x} (kaķis)" for x in grouped["cat"]])
-
     if pet_parts:
         lines.append(f"Mājdzīvnieki: {'; '.join(pet_parts)}")
 
     project_items = []
-
     if projects:
         project_items.extend([p.strip() for p in re.split(r"[;,]", projects) if p.strip()])
-
     project_items.extend(grouped["project"])
-
     proj_seen = set()
     final_projects = []
-
     for p in project_items:
         k = p.lower()
         if k not in proj_seen:
             proj_seen.add(k)
             final_projects.append(p)
-
     if final_projects:
         lines.append(f"Projekti: {'; '.join(final_projects)}")
 
     if goals:
         lines.append(f"Mērķi: {goals}")
-
     if interests:
         lines.append(f"Intereses: {interests}")
 
@@ -13551,15 +13525,133 @@ def nina_profile_summary_v14(user_id):
     lines.append("")
     lines.append("Ja kaut kas nav pareizi, pasaki tieši — es labošu profilu, nevis strīdēšos.")
     lines.append("")
-    lines.append("Profile Summary: V1.4")
+    lines.append("Profile Summary: V1.3")
+    return "\n".join(lines)
+
+
+
+
+# =========================
+# NinaOS Profile Bridge V1.5
+# =========================
+
+def nina_profile_summary_v15(user_id):
+    user = get_user(str(user_id)) or {}
+
+    lines = ["👤 Ko es par tevi zinu"]
+
+    name = (user.get("name") or "").strip()
+    profession = (user.get("profession") or "").strip()
+    projects = (user.get("projects") or "").strip()
+    hobbies = (user.get("hobbies") or user.get("interests") or "").strip()
+    facts = (user.get("facts") or "").strip()
+
+    if name:
+        lines.append(f"Vārds: {name}")
+
+    if profession:
+        lines.append(f"Joma/profesija: {profession}")
+
+    relationships = []
+    try:
+        relationships = nina_latest_relationships(user_id, limit=100) or []
+    except Exception as e:
+        print("Profile Bridge V1.5 relationship read kļūda:", repr(e))
+        relationships = []
+
+    clients = []
+    family = []
+    pets = []
+    rel_projects = []
+    other = []
+
+    seen = set()
+
+    for rel in relationships:
+        subject = (rel.get("subject") or "").strip()
+        relation = (rel.get("relation") or "").strip().lower()
+
+        if not subject or not relation:
+            continue
+
+        key = f"{subject}|{relation}".lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        if relation == "client":
+            clients.append(subject)
+        elif relation == "wife":
+            family.append(f"{subject} (sieva)")
+        elif relation == "husband":
+            family.append(f"{subject} (vīrs)")
+        elif relation == "daughter":
+            family.append(f"{subject} (meita)")
+        elif relation == "son":
+            family.append(f"{subject} (dēls)")
+        elif relation == "dog":
+            pets.append(f"{subject} (suns)")
+        elif relation == "cat":
+            pets.append(f"{subject} (kaķis)")
+        elif relation == "project":
+            rel_projects.append(subject)
+        else:
+            other.append(subject)
+
+    if clients:
+        lines.append("Klienti: " + "; ".join(clients))
+
+    if family:
+        lines.append("Ģimene: " + "; ".join(family))
+
+    if pets:
+        lines.append("Mājdzīvnieki: " + "; ".join(pets))
+
+    all_projects = []
+    if projects:
+        all_projects.extend([p.strip() for p in re.split(r"[;\n|,]+", projects) if p.strip()])
+    all_projects.extend(rel_projects)
+
+    project_seen = set()
+    final_projects = []
+    for p in all_projects:
+        k = p.lower()
+        if k not in project_seen:
+            project_seen.add(k)
+            final_projects.append(p)
+
+    if final_projects:
+        lines.append("Projekti: " + "; ".join(final_projects))
+
+    if hobbies:
+        lines.append(f"Intereses: {hobbies}")
+
+    if other:
+        lines.append("Svarīgi cilvēki/tēmas: " + "; ".join(other))
+
+    # Fallback only if nothing useful was found.
+    if len(lines) == 1:
+        if facts:
+            lines.append(f"Svarīgi fakti: {facts}")
+        else:
+            lines.append("Pagaidām profilā neredzu pietiekami daudz datu.")
+            lines.append("")
+            lines.append("Svarīgi: tas nozīmē, ka šobrīd jānostiprina Memory/Profile slānis, nevis jāizliekas, ka viss ir kārtībā.")
+
+    lines.append("")
+    lines.append("Ja kaut kas nav pareizi, pasaki tieši — es labošu profilu, nevis strīdēšos.")
+    lines.append("")
+    lines.append("Profile Summary: V1.5")
 
     return "\n".join(lines)
 
 
-def nina_profile_summary_v11(user_id):
-    # Compatibility alias. Some routes may still call old name.
-    return nina_profile_summary_v14(user_id)
+# compatibility: old profile routes can still call this name
+def nina_profile_summary_v14(user_id):
+    return nina_profile_summary_v15(user_id)
 
+def nina_profile_summary_v11(user_id):
+    return nina_profile_summary_v15(user_id)
 
 
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -13570,7 +13662,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lower = user_text.strip().lower()
 
         if lower in ["ko tu par mani zini", "ko tu zini par mani", "mans profils", "manas atmiņas", "manas atminas"]:
-            await safe_reply_text(update, nina_profile_summary_v14(user_id))
+            await safe_reply_text(update, nina_profile_summary_v15(user_id))
             return
 
 
