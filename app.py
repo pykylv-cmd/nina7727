@@ -14007,6 +14007,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
 
+        if lower in ["follow-up", "followup", "follow up"]:
+            await safe_reply_text(update, nina_followup_context_answer(user_id))
+            return
+
         followup_router_answer = nina_followup_router_answer_v11(user_id, user_text)
         if followup_router_answer:
             try:
@@ -14023,10 +14027,6 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if lower in ["follow-up engine", "followup engine", "follow up engine", "follow-up status", "followup status"]:
             await safe_reply_text(update, build_followup_status_answer())
-            return
-
-        if lower in ["follow-up", "followup", "follow up"]:
-            await safe_reply_text(update, nina_followup_context_answer(user_id))
             return
 
 
