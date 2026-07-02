@@ -13532,82 +13532,98 @@ def nina_profile_summary_v11(user_id):
 
 
 # =========================
-# NinaOS Persistence Health Check — V1.0
+# NinaOS Memory Router Fix — V1.0
 # =========================
 
-def nina_persistence_health_answer():
-    """
-    Parāda, vai Nina strādā ar pastāvīgu Postgres vai lokālo sqlite failu.
-    Tas palīdz saprast, kāpēc pēc redeploy/restart var pazust profils, attiecības vai uzdevumi.
-    """
+def nina_clean_natural_memory_text_v10(text):
+    raw = (text or "").strip()
+    lower = raw.lower()
+
+    prefixes = [
+        "nina, atceries, ka ",
+        "nina atceries, ka ",
+        "nina, atceries ka ",
+        "nina atceries ka ",
+        "atceries, ka ",
+        "atceries ka ",
+        "neaizmirst, ka ",
+        "neaizmirst ka ",
+        "neaizmirst ",
+    ]
+
+    for prefix in prefixes:
+        if lower.startswith(prefix):
+            return raw[len(prefix):].strip(" .,!?:;")
+
+    return raw.strip(" .,!?:;")
+
+
+def nina_is_natural_memory_request_v10(text):
+    lower = (text or "").strip().lower()
+
+    if not lower:
+        return False
+
+    markers = [
+        "nina, atceries",
+        "nina atceries",
+        "atceries, ka",
+        "atceries ka",
+        "neaizmirst",
+        "paturi prātā",
+        "paturi prata",
+    ]
+
+    return any(lower.startswith(m) for m in markers)
+
+
+def nina_memory_router_answer_v10(user_id, user_text):
+    if not nina_is_natural_memory_request_v10(user_text):
+        return None
+
+    cleaned = nina_clean_natural_memory_text_v10(user_text)
+
+    if not cleaned:
+        return (
+            "🧠 Saki, ko tieši man atcerēties.\n\n"
+            "Piemēram: Nina, atceries, ka man patīk BMW\n\n"
+            "Versija: Memory Router Fix V1.0"
+        )
+
+    saved = ""
     try:
-        db_mode = "PostgreSQL" if USE_POSTGRES else "SQLite local file"
-        database_url_status = "IR" if bool(DATABASE_URL) else "NAV"
-        psycopg2_status = "IR" if bool(psycopg2) else "NAV"
-
-        user_count = "?"
-        memory_count = "?"
-        relationship_count = "?"
-        task_count = "?"
-
-        try:
-            conn = get_db()
-            c = conn.cursor()
-
-            db_execute(c, "SELECT COUNT(*) FROM users")
-            row = c.fetchone()
-            user_count = row[0] if row else 0
-
-            db_execute(c, "SELECT COUNT(*) FROM memory_backups")
-            row = c.fetchone()
-            memory_count = row[0] if row else 0
-
-            db_execute(c, "SELECT COUNT(*) FROM memory_backups WHERE source = %s", ("relationship_engine",))
-            row = c.fetchone()
-            relationship_count = row[0] if row else 0
-
-            db_execute(c, "SELECT COUNT(*) FROM memory_backups WHERE source = %s", ("task_engine",))
-            row = c.fetchone()
-            task_count = row[0] if row else 0
-
-            c.close()
-            conn.close()
-        except Exception as e:
-            print("Persistence DB count kļūda:", repr(e))
-
-        warning = ""
-        if not USE_POSTGRES:
-            warning = (
-                "\n⚠️ Brīdinājums:\n"
-                "Šobrīd Nina izmanto lokālu SQLite failu. Railway redeploy/restart gadījumā dati var pazust vai būt tukši.\n\n"
-                "Lai atmiņa būtu droša, vajag pieslēgt Railway PostgreSQL un DATABASE_URL."
-            )
-        else:
-            warning = (
-                "\n✅ Labi:\n"
-                "Nina izmanto PostgreSQL. Tas ir pareizais virziens pastāvīgai atmiņai."
-            )
-
-        return (
-            "🧪 NinaOS Persistence Health Check\n\n"
-            f"DB režīms: {db_mode}\n"
-            f"DATABASE_URL: {database_url_status}\n"
-            f"psycopg2: {psycopg2_status}\n\n"
-            f"Lietotāji users: {user_count}\n"
-            f"Atmiņas memory_backups: {memory_count}\n"
-            f"Attiecības relationship_engine: {relationship_count}\n"
-            f"Uzdevumi task_engine: {task_count}\n"
-            f"{warning}\n\n"
-            "Versija: Persistence Health V1.0"
-        )
-
+        saved = save_natural_memory_logic(get_db, db_execute, str(user_id), cleaned)
     except Exception as e:
-        return (
-            "🧪 NinaOS Persistence Health Check\n\n"
-            "Nevarēju pilnībā pārbaudīt datubāzi.\n\n"
-            f"Kļūda: {repr(e)}\n\n"
-            "Versija: Persistence Health V1.0"
-        )
+        print("Memory Router Fix save_natural_memory kļūda:", repr(e))
+        saved = ""
+
+    try:
+        user = get_user(str(user_id)) or {}
+        user["facts"] = v24_append_unique_text(user.get("facts", ""), cleaned, max_items=50)
+        update_user(str(user_id), user)
+    except Exception as e:
+        print("Memory Router Fix profile bridge kļūda:", repr(e))
+
+    final_text = saved or cleaned
+
+    return (
+        "🧠 Paturēšu prātā. ✅\n\n"
+        f"Atcerēšos: {final_text}\n\n"
+        "Tagad tā nav tikai saruna — tā ir Ninas atmiņā.\n\n"
+        "Versija: Memory Router Fix V1.0"
+    )
+
+
+def nina_memory_router_status_v10():
+    return (
+        "🧠 Memory Router Fix V1.0 ir aktīvs. ✅\n\n"
+        "Mērķis: frāzes ar `atceries` un `neaizmirst` saglabāt kā atmiņu, nevis projektu.\n\n"
+        "Tests:\n"
+        "Nina, atceries, ka man patīk BMW\n\n"
+        "Sagaidāmais rezultāts:\n"
+        "Atcerēšos: man patīk BMW\n\n"
+        "Versija: Memory Router Fix V1.0"
+    )
 
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
@@ -13616,8 +13632,21 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
 
-        if lower in ["persistence health", "db health", "database health", "atmiņas health", "atminas health", "db statuss", "datubāzes statuss", "datubazes statuss"]:
-            await safe_reply_text(update, nina_persistence_health_answer())
+        if lower in ["memory router", "memory router status", "atmiņas router", "atminas router"]:
+            await safe_reply_text(update, nina_memory_router_status_v10())
+            return
+
+        memory_router_answer = nina_memory_router_answer_v10(user_id, user_text)
+        if memory_router_answer:
+            try:
+                v40_log_usage(user_id, "memory_router_fix", user_text)
+            except Exception:
+                pass
+            try:
+                save_conversation_state(user_id, user_text, memory_router_answer, "memory_router_fix", v80_mood(user_text), "memory")
+            except Exception:
+                pass
+            await safe_reply_text(update, memory_router_answer)
             return
 
 
