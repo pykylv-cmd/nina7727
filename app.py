@@ -13532,127 +13532,82 @@ def nina_profile_summary_v11(user_id):
 
 
 # =========================
-# NinaOS Profile Bridge V1.5
+# NinaOS Persistence Health Check — V1.0
 # =========================
 
-def nina_profile_summary_v15(user_id):
-    user = get_user(str(user_id)) or {}
-
-    lines = ["👤 Ko es par tevi zinu"]
-
-    name = (user.get("name") or "").strip()
-    profession = (user.get("profession") or "").strip()
-    projects = (user.get("projects") or "").strip()
-    hobbies = (user.get("hobbies") or user.get("interests") or "").strip()
-    facts = (user.get("facts") or "").strip()
-
-    if name:
-        lines.append(f"Vārds: {name}")
-
-    if profession:
-        lines.append(f"Joma/profesija: {profession}")
-
-    relationships = []
+def nina_persistence_health_answer():
+    """
+    Parāda, vai Nina strādā ar pastāvīgu Postgres vai lokālo sqlite failu.
+    Tas palīdz saprast, kāpēc pēc redeploy/restart var pazust profils, attiecības vai uzdevumi.
+    """
     try:
-        relationships = nina_latest_relationships(user_id, limit=100) or []
+        db_mode = "PostgreSQL" if USE_POSTGRES else "SQLite local file"
+        database_url_status = "IR" if bool(DATABASE_URL) else "NAV"
+        psycopg2_status = "IR" if bool(psycopg2) else "NAV"
+
+        user_count = "?"
+        memory_count = "?"
+        relationship_count = "?"
+        task_count = "?"
+
+        try:
+            conn = get_db()
+            c = conn.cursor()
+
+            db_execute(c, "SELECT COUNT(*) FROM users")
+            row = c.fetchone()
+            user_count = row[0] if row else 0
+
+            db_execute(c, "SELECT COUNT(*) FROM memory_backups")
+            row = c.fetchone()
+            memory_count = row[0] if row else 0
+
+            db_execute(c, "SELECT COUNT(*) FROM memory_backups WHERE source = %s", ("relationship_engine",))
+            row = c.fetchone()
+            relationship_count = row[0] if row else 0
+
+            db_execute(c, "SELECT COUNT(*) FROM memory_backups WHERE source = %s", ("task_engine",))
+            row = c.fetchone()
+            task_count = row[0] if row else 0
+
+            c.close()
+            conn.close()
+        except Exception as e:
+            print("Persistence DB count kļūda:", repr(e))
+
+        warning = ""
+        if not USE_POSTGRES:
+            warning = (
+                "\n⚠️ Brīdinājums:\n"
+                "Šobrīd Nina izmanto lokālu SQLite failu. Railway redeploy/restart gadījumā dati var pazust vai būt tukši.\n\n"
+                "Lai atmiņa būtu droša, vajag pieslēgt Railway PostgreSQL un DATABASE_URL."
+            )
+        else:
+            warning = (
+                "\n✅ Labi:\n"
+                "Nina izmanto PostgreSQL. Tas ir pareizais virziens pastāvīgai atmiņai."
+            )
+
+        return (
+            "🧪 NinaOS Persistence Health Check\n\n"
+            f"DB režīms: {db_mode}\n"
+            f"DATABASE_URL: {database_url_status}\n"
+            f"psycopg2: {psycopg2_status}\n\n"
+            f"Lietotāji users: {user_count}\n"
+            f"Atmiņas memory_backups: {memory_count}\n"
+            f"Attiecības relationship_engine: {relationship_count}\n"
+            f"Uzdevumi task_engine: {task_count}\n"
+            f"{warning}\n\n"
+            "Versija: Persistence Health V1.0"
+        )
+
     except Exception as e:
-        print("Profile Bridge V1.5 relationship read kļūda:", repr(e))
-        relationships = []
-
-    clients = []
-    family = []
-    pets = []
-    rel_projects = []
-    other = []
-
-    seen = set()
-
-    for rel in relationships:
-        subject = (rel.get("subject") or "").strip()
-        relation = (rel.get("relation") or "").strip().lower()
-
-        if not subject or not relation:
-            continue
-
-        key = f"{subject}|{relation}".lower()
-        if key in seen:
-            continue
-        seen.add(key)
-
-        if relation == "client":
-            clients.append(subject)
-        elif relation == "wife":
-            family.append(f"{subject} (sieva)")
-        elif relation == "husband":
-            family.append(f"{subject} (vīrs)")
-        elif relation == "daughter":
-            family.append(f"{subject} (meita)")
-        elif relation == "son":
-            family.append(f"{subject} (dēls)")
-        elif relation == "dog":
-            pets.append(f"{subject} (suns)")
-        elif relation == "cat":
-            pets.append(f"{subject} (kaķis)")
-        elif relation == "project":
-            rel_projects.append(subject)
-        else:
-            other.append(subject)
-
-    if clients:
-        lines.append("Klienti: " + "; ".join(clients))
-
-    if family:
-        lines.append("Ģimene: " + "; ".join(family))
-
-    if pets:
-        lines.append("Mājdzīvnieki: " + "; ".join(pets))
-
-    all_projects = []
-    if projects:
-        all_projects.extend([p.strip() for p in re.split(r"[;\n|,]+", projects) if p.strip()])
-    all_projects.extend(rel_projects)
-
-    project_seen = set()
-    final_projects = []
-    for p in all_projects:
-        k = p.lower()
-        if k not in project_seen:
-            project_seen.add(k)
-            final_projects.append(p)
-
-    if final_projects:
-        lines.append("Projekti: " + "; ".join(final_projects))
-
-    if hobbies:
-        lines.append(f"Intereses: {hobbies}")
-
-    if other:
-        lines.append("Svarīgi cilvēki/tēmas: " + "; ".join(other))
-
-    # Fallback only if nothing useful was found.
-    if len(lines) == 1:
-        if facts:
-            lines.append(f"Svarīgi fakti: {facts}")
-        else:
-            lines.append("Pagaidām profilā neredzu pietiekami daudz datu.")
-            lines.append("")
-            lines.append("Svarīgi: tas nozīmē, ka šobrīd jānostiprina Memory/Profile slānis, nevis jāizliekas, ka viss ir kārtībā.")
-
-    lines.append("")
-    lines.append("Ja kaut kas nav pareizi, pasaki tieši — es labošu profilu, nevis strīdēšos.")
-    lines.append("")
-    lines.append("Profile Summary: V1.5")
-
-    return "\n".join(lines)
-
-
-# compatibility: old profile routes can still call this name
-def nina_profile_summary_v14(user_id):
-    return nina_profile_summary_v15(user_id)
-
-def nina_profile_summary_v11(user_id):
-    return nina_profile_summary_v15(user_id)
-
+        return (
+            "🧪 NinaOS Persistence Health Check\n\n"
+            "Nevarēju pilnībā pārbaudīt datubāzi.\n\n"
+            f"Kļūda: {repr(e)}\n\n"
+            "Versija: Persistence Health V1.0"
+        )
 
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
@@ -13661,10 +13616,14 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
 
-        if lower in ["ko tu par mani zini", "ko tu zini par mani", "mans profils", "manas atmiņas", "manas atminas"]:
-            await safe_reply_text(update, nina_profile_summary_v15(user_id))
+        if lower in ["persistence health", "db health", "database health", "atmiņas health", "atminas health", "db statuss", "datubāzes statuss", "datubazes statuss"]:
+            await safe_reply_text(update, nina_persistence_health_answer())
             return
 
+
+        if lower in ["ko tu par mani zini", "ko tu zini par mani", "mans profils", "manas atmiņas", "manas atminas"]:
+            await safe_reply_text(update, nina_profile_summary_v11(user_id))
+            return
 
 
 
