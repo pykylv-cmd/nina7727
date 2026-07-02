@@ -109,6 +109,52 @@ except Exception as e:
         return "Relationship Engine nav pieslēgts."
 
 
+
+# NinaOS Client Context Import
+try:
+    from client_context import (
+        enrich_task_with_client_context,
+        build_client_context_answer,
+        client_context_status,
+        CLIENT_CONTEXT_VERSION,
+    )
+except Exception as e:
+    print("client_context.py imports nav pieejams:", e)
+    CLIENT_CONTEXT_VERSION = "Client Context nav pieslēgts"
+
+    def enrich_task_with_client_context(task, relationships):
+        return task
+
+    def build_client_context_answer(task, relationships):
+        return "Client Context nav pieslēgts."
+
+    def client_context_status():
+        return "Client Context nav pieslēgts."
+
+
+
+# NinaOS Follow-up Engine Import
+try:
+    from followup_engine import (
+        enrich_task_with_followup,
+        build_followup_status_answer,
+        build_followup_context_answer,
+        FOLLOWUP_ENGINE_VERSION,
+    )
+except Exception as e:
+    print("followup_engine.py imports nav pieejams:", e)
+    FOLLOWUP_ENGINE_VERSION = "Follow-up Engine nav pieslēgts"
+
+    def enrich_task_with_followup(task):
+        return task
+
+    def build_followup_status_answer():
+        return "Follow-up Engine nav pieslēgts."
+
+    def build_followup_context_answer(task):
+        return "Follow-up Engine nav pieslēgts."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -13827,12 +13873,121 @@ def nina_profile_summary_v11(user_id):
     return nina_profile_summary_v16(user_id)
 
 
+
+# =========================
+# NinaOS Client Context Bridge — V1.0
+# =========================
+
+def nina_latest_task_for_client_context(user_id):
+    tasks = nina_latest_tasks(user_id, limit=20) or []
+    active = []
+    seen = set()
+
+    for task in tasks:
+        key = ((task or {}).get("title") or (task or {}).get("raw_text") or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if (task or {}).get("status", "open") != "completed":
+            active.append(task)
+
+    if not active:
+        return None
+
+    try:
+        return sorted(active, key=nina_task_priority_score, reverse=True)[0]
+    except Exception:
+        return active[0]
+
+
+def nina_client_context_answer(user_id):
+    task = nina_latest_task_for_client_context(user_id)
+    relationships = nina_latest_relationships(user_id, limit=100)
+
+    if not task:
+        return (
+            "👥 Client Context\n\n"
+            "Šobrīd nav aktīva uzdevuma, ko sasaistīt ar klientu.\n\n"
+            "Tests:\n"
+            "Andris ir mans klients\n"
+            "rīt jānosūta piedāvājums Andrim\n"
+            "client context\n\n"
+            "Versija: Client Context V1.0"
+        )
+
+    return build_client_context_answer(task, relationships)
+
+
+# =========================
+# NinaOS Follow-up Bridge — V1.0
+# =========================
+
+def nina_latest_task_for_followup(user_id):
+    tasks = nina_latest_tasks(user_id, limit=20) or []
+    active = []
+    seen = set()
+
+    for task in tasks:
+        key = ((task or {}).get("title") or (task or {}).get("raw_text") or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if (task or {}).get("status", "open") != "completed":
+            active.append(task)
+
+    if not active:
+        return None
+
+    try:
+        return sorted(active, key=nina_task_priority_score, reverse=True)[0]
+    except Exception:
+        return active[0]
+
+
+def nina_followup_context_answer(user_id):
+    task = nina_latest_task_for_followup(user_id)
+    if not task:
+        return (
+            "🔁 Follow-up Context\n\n"
+            "Šobrīd nav aktīva uzdevuma, ko pārbaudīt kā follow-up.\n\n"
+            "Tests:\n"
+            "piektdien jāpajautā Andrim par atbildi\n"
+            "follow-up\n\n"
+            "Versija: Follow-up Engine V1.0"
+        )
+
+    relationships = nina_latest_relationships(user_id, limit=100) or []
+    try:
+        task = enrich_task_with_client_context(task, relationships)
+    except Exception:
+        pass
+
+    return build_followup_context_answer(task)
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
     try:
         user_text = update.message.text
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
+
+        if lower in ["follow-up engine", "followup engine", "follow up engine", "follow-up status", "followup status"]:
+            await safe_reply_text(update, build_followup_status_answer())
+            return
+
+        if lower in ["follow-up", "followup", "follow up"]:
+            await safe_reply_text(update, nina_followup_context_answer(user_id))
+            return
+
+
+        if lower in ["client context", "klienta konteksts", "klientu konteksts"]:
+            await safe_reply_text(update, nina_client_context_answer(user_id))
+            return
+
+        if lower in ["client context status", "client status"]:
+            await safe_reply_text(update, client_context_status())
+            return
+
 
         if lower in ["persistence health", "db health", "database health", "atmiņas health", "atminas health", "db statuss", "datubāzes statuss", "datubazes statuss"]:
             await safe_reply_text(update, nina_persistence_health_answer())
