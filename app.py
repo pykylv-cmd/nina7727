@@ -67,6 +67,21 @@ except Exception as e:
         return "Work Engine nav pieslēgts."
 
 
+
+# NinaOS Daily Planner Import
+try:
+    from daily_planner import build_daily_plan, daily_planner_status, DAILY_PLANNER_VERSION
+except Exception as e:
+    print("daily_planner.py imports nav pieejams:", e)
+    DAILY_PLANNER_VERSION = "Daily Planner nav pieslēgts"
+
+    def build_daily_plan(tasks, user_name=""):
+        return "Daily Planner nav pieslēgts."
+
+    def daily_planner_status():
+        return "Daily Planner nav pieslēgts."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -13122,6 +13137,17 @@ def nina_complete_top_task(user_id):
     )
 
 
+
+# =========================
+# NinaOS Daily Planner Bridge
+# =========================
+
+def nina_daily_plan_answer(user_id):
+    name = nina_task_owner_name(user_id)
+    tasks = nina_latest_tasks(user_id, limit=30)
+    return build_daily_plan(tasks, user_name=name)
+
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
     try:
@@ -13152,6 +13178,25 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if lower in ["izdarīts", "izdarits", "pabeigts", "done", "gatavs"]:
             await safe_reply_text(update, nina_complete_top_task(user_id))
+            return
+
+        if lower in ["daily planner", "planner status", "dienas plānotājs", "dienas planotajs"]:
+            await safe_reply_text(update, daily_planner_status())
+            return
+
+        if lower in [
+            "saplāno manu dienu",
+            "saplano manu dienu",
+            "ko man darīt šodien",
+            "ko man darit sodien",
+            "ko man darīt sodien",
+            "ko man darit šodien",
+            "ar ko sākt",
+            "ar ko sakt",
+            "dienas plāns",
+            "dienas plans"
+        ]:
+            await safe_reply_text(update, nina_daily_plan_answer(user_id))
             return
 
         if lower in ["work engine", "work status", "darba dzinējs", "darba dzinejs"]:
