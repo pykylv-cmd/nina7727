@@ -13059,6 +13059,69 @@ def nina_work_plan_answer(user_id):
     return work_plan(tasks, user_name=name)
 
 
+
+# =========================
+# NinaOS Task Completion Bridge
+# =========================
+
+def nina_task_priority_score(task):
+    priority = (task or {}).get("priority", "normal")
+    deadline = (task or {}).get("deadline", "")
+    score = 0
+    if priority == "high":
+        score += 100
+    elif priority == "normal":
+        score += 50
+    elif priority == "low":
+        score += 10
+    if deadline == "today":
+        score += 80
+    elif deadline == "tomorrow":
+        score += 40
+    elif deadline:
+        score += 20
+    return score
+
+
+def nina_active_tasks_for_completion(user_id, limit=30):
+    rows = nina_latest_tasks(user_id, limit=limit)
+    active = []
+    seen = set()
+    for task in rows or []:
+        key = ((task or {}).get("title") or (task or {}).get("raw_text") or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if (task or {}).get("status", "open") != "completed":
+            active.append(task)
+    return sorted(active, key=nina_task_priority_score, reverse=True)
+
+
+def nina_complete_top_task(user_id):
+    tasks = nina_active_tasks_for_completion(user_id, limit=30)
+    if not tasks:
+        return (
+            "✅ Šobrīd neredzu aktīvu uzdevumu, ko atzīmēt kā pabeigtu.\n\n"
+            "Uzraksti `mani uzdevumi`, lai pārbaudītu darba sarakstu."
+        )
+
+    task = dict(tasks[0])
+    task["status"] = "completed"
+    task["status_label"] = "pabeigts"
+
+    try:
+        nina_save_task_to_memory(user_id, task)
+    except Exception as e:
+        print("nina_complete_top_task save kļūda:", repr(e))
+
+    title = task.get("title", "uzdevums")
+    return (
+        "✅ Atzīmēju kā pabeigtu.\n\n"
+        f"Pabeigts: {title}\n\n"
+        "Nākamais solis: uzraksti `sakārto manu dienu`, un es parādīšu nākamo prioritāti."
+    )
+
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
     try:
@@ -13085,6 +13148,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if lower in ["task engine", "task status", "uzdevumu dzinējs", "uzdevumu dzinejs"]:
             await safe_reply_text(update, task_engine_status())
+            return
+
+        if lower in ["izdarīts", "izdarits", "pabeigts", "done", "gatavs"]:
+            await safe_reply_text(update, nina_complete_top_task(user_id))
             return
 
         if lower in ["work engine", "work status", "darba dzinējs", "darba dzinejs"]:
