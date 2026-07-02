@@ -13400,6 +13400,11 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
 
+        if lower in ["ko tu par mani zini", "ko tu zini par mani", "mans profils", "manas atmiņas", "manas atminas"]:
+            await safe_reply_text(update, nina_profile_summary_v11(user_id))
+            return
+
+
         # =========================
         # V116 Router Priority Gate
         # System/recovery commands MUST run before project/memory/natural conversation routers.
@@ -13423,10 +13428,6 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if lower in ["izdarīts", "izdarits", "pabeigts", "done", "gatavs"]:
             await safe_reply_text(update, nina_complete_top_task(user_id))
-            return
-
-        if lower in ["ko tu par mani zini", "ko tu zini par mani", "mans profils", "manas atmiņas", "manas atminas"]:
-            await safe_reply_text(update, nina_profile_summary_v11(user_id))
             return
 
         if lower in ["relationship engine", "relationship status", "attiecību dzinējs", "attiecibu dzinejs"]:
