@@ -82,6 +82,33 @@ except Exception as e:
         return "Daily Planner nav pieslēgts."
 
 
+
+# NinaOS Relationship Engine Import
+try:
+    from relationship_engine import (
+        detect_relationship,
+        build_relationship_saved_answer,
+        relationship_summary,
+        relationship_engine_status,
+        RELATIONSHIP_ENGINE_VERSION,
+    )
+except Exception as e:
+    print("relationship_engine.py imports nav pieejams:", e)
+    RELATIONSHIP_ENGINE_VERSION = "Relationship Engine nav pieslēgts"
+
+    def detect_relationship(text):
+        return None
+
+    def build_relationship_saved_answer(rel, user_name=""):
+        return ""
+
+    def relationship_summary(relationships):
+        return "Relationship Engine nav pieslēgts."
+
+    def relationship_engine_status():
+        return "Relationship Engine nav pieslēgts."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -13148,6 +13175,99 @@ def nina_daily_plan_answer(user_id):
     return build_daily_plan(tasks, user_name=name)
 
 
+
+# =========================
+# NinaOS Relationship Engine Bridge
+# =========================
+
+def nina_save_relationship_to_memory(user_id, rel):
+    if not rel:
+        return False
+
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        import json
+        db_execute(
+            c,
+            """
+            INSERT INTO memory_backups (user_id, backup_text, source)
+            VALUES (%s, %s, %s)
+            """,
+            (str(user_id), json.dumps(rel, ensure_ascii=False), "relationship_engine")
+        )
+        conn.commit()
+        c.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print("nina_save_relationship_to_memory kļūda:", repr(e))
+        return False
+
+
+def nina_latest_relationships(user_id, limit=30):
+    relationships = []
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(
+            c,
+            """
+            SELECT backup_text, created_at
+            FROM memory_backups
+            WHERE user_id = %s AND source = %s
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            (str(user_id), "relationship_engine", int(limit or 30))
+        )
+        rows = c.fetchall() or []
+        c.close()
+        conn.close()
+
+        import json
+        for row in rows:
+            if not row or not row[0]:
+                continue
+            try:
+                obj = json.loads(str(row[0]))
+                if isinstance(obj, dict):
+                    relationships.append(obj)
+            except Exception:
+                pass
+    except Exception as e:
+        print("nina_latest_relationships kļūda:", repr(e))
+
+    return relationships
+
+
+def nina_relationship_answer(user_id, user_text):
+    rel = detect_relationship(user_text)
+    if not rel:
+        return None
+
+    nina_save_relationship_to_memory(user_id, rel)
+
+    # Also bridge important relationship into user facts for "ko tu par mani zini".
+    try:
+        user = get_user(str(user_id)) or {}
+        subject = rel.get("subject", "")
+        relation = rel.get("relation", "")
+        if subject and relation:
+            value = f"{subject} → {relation}"
+            user["facts"] = v24_append_unique_text(user.get("facts", ""), value, max_items=50)
+            update_user(str(user_id), user)
+    except Exception as e:
+        print("relationship profile bridge kļūda:", repr(e))
+
+    name = nina_task_owner_name(user_id)
+    return build_relationship_saved_answer(rel, user_name=name)
+
+
+def nina_relationships_answer(user_id):
+    return relationship_summary(nina_latest_relationships(user_id, limit=30))
+
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
     try:
@@ -13178,6 +13298,27 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if lower in ["izdarīts", "izdarits", "pabeigts", "done", "gatavs"]:
             await safe_reply_text(update, nina_complete_top_task(user_id))
+            return
+
+        if lower in ["relationship engine", "relationship status", "attiecību dzinējs", "attiecibu dzinejs"]:
+            await safe_reply_text(update, relationship_engine_status())
+            return
+
+        if lower in ["manas attiecības", "manas attiecibas", "attiecības", "attiecibas", "relationship memory"]:
+            await safe_reply_text(update, nina_relationships_answer(user_id))
+            return
+
+        relationship_answer = nina_relationship_answer(user_id, user_text)
+        if relationship_answer:
+            try:
+                v40_log_usage(user_id, "relationship_engine", user_text)
+            except Exception:
+                pass
+            try:
+                save_conversation_state(user_id, user_text, relationship_answer, "relationship_engine", v80_mood(user_text), "relationship")
+            except Exception:
+                pass
+            await safe_reply_text(update, relationship_answer)
             return
 
         if lower in ["daily planner", "planner status", "dienas plānotājs", "dienas planotajs"]:
