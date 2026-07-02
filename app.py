@@ -13268,6 +13268,131 @@ def nina_relationships_answer(user_id):
     return relationship_summary(nina_latest_relationships(user_id, limit=30))
 
 
+
+# =========================
+# NinaOS Profile Summary V1.1
+# =========================
+
+def nina_relation_label_lv(code):
+    mapping = {
+        "client": "klients",
+        "wife": "sieva",
+        "husband": "vīrs",
+        "daughter": "meita",
+        "son": "dēls",
+        "dog": "suns",
+        "cat": "kaķis",
+        "project": "projekts",
+        "car": "auto",
+        "important_person_or_topic": "svarīga persona/tēma",
+    }
+    return mapping.get((code or "").strip().lower(), code or "")
+
+
+def nina_profile_summary_v11(user_id):
+    user = get_user(str(user_id)) or {}
+    lines = ["👤 Ko es par tevi zinu"]
+
+    name = (user.get("name") or "").strip()
+    profession = (user.get("profession") or "").strip()
+    projects = (user.get("projects") or "").strip()
+    goals = (user.get("goals") or "").strip()
+    interests = (user.get("interests") or "").strip()
+
+    if name:
+        lines.append(f"Vārds: {name}")
+    if profession:
+        lines.append(f"Joma/profesija: {profession}")
+
+    rels = []
+    try:
+        rels = nina_latest_relationships(user_id, limit=100)
+    except Exception as e:
+        print("nina_profile_summary_v11 relationships kļūda:", repr(e))
+        rels = []
+
+    grouped = {
+        "client": [],
+        "wife": [],
+        "husband": [],
+        "daughter": [],
+        "son": [],
+        "dog": [],
+        "cat": [],
+        "project": [],
+        "car": [],
+        "important_person_or_topic": [],
+    }
+    seen = set()
+
+    for rel in rels or []:
+        subject = (rel.get("subject") or "").strip()
+        relation = (rel.get("relation") or "").strip()
+        if not subject or not relation:
+            continue
+        key = f"{subject}|{relation}".lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        grouped.setdefault(relation, []).append(subject)
+
+    if grouped["client"]:
+        lines.append(f"Klienti: {'; '.join(grouped['client'])}")
+
+    family_parts = []
+    if grouped["wife"]:
+        family_parts.extend([f"{x} (sieva)" for x in grouped["wife"]])
+    if grouped["husband"]:
+        family_parts.extend([f"{x} (vīrs)" for x in grouped["husband"]])
+    if grouped["daughter"]:
+        family_parts.extend([f"{x} (meita)" for x in grouped["daughter"]])
+    if grouped["son"]:
+        family_parts.extend([f"{x} (dēls)" for x in grouped["son"]])
+    if family_parts:
+        lines.append(f"Ģimene: {'; '.join(family_parts)}")
+
+    pet_parts = []
+    if grouped["dog"]:
+        pet_parts.extend([f"{x} (suns)" for x in grouped["dog"]])
+    if grouped["cat"]:
+        pet_parts.extend([f"{x} (kaķis)" for x in grouped["cat"]])
+    if pet_parts:
+        lines.append(f"Mājdzīvnieki: {'; '.join(pet_parts)}")
+
+    project_items = []
+    if projects:
+        project_items.extend([p.strip() for p in re.split(r"[;,]", projects) if p.strip()])
+    project_items.extend(grouped["project"])
+    # dedupe preserve order
+    proj_seen = set()
+    final_projects = []
+    for p in project_items:
+        k = p.lower()
+        if k not in proj_seen:
+            proj_seen.add(k)
+            final_projects.append(p)
+    if final_projects:
+        lines.append(f"Projekti: {'; '.join(final_projects)}")
+
+    if goals:
+        lines.append(f"Mērķi: {goals}")
+    if interests:
+        lines.append(f"Intereses: {interests}")
+
+    if len(lines) == 1:
+        lines.append("Pagaidām profilā neredzu pietiekami daudz datu.")
+        lines.append("")
+        lines.append("Svarīgi: tas nozīmē, ka šobrīd jānostiprina Memory/Profile slānis, nevis jāizliekas, ka viss ir kārtībā.")
+    else:
+        extra = grouped["important_person_or_topic"] + grouped["car"]
+        if extra:
+            lines.append(f"Svarīgi fakti: {'; '.join(extra)}")
+
+    lines.append("")
+    lines.append("Ja kaut kas nav pareizi, pasaki tieši — es labošu profilu, nevis strīdēšos.")
+    return "\n".join(lines)
+
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
     try:
@@ -13298,6 +13423,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if lower in ["izdarīts", "izdarits", "pabeigts", "done", "gatavs"]:
             await safe_reply_text(update, nina_complete_top_task(user_id))
+            return
+
+        if lower in ["ko tu par mani zini", "ko tu zini par mani", "mans profils", "manas atmiņas", "manas atminas"]:
+            await safe_reply_text(update, nina_profile_summary_v11(user_id))
             return
 
         if lower in ["relationship engine", "relationship status", "attiecību dzinējs", "attiecibu dzinejs"]:
