@@ -1,21 +1,33 @@
 """
 work_engine.py
-NinaOS Work Engine — V1.0
+NinaOS Work Engine — V1.1
 
-Mērķis:
-Pārvērst uzdevumu sarakstu par darba plānu.
-
-Task Engine = uztver darbus.
-Work Engine = sakārto darbus un pasaka, ar ko sākt.
-
-Šis modulis pats nesūta Telegram ziņas.
+Sakārto aktīvos darbus pēc svarīguma un pasaka, ar ko sākt.
+V1.1 filtrē pabeigtos darbus un dedupliko vecos task ierakstus.
 """
 
-WORK_ENGINE_VERSION = "Work Engine V1.0"
+WORK_ENGINE_VERSION = "Work Engine V1.1"
 
 
 def _clean(text):
     return (text or "").strip()
+
+
+def task_key(task):
+    return ((task or {}).get("title") or (task or {}).get("raw_text") or "").strip().lower()
+
+
+def active_tasks(tasks):
+    result = []
+    seen = set()
+    for task in tasks or []:
+        key = task_key(task)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if (task or {}).get("status", "open") != "completed":
+            result.append(task)
+    return result
 
 
 def priority_score(task):
@@ -63,7 +75,7 @@ def task_type(task):
 
 
 def sort_tasks(tasks):
-    tasks = tasks or []
+    tasks = active_tasks(tasks or [])
     return sorted(tasks, key=priority_score, reverse=True)
 
 
@@ -113,9 +125,11 @@ def work_plan(tasks, user_name=""):
 
 def work_engine_status():
     return (
-        "🧠 Work Engine V1.0 ir gatavs pieslēgšanai. ✅\n\n"
-        "Mērķis: sakārtot uzdevumus pēc svarīguma un pateikt, ar ko sākt.\n\n"
-        "Tests pēc pieslēgšanas:\n"
+        "🧠 Work Engine V1.1 ir aktīvs. ✅\n\n"
+        "Mērķis: sakārtot aktīvos darbus un ignorēt pabeigtos.\n\n"
+        "Tests:\n"
+        "sakārto manu dienu\n"
+        "izdarīts\n"
         "sakārto manu dienu\n\n"
         f"Versija: {WORK_ENGINE_VERSION}"
     )
