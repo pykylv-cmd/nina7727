@@ -12994,8 +12994,39 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+class VoiceTextMessageProxy:
+    """Voice V1.5: proxy message with writable text, while reply_text stays on real Telegram message."""
+    def __init__(self, real_message, text):
+        self._real_message = real_message
+        self.text = text
+        self.caption = getattr(real_message, "caption", None)
+        self.photo = None
+        self.voice = None
+        self.audio = None
+        self.document = None
+        self.location = None
+
+    async def reply_text(self, *args, **kwargs):
+        return await self._real_message.reply_text(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._real_message, name)
+
+
+class VoiceTextUpdateProxy:
+    """Voice V1.5: proxy update so existing reply() can process transcript as normal text."""
+    def __init__(self, real_update, transcript):
+        self._real_update = real_update
+        self.message = VoiceTextMessageProxy(real_update.message, transcript)
+        self.effective_user = real_update.effective_user
+        self.effective_chat = getattr(real_update, "effective_chat", None)
+
+    def __getattr__(self, name):
+        return getattr(self._real_update, name)
+
+
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Voice Intake V1.1: Telegram voice/audio -> teksts -> esošais NinaOS reply router."""
+    """Voice Intake V1.5: Telegram voice/audio -> teksts -> existing reply router via proxy update."""
     try:
         if not update.message:
             return
@@ -13026,7 +13057,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await tg_file.download_to_memory(out=buffer)
         audio_bytes = buffer.getvalue()
 
-        print(f"Voice Intake handler: received file={filename} bytes={len(audio_bytes)}")
+        print(f"Voice Intake V1.5 handler: received file={filename} bytes={len(audio_bytes)}")
 
         transcript = transcribe_audio_with_openai(
             client,
@@ -13044,20 +13075,14 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print("Voice conversation save kļūda:", e)
 
-        # Svarīgi: pēc transkripcijas neizdomājam jaunu ceļu.
-        # Iedodam tekstu esošajam reply routerim kā parastu ziņu.
-        original_text = getattr(update.message, "text", None)
-        try:
-            update.message.text = transcript
-            await reply(update, context)
-        finally:
-            try:
-                update.message.text = original_text
-            except Exception:
-                pass
+        # V1.5 FIX:
+        # Telegram Message.text ir read-only, tāpēc to NEPĀRRAKSTĀM.
+        # Izveidojam proxy update ar tekstu un palaižam esošo reply() ceļu.
+        voice_update = VoiceTextUpdateProxy(update, transcript)
+        await reply(voice_update, context)
 
     except Exception as e:
-        print("handle_voice kļūda:", repr(e))
+        print("handle_voice V1.5 kļūda:", repr(e))
         try:
             await safe_reply_text(update, build_voice_error_answer(str(e)))
         except Exception:
