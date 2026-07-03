@@ -1,9 +1,27 @@
 """
 client_work_view.py
-NinaOS Client Work View — V1.0
+NinaOS Client Work View — V1.1 + Sales Pipeline bridge
+
+V1.1:
+- saglabā veco Client Work View komandu;
+- labo "Kas notiek ar Andris" -> "Kas notiek ar Andri";
+- ja sales_pipeline.py ir pieejams, rāda CRM/Pipeline skatu klientam;
+- ja sales_pipeline.py nav pieejams, droši atgriežas uz V1.0 klienta darbu skatu.
 """
 
-CLIENT_WORK_VIEW_VERSION = "Client Work View V1.0"
+CLIENT_WORK_VIEW_VERSION = "Client Work View V1.1 + Sales Pipeline bridge"
+
+try:
+    from sales_pipeline import (
+        format_client_crm_view,
+        SALES_PIPELINE_VERSION,
+    )
+except Exception as e:
+    print("sales_pipeline.py imports nav pieejams client_work_view.py:", e)
+    SALES_PIPELINE_VERSION = "Sales Pipeline nav pieslēgts"
+
+    def format_client_crm_view(client_name, tasks):
+        return ""
 
 
 def _clean(text):
@@ -32,11 +50,40 @@ def normalize_client_name_v1(name):
     return raw[:1].upper() + raw[1:]
 
 
+def client_name_dative_v1(client_name):
+    """
+    V1.1 kosmētiskais locījums virsrakstam.
+    Tas labo galveno zināmo kļūdu:
+    "Kas notiek ar Andris" -> "Kas notiek ar Andri".
+    """
+    name = normalize_client_name_v1(client_name)
+    mapping = {
+        "Andris": "Andri",
+        "Jānis": "Jāni",
+        "Janis": "Jāni",
+        "Anna": "Annu",
+    }
+    return mapping.get(name, name)
+
+
 def extract_client_from_query(text):
     raw = _clean(text)
     lower = raw.lower()
 
-    prefixes = ["kas notiek ar ", "kas ar ", "client work "]
+    prefixes = [
+        "kas notiek ar ",
+        "kas ar ",
+        "client work ",
+        "andra pipeline",
+        "andra statuss",
+        "andris pipeline",
+        "andris statuss",
+    ]
+
+    # Speciālie īsie testi Andrim
+    if lower in ["andra pipeline", "andra statuss", "andris pipeline", "andris statuss", "kas ar andri tālāk", "kas ar andri talak"]:
+        return "Andris"
+
     for prefix in prefixes:
         if lower.startswith(prefix):
             tail = raw[len(prefix):].strip(" .,!?:;")
@@ -46,44 +93,34 @@ def extract_client_from_query(text):
 
 
 def task_matches_client(task, client_name):
-    client_name = _clean(client_name)
+    client_name = normalize_client_name_v1(client_name)
     if not client_name:
         return False
 
     task = task or {}
-    task_client = _clean(task.get("client", ""))
+    task_client = normalize_client_name_v1(task.get("client", ""))
     title = _clean(task.get("title", ""))
     raw_text = _clean(task.get("raw_text", ""))
 
-    if task_client.lower() == client_name.lower():
+    if task_client and task_client.lower() == client_name.lower():
         return True
 
     blob = f"{title} {raw_text}".lower()
-    return client_name.lower() in blob
+
+    variants = {
+        "Andris": ["andris", "andri", "andrim"],
+        "Jānis": ["jānis", "janis", "jāni", "jani", "jānim", "janim"],
+        "Anna": ["anna", "annu", "annai"],
+    }.get(client_name, [client_name.lower()])
+
+    return any(v in blob for v in variants)
 
 
-def build_client_work_view(client_name, tasks):
-    client_name = _clean(client_name)
-
-    if not client_name:
-        return (
-            "👥 Client Work View\n\n"
-            "Pasaki klienta vārdu, piemēram:\n"
-            "kas notiek ar Andri\n\n"
-            f"Versija: {CLIENT_WORK_VIEW_VERSION}"
-        )
-
-    matched = [task for task in (tasks or []) if task_matches_client(task, client_name)]
-
-    if not matched:
-        return (
-            f"👥 Klientam {client_name} šobrīd neredzu aktīvus darbus.\n\n"
-            "Ja vajag, vispirms iedod uzdevumu.\n\n"
-            f"Versija: {CLIENT_WORK_VIEW_VERSION}"
-        )
+def _legacy_client_work_view(client_name, matched):
+    header_name = client_name_dative_v1(client_name)
 
     lines = [
-        f"👥 Kas notiek ar {client_name}",
+        f"👥 Kas notiek ar {header_name}",
         "",
         f"Aktīvie darbi: {len(matched)}",
         ""
@@ -108,11 +145,48 @@ def build_client_work_view(client_name, tasks):
     return "\n".join(lines)
 
 
+def build_client_work_view(client_name, tasks):
+    client_name = normalize_client_name_v1(client_name)
+
+    if not client_name:
+        return (
+            "👥 Client Work View\n\n"
+            "Pasaki klienta vārdu, piemēram:\n"
+            "kas notiek ar Andri\n\n"
+            f"Versija: {CLIENT_WORK_VIEW_VERSION}"
+        )
+
+    matched = [task for task in (tasks or []) if task_matches_client(task, client_name)]
+
+    if not matched:
+        return (
+            f"👥 Klientam {client_name_dative_v1(client_name)} šobrīd neredzu aktīvus darbus.\n\n"
+            "Ja vajag, vispirms iedod uzdevumu.\n\n"
+            f"Versija: {CLIENT_WORK_VIEW_VERSION}"
+        )
+
+    # Ja sales_pipeline.py ir pieslēgts, rādām augstāka līmeņa CRM skatu.
+    try:
+        crm_view = format_client_crm_view(client_name, matched)
+        if crm_view:
+            return crm_view
+    except Exception as e:
+        print("build_client_work_view sales pipeline kļūda:", repr(e))
+
+    # Drošs fallback uz veco Client Work View.
+    return _legacy_client_work_view(client_name, matched)
+
+
 def client_work_status():
     return (
-        "👥 Client Work View V1.0 ir aktīvs. ✅\n\n"
+        "👥 Client Work View V1.1 ir aktīvs. ✅\n\n"
+        "Ja sales_pipeline.py ir pieslēgts, komanda rāda arī CRM/Pipeline skatu.\n\n"
         "Tests:\n"
         "kas notiek ar Andri\n\n"
-        "Sagaidāmais rezultāts: Nina parāda visus Andra aktīvos darbus vienā skatā.\n\n"
-        f"Versija: {CLIENT_WORK_VIEW_VERSION}"
+        "Sagaidāmais rezultāts:\n"
+        "- pareizs virsraksts: Kas notiek ar Andri\n"
+        "- redzami Andra aktīvie darbi\n"
+        "- redzams pipeline statuss un nākamais solis\n\n"
+        f"Client Work versija: {CLIENT_WORK_VIEW_VERSION}\n"
+        f"Sales Pipeline: {SALES_PIPELINE_VERSION}"
     )
