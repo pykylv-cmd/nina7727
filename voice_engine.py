@@ -1,6 +1,6 @@
 """
 voice_engine.py
-NinaOS Voice Intake V1.4 — Debug in Telegram
+NinaOS Voice Intake V1.5 — Route Fix
 
 Mērķis:
 - Telegram voice/audio failu sūtīt tieši OpenAI transkripcijai;
@@ -12,7 +12,7 @@ Mērķis:
 import io
 import traceback
 
-VOICE_ENGINE_VERSION = "Voice Intake V1.4 — Debug in Telegram"
+VOICE_ENGINE_VERSION = "Voice Intake V1.5 — Route Fix"
 LAST_VOICE_DEBUG = ""
 
 
@@ -20,7 +20,7 @@ def _set_debug(message):
     global LAST_VOICE_DEBUG
     LAST_VOICE_DEBUG = str(message or "").strip()[:900]
     try:
-        print("Voice Intake V1.4 debug:", LAST_VOICE_DEBUG)
+        print("Voice Intake V1.5 debug:", LAST_VOICE_DEBUG)
     except Exception:
         pass
 
@@ -31,12 +31,12 @@ def _get_debug():
 
 def voice_status_answer():
     return (
-        "🎙 Voice Intake V1.4 — Debug in Telegram ir aktīvs. ✅\n\n"
+        "🎙 Voice Intake V1.5 — Route Fix ir aktīvs. ✅\n\n"
         "Ko tas dara:\n"
         "• pieņem Telegram balss/audio ziņu;\n"
         "• sūta .ogg/.opus audio tieši transkripcijai;\n"
         "• ja transkripcija neizdodas, kļūdu parāda tepat Telegramā;\n"
-        "• app.py un requirements.txt nav jāmaina.\n\n"
+        "• app.py satur proxy route fix; requirements.txt nav jāmaina.\n\n"
         "Tests:\n"
         "• ierunā Telegram voice ziņu: rīt jānosūta piedāvājums Andrim\n\n"
         f"Versija: {VOICE_ENGINE_VERSION}"
@@ -107,7 +107,7 @@ def transcribe_audio_with_openai(openai_client, audio_bytes, filename="voice.ogg
     """
     Atgriež tekstu no Telegram audio bytes.
 
-    V1.4:
+    V1.5:
     - izmanto BytesIO ar drošu .name;
     - mēģina response_format='text';
     - ja kļūda, saglabā LAST_VOICE_DEBUG, ko build_voice_error_answer parāda Telegramā.
