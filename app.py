@@ -213,6 +213,24 @@ except Exception as e:
         return "Client Work View nav pieslēgts."
 
 
+# NinaOS Sales Pipeline / Client CRM Import
+try:
+    from sales_pipeline import (
+        format_pipeline_overview,
+        format_stuck_clients,
+        SALES_PIPELINE_VERSION,
+    )
+except Exception as e:
+    print("sales_pipeline.py imports nav pieejams:", e)
+    SALES_PIPELINE_VERSION = "Sales Pipeline nav pieslēgts"
+
+    def format_pipeline_overview(client_task_map):
+        return "Sales Pipeline nav pieslēgts."
+
+    def format_stuck_clients(client_task_map):
+        return "Sales Pipeline nav pieslēgts."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -14186,12 +14204,83 @@ def nina_client_work_view_answer(user_id, user_text):
     tasks = nina_clean_real_tasks(user_id, limit=200)
     return build_client_work_view(client_name, tasks)
 
+
+# =========================
+# NinaOS Sales Pipeline / Client CRM Bridge — V1.0
+# =========================
+
+def nina_client_task_map_v1(user_id, limit=200):
+    """
+    Savāc aktīvos uzdevumus pa klientiem, neizmantojot client_context.py.
+    Pamats: jau esošais nina_clean_real_tasks().
+    """
+    tasks = nina_clean_real_tasks(user_id, limit=limit)
+    client_map = {}
+
+    for task in tasks or []:
+        if not isinstance(task, dict):
+            continue
+
+        client = (task.get("client") or "").strip()
+
+        # Fallback: mēģina izvilkt klientu no title/raw_text ar esošo client_work_view normalizāciju.
+        if not client:
+            blob = f"{task.get('title', '')} {task.get('raw_text', '')}".lower()
+            if any(x in blob for x in ["andris", "andri", "andrim"]):
+                client = "Andris"
+            elif any(x in blob for x in ["jānis", "janis", "jāni", "jani", "jānim", "janim"]):
+                client = "Jānis"
+            elif any(x in blob for x in ["anna", "annu", "annai"]):
+                client = "Anna"
+
+        if not client:
+            continue
+
+        client = extract_client_from_query(f"kas notiek ar {client}") or client
+        client_map.setdefault(client, []).append(task)
+
+    return client_map
+
+
+def nina_sales_pipeline_answer(user_id):
+    client_map = nina_client_task_map_v1(user_id, limit=200)
+    return format_pipeline_overview(client_map)
+
+
+def nina_sales_pipeline_risk_answer(user_id):
+    client_map = nina_client_task_map_v1(user_id, limit=200)
+    return format_stuck_clients(client_map)
+
+
+def nina_sales_pipeline_status_answer():
+    return (
+        "📊 Sales Pipeline / Client CRM V1.0 ir aktīvs. ✅\n\n"
+        "Komandas:\n"
+        "pipeline\n"
+        "mani klienti\n"
+        "kas iestrēdzis\n"
+        "kas notiek ar Andri\n\n"
+        f"Versija: {SALES_PIPELINE_VERSION}"
+    )
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
     try:
         user_text = update.message.text
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
+
+        if lower in ["sales pipeline", "pipeline status", "crm status", "client crm status"]:
+            await safe_reply_text(update, nina_sales_pipeline_status_answer())
+            return
+
+        if lower in ["pipeline", "mani klienti", "klienti", "klientu statuss", "parādi manus klientus", "paradi manus klientus", "sales pipeline", "crm", "client crm"]:
+            await safe_reply_text(update, nina_sales_pipeline_answer(user_id))
+            return
+
+        if lower in ["kas iestrēdzis", "kas iestredzis", "kur deg", "kam jātaisa follow-up", "kam jataisa follow-up", "kam jānosūta piedāvājums", "kam janosuta piedavajums", "kurš klients stāv uz vietas", "kurs klients stav uz vietas"]:
+            await safe_reply_text(update, nina_sales_pipeline_risk_answer(user_id))
+            return
 
         if lower in ["client work", "client work status", "client work view"]:
             await safe_reply_text(update, client_work_status())
