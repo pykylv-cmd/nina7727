@@ -1,201 +1,232 @@
 """
 voice_engine.py
-NinaOS Voice Intake V1.6 — Voice Command Cleanup
+NinaOS Voice Intake V1.7 — Routing & Deadline Fix
+
+Mērķis:
+- saglabāt termiņu balss follow-up komandās;
+- piespiest balss prioritātes komandas iet uz Initiative/Daily/Client ceļu;
+- pārvērst 'piezvanīt Andrim' un līdzīgus šķībus transkriptus par īstiem taskiem.
 """
 
-import io
 import re
-import traceback
 
-VOICE_ENGINE_VERSION = "Voice Intake V1.6 — Voice Command Cleanup"
-LAST_VOICE_DEBUG = ""
+VOICE_ENGINE_VERSION = "Voice Intake V1.7 — Routing & Deadline Fix"
 
 
-def _set_debug(message):
-    global LAST_VOICE_DEBUG
-    LAST_VOICE_DEBUG = str(message or "").strip()[:900]
-    try:
-        print("Voice Intake V1.6 debug:", LAST_VOICE_DEBUG)
-    except Exception:
-        pass
-
-
-def _get_debug():
-    return (LAST_VOICE_DEBUG or "").strip()
+LAST_VOICE_DEBUG = {
+    "raw": "",
+    "cleaned": "",
+    "route": "",
+}
 
 
 def voice_status_answer():
     return (
-        "🎙 Voice Intake V1.6 — Voice Command Cleanup ir aktīvs. ✅\n\n"
-        "Ko tas dara:\n"
-        "• pieņem Telegram balss/audio ziņu;\n"
-        "• pārvērš audio tekstā;\n"
-        "• notīra transkripta troksni un salabo tipiskas kļūdas;\n"
-        "• mēģina pārvērst to par skaidru NinaOS komandu vai uzdevumu.\n\n"
+        "🎙 Voice Intake V1.7 — Routing & Deadline Fix ir aktīvs. ✅\n\n"
+        "Ko tas labo:\n"
+        "• follow-up balss komandās saglabā termiņu;\n"
+        "• 'ko man tagad darīt' virza uz Initiative ceļu;\n"
+        "• 'mana diena' virza uz Daily Brief ceļu;\n"
+        "• 'klienti' virza uz klientu pārskatu;\n"
+        "• 'rīt jāpiezvana Andrim' pārvērš par īstu uzdevumu.\n\n"
         "Testi:\n"
-        "• ierunā: rīt jānosūta piedāvājums Andrim\n"
-        "• ierunā: piektdien jāpajautā Andrim par atbildi\n"
-        "• ierunā: ko man tagad darīt\n\n"
+        "• rīt jānosūta piedāvājums Andrim\n"
+        "• piektdien jāpajautā Andrim par atbildi\n"
+        "• ko man tagad darīt\n"
+        "• rīt jāpiezvana Andrim\n\n"
         f"Versija: {VOICE_ENGINE_VERSION}"
     )
 
 
 def build_voice_error_answer(error_text=""):
-    debug = (error_text or "").strip() or _get_debug()
-    base = "🎙 Balss ziņu saņēmu, bet šoreiz neizdevās to pārvērst tekstā."
-    if debug:
-        return f"{base}\n\nDebug:\n{debug}\n\nVersija: {VOICE_ENGINE_VERSION}"
-    return f"{base}\n\nPamēģini vēlreiz mazliet skaidrāk.\n\nVersija: {VOICE_ENGINE_VERSION}"
-
-
-def _safe_filename(filename):
-    name = (filename or "voice.ogg").strip()
-    lower = name.lower()
-    allowed = [".ogg", ".oga", ".opus", ".mp3", ".m4a", ".wav", ".webm", ".mp4", ".mpeg", ".mpga"]
-    if any(lower.endswith(ext) for ext in allowed):
-        return name
-    return "voice.ogg"
-
-
-def _extract_text_from_result(result):
-    if result is None:
-        return ""
-    if isinstance(result, str):
-        return result.strip()
-    text = getattr(result, "text", None)
-    if text:
-        return str(text).strip()
-    if isinstance(result, dict):
-        text = result.get("text") or result.get("transcript")
-        if text:
-            return str(text).strip()
-    try:
-        text = result["text"]
-        if text:
-            return str(text).strip()
-    except Exception:
-        pass
-    return ""
-
-
-def transcribe_audio_with_openai(openai_client, audio_bytes, filename="voice.ogg"):
-    _set_debug("")
-    if not openai_client:
-        _set_debug("OpenAI client nav pieejams app.py pusē.")
-        return ""
-    audio_bytes = audio_bytes or b""
-    if not audio_bytes:
-        _set_debug("audio_bytes ir tukšs — Telegram fails tika saņemts bez audio satura.")
-        return ""
-    safe_name = _safe_filename(filename)
-    try:
-        audio_file = io.BytesIO(audio_bytes)
-        audio_file.name = safe_name
-        _set_debug(f"transcribe start: filename={safe_name}, bytes={len(audio_bytes)}")
-        try:
-            result = openai_client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                response_format="text",
-            )
-        except TypeError as e:
-            audio_file.seek(0)
-            _set_debug(f"response_format TypeError, retry bez response_format: {repr(e)}")
-            result = openai_client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-            )
-        transcript = _extract_text_from_result(result)
-        if not transcript:
-            _set_debug(f"OpenAI atbildēja, bet transcript ir tukšs. result_type={type(result).__name__}, result={str(result)[:500]}")
-            return ""
-        _set_debug(f"OK transcript length={len(transcript)}")
-        return transcript
-    except Exception as e:
-        short_trace = traceback.format_exc(limit=2)
-        _set_debug(f"OpenAI transcribe error: {repr(e)}\\n{short_trace}")
-        return ""
+    error_text = (error_text or "").strip()
+    if error_text:
+        return (
+            "🎙 Balss ziņu saņēmu, bet šoreiz neizdevās to pārvērst tekstā.\n\n"
+            "Debug:\n"
+            f"{error_text}\n\n"
+            f"Versija: {VOICE_ENGINE_VERSION}"
+        )
+    return (
+        "🎙 Balss ziņu saņēmu, bet šoreiz neizdevās to pārvērst tekstā.\n\n"
+        "Pamēģini vēlreiz mazliet skaidrāk.\n\n"
+        f"Versija: {VOICE_ENGINE_VERSION}"
+    )
 
 
 def _normalize_spaces(text):
     return re.sub(r"\s+", " ", str(text or "")).strip()
 
 
+def _lv_lower(text):
+    return str(text or "").strip().lower()
+
+
+def _has_any(text, words):
+    lower = _lv_lower(text)
+    return any(w in lower for w in words)
+
+
+def _detect_deadline(text):
+    lower = _lv_lower(text)
+    if _has_any(lower, ["šodien", "sodien", "šodienas"]):
+        return "šodien"
+    if _has_any(lower, ["rīt", "rit", "riit", "rītdien", "ritdien"]):
+        return "rīt"
+    if _has_any(lower, ["parīt", "parit"]):
+        return "parīt"
+    weekdays = [
+        ("pirmdien", ["pirmdien"]),
+        ("otrdien", ["otrdien"]),
+        ("trešdien", ["trešdien", "tresdien"]),
+        ("ceturtdien", ["ceturtdien"]),
+        ("piektdien", ["piektdien", "piekdien", "piktien", "piekdienā", "piektdienā"]),
+        ("sestdien", ["sestdien"]),
+        ("svētdien", ["svētdien", "svetdien"]),
+    ]
+    for canonical, variants in weekdays:
+        if any(v in lower for v in variants):
+            return canonical
+    return ""
+
+
+def _has_andris(text):
+    return _has_any(text, ["andri", "andrim", "andris", "antri", "antrim", "andriem", "andriu", "andri"])
+
+
 def _cleanup_noise(text):
     text = str(text or "").strip()
     if not text:
         return ""
+
+    lower = text.lower()
+
     replacements = {
         "pazūnīt": "piezvanīt",
+        "pazunīt": "piezvanīt",
         "pazvanīt": "piezvanīt",
         "pazudīt": "piezvanīt",
-        "pazudin": "piezvan",
-        "uandrim": "Andrim",
-        "antrim": "Andrim",
-        "andriem": "Andrim",
+        "zvanīt": "piezvanīt",
+        "piedzvanīt": "piezvanīt",
+        "piez vana": "piezvana",
+        "biedz vana": "piezvana",
+        "biedzvana": "piezvana",
+        "biedzu vana": "piezvana",
+        "jābiedz vana": "jāpiezvana",
+        "jā biezvana": "jāpiezvana",
+        "jā piez vana": "jāpiezvana",
+        "japiezvana": "jāpiezvana",
+        "jāpie zvana": "jāpiezvana",
         "piedavajumu": "piedāvājumu",
         "piedavajums": "piedāvājums",
-        "piedavaj": "piedāvāj",
-        "rit": "rīt",
-        "sodien": "šodien",
+        "piedāvājums andrim": "piedāvājums Andrim",
         "japajauta": "jāpajautā",
-        "japiezvana": "jāpiezvana",
+        "jā pajautā": "jāpajautā",
         "janosuta": "jānosūta",
+        "jā nosūta": "jānosūta",
+        "jaanosuuta": "jānosūta",
+        "rit": "rīt",
+        "riit": "rīt",
+        "sodien": "šodien",
+        "piekdien": "piektdien",
+        "piktien": "piektdien",
+        "antrim": "Andrim",
+        "andriem": "Andrim",
+        "andrim": "Andrim",
+        "andris": "Andris",
+        "andri": "Andri",
     }
-    lowered = text.lower()
+
     for bad, good in replacements.items():
-        lowered = lowered.replace(bad, good.lower())
-    lowered = re.sub(r"\b(ā|nu|emm|mm|eu|eee|vienkārši)\b", " ", lowered, flags=re.IGNORECASE)
-    lowered = _normalize_spaces(lowered)
-    lowered = re.sub(r"\bandris\b", "Andris", lowered, flags=re.IGNORECASE)
-    lowered = re.sub(r"\bandrim\b", "Andrim", lowered, flags=re.IGNORECASE)
-    lowered = re.sub(r"\bandri\b", "Andri", lowered, flags=re.IGNORECASE)
-    return lowered.strip()
+        lower = lower.replace(bad, good.lower())
+
+    # noņem runas parazītvārdus, bet nepieskaras jēgai
+    lower = re.sub(r"\b(ā|nu|emm|mm|eee|ēē|eu|nu jā|vienkārši|lūdzu)\b", " ", lower, flags=re.IGNORECASE)
+    lower = _normalize_spaces(lower)
+
+    # normalizē Andra formas pēc tīrīšanas
+    lower = re.sub(r"\bandrim\b", "Andrim", lower, flags=re.IGNORECASE)
+    lower = re.sub(r"\bandris\b", "Andris", lower, flags=re.IGNORECASE)
+    lower = re.sub(r"\bandri\b", "Andri", lower, flags=re.IGNORECASE)
+
+    return lower.strip()
 
 
-def _looks_like_priority_command(text):
-    lower = text.lower().strip()
-    return lower in {
-        "ko man tagad darīt", "kas svarīgākais", "kas svarigakais",
-        "ar ko sākt", "ar ko sakt", "mana diena", "klienti"
-    }
+def _rewrite_system_command(text):
+    lower = _lv_lower(text)
+
+    # Initiative komandas — agresīvi virzām uz pārbaudīto tekstu
+    if (
+        "ko man" in lower and ("tagad" in lower or "darīt" in lower or "darit" in lower)
+    ) or _has_any(lower, ["kas svarīgākais", "kas svarigakais", "ko iesaki", "ar ko sākt", "ar ko sakt"]):
+        return "ko man tagad darīt", "initiative"
+
+    if _has_any(lower, ["mana diena", "darba inbox", "ko man šodien", "ko man sodien", "šodienas plāns", "sodienas plans"]):
+        return "mana diena", "daily_brief"
+
+    if lower.strip() in {"klienti", "mani klienti", "klientu pārskats", "klientu parskats"} or _has_any(lower, ["parādi klientus", "paradi klientus"]):
+        return "klienti", "clients"
+
+    return "", ""
 
 
 def _rewrite_task_command(text):
-    t = text.strip()
-    lower = t.lower()
-    if _looks_like_priority_command(t):
-        return t
-    if "jāpajautā" in lower and "andr" in lower:
-        if "piektdien" in lower:
-            return "piektdien jāpajautā Andrim par atbildi"
-        if "rīt" in lower:
-            return "rīt jāpajautā Andrim par atbildi"
-        return "jāpajautā Andrim par atbildi"
-    if ("piedāvā" in lower or "piedāvāj" in lower or "piedavaj" in lower) and "andr" in lower:
-        if "rīt" in lower:
-            return "rīt jānosūta piedāvājums Andrim"
-        if "šodien" in lower:
-            return "šodien jānosūta piedāvājums Andrim"
-        return "jānosūta piedāvājums Andrim"
-    if ("piezvan" in lower or "zvan" in lower) and "andr" in lower:
-        if "rīt" in lower:
-            return "rīt jāpiezvana Andrim"
-        if "piektdien" in lower:
-            return "piektdien jāpiezvana Andrim"
-        return "jāpiezvana Andrim"
-    if "andr" in lower and ("atbild" in lower or "follow" in lower):
-        if "piektdien" in lower:
-            return "piektdien jāpajautā Andrim par atbildi"
-        if "rīt" in lower:
-            return "rīt jāpajautā Andrim par atbildi"
-        return "jāpajautā Andrim par atbildi"
-    return t
+    t = _normalize_spaces(text)
+    lower = _lv_lower(t)
+    deadline = _detect_deadline(t)
+    deadline_prefix = (deadline + " ") if deadline else ""
+
+    system_cmd, route = _rewrite_system_command(t)
+    if system_cmd:
+        return system_cmd, route
+
+    # Piedāvājums Andrim
+    if _has_andris(lower) and _has_any(lower, ["piedāvāj", "piedavaj", "offer", "tāme", "tame"]):
+        return f"{deadline_prefix}jānosūta piedāvājums Andrim".strip(), "task"
+
+    # Follow-up / pajautāt par atbildi Andrim — termiņu saglabājam obligāti
+    if _has_andris(lower) and (_has_any(lower, ["jāpajautā", "pajaut", "atbild", "follow"])):
+        return f"{deadline_prefix}jāpajautā Andrim par atbildi".strip(), "followup"
+
+    # Piezvanīt Andrim — kā īsts task
+    if _has_andris(lower) and _has_any(lower, ["piezvan", "zvan", "jāpiezvana", "japiezvana", "vana"]):
+        return f"{deadline_prefix}jāpiezvana Andrim".strip(), "task"
+
+    # Vispārīgs Andris + termiņš + neskaidra darbība: labāk izveidot follow-up, nevis pļāpāt
+    if _has_andris(lower) and deadline and _has_any(lower, ["atbild", "jaut", "pajaut", "sazin", "klient"]):
+        return f"{deadline_prefix}jāpajautā Andrim par atbildi".strip(), "followup"
+
+    return t, "general"
 
 
 def cleanup_voice_transcript(transcript):
-    cleaned = _cleanup_noise(transcript)
+    raw = str(transcript or "").strip()
+    cleaned = _cleanup_noise(raw)
     if not cleaned:
+        LAST_VOICE_DEBUG.update({"raw": raw, "cleaned": "", "route": "empty"})
         return ""
-    rewritten = _rewrite_task_command(cleaned)
-    return _normalize_spaces(rewritten)
+
+    rewritten, route = _rewrite_task_command(cleaned)
+    rewritten = _normalize_spaces(rewritten)
+
+    LAST_VOICE_DEBUG.update({"raw": raw, "cleaned": rewritten, "route": route or "general"})
+    return rewritten
+
+
+def voice_last_debug_answer():
+    return (
+        "🎙 Voice pēdējais debug\n\n"
+        f"Raw: {LAST_VOICE_DEBUG.get('raw') or '—'}\n"
+        f"Cleaned: {LAST_VOICE_DEBUG.get('cleaned') or '—'}\n"
+        f"Route: {LAST_VOICE_DEBUG.get('route') or '—'}\n\n"
+        f"Versija: {VOICE_ENGINE_VERSION}"
+    )
+
+
+def build_voice_debug_answer(original_transcript, cleaned_transcript):
+    return (
+        "🎙 Voice Cleanup debug\n\n"
+        f"Raw: {original_transcript}\n"
+        f"Cleaned: {cleaned_transcript}\n\n"
+        f"Versija: {VOICE_ENGINE_VERSION}"
+    )
