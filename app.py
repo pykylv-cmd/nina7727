@@ -190,6 +190,29 @@ except Exception as e:
         return "Task Cleanup nav pieslēgts."
 
 
+
+# NinaOS Client Work View Import
+try:
+    from client_work_view import (
+        extract_client_from_query,
+        build_client_work_view,
+        client_work_status,
+        CLIENT_WORK_VIEW_VERSION,
+    )
+except Exception as e:
+    print("client_work_view.py imports nav pieejams:", e)
+    CLIENT_WORK_VIEW_VERSION = "Client Work View nav pieslēgts"
+
+    def extract_client_from_query(text):
+        return ""
+
+    def build_client_work_view(client_name, tasks):
+        return "Client Work View nav pieslēgts."
+
+    def client_work_status():
+        return "Client Work View nav pieslēgts."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -14153,12 +14176,31 @@ def nina_task_cleanup_confirm(user_id):
 
     return build_cleanup_done_answer(deleted)
 
+
+# =========================
+# NinaOS Client Work View Bridge — V1.0
+# =========================
+
+def nina_client_work_view_answer(user_id, user_text):
+    client_name = extract_client_from_query(user_text)
+    tasks = nina_clean_real_tasks(user_id, limit=200)
+    return build_client_work_view(client_name, tasks)
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
     try:
         user_text = update.message.text
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
+
+        if lower in ["client work", "client work status", "client work view"]:
+            await safe_reply_text(update, client_work_status())
+            return
+
+        if lower.startswith("kas notiek ar ") or lower.startswith("kas ar "):
+            await safe_reply_text(update, nina_client_work_view_answer(user_id, user_text))
+            return
+
 
         if lower == "task cleanup":
             await safe_reply_text(update, nina_task_cleanup_preview(user_id))
