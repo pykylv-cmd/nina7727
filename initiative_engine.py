@@ -1,217 +1,160 @@
 """
 initiative_engine.py
-NinaOS Initiative Engine — V1.0
+NinaOS Core 2.6 — Initiative Hardening V1.0
 
 Mērķis:
-- Nina pati pasaka, kas šobrīd svarīgākais;
-- no aktīvajiem uzdevumiem izceļ 1–3 prioritātes;
-- dod īsu cilvēkam saprotamu ieteikumu.
-
-Šis modulis nemaina datubāzi.
-Tas tikai analizē jau esošos taskus.
+- izvēlēties nākamo labāko darbu no reālajiem taskiem;
+- dot vienu skaidru TOP prioritāti un 1–2 nākamos soļus;
+- prioritizēt pēc termiņa, klienta/piedāvājuma tuvuma un follow-up riska.
 """
 
-INITIATIVE_ENGINE_VERSION = "Initiative Engine V1.0"
+import re
+
+INITIATIVE_ENGINE_VERSION = "Core 2.6 — Initiative Hardening V1.0"
 
 
-def _clean(text):
-    return (text or "").strip()
+def _task_title(task):
+    return str((task or {}).get("title") or (task or {}).get("raw_text") or "").strip()
 
 
-def _lower(text):
-    return _clean(text).lower()
+def _contains(text, words):
+    lower = (text or "").lower()
+    return any(w in lower for w in words)
 
 
-def _contains_any(text, phrases):
-    lower = _lower(text)
-    return any(p in lower for p in phrases)
+def _extract_client_name(text):
+    text = str(text or "").strip()
+    m = re.search(r"\b([A-ZĀČĒĢĪĶĻŅŠŪŽ][a-zāčēģīķļņšūž]+)\b", text)
+    return m.group(1) if m else ""
 
 
-def initiative_status_answer():
-    return (
-        "🔥 Initiative Engine V1.0 ir aktīvs. ✅\n\n"
-        "Uzdevums:\n"
-        "- paskatīties uz aktīvajiem darbiem;\n"
-        "- izcelt 1–3 svarīgākos soļus;\n"
-        "- dot īsu ieteikumu, ar ko sākt.\n\n"
-        "Komandas:\n"
-        "- ko man tagad darīt\n"
-        "- kas svarīgākais\n"
-        "- ko iesaki\n"
-        "- ninas ieteikums\n\n"
-        f"Versija: {INITIATIVE_ENGINE_VERSION}"
-    )
-
-
-def is_initiative_command(text):
-    lower = _lower(text)
-    return lower in [
-        "ko man tagad darīt",
-        "ko man tagad darit",
-        "kas svarīgākais",
-        "kas svarigakais",
-        "kas tagad svarīgākais",
-        "kas tagad svarigakais",
-        "ko iesaki",
-        "ko tu iesaki",
-        "ninas ieteikums",
-        "nina ieteikums",
-        "initiative",
-        "initiative engine",
-    ]
-
-
-def task_text(task):
-    if isinstance(task, dict):
-        return _clean(task.get("title") or task.get("text") or task.get("task") or task.get("raw_text") or "")
-    return _clean(str(task or ""))
-
-
-def task_client(task):
-    if isinstance(task, dict):
-        return _clean(task.get("client", ""))
-    return ""
-
-
-def task_deadline_label(task):
-    if isinstance(task, dict):
-        return _clean(task.get("deadline_label", "")) or _clean(task.get("deadline", ""))
-    return ""
-
-
-def is_offer_task(text):
-    return _contains_any(text, [
-        "piedāvājums", "piedavajums",
-        "jānosūta", "janosuta",
-        "nosūtīt", "nosutit",
-        "sagatavot piedāvājumu", "sagatavot piedavajumu",
-    ])
-
-
-def is_reminder_task(text):
-    return _contains_any(text, [
-        "jāpajautā", "japajauta",
-        "pajautāt", "pajautat",
-        "par atbildi",
-        "atgādināt", "atgadinat",
-        "follow-up", "follow up", "followup",
-    ])
-
-
-def deadline_score(deadline):
-    d = _lower(deadline)
-    if d in ["šodien", "sodien", "today"]:
-        return 90
-    if d in ["rīt", "rit", "tomorrow"]:
-        return 75
-    if d in ["parīt", "parit", "day_after_tomorrow"]:
-        return 55
-    if d:
-        return 35
-    return 0
-
-
-def priority_score(task):
-    text = task_text(task)
-    deadline = task_deadline_label(task)
+def _score_task(task):
+    title = _task_title(task)
+    lower = title.lower()
 
     score = 0
     reasons = []
 
-    if is_offer_task(text):
-        score += 120
-        reasons.append("tas virza klientu tuvāk darījumam")
-
-    if deadline:
-        ds = deadline_score(deadline)
-        score += ds
-        if deadline in ["šodien", "sodien", "today"]:
-            reasons.append("termiņš ir šodien")
-        elif deadline in ["rīt", "rit", "tomorrow"]:
-            reasons.append("termiņš ir rīt")
-        else:
-            reasons.append(f"ir termiņš: {deadline}")
-
-    if is_reminder_task(text):
+    if _contains(lower, ["piedāvāj", "tāme", "tame", "rēķin", "rekin", "invoice", "offer"]):
         score += 60
-        reasons.append("tas ir klienta atgādinājuma darbs")
+        reasons.append("tas ir tuvu naudai / darījumam")
 
-    client = task_client(task)
+    if _contains(lower, ["jāpajautā", "japajauta", "follow-up", "followup", "atbild", "jāzvana", "jazvana"]):
+        score += 40
+        reasons.append("tas uztur klientu kustībā")
+
+    if _contains(lower, ["šodien", "sodien", "tagad"]):
+        score += 80
+        reasons.append("tam ir tūlītējs termiņš")
+    elif _contains(lower, ["rīt", "rit"]):
+        score += 50
+        reasons.append("tam ir tuvākais termiņš")
+    elif _contains(lower, ["pirmdien", "otrdien", "trešdien", "tresdien", "ceturtdien", "piektdien", "sestdien", "svētdien", "svetdien"]):
+        score += 35
+        reasons.append("tam ir konkrēts termiņš")
+
+    client = _extract_client_name(title)
     if client:
-        score += 20
-        reasons.append(f"tas ir saistīts ar klientu {client}")
+        score += 15
+        reasons.append(f"tas ir saistīts ar klientu: {client}")
 
-    if not reasons:
-        reasons.append("tas ir aktīvs darbs")
+    status = str((task or {}).get("status") or "open").lower()
+    if status in ["open", "active", "todo"]:
+        score += 5
 
-    return score, reasons
+    return score, reasons, client
 
 
-def ranked_tasks(tasks, limit=3):
-    scored = []
-    seen = set()
-
+def _pick_top_tasks(tasks, limit=3):
+    ranked = []
     for task in tasks or []:
-        text = task_text(task)
-        if not text:
+        title = _task_title(task)
+        if not title:
             continue
-
-        key = text.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-
-        score, reasons = priority_score(task)
-        scored.append({
+        score, reasons, client = _score_task(task)
+        ranked.append({
             "task": task,
-            "text": text,
+            "title": title,
             "score": score,
             "reasons": reasons,
-            "client": task_client(task),
-            "deadline": task_deadline_label(task),
+            "client": client,
         })
 
-    scored.sort(key=lambda x: x["score"], reverse=True)
-    return scored[:int(limit or 3)]
+    ranked.sort(key=lambda x: x["score"], reverse=True)
+    return ranked[:limit]
 
 
 def build_initiative_answer(tasks):
-    top = ranked_tasks(tasks, limit=3)
+    ranked = _pick_top_tasks(tasks, limit=3)
 
-    if not top:
+    if not ranked:
         return (
-            "🔥 Šobrīd neredzu aktīvus darbus, no kuriem izvēlēties prioritāti.\n\n"
-            "Iedod vienu īstu darbu, piemēram:\n"
-            "rīt jānosūta piedāvājums Andrim\n\n"
-            f"Versija: {INITIATIVE_ENGINE_VERSION}"
+            "🔥 Šobrīd neredzu aktīvu darbu, ko celt kā prioritāti.\n\n"
+            "Ja iedosi man uzdevumus vai klientu darbus, es pateikšu, ar ko sākt."
         )
+
+    top = ranked[0]
+    second = ranked[1] if len(ranked) > 1 else None
 
     lines = []
     lines.append("🔥 Šobrīd svarīgākais")
     lines.append("")
+    lines.append(f"1. {top['title']}")
 
-    for idx, item in enumerate(top, start=1):
-        lines.append(f"{idx}. {item['text']}")
-        if item["reasons"]:
-            lines.append(f"Kāpēc: {item['reasons'][0]}.")
+    if top["reasons"]:
+        lines.append("Kāpēc:")
+        for reason in top["reasons"][:2]:
+            lines.append(f"- {reason}")
+
+    if second:
         lines.append("")
+        lines.append("Pēc tam:")
+        lines.append(f"2. {second['title']}")
 
-    first = top[0]["text"]
-
+    lines.append("")
     lines.append("Mans ieteikums:")
-    if is_offer_task(first):
-        lines.append("Sāc ar piedāvājumu, jo tas ir vistuvāk naudas un klienta virzībai.")
-    elif is_reminder_task(first):
-        lines.append("Sāc ar atgādinājumu klientam, lai darbs neiestrēgst.")
+    if _contains(top["title"].lower(), ["piedāvāj", "offer", "tāme", "tame"]):
+        lines.append("Sāc ar piedāvājumu/tāmi — tas šobrīd ir vistuvāk rezultātam un naudai.")
+    elif _contains(top["title"].lower(), ["jāpajautā", "japajauta", "follow-up", "followup", "atbild"]):
+        lines.append("Sāc ar follow-up — tas notur klientu kustībā un neļauj sarunai atdzist.")
     else:
-        lines.append("Sāc ar pirmo punktu — tas šobrīd izskatās svarīgākais.")
+        lines.append("Sāc ar pirmo punktu, jo tas šobrīd saņem augstāko prioritāti pēc termiņa un klienta svara.")
 
     lines.append("")
     lines.append("Pēc tam vari rakstīt:")
     lines.append("- klienti")
     lines.append("- mani uzdevumi")
-    lines.append("- kam jānosūta piedāvājums")
+    lines.append("- mana diena")
     lines.append("")
     lines.append(f"Versija: {INITIATIVE_ENGINE_VERSION}")
-
     return "\n".join(lines)
+
+
+def initiative_status_answer():
+    return (
+        "🔥 Core 2.6 — Initiative Hardening V1.0 ir aktīvs.\n\n"
+        "Ko tas dara:\n"
+        "• izvēlas TOP prioritāti no reālajiem taskiem;\n"
+        "• ņem vērā termiņu, piedāvājumu un follow-up svaru;\n"
+        "• dod vienu skaidru nākamo soli, nevis tikai vispārīgu sarakstu.\n\n"
+        "Testi:\n"
+        "• ko man tagad darīt\n"
+        "• kas svarīgākais\n"
+        "• ar ko sākt\n\n"
+        f"Versija: {INITIATIVE_ENGINE_VERSION}"
+    )
+
+
+def is_initiative_command(text):
+    lower = (text or "").strip().lower()
+    return lower in {
+        "ko man tagad darīt",
+        "kas svarīgākais",
+        "kas svarigakais",
+        "ar ko sākt",
+        "ar ko sakt",
+        "ko tu iesaki",
+        "initiative",
+        "initiative status",
+        "initiative engine",
+    }
