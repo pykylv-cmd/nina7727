@@ -12995,7 +12995,7 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Voice Intake V1.0: Telegram voice/audio -> teksts -> esošais NinaOS reply router."""
+    """Voice Intake V1.1: Telegram voice/audio -> teksts -> esošais NinaOS reply router."""
     try:
         if not update.message:
             return
@@ -13025,6 +13025,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         buffer = BytesIO()
         await tg_file.download_to_memory(out=buffer)
         audio_bytes = buffer.getvalue()
+
+        print(f"Voice Intake handler: received file={filename} bytes={len(audio_bytes)}")
 
         transcript = transcribe_audio_with_openai(
             client,
