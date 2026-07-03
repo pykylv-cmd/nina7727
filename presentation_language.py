@@ -10,7 +10,7 @@ Mērķis:
 Šis modulis nemaina datubāzi.
 """
 
-PRESENTATION_LANGUAGE_VERSION = "Presentation / Language Layer V1.2"
+PRESENTATION_LANGUAGE_VERSION = "Presentation / Language Layer V1.3"
 
 DEFAULT_LOCALE = "lv"
 FALLBACK_LOCALE = "en"
@@ -109,12 +109,13 @@ def humanize_public_text(text, locale=DEFAULT_LOCALE):
             out = out.replace(old, new)
 
     out = polish_public_text_v12(out, locale=loc)
+    out = polish_help_text_v13(out, locale=loc)
     return out
 
 
 def presentation_status_answer():
     return (
-        "🌍 Presentation / Language Layer V1.2 ir aktīvs. ✅\n\n"
+        "🌍 Presentation / Language Layer V1.3 ir aktīvs. ✅\n\n"
         "Uzdevums:\n"
         "- iekšējos tehniskos terminus atstāt kodā;\n"
         "- lietotājam rādīt skaidru, cilvēcīgu valodu;\n"
@@ -146,6 +147,23 @@ def polish_public_text_v12(text, locale=DEFAULT_LOCALE):
             ("uzraksti atgādinājums darbu", "uzraksti atgādinājuma uzdevumu"),
             ("Ja klients jāatgādina:", "Ja klientam jāatgādina:"),
             ("Klienti / klientiem", "Klienti"),
+        ]
+        for old, new in fixes:
+            out = out.replace(old, new)
+    return out
+
+
+
+
+
+def polish_help_text_v13(text, locale=DEFAULT_LOCALE):
+    out = text or ""
+    if normalize_locale(locale) == "lv":
+        fixes = [
+            ("👥 Klienti / CRM", "👥 Klienti"),
+            ("👥 Klienti / klientu darbi", "👥 Klienti"),
+            ("👥 Klienti / klientu pārskats", "👥 Klienti"),
+            ("- “klienta darbi”", "- “kas notiek ar Andri”"),
         ]
         for old, new in fixes:
             out = out.replace(old, new)
