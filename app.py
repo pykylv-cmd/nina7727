@@ -168,6 +168,7 @@ except Exception as e:
 try:
     from task_cleanup import (
         find_cleanup_candidates,
+        is_active_real_task,
         build_cleanup_preview,
         build_cleanup_done_answer,
         TASK_CLEANUP_VERSION,
@@ -178,6 +179,9 @@ except Exception as e:
 
     def find_cleanup_candidates(tasks):
         return []
+
+    def is_active_real_task(task):
+        return True
 
     def build_cleanup_preview(tasks):
         return "Task Cleanup nav pieslēgts."
@@ -14072,6 +14076,80 @@ def nina_task_cleanup_confirm(user_id):
         conn.close()
     except Exception as e:
         print("Task cleanup DB kļūda:", repr(e))
+
+    return build_cleanup_done_answer(deleted)
+
+
+# =========================
+# NinaOS Task Cleanup V1.1 + Task List Filter Fix
+# =========================
+
+def nina_clean_real_tasks(user_id, limit=200):
+    tasks = nina_latest_tasks(user_id, limit=limit) or []
+    result = []
+    seen = set()
+
+    for task in tasks:
+        title = ((task or {}).get("title") or (task or {}).get("raw_text") or "").strip()
+        key = title.lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+
+        try:
+            if not is_active_real_task(task):
+                continue
+        except Exception:
+            status = ((task or {}).get("status") or "open").strip().lower()
+            if status in ["completed", "deleted", "archived", "cancelled", "canceled"]:
+                continue
+            if title.lower() in ["follow-up", "followup", "follow up", "[deleted task cleanup]"]:
+                continue
+
+        result.append(task)
+
+    return result
+
+
+def nina_task_list_answer(user_id):
+    return task_summary(nina_clean_real_tasks(user_id, limit=200))
+
+
+def nina_task_cleanup_preview(user_id):
+    tasks = nina_latest_tasks(user_id, limit=200) or []
+    return build_cleanup_preview(tasks)
+
+
+def nina_task_cleanup_confirm(user_id):
+    tasks = nina_latest_tasks(user_id, limit=200) or []
+    junk = find_cleanup_candidates(tasks)
+
+    if not junk:
+        return build_cleanup_done_answer(0)
+
+    deleted = 0
+    seen = set()
+
+    for task in junk:
+        title = ((task or {}).get("title") or (task or {}).get("raw_text") or "").strip()
+        if not title:
+            continue
+
+        key = title.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        deleted_task = dict(task)
+        deleted_task["status"] = "deleted"
+        deleted_task["status_label"] = "dzēsts"
+        deleted_task["cleanup"] = "task_cleanup_v1_1"
+
+        try:
+            nina_save_task_to_memory(user_id, deleted_task)
+            deleted += 1
+        except Exception as e:
+            print("Task Cleanup V1.1 delete marker kļūda:", repr(e))
 
     return build_cleanup_done_answer(deleted)
 
