@@ -1,24 +1,29 @@
 """
 reply_builder.py
-NinaOS Core 2.5.1 — Reply Builder V1.0
+NinaOS Core 2.5.2 — Reply Builder Polish V1.1
 
 Mērķis:
 - centrāli sakārtot gala atbildi pirms sūtīšanas lietotājam;
-- neļaut vecajiem routeriem pārrakstīt labu moduļa atbildi;
+- noņemt visas vecās moduļu/APP versiju rindas;
+- atstāt tikai vienu gala versijas rindu;
 - uzturēt vienotu NinaOS publisko toni Telegram kanālā.
 """
 
 import re
 
-REPLY_BUILDER_VERSION = "Reply Builder V1.0"
-APP_VERSION = "V115.3 + Core 2.5.1"
+REPLY_BUILDER_VERSION = "Reply Builder Polish V1.1"
+APP_VERSION = "V115.4 + Core 2.5.2"
 
 
-_VERSION_PATTERNS = [
-    r"\n{0,2}Versija:\s*V[0-9.]+\s*$",
-    r"\n{0,2}Versija:\s*V[0-9.]+\s*\+\s*Core\s*2\.5\.1\s*$",
-    r"\n{0,2}Versija:\s*V[0-9.]+\s*\+\s*.*$",
-]
+def rb_remove_version_lines(text):
+    """Noņem jebkuru rindu, kas sākas ar 'Versija:'."""
+    lines = str(text or "").splitlines()
+    cleaned = []
+    for line in lines:
+        if re.match(r"^\s*Versija\s*:", line or "", flags=re.IGNORECASE):
+            continue
+        cleaned.append(line)
+    return "\n".join(cleaned).strip()
 
 
 def rb_clean_text(value):
@@ -27,9 +32,7 @@ def rb_clean_text(value):
     if not text:
         return ""
 
-    for pattern in _VERSION_PATTERNS:
-        text = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
-
+    text = rb_remove_version_lines(text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
 
@@ -107,11 +110,9 @@ def reply_builder_build(reply_object):
     if channel == "telegram" and len(text) > 3800:
         text = text[:3700].rstrip() + "\n\n…"
 
-    # Viena versijas rinda. Ne dubultojam vecās V114/V115 rindas.
-    if "Versija:" not in text:
-        text = text.rstrip() + f"\n\nVersija: {APP_VERSION}"
-    else:
-        text = rb_clean_text(text).rstrip() + f"\n\nVersija: {APP_VERSION}"
+    # Core 2.5.2: vienmēr tikai viena gala versijas rinda.
+    text = rb_remove_version_lines(text).rstrip()
+    text = text + f"\n\nVersija: {APP_VERSION}"
 
     return {
         "text": text,
@@ -139,12 +140,12 @@ def reply_builder_text(text, user_text="", source="legacy_router", channel="tele
 
 def reply_builder_status_answer():
     return reply_builder_text(
-        "🧩 Core 2.5.1 — Reply Builder V1.0 ir aktīvs. ✅\n\n"
+        "🧩 Core 2.5.2 — Reply Builder Polish V1.1 ir aktīvs. ✅\n\n"
         "Gala atbildes pirms sūtīšanas iet caur vienu centrālo komunikācijas slāni.\n\n"
-        "Ko tas dod:\n"
-        "• moduļi drīkst sagatavot saturu;\n"
-        "• Reply Builder sakārto gala tekstu;\n"
-        "• vecās versiju rindas netiek dubultotas;\n"
+        "Ko šis polish labo:\n"
+        "• noņem dubultās Versija rindas;\n"
+        "• saglabā moduļa saturu;\n"
+        "• pieliek tikai vienu gala versiju;\n"
         "• laba moduļa atbilde netiek pārrakstīta ar fallback.\n\n"
         "Tests:\n"
         "• klienti\n"
