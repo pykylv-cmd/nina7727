@@ -321,6 +321,28 @@ except Exception as e:
         return False
 
 
+# NinaOS Daily Brief / Work Inbox Import
+try:
+    from daily_brief import (
+        build_daily_brief_answer,
+        daily_brief_status_answer,
+        is_daily_brief_command,
+        DAILY_BRIEF_VERSION,
+    )
+except Exception as e:
+    print("daily_brief.py imports nav pieejams:", e)
+    DAILY_BRIEF_VERSION = "Daily Brief nav pieslēgts"
+
+    def build_daily_brief_answer(tasks):
+        return "Daily Brief nav pieslēgts."
+
+    def daily_brief_status_answer():
+        return "Daily Brief nav pieslēgts."
+
+    def is_daily_brief_command(text):
+        return False
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -14417,6 +14439,15 @@ def nina_initiative_answer(user_id):
     tasks = nina_clean_real_tasks(user_id, limit=200)
     return build_initiative_answer(tasks)
 
+
+# =========================
+# NinaOS Daily Brief / Work Inbox Bridge — V1.0
+# =========================
+
+def nina_daily_brief_answer(user_id):
+    tasks = nina_clean_real_tasks(user_id, limit=200)
+    return build_daily_brief_answer(tasks)
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
     try:
@@ -14430,6 +14461,14 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if lower in ["initiative status", "initiative engine", "initiative"]:
             await safe_reply_text(update, nina_public_answer(initiative_status_answer()))
+            return
+
+        if lower in ["daily brief status", "work inbox status", "dienas status", "darba inbox status"]:
+            await safe_reply_text(update, nina_public_answer(daily_brief_status_answer()))
+            return
+
+        if is_daily_brief_command(user_text):
+            await safe_reply_text(update, nina_public_answer(nina_daily_brief_answer(user_id)))
             return
 
         if is_initiative_command(user_text):
