@@ -1,19 +1,16 @@
 """
 task_cleanup.py
-NinaOS Task Cleanup — V1.0
+NinaOS Task Cleanup — V1.1
 
 Mērķis:
-iztīrīt acīmredzami nederīgus vai tehniskus uzdevumus no task saraksta,
-piemēram:
-- follow-up
-- client context
-- memory router
-- persistence health
+iztīrīt tehniskos/testa uzdevumus no darba galda.
 
-Tas nav domāts normāliem darbiem, bet tikai testu / komandu atkritumiem.
+V1.1:
+- junk uzdevumus marķē kā status='deleted'
+- Task List Filter Fix filtrē ārā deleted/archived un tehniskos title
 """
 
-TASK_CLEANUP_VERSION = "Task Cleanup V1.0"
+TASK_CLEANUP_VERSION = "Task Cleanup V1.1"
 
 
 def _clean(text):
@@ -24,26 +21,40 @@ def _lower(text):
     return _clean(text).lower()
 
 
+JUNK_TITLES = {
+    "follow-up",
+    "follow up",
+    "followup",
+    "client context",
+    "client context status",
+    "memory router",
+    "memory router status",
+    "persistence health",
+    "db health",
+    "database health",
+    "[deleted task cleanup]",
+}
+
+
 def is_junk_task_title(title):
     lower = _lower(title)
-
     if not lower:
         return False
+    return lower in JUNK_TITLES
 
-    junk_titles = {
-        "follow-up",
-        "follow up",
-        "followup",
-        "client context",
-        "client context status",
-        "memory router",
-        "memory router status",
-        "persistence health",
-        "db health",
-        "database health",
-    }
 
-    return lower in junk_titles
+def is_active_real_task(task):
+    task = task or {}
+    status = _lower(task.get("status", "open"))
+    title = _clean(task.get("title", ""))
+
+    if status in ["completed", "deleted", "archived", "cancelled", "canceled"]:
+        return False
+
+    if is_junk_task_title(title):
+        return False
+
+    return True
 
 
 def find_cleanup_candidates(tasks):
@@ -51,7 +62,9 @@ def find_cleanup_candidates(tasks):
 
     for task in tasks or []:
         title = _clean((task or {}).get("title", ""))
-        if is_junk_task_title(title):
+        status = _lower((task or {}).get("status", "open"))
+
+        if is_junk_task_title(title) and status not in ["deleted", "archived"]:
             result.append(task)
 
     return result
@@ -68,7 +81,7 @@ def build_cleanup_preview(tasks):
         )
 
     lines = [
-        "🧹 Atradu uzdevumus, kurus vajag izmest no darba galda:",
+        "🧹 Atradu uzdevumus, kurus vajag paslēpt no darba galda:",
         ""
     ]
 
@@ -86,6 +99,6 @@ def build_cleanup_preview(tasks):
 def build_cleanup_done_answer(deleted_count):
     return (
         "🧹 Darba galds iztīrīts. ✅\n\n"
-        f"Izdzēsti tehniskie/testa uzdevumi: {int(deleted_count or 0)}\n\n"
+        f"Paslēpti tehniskie/testa uzdevumi: {int(deleted_count or 0)}\n\n"
         f"Versija: {TASK_CLEANUP_VERSION}"
     )
