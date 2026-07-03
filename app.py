@@ -349,6 +349,7 @@ try:
         transcribe_audio_with_openai,
         voice_status_answer,
         build_voice_error_answer,
+        cleanup_voice_transcript,
         VOICE_ENGINE_VERSION,
     )
 except Exception as e:
@@ -363,6 +364,9 @@ except Exception as e:
 
     def build_voice_error_answer(error_text=""):
         return "Balss ziņu saņēmu, bet Voice Intake vēl nav pieslēgts."
+
+    def cleanup_voice_transcript(transcript):
+        return str(transcript or "").strip()
 
 
 # V114.0 Safe User Profile Engine Import
@@ -13026,7 +13030,7 @@ class VoiceTextUpdateProxy:
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Voice Intake V1.5: Telegram voice/audio -> teksts -> existing reply router via proxy update."""
+    """Voice Intake V1.6: Telegram voice/audio -> transkripts -> cleanup -> existing reply router via proxy update."""
     try:
         if not update.message:
             return
@@ -13057,7 +13061,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await tg_file.download_to_memory(out=buffer)
         audio_bytes = buffer.getvalue()
 
-        print(f"Voice Intake V1.5 handler: received file={filename} bytes={len(audio_bytes)}")
+        print(f"Voice Intake V1.6 handler: received file={filename} bytes={len(audio_bytes)}")
 
         transcript = transcribe_audio_with_openai(
             client,
@@ -13069,16 +13073,20 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, build_voice_error_answer(""))
             return
 
+        cleaned_transcript = cleanup_voice_transcript(transcript)
+        if not cleaned_transcript:
+            await safe_reply_text(update, build_voice_error_answer("Voice cleanup atgrieza tukšu tekstu."))
+            return
+
+        print(f"Voice Intake V1.6 cleaned transcript: {cleaned_transcript}")
+
         try:
-            v40_log_usage(user_id, "voice", transcript)
-            save_conversation_state(user_id, "[VOICE] " + transcript, "", "voice_transcript", "neutral", "voice")
+            v40_log_usage(user_id, "voice", cleaned_transcript)
+            save_conversation_state(user_id, "[VOICE] " + cleaned_transcript, "", "voice_transcript", "neutral", "voice")
         except Exception as e:
             print("Voice conversation save kļūda:", e)
 
-        # V1.5 FIX:
-        # Telegram Message.text ir read-only, tāpēc to NEPĀRRAKSTĀM.
-        # Izveidojam proxy update ar tekstu un palaižam esošo reply() ceļu.
-        voice_update = VoiceTextUpdateProxy(update, transcript)
+        voice_update = VoiceTextUpdateProxy(update, cleaned_transcript)
         await reply(voice_update, context)
 
     except Exception as e:
