@@ -343,6 +343,28 @@ except Exception as e:
         return False
 
 
+# NinaOS Voice Intake Import
+try:
+    from voice_engine import (
+        transcribe_audio_with_openai,
+        voice_status_answer,
+        build_voice_error_answer,
+        VOICE_ENGINE_VERSION,
+    )
+except Exception as e:
+    print("voice_engine.py imports nav pieejams:", e)
+    VOICE_ENGINE_VERSION = "Voice Intake nav pieslēgts"
+
+    def transcribe_audio_with_openai(openai_client, audio_bytes, filename="voice.ogg"):
+        return ""
+
+    def voice_status_answer():
+        return "Voice Intake nav pieslēgts."
+
+    def build_voice_error_answer(error_text=""):
+        return "Balss ziņu saņēmu, bet Voice Intake vēl nav pieslēgts."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -12123,82 +12145,158 @@ def nina_progress_answer(user_id):
 
 
 # =========================
-# Core Evolution 2.5.1 — Reply Builder
+# Core Evolution 2.5.2 — Reply Builder Polish
 # =========================
 # Reply Builder ir centrālais NinaOS komunikācijas slānis.
-# No šī punkta gala teksts pirms sūtīšanas lietotājam iziet caur vienu vietu.
+# Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
-try:
-    from reply_builder import (
-        REPLY_BUILDER_VERSION,
-        APP_VERSION,
-        rb_clean_text,
-        rb_detect_intent,
-        rb_detect_tone,
-        build_reply_object,
-        reply_builder_build,
-        reply_builder_text,
-        reply_builder_status_answer,
+REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1"
+APP_VERSION = "V115.4 + Core 2.5.2"
+
+
+def rb_remove_version_lines(text):
+    """Noņem jebkuru rindu, kas sākas ar 'Versija:'."""
+    lines = str(text or "").splitlines()
+    cleaned = []
+    for line in lines:
+        if re.match(r"^\s*Versija\s*:", line or "", flags=re.IGNORECASE):
+            continue
+        cleaned.append(line)
+    return "\n".join(cleaned).strip()
+
+
+def rb_clean_text(value):
+    """Notīra liekas versiju rindas, tukšumus un tehnisko troksni."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+
+    text = rb_remove_version_lines(text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text
+
+
+def rb_detect_intent(text):
+    lower = (text or "").strip().lower()
+    if not lower:
+        return "empty"
+
+    if any(x in lower for x in ["premium", "abonements", "pirkt", "cena", "tarifs"]):
+        return "business"
+
+    if any(x in lower for x in [
+        "klienti", "andri", "andris", "piedāvājums", "piedavajums",
+        "follow-up", "followup", "jāpajautā", "japajauta"
+    ]):
+        return "client_work"
+
+    if any(x in lower for x in ["mana diena", "darba inbox", "ko man šodien", "ko man sodien"]):
+        return "daily_brief"
+
+    if any(x in lower for x in ["ko man tagad", "kas svarīgākais", "ko iesaki"]):
+        return "initiative"
+
+    if any(x in lower for x in ["core", "ninaos", "initiative", "think engine", "learning", "quality", "reply builder"]):
+        return "ninaos_core"
+
+    if any(x in lower for x in ["čau", "cau", "sveika", "sveiks", "hello", "hi", "kā tev iet", "ka tev iet"]):
+        return "conversation"
+
+    return "general"
+
+
+def rb_detect_tone(text):
+    lower = (text or "").strip().lower()
+
+    if any(x in lower for x in ["smagi", "grūti", "gruti", "slikti", "noguris", "nogurusi", "bēdīgi", "bedigi"]):
+        return "supportive"
+
+    if any(x in lower for x in ["premium", "cena", "tarifs", "pirkt", "abonements"]):
+        return "commercial_warm"
+
+    if any(x in lower for x in ["core", "ninaos", "architecture", "arhitekt", "engine"]):
+        return "architectural"
+
+    return "warm"
+
+
+def build_reply_object(main_message="", user_text="", source="legacy_router", intent="", tone="", channel="telegram", metadata=None):
+    return {
+        "intent": intent or rb_detect_intent(user_text or main_message),
+        "tone": tone or rb_detect_tone(user_text or main_message),
+        "priority": "normal",
+        "identity": "Nina — AI darbiniece NinaOS platformā",
+        "main_message": main_message or "",
+        "channel": channel or "telegram",
+        "metadata": metadata or {"source": source},
+    }
+
+
+def reply_builder_build(reply_object):
+    if isinstance(reply_object, str):
+        reply_object = build_reply_object(main_message=reply_object)
+
+    if not isinstance(reply_object, dict):
+        reply_object = build_reply_object(main_message=str(reply_object or ""))
+
+    text = rb_clean_text(reply_object.get("main_message", ""))
+
+    if not text:
+        text = "Esmu te. 😊\n\nPasaki, ko vajag sakārtot, un es palīdzēšu soli pa solim."
+
+    channel = (reply_object.get("channel") or "telegram").lower()
+
+    if channel == "telegram" and len(text) > 3800:
+        text = text[:3700].rstrip() + "\n\n…"
+
+    # Core 2.5.2: vienmēr tikai viena gala versijas rinda.
+    text = rb_remove_version_lines(text).rstrip()
+    text = text + f"\n\nVersija: {APP_VERSION}"
+
+    return {
+        "text": text,
+        "buttons": [],
+        "attachments": [],
+        "actions": [],
+        "metadata": {
+            "builder": REPLY_BUILDER_VERSION,
+            "intent": reply_object.get("intent", ""),
+            "tone": reply_object.get("tone", ""),
+            **(reply_object.get("metadata") or {}),
+        },
+    }
+
+
+def reply_builder_text(text, user_text="", source="legacy_router", channel="telegram"):
+    obj = build_reply_object(
+        main_message=text,
+        user_text=user_text,
+        source=source,
+        channel=channel,
     )
-except Exception as e:
-    print("reply_builder.py imports nav pieejams:", e)
+    return reply_builder_build(obj).get("text", "")
 
-    REPLY_BUILDER_VERSION = "Reply Builder fallback"
-    APP_VERSION = "V115.3 + Core 2.5.1"
 
-    def rb_clean_text(value):
-        text = str(value or "").strip()
-        text = re.sub(r"\n{0,2}Versija:\s*.*$", "", text, flags=re.IGNORECASE).strip()
-        text = re.sub(r"\n{3,}", "\n\n", text).strip()
-        return text
-
-    def rb_detect_intent(text):
-        lower = (text or "").strip().lower()
-        if not lower:
-            return "empty"
-        if any(x in lower for x in ["klienti", "andri", "follow-up", "piedāvājums", "piedavajums"]):
-            return "client_work"
-        if any(x in lower for x in ["mana diena", "darba inbox"]):
-            return "daily_brief"
-        if any(x in lower for x in ["ko man tagad", "kas svarīgākais", "ko iesaki"]):
-            return "initiative"
-        return "general"
-
-    def rb_detect_tone(text):
-        return "warm"
-
-    def build_reply_object(main_message="", user_text="", source="legacy_router", intent="", tone="", channel="telegram", metadata=None):
-        return {
-            "intent": intent or rb_detect_intent(user_text or main_message),
-            "tone": tone or rb_detect_tone(user_text or main_message),
-            "main_message": main_message or "",
-            "channel": channel or "telegram",
-            "metadata": metadata or {"source": source},
-        }
-
-    def reply_builder_build(reply_object):
-        if isinstance(reply_object, str):
-            reply_object = build_reply_object(main_message=reply_object)
-        text = rb_clean_text((reply_object or {}).get("main_message", ""))
-        if not text:
-            text = "Esmu te. 😊\n\nPasaki, ko vajag sakārtot, un es palīdzēšu soli pa solim."
-        if (reply_object or {}).get("channel", "telegram") == "telegram" and len(text) > 3800:
-            text = text[:3700].rstrip() + "\n\n…"
-        text = text.rstrip() + f"\n\nVersija: {APP_VERSION}"
-        return {"text": text, "metadata": {"builder": REPLY_BUILDER_VERSION}}
-
-    def reply_builder_text(text, user_text="", source="legacy_router", channel="telegram"):
-        return reply_builder_build(build_reply_object(text, user_text, source, channel=channel)).get("text", "")
-
-    def reply_builder_status_answer():
-        return reply_builder_text(
-            "🧩 Core 2.5.1 — Reply Builder fallback ir aktīvs. ✅",
-            source="reply_builder_status",
-        )
+def reply_builder_status_answer():
+    return reply_builder_text(
+        "🧩 Core 2.5.2 — Reply Builder Polish V1.1 ir aktīvs. ✅\n\n"
+        "Gala atbildes pirms sūtīšanas iet caur vienu centrālo komunikācijas slāni.\n\n"
+        "Ko šis polish labo:\n"
+        "• noņem dubultās Versija rindas;\n"
+        "• saglabā moduļa saturu;\n"
+        "• pieliek tikai vienu gala versiju;\n"
+        "• laba moduļa atbilde netiek pārrakstīta ar fallback.\n\n"
+        "Tests:\n"
+        "• klienti\n"
+        "• kas notiek ar Andri\n"
+        "• ko man tagad darīt\n"
+        "• mana diena",
+        source="reply_builder_status",
+    )
 
 
 async def safe_reply_text(update, text, disable_web_page_preview=True):
-    """Core 2.5.1: vienīgā drošā izeja gala tekstam uz Telegram."""
+    """Core 2.5.2: vienīgā drošā izeja gala tekstam uz Telegram."""
     try:
         if update and update.message:
             try:
@@ -12221,7 +12319,6 @@ async def safe_reply_text(update, text, disable_web_page_preview=True):
     except Exception as e:
         print("safe_reply_text kļūda:", e)
     return False
-
 
 def public_test_fallback_answer():
     return nina_public_offer_answer()
@@ -12895,6 +12992,74 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
+
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Voice Intake V1.0: Telegram voice/audio -> teksts -> esošais NinaOS reply router."""
+    try:
+        if not update.message:
+            return
+
+        user_id = str(update.effective_user.id) if update.effective_user else "unknown"
+
+        voice = getattr(update.message, "voice", None)
+        audio = getattr(update.message, "audio", None)
+        document = getattr(update.message, "document", None)
+
+        tg_audio = voice or audio
+        filename = "voice.ogg"
+
+        if audio and getattr(audio, "file_name", None):
+            filename = audio.file_name
+        elif voice:
+            filename = "voice.ogg"
+        elif document and getattr(document, "mime_type", "").startswith("audio/"):
+            tg_audio = document
+            filename = getattr(document, "file_name", None) or "audio.ogg"
+
+        if not tg_audio:
+            return
+
+        tg_file = await context.bot.get_file(tg_audio.file_id)
+
+        buffer = BytesIO()
+        await tg_file.download_to_memory(out=buffer)
+        audio_bytes = buffer.getvalue()
+
+        transcript = transcribe_audio_with_openai(
+            client,
+            audio_bytes,
+            filename=filename,
+        )
+
+        if not transcript:
+            await safe_reply_text(update, build_voice_error_answer(""))
+            return
+
+        try:
+            v40_log_usage(user_id, "voice", transcript)
+            save_conversation_state(user_id, "[VOICE] " + transcript, "", "voice_transcript", "neutral", "voice")
+        except Exception as e:
+            print("Voice conversation save kļūda:", e)
+
+        # Svarīgi: pēc transkripcijas neizdomājam jaunu ceļu.
+        # Iedodam tekstu esošajam reply routerim kā parastu ziņu.
+        original_text = getattr(update.message, "text", None)
+        try:
+            update.message.text = transcript
+            await reply(update, context)
+        finally:
+            try:
+                update.message.text = original_text
+            except Exception:
+                pass
+
+    except Exception as e:
+        print("handle_voice kļūda:", repr(e))
+        try:
+            await safe_reply_text(update, build_voice_error_answer(str(e)))
+        except Exception:
+            pass
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """V114.0: Telegram foto apstrāde ar Vision Engine."""
@@ -14407,6 +14572,11 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
 
+
+        if lower in ["voice status", "voice intake status", "audio status", "balss statuss", "balss"]:
+            await safe_reply_text(update, voice_status_answer())
+            return
+
         if lower in ["presentation status", "language status", "valodu slānis", "valodu slanis", "presentation layer"]:
             await safe_reply_text(update, presentation_status_answer())
             return
@@ -14554,7 +14724,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 
-        if lower in ["reply builder", "core 2.5.1", "reply builder status", "core 251", "core 2.5.1 status"]:
+        if lower in ["reply builder", "core 2.5.1", "core 2.5.2", "reply builder status", "core 251", "core 252", "core 2.5.1 status", "core 2.5.2 status"]:
             await safe_reply_text(update, reply_builder_status_answer())
             return
 
@@ -15830,6 +16000,7 @@ telegram_app = (
 telegram_app.add_handler(CommandHandler("start", start_command))
 telegram_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 telegram_app.add_handler(MessageHandler(filters.LOCATION, handle_location))
+telegram_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.Document.AUDIO, handle_voice))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 def run_flask_server():
