@@ -96,7 +96,7 @@ def humanize_public_text(text, locale=DEFAULT_LOCALE):
             ("Pipeline:", "Klienta statuss:"),
             ("pipeline", "klientu pārskats"),
             ("Pipeline", "Klientu pārskats"),
-            ("CRM", "klientu darbi"),
+            ("CRM", "klientiem"),
             ("follow-up", "atgādinājums"),
             ("Follow-up", "Atgādinājums"),
             ("kam jātaisa atgādinājums", "kam jāatgādina"),
@@ -108,6 +108,7 @@ def humanize_public_text(text, locale=DEFAULT_LOCALE):
         for old, new in replacements:
             out = out.replace(old, new)
 
+    out = polish_followup_hint_text(out, locale=loc)
     return out
 
 
@@ -126,3 +127,16 @@ def presentation_status_answer():
         "Tehniskie aliasi joprojām strādā, bet Nina tos vairs nereklamē.\n\n"
         f"Versija: {PRESENTATION_LANGUAGE_VERSION}"
     )
+
+
+
+def polish_followup_hint_text(text, locale=DEFAULT_LOCALE):
+    out = text or ""
+    if normalize_locale(locale) == "lv":
+        out = out.replace("Ja klients jāatgādina:", "Ja klientam jāatgādina:")
+        out = out.replace("uzraksti atgādinājums darbu", "uzraksti atgādinājuma uzdevumu")
+        out = out.replace("Ātrie klientu darbi skati:", "Ātrie klientu skati:")
+        out = out.replace("sales klientu pārskats", "klientu pārskats")
+        out = out.replace("Sales klientu pārskats", "Klientu pārskats")
+    return out
+
