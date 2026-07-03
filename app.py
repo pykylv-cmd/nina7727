@@ -218,7 +218,6 @@ try:
     from sales_pipeline import (
         format_pipeline_overview,
         format_stuck_clients,
-        sales_pipeline_status_answer as sales_pipeline_status_text,
         SALES_PIPELINE_VERSION,
     )
 except Exception as e:
@@ -229,9 +228,6 @@ except Exception as e:
         return "Sales Pipeline nav pieslēgts."
 
     def format_stuck_clients(client_task_map):
-        return "Sales Pipeline nav pieslēgts."
-
-    def sales_pipeline_status_text():
         return "Sales Pipeline nav pieslēgts."
 
 
@@ -14258,21 +14254,19 @@ def nina_sales_pipeline_risk_answer(user_id):
 
 def nina_sales_pipeline_status_answer():
     """
-    V1.1 patch:
-    statusa tekstu ņem no sales_pipeline.py, nevis cieti tur V1.0 app.py failā.
+    Sales Pipeline status hotfix:
+    app.py neimportē sales_pipeline_status_answer.
+    Tas izmanto tikai SALES_PIPELINE_VERSION, kas droši nāk no sales_pipeline.py.
     """
-    try:
-        return sales_pipeline_status_text()
-    except Exception:
-        return (
-            "📊 Sales Pipeline / Client CRM ir pieslēgts. ✅\n\n"
-            "Komandas:\n"
-            "pipeline\n"
-            "mani klienti\n"
-            "kas iestrēdzis\n"
-            "kas notiek ar Andri\n\n"
-            f"Versija: {SALES_PIPELINE_VERSION}"
-        )
+    return (
+        "📊 Sales Pipeline / Client CRM ir aktīvs. ✅\n\n"
+        "Komandas:\n"
+        "pipeline\n"
+        "mani klienti\n"
+        "kas iestrēdzis\n"
+        "kas notiek ar Andri\n\n"
+        f"Versija: {SALES_PIPELINE_VERSION}"
+    )
 
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
