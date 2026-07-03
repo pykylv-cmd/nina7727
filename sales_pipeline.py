@@ -1,6 +1,6 @@
 """
 sales_pipeline.py
-NinaOS — Sales Pipeline / Client CRM V1.1
+NinaOS — Sales Pipeline / Client CRM V1.2
 
 Mērķis:
 - Noteikt klienta pārdošanas/pipeline statusu no darbiem un teksta.
@@ -12,7 +12,7 @@ Mērķis:
 Tas tikai analizē jau esošu tekstu / taskus / klienta kontekstu un atgriež strukturētu rezultātu.
 """
 
-SALES_PIPELINE_VERSION = "Sales Pipeline / Client CRM V1.1"
+SALES_PIPELINE_VERSION = "Sales Pipeline / Client CRM V1.2"
 
 
 PIPELINE_STAGES = {
@@ -501,5 +501,155 @@ def sales_pipeline_status_answer():
         "kas notiek ar Andri\n"
         "pipeline\n"
         "kas iestrēdzis\n\n"
+        f"Versija: {SALES_PIPELINE_VERSION}"
+    )
+
+
+# =========================
+# Sales Pipeline V1.2 — Command Expansion
+# =========================
+
+def filter_clients_by_stage(client_task_map, target_stage):
+    """
+    Atgriež klientus konkrētā pipeline stadijā.
+    """
+    result = []
+    for client_name, tasks in (client_task_map or {}).items():
+        crm = analyze_client_tasks(client_name, tasks)
+        if crm.get("pipeline_stage") == target_stage:
+            result.append(crm)
+    return result
+
+
+def format_clients_by_stage(client_task_map, target_stage, title):
+    clients = filter_clients_by_stage(client_task_map, target_stage)
+
+    lines = []
+    lines.append(title)
+    lines.append("")
+
+    if not clients:
+        lines.append("Šobrīd šajā skatā nav klientu.")
+    else:
+        for crm in clients:
+            risk_mark = " ⚠️" if crm["risk"]["has_risk"] else ""
+            lines.append(f"- {crm['client_name']} — {crm['next_step']}{risk_mark}")
+
+    lines.append("")
+    lines.append(f"Versija: {SALES_PIPELINE_VERSION}")
+    return "\n".join(lines)
+
+
+def format_offer_to_send_clients(client_task_map):
+    return format_clients_by_stage(
+        client_task_map,
+        "offer_to_send",
+        "📨 Klienti, kam jānosūta piedāvājums"
+    )
+
+
+def format_followup_clients(client_task_map):
+    return format_clients_by_stage(
+        client_task_map,
+        "waiting_reply",
+        "🔁 Klienti, kam jātaisa follow-up"
+    )
+
+
+def format_active_clients(client_task_map):
+    """
+    Vienkāršs aktīvo klientu skats.
+    """
+    lines = []
+    lines.append("👥 Mani klienti")
+    lines.append("")
+
+    if not client_task_map:
+        lines.append("Šobrīd neredzu aktīvus klientus.")
+        lines.append("")
+        lines.append(f"Versija: {SALES_PIPELINE_VERSION}")
+        return "\n".join(lines)
+
+    for client_name, tasks in client_task_map.items():
+        crm = analyze_client_tasks(client_name, tasks)
+        risk_mark = " ⚠️" if crm["risk"]["has_risk"] else ""
+        lines.append(
+            f"- {crm['client_name']} — {crm['pipeline_stage_label']} | "
+            f"darbi: {crm['active_task_count']} | nākamais solis: {crm['next_step']}{risk_mark}"
+        )
+
+    lines.append("")
+    lines.append(f"Versija: {SALES_PIPELINE_VERSION}")
+    return "\n".join(lines)
+
+
+def format_pipeline_overview_v12(client_task_map):
+    """
+    Skaidrāks vadības panelis nekā V1.1.
+    Saglabā to pašu ideju, bet grupē pēc svarīgākā biznesa secībā.
+    """
+    grouped = get_pipeline_overview(client_task_map)
+
+    lines = []
+    lines.append("📊 Sales Pipeline / Client CRM")
+    lines.append("")
+
+    order = [
+        "offer_to_send",
+        "waiting_reply",
+        "offer_sent",
+        "negotiation",
+        "contacted",
+        "lead",
+        "won",
+        "lost",
+        "unknown",
+    ]
+
+    any_clients = False
+
+    for stage in order:
+        clients = grouped.get(stage, [])
+        if not clients:
+            continue
+
+        any_clients = True
+        lines.append(f"{PIPELINE_STAGES.get(stage, stage)}:")
+        for crm in clients:
+            risk_mark = " ⚠️" if crm["risk"]["has_risk"] else ""
+            lines.append(
+                f"- {crm['client_name']} — nākamais solis: {crm['next_step']} "
+                f"| darbi: {crm['active_task_count']} | piedāvājums: {format_offer_status(crm.get('offer_status'))}{risk_mark}"
+            )
+        lines.append("")
+
+    if not any_clients:
+        lines.append("Nav aktīvu klientu pipeline skatam.")
+        lines.append("")
+
+    lines.append("Ātrās komandas:")
+    lines.append("- kam jānosūta piedāvājums")
+    lines.append("- kam jātaisa follow-up")
+    lines.append("- kas iestrēdzis")
+    lines.append("")
+    lines.append(f"Versija: {SALES_PIPELINE_VERSION}")
+    return "\n".join(lines).strip()
+
+
+# Pārrakstām publisko overview uz V1.2 paneli.
+def format_pipeline_overview(client_task_map):
+    return format_pipeline_overview_v12(client_task_map)
+
+
+def sales_pipeline_status_answer():
+    return (
+        "📊 Sales Pipeline / Client CRM V1.2 ir aktīvs. ✅\n\n"
+        "V1.2 command expansion:\n"
+        "- pipeline — pilns CRM vadības panelis\n"
+        "- mani klienti — aktīvie klienti\n"
+        "- kam jānosūta piedāvājums — tikai offer_to_send\n"
+        "- kam jātaisa follow-up — tikai waiting_reply\n"
+        "- kas iestrēdzis — riski un iestrēgumi\n"
+        "- kas notiek ar Andri — klienta detalizētais skats\n\n"
         f"Versija: {SALES_PIPELINE_VERSION}"
     )
