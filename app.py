@@ -163,6 +163,29 @@ except Exception as e:
         return "Follow-up Engine nav pieslēgts."
 
 
+
+# NinaOS Task Cleanup Import
+try:
+    from task_cleanup import (
+        find_cleanup_candidates,
+        build_cleanup_preview,
+        build_cleanup_done_answer,
+        TASK_CLEANUP_VERSION,
+    )
+except Exception as e:
+    print("task_cleanup.py imports nav pieejams:", e)
+    TASK_CLEANUP_VERSION = "Task Cleanup nav pieslēgts"
+
+    def find_cleanup_candidates(tasks):
+        return []
+
+    def build_cleanup_preview(tasks):
+        return "Task Cleanup nav pieslēgts."
+
+    def build_cleanup_done_answer(deleted_count):
+        return "Task Cleanup nav pieslēgts."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -14000,12 +14023,73 @@ def nina_followup_router_answer_v11(user_id, user_text):
 
     return build_followup_saved_answer(task)
 
+
+# =========================
+# NinaOS Task Cleanup Bridge — V1.0
+# =========================
+
+def nina_task_cleanup_preview(user_id):
+    tasks = nina_latest_tasks(user_id, limit=200) or []
+    return build_cleanup_preview(tasks)
+
+
+def nina_task_cleanup_confirm(user_id):
+    tasks = nina_latest_tasks(user_id, limit=200) or []
+    junk = find_cleanup_candidates(tasks)
+
+    if not junk:
+        return build_cleanup_done_answer(0)
+
+    deleted = 0
+
+    try:
+        conn = get_db()
+        c = conn.cursor()
+
+        for task in junk:
+            title = (task.get("title") or "").strip()
+            if not title:
+                continue
+
+            try:
+                db_execute(
+                    c,
+                    """
+                    UPDATE memory_backups
+                    SET backup_text = %s
+                    WHERE user_id = %s
+                      AND source = %s
+                      AND backup_text LIKE %s
+                    """,
+                    ("[deleted task cleanup]", str(user_id), "task_engine", f'%\"title\": \"{title}%')
+                )
+                deleted += 1
+            except Exception as e:
+                print("Task cleanup delete kļūda:", repr(e))
+
+        conn.commit()
+        c.close()
+        conn.close()
+    except Exception as e:
+        print("Task cleanup DB kļūda:", repr(e))
+
+    return build_cleanup_done_answer(deleted)
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
     try:
         user_text = update.message.text
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
+
+        if lower == "task cleanup":
+            await safe_reply_text(update, nina_task_cleanup_preview(user_id))
+            return
+
+        if lower == "task cleanup confirm":
+            await safe_reply_text(update, nina_task_cleanup_confirm(user_id))
+            return
+
 
         if lower in ["follow-up", "followup", "follow up"]:
             await safe_reply_text(update, nina_followup_context_answer(user_id))
