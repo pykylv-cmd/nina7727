@@ -12128,121 +12128,73 @@ def nina_progress_answer(user_id):
 # Reply Builder ir centrālais NinaOS komunikācijas slānis.
 # No šī punkta gala teksts pirms sūtīšanas lietotājam iziet caur vienu vietu.
 
-REPLY_BUILDER_VERSION = "Core 2.5.1 — Reply Builder"
-APP_VERSION = "V115.2 + Core 2.5.1"
+try:
+    from reply_builder import (
+        REPLY_BUILDER_VERSION,
+        APP_VERSION,
+        rb_clean_text,
+        rb_detect_intent,
+        rb_detect_tone,
+        build_reply_object,
+        reply_builder_build,
+        reply_builder_text,
+        reply_builder_status_answer,
+    )
+except Exception as e:
+    print("reply_builder.py imports nav pieejams:", e)
 
+    REPLY_BUILDER_VERSION = "Reply Builder fallback"
+    APP_VERSION = "V115.3 + Core 2.5.1"
 
-def rb_clean_text(value):
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    # noņem vecās versijas rindas, lai gala tekstā nav vairākas versijas vienlaikus
-    text = re.sub(r"\n{0,2}Versija:\s*V[0-9.]+\s*$", "", text, flags=re.IGNORECASE).strip()
-    text = re.sub(r"\n{0,2}Versija:\s*V[0-9.]+\s*\+\s*Core\s*2\.5\.1\s*$", "", text, flags=re.IGNORECASE).strip()
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    return text
+    def rb_clean_text(value):
+        text = str(value or "").strip()
+        text = re.sub(r"\n{0,2}Versija:\s*.*$", "", text, flags=re.IGNORECASE).strip()
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        return text
 
+    def rb_detect_intent(text):
+        lower = (text or "").strip().lower()
+        if not lower:
+            return "empty"
+        if any(x in lower for x in ["klienti", "andri", "follow-up", "piedāvājums", "piedavajums"]):
+            return "client_work"
+        if any(x in lower for x in ["mana diena", "darba inbox"]):
+            return "daily_brief"
+        if any(x in lower for x in ["ko man tagad", "kas svarīgākais", "ko iesaki"]):
+            return "initiative"
+        return "general"
 
-def rb_detect_intent(text):
-    lower = (text or "").strip().lower()
-    if not lower:
-        return "empty"
-    if any(x in lower for x in ["premium", "abonements", "pirkt", "cena", "tarifs"]):
-        return "business"
-    if any(x in lower for x in ["atgādini", "atgadini", "rīt", "rit", "pirmdien", "otrdien", "trešdien", "tresdien"]):
-        return "memory_or_reminder"
-    if any(x in lower for x in ["core", "ninaos", "initiative", "think engine", "learning", "quality", "reply builder"]):
-        return "ninaos_core"
-    if any(x in lower for x in ["čau", "cau", "sveika", "sveiks", "hello", "hi", "kā tev iet", "ka tev iet"]):
-        return "conversation"
-    return "general"
+    def rb_detect_tone(text):
+        return "warm"
 
+    def build_reply_object(main_message="", user_text="", source="legacy_router", intent="", tone="", channel="telegram", metadata=None):
+        return {
+            "intent": intent or rb_detect_intent(user_text or main_message),
+            "tone": tone or rb_detect_tone(user_text or main_message),
+            "main_message": main_message or "",
+            "channel": channel or "telegram",
+            "metadata": metadata or {"source": source},
+        }
 
-def rb_detect_tone(text):
-    lower = (text or "").strip().lower()
-    if any(x in lower for x in ["smagi", "grūti", "gruti", "slikti", "noguris", "nogurusi", "bēdīgi", "bedigi"]):
-        return "supportive"
-    if any(x in lower for x in ["premium", "cena", "tarifs", "pirkt", "abonements"]):
-        return "commercial_warm"
-    if any(x in lower for x in ["core", "ninaos", "architecture", "arhitekt", "engine"]):
-        return "architectural"
-    return "warm"
-
-
-def build_reply_object(main_message="", user_text="", source="legacy_router", intent="", tone="", channel="telegram", metadata=None):
-    return {
-        "intent": intent or rb_detect_intent(user_text or main_message),
-        "tone": tone or rb_detect_tone(user_text or main_message),
-        "priority": "normal",
-        "identity": "Nina — AI darbiniece NinaOS platformā",
-        "memory": {},
-        "knowledge": {},
-        "reasoning": {},
-        "facts": [],
-        "suggestions": [],
-        "questions": [],
-        "warnings": [],
-        "next_action": "reply",
-        "main_message": main_message or "",
-        "channel": channel or "telegram",
-        "metadata": metadata or {"source": source},
-    }
-
-
-def reply_builder_build(reply_object):
-    if isinstance(reply_object, str):
-        reply_object = build_reply_object(main_message=reply_object)
-    if not isinstance(reply_object, dict):
-        reply_object = build_reply_object(main_message=str(reply_object or ""))
-
-    text = rb_clean_text(reply_object.get("main_message", ""))
-    if not text:
-        text = "Esmu te. 😊\n\nPasaki, ko vajag sakārtot, un es palīdzēšu soli pa solim."
-
-    channel = (reply_object.get("channel") or "telegram").lower()
-
-    # Telegram tekstam jābūt īsam un skaidram. Pārāk garu tekstu droši apgriežam, lai nesalauž sūtīšanu.
-    if channel == "telegram" and len(text) > 3800:
-        text = text[:3700].rstrip() + "\n\n…"
-
-    if "Reply Builder" not in text:
+    def reply_builder_build(reply_object):
+        if isinstance(reply_object, str):
+            reply_object = build_reply_object(main_message=reply_object)
+        text = rb_clean_text((reply_object or {}).get("main_message", ""))
+        if not text:
+            text = "Esmu te. 😊\n\nPasaki, ko vajag sakārtot, un es palīdzēšu soli pa solim."
+        if (reply_object or {}).get("channel", "telegram") == "telegram" and len(text) > 3800:
+            text = text[:3700].rstrip() + "\n\n…"
         text = text.rstrip() + f"\n\nVersija: {APP_VERSION}"
+        return {"text": text, "metadata": {"builder": REPLY_BUILDER_VERSION}}
 
-    return {
-        "text": text,
-        "buttons": [],
-        "attachments": [],
-        "actions": [],
-        "metadata": {
-            "builder": REPLY_BUILDER_VERSION,
-            "intent": reply_object.get("intent", ""),
-            "tone": reply_object.get("tone", ""),
-            **(reply_object.get("metadata") or {}),
-        },
-    }
+    def reply_builder_text(text, user_text="", source="legacy_router", channel="telegram"):
+        return reply_builder_build(build_reply_object(text, user_text, source, channel=channel)).get("text", "")
 
-
-def reply_builder_text(text, user_text="", source="legacy_router", channel="telegram"):
-    obj = build_reply_object(
-        main_message=text,
-        user_text=user_text,
-        source=source,
-        channel=channel,
-    )
-    return reply_builder_build(obj).get("text", "")
-
-
-def reply_builder_status_answer():
-    return reply_builder_text(
-        "🧩 Core 2.5.1 — Reply Builder ir aktīvs.\n\n"
-        "No šī brīža gala atbildes pirms sūtīšanas iet caur vienu centrālo komunikācijas slāni.\n\n"
-        "Tas nozīmē:\n"
-        "• vecie V115 ceļi vēl drīkst sagatavot saturu;\n"
-        "• gala tekstu sakārto Reply Builder;\n"
-        "• nākamais Core 2.6 — Initiative Engine jau varēs balstīties uz vienotu atbilžu ceļu.",
-        source="reply_builder_status",
-    )
-
+    def reply_builder_status_answer():
+        return reply_builder_text(
+            "🧩 Core 2.5.1 — Reply Builder fallback ir aktīvs. ✅",
+            source="reply_builder_status",
+        )
 
 
 async def safe_reply_text(update, text, disable_web_page_preview=True):
