@@ -218,6 +218,10 @@ try:
     from sales_pipeline import (
         format_pipeline_overview,
         format_stuck_clients,
+        format_active_clients,
+        format_offer_to_send_clients,
+        format_followup_clients,
+        sales_pipeline_status_answer as sales_pipeline_status_text,
         SALES_PIPELINE_VERSION,
     )
 except Exception as e:
@@ -228,6 +232,18 @@ except Exception as e:
         return "Sales Pipeline nav pieslēgts."
 
     def format_stuck_clients(client_task_map):
+        return "Sales Pipeline nav pieslēgts."
+
+    def format_active_clients(client_task_map):
+        return "Sales Pipeline nav pieslēgts."
+
+    def format_offer_to_send_clients(client_task_map):
+        return "Sales Pipeline nav pieslēgts."
+
+    def format_followup_clients(client_task_map):
+        return "Sales Pipeline nav pieslēgts."
+
+    def sales_pipeline_status_text():
         return "Sales Pipeline nav pieslēgts."
 
 
@@ -14252,21 +14268,40 @@ def nina_sales_pipeline_risk_answer(user_id):
     return format_stuck_clients(client_map)
 
 
+def nina_active_clients_answer(user_id):
+    client_map = nina_client_task_map_v1(user_id, limit=200)
+    return format_active_clients(client_map)
+
+
+def nina_offer_to_send_answer(user_id):
+    client_map = nina_client_task_map_v1(user_id, limit=200)
+    return format_offer_to_send_clients(client_map)
+
+
+def nina_followup_clients_answer(user_id):
+    client_map = nina_client_task_map_v1(user_id, limit=200)
+    return format_followup_clients(client_map)
+
+
 def nina_sales_pipeline_status_answer():
     """
-    Sales Pipeline status hotfix:
-    app.py neimportē sales_pipeline_status_answer.
-    Tas izmanto tikai SALES_PIPELINE_VERSION, kas droši nāk no sales_pipeline.py.
+    Sales Pipeline V1.2 status:
+    statusa tekstu ņem no sales_pipeline.py, ja pieejams.
     """
-    return (
-        "📊 Sales Pipeline / Client CRM ir aktīvs. ✅\n\n"
-        "Komandas:\n"
-        "pipeline\n"
-        "mani klienti\n"
-        "kas iestrēdzis\n"
-        "kas notiek ar Andri\n\n"
-        f"Versija: {SALES_PIPELINE_VERSION}"
-    )
+    try:
+        return sales_pipeline_status_text()
+    except Exception:
+        return (
+            "📊 Sales Pipeline / Client CRM ir aktīvs. ✅\n\n"
+            "Komandas:\n"
+            "pipeline\n"
+            "mani klienti\n"
+            "kam jānosūta piedāvājums\n"
+            "kam jātaisa follow-up\n"
+            "kas iestrēdzis\n"
+            "kas notiek ar Andri\n\n"
+            f"Versija: {SALES_PIPELINE_VERSION}"
+        )
 
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
@@ -14279,11 +14314,23 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, nina_sales_pipeline_status_answer())
             return
 
-        if lower in ["pipeline", "mani klienti", "klienti", "klientu statuss", "parādi manus klientus", "paradi manus klientus", "sales pipeline", "crm", "client crm"]:
+        if lower in ["pipeline", "klientu statuss", "parādi manus klientus", "paradi manus klientus", "crm", "client crm"]:
             await safe_reply_text(update, nina_sales_pipeline_answer(user_id))
             return
 
-        if lower in ["kas iestrēdzis", "kas iestredzis", "kur deg", "kam jātaisa follow-up", "kam jataisa follow-up", "kam jānosūta piedāvājums", "kam janosuta piedavajums", "kurš klients stāv uz vietas", "kurs klients stav uz vietas"]:
+        if lower in ["mani klienti", "klienti"]:
+            await safe_reply_text(update, nina_active_clients_answer(user_id))
+            return
+
+        if lower in ["kam jānosūta piedāvājums", "kam janosuta piedavajums", "piedāvājumi jānosūta", "piedavajumi janosuta", "offer to send"]:
+            await safe_reply_text(update, nina_offer_to_send_answer(user_id))
+            return
+
+        if lower in ["kam jātaisa follow-up", "kam jataisa follow-up", "kam follow-up", "follow-up klienti", "followup klienti"]:
+            await safe_reply_text(update, nina_followup_clients_answer(user_id))
+            return
+
+        if lower in ["kas iestrēdzis", "kas iestredzis", "kur deg", "kurš klients stāv uz vietas", "kurs klients stav uz vietas"]:
             await safe_reply_text(update, nina_sales_pipeline_risk_answer(user_id))
             return
 
