@@ -10,7 +10,7 @@ Mērķis:
 Šis modulis nemaina datubāzi.
 """
 
-PRESENTATION_LANGUAGE_VERSION = "Presentation / Language Layer V1.0"
+PRESENTATION_LANGUAGE_VERSION = "Presentation / Language Layer V1.2"
 
 DEFAULT_LOCALE = "lv"
 FALLBACK_LOCALE = "en"
@@ -96,7 +96,7 @@ def humanize_public_text(text, locale=DEFAULT_LOCALE):
             ("Pipeline:", "Klienta statuss:"),
             ("pipeline", "klientu pārskats"),
             ("Pipeline", "Klientu pārskats"),
-            ("CRM", "klientiem"),
+            ("Client CRM", "klientu pārskats"),
             ("follow-up", "atgādinājums"),
             ("Follow-up", "Atgādinājums"),
             ("kam jātaisa atgādinājums", "kam jāatgādina"),
@@ -108,13 +108,13 @@ def humanize_public_text(text, locale=DEFAULT_LOCALE):
         for old, new in replacements:
             out = out.replace(old, new)
 
-    out = polish_followup_hint_text(out, locale=loc)
+    out = polish_public_text_v12(out, locale=loc)
     return out
 
 
 def presentation_status_answer():
     return (
-        "🌍 Presentation / Language Layer V1.0 ir aktīvs. ✅\n\n"
+        "🌍 Presentation / Language Layer V1.2 ir aktīvs. ✅\n\n"
         "Uzdevums:\n"
         "- iekšējos tehniskos terminus atstāt kodā;\n"
         "- lietotājam rādīt skaidru, cilvēcīgu valodu;\n"
@@ -130,13 +130,24 @@ def presentation_status_answer():
 
 
 
-def polish_followup_hint_text(text, locale=DEFAULT_LOCALE):
+
+def polish_public_text_v12(text, locale=DEFAULT_LOCALE):
     out = text or ""
     if normalize_locale(locale) == "lv":
-        out = out.replace("Ja klients jāatgādina:", "Ja klientam jāatgādina:")
-        out = out.replace("uzraksti atgādinājums darbu", "uzraksti atgādinājuma uzdevumu")
-        out = out.replace("Ātrie klientu darbi skati:", "Ātrie klientu skati:")
-        out = out.replace("sales klientu pārskats", "klientu pārskats")
-        out = out.replace("Sales klientu pārskats", "Klientu pārskats")
+        fixes = [
+            ("👥 Klienti / klientiem", "👥 Klienti"),
+            ("👥 Klienti / klientu darbi", "👥 Klienti"),
+            ("👥 Klienti / klientu pārskats", "👥 Klienti"),
+            ("Ātrie klientiem skati:", "Ātrie klientu skati:"),
+            ("Ātrie klientu darbi skati:", "Ātrie klientu skati:"),
+            ("Ātrie klientu pārskats skati:", "Ātrie klientu skati:"),
+            ("sales klientu pārskats", "klientu pārskats"),
+            ("Sales klientu pārskats", "Klientu pārskats"),
+            ("uzraksti atgādinājums darbu", "uzraksti atgādinājuma uzdevumu"),
+            ("Ja klients jāatgādina:", "Ja klientam jāatgādina:"),
+            ("Klienti / klientiem", "Klienti"),
+        ]
+        for old, new in fixes:
+            out = out.replace(old, new)
     return out
 
