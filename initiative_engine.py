@@ -1,168 +1,217 @@
 """
-NinaOS — Core 2.6.1
-Initiative Engine
+initiative_engine.py
+NinaOS Initiative Engine — V1.0
 
-Šis modulis NEVEIDO gala atbildes tekstu.
-Tas tikai nosaka, vai Ninai vajag piedāvāt nākamo soli,
-un atgriež strukturētu Initiative Object.
+Mērķis:
+- Nina pati pasaka, kas šobrīd svarīgākais;
+- no aktīvajiem uzdevumiem izceļ 1–3 prioritātes;
+- dod īsu cilvēkam saprotamu ieteikumu.
 
-Gala tekstu drīkst veidot tikai Reply Builder.
+Šis modulis nemaina datubāzi.
+Tas tikai analizē jau esošos taskus.
 """
 
-from datetime import datetime, timezone
+INITIATIVE_ENGINE_VERSION = "Initiative Engine V1.0"
 
 
-CORE_VERSION = "Core 2.6.1"
-MODULE_NAME = "Initiative Engine"
-MODULE_STATUS = "active"
+def _clean(text):
+    return (text or "").strip()
 
 
-def initiative_status_object():
-    return {
-        "enabled": True,
-        "core": CORE_VERSION,
-        "module": MODULE_NAME,
-        "status": MODULE_STATUS,
-        "type": "status",
-        "priority": "normal",
-        "reason": "manual_status_check",
-        "message": (
-            "Core 2.6.1 — Initiative Detector ir aktīvs. "
-            "Tas nozīmē, ka Nina var sākt pamanīt situācijas, "
-            "kurās lietotājam noder nākamais solis."
-        ),
-        "action": "none",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
+def _lower(text):
+    return _clean(text).lower()
 
 
-def is_initiative_status_command(text):
-    lower = (text or "").strip().lower()
-    return lower in {
-        "core 2.6.1",
-        "initiative detector status",
-        "initiative status",
-        "initiative engine status",
-        "core initiative",
-    }
+def _contains_any(text, phrases):
+    lower = _lower(text)
+    return any(p in lower for p in phrases)
 
 
-def detect_initiative(user_text="", user_context=None, reply_object=None):
-    """
-    Atgriež strukturētu Initiative Object.
-
-    enabled = False nozīmē: Initiative šajā brīdī neiejaucas.
-    enabled = True nozīmē: Reply Builder drīkst iekļaut iniciatīvu gala atbildē.
-    """
-
-    text = (user_text or "").strip()
-    lower = text.lower()
-    user_context = user_context or {}
-    reply_object = reply_object or {}
-
-    if not lower:
-        return {
-            "enabled": False,
-            "type": "none",
-            "priority": "low",
-            "reason": "empty_message",
-            "message": "",
-            "action": "none",
-            "metadata": {},
-        }
-
-    if is_initiative_status_command(text):
-        return initiative_status_object()
-
-    # Termiņi / nākotnes lietas → piedāvāt atgādinājumu
-    reminder_markers = [
-        "rīt", "rit", "parīt", "parit",
-        "pirmdien", "otrdien", "trešdien", "tresdien",
-        "ceturtdien", "piektdien", "sestdien", "svētdien", "svetdien",
-        "10:00", "9:00", "8:00", "sapulce", "klients", "klientam",
-        "jāzvana", "jazvana", "jāsatiek", "jasatiek",
-        "neaizmirst", "atgādini", "atgadini",
-    ]
-
-    if "?" not in lower and any(marker in lower for marker in reminder_markers):
-        return {
-            "enabled": True,
-            "type": "reminder_offer",
-            "priority": "medium",
-            "reason": "future_or_deadline_detected",
-            "message": "Vai gribi, lai es šo pārvēršu arī par īstu atgādinājumu?",
-            "action": "offer_reminder",
-            "metadata": {
-                "source_text": text,
-            },
-        }
-
-    # Projekti / lieli darbi → piedāvāt sadalīt soļos
-    planning_markers = [
-        "projekts", "projektu", "jāuztaisa", "jauztaisa",
-        "jāpabeidz", "japabeidz", "jāsakārto", "jasakarto",
-        "daudz darbu", "haoss", "plāns", "plans",
-    ]
-
-    if any(marker in lower for marker in planning_markers):
-        return {
-            "enabled": True,
-            "type": "planning_offer",
-            "priority": "medium",
-            "reason": "planning_context_detected",
-            "message": "Varam šo sadalīt mazākos soļos, lai nav viss jātur galvā.",
-            "action": "offer_planning",
-            "metadata": {
-                "source_text": text,
-            },
-        }
-
-    # Nogurums / smagums → piedāvāt mīkstu nākamo soli
-    emotional_markers = [
-        "grūti", "gruti", "smagi", "noguris", "nogurusi",
-        "nav spēka", "nav speka", "slikta diena", "besī", "besi",
-    ]
-
-    if any(marker in lower for marker in emotional_markers):
-        return {
-            "enabled": True,
-            "type": "support_offer",
-            "priority": "medium",
-            "reason": "emotional_load_detected",
-            "message": "Gribi, lai palīdzam to sadalīt pa vienam mazam solim?",
-            "action": "offer_support_planning",
-            "metadata": {
-                "source_text": text,
-            },
-        }
-
-    return {
-        "enabled": False,
-        "type": "none",
-        "priority": "low",
-        "reason": "no_useful_initiative_detected",
-        "message": "",
-        "action": "none",
-        "metadata": {
-            "source_text": text,
-        },
-    }
-
-
-def build_initiative_status_text():
-    """
-    Pagaidu statusa teksts testam.
-
-    Šo drīkst izmantot tikai komandas testam app.py līmenī.
-    Normālā sarunā gala tekstu vēlāk veidos Reply Builder.
-    """
+def initiative_status_answer():
     return (
-        "🧠 Core 2.6.1 — Initiative Detector ir aktīvs.\n\n"
-        "Nina tagad var noteikt, kad lietotājam noder nākamais solis.\n\n"
-        "Svarīgi:\n"
-        "• Initiative Engine neveido gala atbildi;\n"
-        "• tas sagatavo strukturētu iniciatīvu;\n"
-        "• gala tekstu sakārto Reply Builder;\n"
-        "• vecais V115.2 sarunas ceļš šai testa komandai vairs netiek izmantots.\n\n"
-        "Nākamais solis: Core 2.6.2 — Initiative Generator."
+        "🔥 Initiative Engine V1.0 ir aktīvs. ✅\n\n"
+        "Uzdevums:\n"
+        "- paskatīties uz aktīvajiem darbiem;\n"
+        "- izcelt 1–3 svarīgākos soļus;\n"
+        "- dot īsu ieteikumu, ar ko sākt.\n\n"
+        "Komandas:\n"
+        "- ko man tagad darīt\n"
+        "- kas svarīgākais\n"
+        "- ko iesaki\n"
+        "- ninas ieteikums\n\n"
+        f"Versija: {INITIATIVE_ENGINE_VERSION}"
     )
+
+
+def is_initiative_command(text):
+    lower = _lower(text)
+    return lower in [
+        "ko man tagad darīt",
+        "ko man tagad darit",
+        "kas svarīgākais",
+        "kas svarigakais",
+        "kas tagad svarīgākais",
+        "kas tagad svarigakais",
+        "ko iesaki",
+        "ko tu iesaki",
+        "ninas ieteikums",
+        "nina ieteikums",
+        "initiative",
+        "initiative engine",
+    ]
+
+
+def task_text(task):
+    if isinstance(task, dict):
+        return _clean(task.get("title") or task.get("text") or task.get("task") or task.get("raw_text") or "")
+    return _clean(str(task or ""))
+
+
+def task_client(task):
+    if isinstance(task, dict):
+        return _clean(task.get("client", ""))
+    return ""
+
+
+def task_deadline_label(task):
+    if isinstance(task, dict):
+        return _clean(task.get("deadline_label", "")) or _clean(task.get("deadline", ""))
+    return ""
+
+
+def is_offer_task(text):
+    return _contains_any(text, [
+        "piedāvājums", "piedavajums",
+        "jānosūta", "janosuta",
+        "nosūtīt", "nosutit",
+        "sagatavot piedāvājumu", "sagatavot piedavajumu",
+    ])
+
+
+def is_reminder_task(text):
+    return _contains_any(text, [
+        "jāpajautā", "japajauta",
+        "pajautāt", "pajautat",
+        "par atbildi",
+        "atgādināt", "atgadinat",
+        "follow-up", "follow up", "followup",
+    ])
+
+
+def deadline_score(deadline):
+    d = _lower(deadline)
+    if d in ["šodien", "sodien", "today"]:
+        return 90
+    if d in ["rīt", "rit", "tomorrow"]:
+        return 75
+    if d in ["parīt", "parit", "day_after_tomorrow"]:
+        return 55
+    if d:
+        return 35
+    return 0
+
+
+def priority_score(task):
+    text = task_text(task)
+    deadline = task_deadline_label(task)
+
+    score = 0
+    reasons = []
+
+    if is_offer_task(text):
+        score += 120
+        reasons.append("tas virza klientu tuvāk darījumam")
+
+    if deadline:
+        ds = deadline_score(deadline)
+        score += ds
+        if deadline in ["šodien", "sodien", "today"]:
+            reasons.append("termiņš ir šodien")
+        elif deadline in ["rīt", "rit", "tomorrow"]:
+            reasons.append("termiņš ir rīt")
+        else:
+            reasons.append(f"ir termiņš: {deadline}")
+
+    if is_reminder_task(text):
+        score += 60
+        reasons.append("tas ir klienta atgādinājuma darbs")
+
+    client = task_client(task)
+    if client:
+        score += 20
+        reasons.append(f"tas ir saistīts ar klientu {client}")
+
+    if not reasons:
+        reasons.append("tas ir aktīvs darbs")
+
+    return score, reasons
+
+
+def ranked_tasks(tasks, limit=3):
+    scored = []
+    seen = set()
+
+    for task in tasks or []:
+        text = task_text(task)
+        if not text:
+            continue
+
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        score, reasons = priority_score(task)
+        scored.append({
+            "task": task,
+            "text": text,
+            "score": score,
+            "reasons": reasons,
+            "client": task_client(task),
+            "deadline": task_deadline_label(task),
+        })
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored[:int(limit or 3)]
+
+
+def build_initiative_answer(tasks):
+    top = ranked_tasks(tasks, limit=3)
+
+    if not top:
+        return (
+            "🔥 Šobrīd neredzu aktīvus darbus, no kuriem izvēlēties prioritāti.\n\n"
+            "Iedod vienu īstu darbu, piemēram:\n"
+            "rīt jānosūta piedāvājums Andrim\n\n"
+            f"Versija: {INITIATIVE_ENGINE_VERSION}"
+        )
+
+    lines = []
+    lines.append("🔥 Šobrīd svarīgākais")
+    lines.append("")
+
+    for idx, item in enumerate(top, start=1):
+        lines.append(f"{idx}. {item['text']}")
+        if item["reasons"]:
+            lines.append(f"Kāpēc: {item['reasons'][0]}.")
+        lines.append("")
+
+    first = top[0]["text"]
+
+    lines.append("Mans ieteikums:")
+    if is_offer_task(first):
+        lines.append("Sāc ar piedāvājumu, jo tas ir vistuvāk naudas un klienta virzībai.")
+    elif is_reminder_task(first):
+        lines.append("Sāc ar atgādinājumu klientam, lai darbs neiestrēgst.")
+    else:
+        lines.append("Sāc ar pirmo punktu — tas šobrīd izskatās svarīgākais.")
+
+    lines.append("")
+    lines.append("Pēc tam vari rakstīt:")
+    lines.append("- klienti")
+    lines.append("- mani uzdevumi")
+    lines.append("- kam jānosūta piedāvājums")
+    lines.append("")
+    lines.append(f"Versija: {INITIATIVE_ENGINE_VERSION}")
+
+    return "\n".join(lines)
