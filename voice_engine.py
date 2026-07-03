@@ -1,28 +1,26 @@
 """
 voice_engine.py
-NinaOS Voice Intake V1.2 — Telegram OGG/OPUS Fix
+NinaOS Voice Intake V1.3 — Direct Telegram OGG Mode
 
 Mērķis:
-- Telegram voice ziņas (.ogg/.oga OPUS) pirms OpenAI transkripcijas pārkonvertēt uz WAV;
-- izmantot imageio-ffmpeg, lai Render vidē nav jāpaļaujas uz sistēmas ffmpeg;
-- saglabāt V1.1 tempfile drošību un skaidrus servera logus.
+- Telegram voice/audio failu pārvērst tekstā bez ffmpeg konvertācijas;
+- sūtīt Telegram .ogg/.oga/.opus audio tieši OpenAI transkripcijai;
+- samazināt servera atkarības un nelauzt esošo NinaOS teksta routeri.
 """
 
 import os
-import shutil
-import subprocess
 import tempfile
 
-VOICE_ENGINE_VERSION = "Voice Intake V1.2 — Telegram OGG/OPUS Fix"
+VOICE_ENGINE_VERSION = "Voice Intake V1.3 — Direct Telegram OGG Mode"
 
 
 def voice_status_answer():
     return (
-        "🎙 Voice Intake V1.2 — Telegram OGG/OPUS Fix ir aktīvs. ✅\n\n"
+        "🎙 Voice Intake V1.3 — Direct Telegram OGG Mode ir aktīvs. ✅\n\n"
         "Ko tas dara:\n"
         "• pieņem Telegram balss/audio ziņu;\n"
-        "• Telegram .ogg/.opus audio pārtaisa uz WAV;\n"
-        "• pārvērš audio tekstā ar OpenAI transkripciju;\n"
+        "• neslēdz ffmpeg konvertāciju;\n"
+        "• sūta .ogg/.opus audio tieši transkripcijai;\n"
         "• nodod tekstu Ninai tā, it kā tu būtu to uzrakstījis.\n\n"
         "Tests:\n"
         "• ierunā Telegram voice ziņu: rīt jānosūta piedāvājums Andrim\n\n"
@@ -33,8 +31,8 @@ def voice_status_answer():
 def build_voice_error_answer(error_text=""):
     return (
         "🎙 Balss ziņu saņēmu, bet šoreiz neizdevās to pārvērst tekstā.\n\n"
-        "Visticamāk audio konvertācija vai transkripcija vēl neizgāja serverī. "
-        "Pamēģini vēlreiz pēc redeploy. Ja nesanāk, atsūti Render logu rindu ar `Voice Intake`.\n\n"
+        "Šis V1.3 režīms sūta Telegram audio tieši transkripcijai bez pārkonvertēšanas. "
+        "Ja vēl nesanāk, nākamais solis būs parādīt kļūdu pašā Telegram atbildē, nevis meklēt to ārējos logos.\n\n"
         f"Versija: {VOICE_ENGINE_VERSION}"
     )
 
@@ -68,79 +66,40 @@ def _extract_text_from_result(result):
     return ""
 
 
-def _ffmpeg_exe():
-    """Atrod ffmpeg. Vispirms sistēmas ffmpeg, tad imageio-ffmpeg pip binary."""
-    found = shutil.which("ffmpeg")
-    if found:
-        return found
-    try:
-        import imageio_ffmpeg
-        return imageio_ffmpeg.get_ffmpeg_exe()
-    except Exception as e:
-        print("Voice Intake V1.2: ffmpeg nav pieejams:", repr(e))
-        return ""
-
-
-def _convert_to_wav_if_needed(input_path, suffix):
-    """Telegram voice parasti ir .ogg OPUS. OpenAI transkripcijai drošāk dodam WAV."""
-    if suffix in [".wav", ".mp3", ".m4a", ".mp4", ".mpeg", ".mpga", ".webm"]:
-        return input_path
-
-    ffmpeg = _ffmpeg_exe()
-    if not ffmpeg:
-        return input_path
-
-    output_path = input_path + ".wav"
-    cmd = [
-        ffmpeg,
-        "-y",
-        "-i", input_path,
-        "-ar", "16000",
-        "-ac", "1",
-        output_path,
-    ]
-    print("Voice Intake V1.2: ffmpeg convert start", cmd)
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
-    if proc.returncode != 0:
-        print("Voice Intake V1.2: ffmpeg convert failed:", proc.stderr[-1000:])
-        return input_path
-
-    print("Voice Intake V1.2: ffmpeg convert OK", output_path)
-    return output_path
-
-
 def transcribe_audio_with_openai(openai_client, audio_bytes, filename="voice.ogg"):
+    """
+    Atgriež tekstu no Telegram audio bytes.
+
+    V1.3:
+    - nelieto ffmpeg;
+    - ieraksta oriģinālo Telegram audio tempfile;
+    - sūta failu tieši OpenAI audio transcriptions API.
+    """
     if not openai_client:
-        print("Voice Intake V1.2: OpenAI client nav pieejams.")
+        print("Voice Intake V1.3: OpenAI client nav pieejams.")
         return ""
 
     audio_bytes = audio_bytes or b""
     if not audio_bytes:
-        print("Voice Intake V1.2: audio_bytes ir tukšs.")
+        print("Voice Intake V1.3: audio_bytes ir tukšs.")
         return ""
 
     suffix = _safe_suffix(filename)
     temp_path = ""
-    transcribe_path = ""
 
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(audio_bytes)
             temp_path = tmp.name
 
-        transcribe_path = _convert_to_wav_if_needed(temp_path, suffix)
-        print(
-            f"Voice Intake V1.2: transcribe start file={filename} "
-            f"suffix={suffix} bytes={len(audio_bytes)} send={transcribe_path}"
-        )
+        print(f"Voice Intake V1.3: direct transcribe start file={filename} suffix={suffix} bytes={len(audio_bytes)}")
 
-        with open(transcribe_path, "rb") as audio_file:
+        with open(temp_path, "rb") as audio_file:
             try:
                 result = openai_client.audio.transcriptions.create(
                     model="whisper-1",
                     file=audio_file,
                     response_format="text",
-                    language="lv",
                 )
             except TypeError:
                 audio_file.seek(0)
@@ -150,17 +109,16 @@ def transcribe_audio_with_openai(openai_client, audio_bytes, filename="voice.ogg
                 )
 
         transcript = _extract_text_from_result(result)
-        print(f"Voice Intake V1.2: transcript length={len(transcript)} text={transcript[:120]!r}")
+        print(f"Voice Intake V1.3: transcript length={len(transcript)}")
         return transcript
 
     except Exception as e:
-        print("Voice Intake V1.2 transcribe kļūda:", repr(e))
+        print("Voice Intake V1.3 transcribe kļūda:", repr(e))
         return ""
 
     finally:
-        for path in [transcribe_path, temp_path]:
-            if path and os.path.exists(path):
-                try:
-                    os.remove(path)
-                except Exception:
-                    pass
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
