@@ -299,6 +299,28 @@ except Exception as e:
         return "Presentation / Language Layer nav pieslēgts."
 
 
+# NinaOS Initiative Engine Import
+try:
+    from initiative_engine import (
+        build_initiative_answer,
+        initiative_status_answer,
+        is_initiative_command,
+        INITIATIVE_ENGINE_VERSION,
+    )
+except Exception as e:
+    print("initiative_engine.py imports nav pieejams:", e)
+    INITIATIVE_ENGINE_VERSION = "Initiative Engine nav pieslēgts"
+
+    def build_initiative_answer(tasks):
+        return "Initiative Engine nav pieslēgts."
+
+    def initiative_status_answer():
+        return "Initiative Engine nav pieslēgts."
+
+    def is_initiative_command(text):
+        return False
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -14386,6 +14408,15 @@ def nina_public_append_hint(answer, context, locale="lv"):
     except Exception:
         return nina_public_answer(answer, locale=locale)
 
+
+# =========================
+# NinaOS Initiative Engine Bridge — V1.0
+# =========================
+
+def nina_initiative_answer(user_id):
+    tasks = nina_clean_real_tasks(user_id, limit=200)
+    return build_initiative_answer(tasks)
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
     try:
@@ -14395,6 +14426,14 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if lower in ["presentation status", "language status", "valodu slānis", "valodu slanis", "presentation layer"]:
             await safe_reply_text(update, presentation_status_answer())
+            return
+
+        if lower in ["initiative status", "initiative engine", "initiative"]:
+            await safe_reply_text(update, nina_public_answer(initiative_status_answer()))
+            return
+
+        if is_initiative_command(user_text):
+            await safe_reply_text(update, nina_public_answer(nina_initiative_answer(user_id)))
             return
 
         if lower in ["guide status", "guide engine", "onboarding status"]:
