@@ -1,6 +1,6 @@
 """
 sales_pipeline.py
-NinaOS — Sales Pipeline / Client CRM V1.0
+NinaOS — Sales Pipeline / Client CRM V1.1
 
 Mērķis:
 - Noteikt klienta pārdošanas/pipeline statusu no darbiem un teksta.
@@ -12,7 +12,7 @@ Mērķis:
 Tas tikai analizē jau esošu tekstu / taskus / klienta kontekstu un atgriež strukturētu rezultātu.
 """
 
-SALES_PIPELINE_VERSION = "Sales Pipeline / Client CRM V1.0"
+SALES_PIPELINE_VERSION = "Sales Pipeline / Client CRM V1.1"
 
 
 PIPELINE_STAGES = {
@@ -203,19 +203,57 @@ def analyze_client_tasks(client_name, tasks):
 
 def infer_next_step(stage, task_texts, fallback=""):
     """
-    Izvēlas praktisku nākamo soli.
-    Prioritāte:
-    1) konkrēts task ar follow-up/atbildi
-    2) konkrēts task ar piedāvājumu
-    3) stage fallback
+    V1.1 polish:
+    - ja pipeline stadija ir offer_to_send, nākamais solis ir piedāvājums;
+    - ja pipeline stadija ir waiting_reply, nākamais solis ir follow-up.
     """
-    for text in task_texts:
-        if _contains_any(text, ["follow-up", "atbildi", "pajautāt", "pajautat", "atgādināt", "atgadinat"]):
-            return text
+    def is_offer(text):
+        return _contains_any(text, [
+            "piedāvājums", "piedavajums",
+            "jānosūta", "janosuta",
+            "nosūtīt", "nosutit",
+            "sagatavot"
+        ])
 
-    for text in task_texts:
-        if _contains_any(text, ["piedāvājums", "piedavajums"]):
-            return text
+    def is_followup(text):
+        return _contains_any(text, [
+            "follow-up", "follow up", "followup",
+            "atbildi",
+            "pajautāt", "pajautat",
+            "jāpajautā", "japajauta",
+            "atgādināt", "atgadinat"
+        ])
+
+    offer_tasks = [text for text in task_texts if is_offer(text)]
+    followup_tasks = [text for text in task_texts if is_followup(text)]
+
+    if stage == "offer_to_send":
+        if offer_tasks:
+            return offer_tasks[0]
+        return "nosūtīt piedāvājumu"
+
+    if stage == "waiting_reply":
+        if followup_tasks:
+            return followup_tasks[0]
+        return "uztaisīt follow-up"
+
+    if stage == "offer_sent":
+        if followup_tasks:
+            return followup_tasks[0]
+        return "sekot klienta atbildei"
+
+    if stage == "negotiation":
+        if followup_tasks:
+            return followup_tasks[0]
+        if offer_tasks:
+            return offer_tasks[0]
+        return "virzīt sarunu uz lēmumu"
+
+    if offer_tasks:
+        return offer_tasks[0]
+
+    if followup_tasks:
+        return followup_tasks[0]
 
     if fallback:
         return fallback
@@ -223,14 +261,12 @@ def infer_next_step(stage, task_texts, fallback=""):
     defaults = {
         "lead": "uzsākt kontaktu un noskaidrot vajadzību",
         "contacted": "nofiksēt nākamo konkrēto soli",
-        "waiting_reply": "uztaisīt follow-up",
-        "offer_to_send": "nosūtīt piedāvājumu",
-        "offer_sent": "sekot klienta atbildei",
-        "negotiation": "virzīt sarunu uz lēmumu",
         "won": "nofiksēt nākamo apkalpošanas soli",
         "lost": "pierakstīt atteikuma iemeslu",
+        "unknown": "nav noteikts nākamais solis",
     }
     return defaults.get(stage, "nav noteikts nākamais solis")
+
 
 
 def detect_client_risk(stage, tasks, followup_count=0, offer_task_count=0):
@@ -370,7 +406,7 @@ def format_pipeline_overview(client_task_map):
         lines.append(f"{PIPELINE_STAGES.get(stage, stage)}:")
         for crm in clients:
             risk_mark = " ⚠️" if crm["risk"]["has_risk"] else ""
-            lines.append(f"- {crm['client_name']} — {crm['next_step']}{risk_mark}")
+            lines.append(f"- {crm['client_name']} — nākamais solis: {crm['next_step']}{risk_mark}")
         lines.append("")
 
     if not any_clients:
@@ -451,4 +487,19 @@ def is_client_pipeline_command(text):
         or "kas ar" in lower
         or "tālāk" in lower
         or "talak" in lower
+    )
+
+
+def sales_pipeline_status_answer():
+    return (
+        "📊 Sales Pipeline / Client CRM V1.1 ir aktīvs. ✅\n\n"
+        "V1.1 polish:\n"
+        "- offer_to_send stadijā nākamais solis ir piedāvājuma nosūtīšana\n"
+        "- waiting_reply stadijā nākamais solis ir follow-up\n"
+        "- pipeline skats ir skaidrāks\n\n"
+        "Testi:\n"
+        "kas notiek ar Andri\n"
+        "pipeline\n"
+        "kas iestrēdzis\n\n"
+        f"Versija: {SALES_PIPELINE_VERSION}"
     )
