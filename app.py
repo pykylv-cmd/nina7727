@@ -247,6 +247,40 @@ except Exception as e:
         return "Sales Pipeline nav pieslēgts."
 
 
+# NinaOS Guide Engine Import
+try:
+    from guide_engine import (
+        is_guide_command,
+        is_start_command,
+        guide_welcome_answer,
+        guide_capabilities_answer,
+        guide_status_answer,
+        append_hint,
+        GUIDE_ENGINE_VERSION,
+    )
+except Exception as e:
+    print("guide_engine.py imports nav pieejams:", e)
+    GUIDE_ENGINE_VERSION = "Guide Engine nav pieslēgts"
+
+    def is_guide_command(text):
+        return False
+
+    def is_start_command(text):
+        return False
+
+    def guide_welcome_answer(user_name=""):
+        return "Guide Engine nav pieslēgts."
+
+    def guide_capabilities_answer():
+        return "Guide Engine nav pieslēgts."
+
+    def guide_status_answer():
+        return "Guide Engine nav pieslēgts."
+
+    def append_hint(answer, context):
+        return answer
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -14303,6 +14337,22 @@ def nina_sales_pipeline_status_answer():
             f"Versija: {SALES_PIPELINE_VERSION}"
         )
 
+
+# =========================
+# NinaOS Guide Engine Bridge — V1.0
+# =========================
+
+def nina_guide_user_name(user_id):
+    try:
+        user = get_user(str(user_id)) or {}
+        return (user.get("name") or "").strip()
+    except Exception:
+        return ""
+
+
+def nina_guide_welcome_for_user(user_id):
+    return guide_welcome_answer(nina_guide_user_name(user_id))
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
     try:
@@ -14310,28 +14360,40 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
 
+        if lower in ["guide status", "guide engine", "onboarding status"]:
+            await safe_reply_text(update, guide_status_answer())
+            return
+
+        if is_start_command(user_text):
+            await safe_reply_text(update, nina_guide_welcome_for_user(user_id))
+            return
+
+        if is_guide_command(user_text):
+            await safe_reply_text(update, guide_capabilities_answer())
+            return
+
         if lower in ["sales pipeline", "pipeline status", "crm status", "client crm status"]:
             await safe_reply_text(update, nina_sales_pipeline_status_answer())
             return
 
         if lower in ["pipeline", "klientu statuss", "parādi manus klientus", "paradi manus klientus", "crm", "client crm"]:
-            await safe_reply_text(update, nina_sales_pipeline_answer(user_id))
+            await safe_reply_text(update, append_hint(nina_sales_pipeline_answer(user_id), "pipeline"))
             return
 
         if lower in ["mani klienti", "klienti"]:
-            await safe_reply_text(update, nina_active_clients_answer(user_id))
+            await safe_reply_text(update, append_hint(nina_active_clients_answer(user_id), "active_clients"))
             return
 
         if lower in ["kam jānosūta piedāvājums", "kam janosuta piedavajums", "piedāvājumi jānosūta", "piedavajumi janosuta", "offer to send"]:
-            await safe_reply_text(update, nina_offer_to_send_answer(user_id))
+            await safe_reply_text(update, append_hint(nina_offer_to_send_answer(user_id), "offer_to_send"))
             return
 
         if lower in ["kam jātaisa follow-up", "kam jataisa follow-up", "kam follow-up", "follow-up klienti", "followup klienti"]:
-            await safe_reply_text(update, nina_followup_clients_answer(user_id))
+            await safe_reply_text(update, append_hint(nina_followup_clients_answer(user_id), "followup_clients"))
             return
 
         if lower in ["kas iestrēdzis", "kas iestredzis", "kur deg", "kurš klients stāv uz vietas", "kurs klients stav uz vietas"]:
-            await safe_reply_text(update, nina_sales_pipeline_risk_answer(user_id))
+            await safe_reply_text(update, append_hint(nina_sales_pipeline_risk_answer(user_id), "stuck"))
             return
 
         if lower in ["client work", "client work status", "client work view"]:
@@ -14339,7 +14401,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if lower.startswith("kas notiek ar ") or lower.startswith("kas ar "):
-            await safe_reply_text(update, nina_client_work_view_answer(user_id, user_text))
+            await safe_reply_text(update, append_hint(nina_client_work_view_answer(user_id, user_text), "client_view"))
             return
 
 
@@ -14494,7 +14556,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if lower in ["mani uzdevumi", "uzdevumi", "task list", "tasks"]:
-            await safe_reply_text(update, nina_task_list_answer(user_id))
+            await safe_reply_text(update, append_hint(nina_task_list_answer(user_id), "task_list"))
             return
 
         task_answer = nina_task_answer(user_id, user_text)
