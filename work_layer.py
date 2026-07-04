@@ -1,6 +1,6 @@
 """
 work_layer.py
-Nina Work Layer V1.3 — Context-Aware Message Builder
+Nina Work Layer V1.3.1 — Offer Context Cleanup
 
 Mērķis:
 - pārvērst klienta darba snapshotu praktiskās darba sagatavēs;
@@ -12,7 +12,7 @@ Mērķis:
 
 import re
 
-WORK_LAYER_VERSION = "Nina Work Layer V1.3 — Context-Aware Message Builder"
+WORK_LAYER_VERSION = "Nina Work Layer V1.3.1 — Offer Context Cleanup"
 
 
 def _clean(value):
@@ -156,19 +156,21 @@ def is_work_layer_command(text):
 
 def work_layer_status_answer():
     return (
-        "🧰 Nina Work Layer V1.3 — Context-Aware Message Builder ir aktīvs. ✅\n\n"
+        "🧰 Nina Work Layer V1.3.1 — Offer Context Cleanup ir aktīvs. ✅\n\n"
         "Ko tas dara:\n"
         "• sagatavo piedāvājuma tekstu klientam;\n"
         "• sagatavo follow-up ziņu;\n"
         "• sagatavo zvana plānu;\n"
         "• Smart Message Mode pats izvēlas pareizo ziņas tipu pēc klienta darba snapshota;\n"
         "• katram ziņas tipam dod 3 variantus;\n"
-        "• ziņās ieliek darba tēmu, summu/cenu, termiņu un nākamo soli, ja tie ir atrodami taskā;\n"
+        "• offer ziņās termiņu lieto tikai kā piedāvājuma nosūtīšanas kontekstu, nevis kā darbu sākšanas frāzi;\n"
+        "• follow-up ziņās nevajadzīgi neievelk offer termiņu;\n"
+        "• ziņās ieliek darba tēmu, summu/cenu un tikai atbilstošo kontekstu no taska;\n"
         "• neko nesaglabā datubāzē — tikai sagatavo tekstu darbam.\n\n"
         "Testi:\n"
         "• ko rakstīt Andrim\n"
         "• uztaisi piedāvājumu Andrim\n"
-        "• uzraksti follow-up Andrim\n"
+        "• uzraksti atgādinājums Andrim\n"
         "• sagatavo zvana plānu Andrim\n\n"
         f"Versija: {WORK_LAYER_VERSION}"
     )
@@ -253,18 +255,31 @@ def _build_context(client, tasks=None, memory_snapshot=None):
         "call_task": call_task,
         "subject": _extract_subject(primary, client),
         "price": _extract_price(combined),
-        "when": _extract_start_or_deadline(primary or combined),
+        "offer_send_when": _extract_start_or_deadline(offer_task),
+        "followup_when": _extract_start_or_deadline(followup_task),
+        "call_when": _extract_start_or_deadline(call_task),
     }
 
 
-def _context_sentence(ctx):
+def _context_sentence(ctx, mode="generic"):
     parts = []
     if ctx.get("subject") and ctx.get("subject") != "pārrunāto darbu":
         parts.append(f"darba tēma: {ctx['subject']}")
     if ctx.get("price"):
         parts.append(f"summa/cena: {ctx['price']}")
-    if ctx.get("when"):
-        parts.append(f"termiņš/laiks: {ctx['when']}")
+    when = ""
+    if mode == "offer":
+        when = ctx.get("offer_send_when", "")
+        if when:
+            parts.append(f"piedāvājums jānosūta: {when}")
+    elif mode == "followup":
+        when = ctx.get("followup_when", "")
+        if when:
+            parts.append(f"follow-up termiņš: {when}")
+    elif mode == "call":
+        when = ctx.get("call_when", "")
+        if when:
+            parts.append(f"zvana termiņš: {when}")
     return "; ".join(parts)
 
 
@@ -272,9 +287,9 @@ def _offer_body(ctx, style="normal"):
     voc = _client_vocative(ctx["client"])
     subject = ctx.get("subject") or "pārrunāto darbu"
     price = ctx.get("price")
-    when = ctx.get("when")
+    send_when = ctx.get("offer_send_when")
     price_line = f" Kopējā summa/cena: {price}." if price else ""
-    when_line = f" Darbus / nākamo soli varam virzīt {when}." if when else ""
+    when_line = f" Nosūtu to {send_when}, kā runājām." if send_when else ""
 
     if style == "short":
         return f"Sveiks, {voc}! Nosūtu piedāvājumu par {subject}.{price_line}{when_line} Apskati, lūdzu, un dod ziņu, ja viss der vai vajag ko precizēt."
@@ -296,13 +311,13 @@ def _followup_body(ctx, style="soft"):
     return f"Sveiks, {voc}! Gribēju tikai pieklājīgi pajautāt, vai sanāca apskatīt piedāvājumu{context}.{price_line} Ja ir kādi jautājumi, droši dod ziņu."
 
 
-def _render_variants(title, variants, notes, next_step, ctx=None):
+def _render_variants(title, variants, notes, next_step, ctx=None, mode="generic"):
     lines = [title, "", "Gatavi varianti klientam:", ""]
     for idx, (label, text) in enumerate(variants, 1):
         lines.append(f"{idx}. {label}")
         lines.append(text)
         lines.append("")
-    context_note = _context_sentence(ctx or {})
+    context_note = _context_sentence(ctx or {}, mode=mode)
     if context_note:
         notes = list(notes or []) + [f"konteksts ziņā: {context_note}"]
     lines.append("Ninas darba piezīmes:")
@@ -324,7 +339,7 @@ def build_offer_message(client, tasks=None, memory_snapshot=None):
     notes = [f"klients: {client}", f"saistītais darbs: {ctx.get('offer_task') or 'jānosūta piedāvājums'}"]
     if ctx.get("followup_task"):
         notes.append(f"pēc tam jāseko līdzi: {ctx['followup_task']}")
-    return _render_variants(f"📨 Piedāvājuma varianti — {client}", variants, notes, "izvēlies vienu variantu, pieliec summas / termiņus un nosūti klientam.", ctx)
+    return _render_variants(f"📨 Piedāvājuma varianti — {client}", variants, notes, "izvēlies vienu variantu, pieliec summas / termiņus un nosūti klientam.", ctx, mode="offer")
 
 
 def build_followup_message(client, tasks=None, memory_snapshot=None):
@@ -338,7 +353,7 @@ def build_followup_message(client, tasks=None, memory_snapshot=None):
     notes = [f"klients: {client}", f"follow-up darbs: {ctx.get('followup_task') or 'jāpajautā par atbildi'}"]
     if ctx.get("offer_task"):
         notes.append(f"piedāvājuma konteksts: {ctx['offer_task']}")
-    return _render_variants(f"🔁 Follow-up varianti — {client}", variants, notes, "izvēlies vienu follow-up variantu, nosūti un pēc tam atzīmē klienta atbildi.", ctx)
+    return _render_variants(f"🔁 Follow-up varianti — {client}", variants, notes, "izvēlies vienu follow-up variantu, nosūti un pēc tam atzīmē klienta atbildi.", ctx, mode="followup")
 
 
 def build_call_plan(client, tasks=None, memory_snapshot=None):
@@ -346,14 +361,14 @@ def build_call_plan(client, tasks=None, memory_snapshot=None):
     ctx = _build_context(client, tasks, memory_snapshot)
     subject = ctx.get("subject") or "piedāvājumu"
     price = f" Summa/cena: {ctx['price']}." if ctx.get("price") else ""
-    when = f" Termiņš/laiks: {ctx['when']}." if ctx.get("when") else ""
+    when = f" Zvana termiņš: {ctx['call_when']}." if ctx.get("call_when") else ""
     variants = [
         ("Īsais zvana plāns", f"1. Pajautā, vai piedāvājums par {subject} ir apskatīts.\n2. Noskaidro, vai ir jautājumi par cenu, termiņu vai darba apjomu.{price}{when}\n3. Vienojies par nākamo soli."),
         ("Sarunas skripts", f"Sveiks, {_client_vocative(client)}! Zvanu, lai saprastu, vai sanāca apskatīt piedāvājumu par {subject} un vai ir kādi jautājumi.{price}{when} Ja kaut kas jāprecizē, varu to uzreiz piefiksēt un sagatavot nākamo versiju."),
         ("Iebildumu jautājumi", "• Kas šobrīd traucē pieņemt lēmumu?\n• Vai jautājums ir par cenu, termiņu vai darba apjomu?\n• Ko vajag precizēt, lai varam virzīties tālāk?"),
     ]
     notes = [f"klients: {client}", f"zvans: {ctx.get('call_task') or 'jāzvana klientam'}", f"piedāvājums: {ctx.get('offer_task') or 'nav konkrēta piedāvājuma ieraksta'}", f"follow-up: {ctx.get('followup_task') or 'nav konkrēta follow-up ieraksta'}"]
-    return _render_variants(f"☎️ Zvana varianti — {client}", variants, notes, "izvēlies vienu zvana pieeju, piezvani un pēc sarunas ieraksti rezultātu.", ctx)
+    return _render_variants(f"☎️ Zvana varianti — {client}", variants, notes, "izvēlies vienu zvana pieeju, piezvani un pēc sarunas ieraksti rezultātu.", ctx, mode="call")
 
 
 def _task_kind(text):
@@ -456,7 +471,7 @@ def build_work_layer_answer(user_text, tasks=None, memory_snapshot=None):
             "Pasaki klientu, kuram jāsagatavo teksts.\n\n"
             "Piemēri:\n"
             "• uztaisi piedāvājumu Andrim\n"
-            "• uzraksti follow-up Andrim\n"
+            "• uzraksti atgādinājums Andrim\n"
             "• sagatavo zvana plānu Andrim\n\n"
             f"Versija: {WORK_LAYER_VERSION}"
         )
