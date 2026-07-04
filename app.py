@@ -403,6 +403,32 @@ except Exception as e:
         return "Context debug nav pieejams."
 
 
+
+# NinaOS Memory Intelligence Import
+try:
+    from memory_intelligence import (
+        build_memory_snapshot,
+        memory_status_answer,
+        is_memory_status_command,
+        resolve_memory_command,
+        MEMORY_INTELLIGENCE_VERSION,
+    )
+except Exception as e:
+    print("memory_intelligence.py imports nav pieejams:", e)
+    MEMORY_INTELLIGENCE_VERSION = "Memory Intelligence nav pieslēgts"
+
+    def build_memory_snapshot(user_id, tasks=None, context=None, recent_messages=None):
+        return {}
+
+    def memory_status_answer(snapshot=None):
+        return "Memory Intelligence nav pieslēgts."
+
+    def is_memory_status_command(text):
+        return False
+
+    def resolve_memory_command(text, snapshot=None):
+        return text
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -14693,6 +14719,44 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_text = update.message.text
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
+
+        # =========================
+        # Core 2.8 — Memory Intelligence V1
+        # =========================
+        try:
+            active_ctx_for_memory = get_active_context(user_id)
+        except Exception:
+            active_ctx_for_memory = {}
+
+        try:
+            memory_snapshot = build_memory_snapshot(
+                user_id,
+                tasks=nina_clean_real_tasks(user_id, limit=50),
+                context=active_ctx_for_memory,
+                recent_messages=[],
+            )
+        except Exception as e:
+            print("Memory Intelligence snapshot kļūda:", repr(e))
+            memory_snapshot = {}
+
+        if is_memory_status_command(user_text):
+            await safe_reply_text(update, memory_status_answer(memory_snapshot))
+            return
+
+        try:
+            memory_rewritten_text = resolve_memory_command(user_text, memory_snapshot)
+        except Exception as e:
+            print("Memory Intelligence rewrite kļūda:", repr(e))
+            memory_rewritten_text = user_text
+
+        if memory_rewritten_text and memory_rewritten_text != user_text:
+            user_text = memory_rewritten_text
+            lower = (user_text or "").strip().lower()
+            try:
+                update_context_from_text(user_id, user_text, source="memory_intelligence_rewrite")
+            except Exception:
+                pass
+
 
         # Core 2.7 — Context V1: resolve short/pronoun commands before normal routing.
         try:
