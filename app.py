@@ -14831,8 +14831,8 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, nina_public_answer(nina_initiative_answer(user_id)))
             return
 
-        # Nina Work Layer V1 — Offer & Follow-up Skills
-        # Ģenerē praktiskas klientu darba sagataves, bet neko nesaglabā datubāzē.
+        # Nina Work Layer V1.1 — Smart Message Mode
+        # Ģenerē praktiskas klientu darba sagataves un automātiski izvēlas pareizo ziņas tipu.
         if lower in ["work layer", "work layer status", "nina work layer", "work skills", "darba prasmes"]:
             await safe_reply_text(update, nina_public_answer(work_layer_status_answer()))
             return
@@ -14846,14 +14846,14 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 work_answer = build_work_layer_answer(user_text, tasks=work_tasks, memory_snapshot=memory_snapshot)
             except Exception as e:
                 print("Work Layer route kļūda:", repr(e))
-                work_answer = "🧰 Work Layer šobrīd nevarēja sagatavot atbildi. Pamēģini vēlreiz ar klienta vārdu.\n\nVersija: Nina Work Layer V1"
+                work_answer = "🧰 Work Layer šobrīd nevarēja sagatavot atbildi. Pamēģini vēlreiz ar klienta vārdu.\n\nVersija: Nina Work Layer V1.1"
 
             try:
-                v40_log_usage(user_id, "work_layer_v1", user_text)
+                v40_log_usage(user_id, "work_layer_v11", user_text)
             except Exception:
                 pass
             try:
-                save_conversation_state(user_id, user_text, work_answer, "work_layer_v1", v80_mood(user_text), "work_layer")
+                save_conversation_state(user_id, user_text, work_answer, "work_layer_v11", v80_mood(user_text), "work_layer")
             except Exception:
                 pass
 
