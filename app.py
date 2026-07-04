@@ -14423,17 +14423,56 @@ def nina_task_cleanup_confirm(user_id):
 # NinaOS Task Cleanup V1.1 + Task List Filter Fix
 # =========================
 
+def _task_deadline_rank(task):
+    title = ((task or {}).get("title") or "").lower()
+    deadline = str((task or {}).get("deadline") or "").lower()
+    blob = f"{title} {deadline}"
+    order = ["today", "tomorrow", "day_after_tomorrow", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+             "šodien", "rīt", "parīt", "pirmdien", "otrdien", "trešdien", "ceturtdien", "piektdien", "sestdien", "svētdien"]
+    for i, token in enumerate(order):
+        if token in blob:
+            return len(order) - i
+    return 0
+
+
+def _task_client_guess(task):
+    client = ((task or {}).get("client") or "").strip()
+    if client:
+        return client
+    blob = f"{(task or {}).get('title','')} {(task or {}).get('raw_text','')}".lower()
+    if any(x in blob for x in ["andris", "andri", "andrim"]):
+        return "Andris"
+    if any(x in blob for x in ["anna", "annai", "annu"]):
+        return "Anna"
+    if any(x in blob for x in ["jānis", "janis", "jāni", "jani", "jānim", "janim"]):
+        return "Jānis"
+    return ""
+
+
+def _task_semantic_key(task):
+    title = ((task or {}).get("title") or (task or {}).get("raw_text") or "").strip().lower()
+    client = _task_client_guess(task).lower()
+    if not title:
+        return ""
+
+    if ("jāpajautā" in title or "japajauta" in title or "par atbildi" in title) and client:
+        return f"followup_answer::{client}"
+    if ("jānosūta piedāvājums" in title or "jānosuta piedāvājumu" in title or "piedāvājums" in title) and client:
+        return f"offer::{client}"
+    if ("jāzvana" in title or "jāpiezvana" in title or "jazvana" in title or "japiezvana" in title) and client:
+        return f"call::{client}"
+
+    return f"raw::{title}"
+
+
 def nina_clean_real_tasks(user_id, limit=200):
     tasks = nina_latest_tasks(user_id, limit=limit) or []
-    result = []
-    seen = set()
+    buckets = {}
 
     for task in tasks:
         title = ((task or {}).get("title") or (task or {}).get("raw_text") or "").strip()
-        key = title.lower()
-        if not key or key in seen:
+        if not title:
             continue
-        seen.add(key)
 
         try:
             if not is_active_real_task(task):
@@ -14445,9 +14484,23 @@ def nina_clean_real_tasks(user_id, limit=200):
             if title.lower() in ["follow-up", "followup", "follow up", "[deleted task cleanup]"]:
                 continue
 
-        result.append(task)
+        key = _task_semantic_key(task)
+        if not key:
+            continue
 
-    return result
+        existing = buckets.get(key)
+        if not existing:
+            buckets[key] = task
+            continue
+
+        # Dod priekšroku ierakstam ar termiņu / pilnāku follow-up formulējumu.
+        existing_score = _task_deadline_rank(existing) + (3 if "par atbildi" in ((existing.get("title") or "").lower()) else 0)
+        new_score = _task_deadline_rank(task) + (3 if "par atbildi" in ((task.get("title") or "").lower()) else 0)
+
+        if new_score > existing_score:
+            buckets[key] = task
+
+    return list(buckets.values())
 
 
 def nina_task_list_answer(user_id):
