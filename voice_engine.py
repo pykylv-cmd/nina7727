@@ -1,33 +1,36 @@
 """
 voice_engine.py
-NinaOS Voice Intake V1.7 — Routing & Deadline Fix
+NinaOS Voice Intake V1.7.1 — Import Fix + Routing & Deadline Fix
 
 Mērķis:
+- salabot V1.7 import kļūdu;
+- atstāt pilnu transkripcijas funkciju;
 - saglabāt termiņu balss follow-up komandās;
-- piespiest balss prioritātes komandas iet uz Initiative/Daily/Client ceļu;
-- pārvērst 'piezvanīt Andrim' un līdzīgus šķībus transkriptus par īstiem taskiem.
+- pārvērst balss tekstu par skaidru NinaOS komandu pirms nodošanas app.py routerim.
 """
 
+import os
 import re
+import tempfile
 
-VOICE_ENGINE_VERSION = "Voice Intake V1.7 — Routing & Deadline Fix"
-
+VOICE_ENGINE_VERSION = "Voice Intake V1.7.1 — Import Fix + Routing Fix"
 
 LAST_VOICE_DEBUG = {
     "raw": "",
     "cleaned": "",
     "route": "",
+    "error": "",
 }
 
 
 def voice_status_answer():
     return (
-        "🎙 Voice Intake V1.7 — Routing & Deadline Fix ir aktīvs. ✅\n\n"
+        "🎙 Voice Intake V1.7.1 — Import Fix + Routing Fix ir aktīvs. ✅\n\n"
         "Ko tas labo:\n"
+        "• Voice Engine imports vairs nekrīt;\n"
+        "• transkripcija paliek pieslēgta;\n"
         "• follow-up balss komandās saglabā termiņu;\n"
         "• 'ko man tagad darīt' virza uz Initiative ceļu;\n"
-        "• 'mana diena' virza uz Daily Brief ceļu;\n"
-        "• 'klienti' virza uz klientu pārskatu;\n"
         "• 'rīt jāpiezvana Andrim' pārvērš par īstu uzdevumu.\n\n"
         "Testi:\n"
         "• rīt jānosūta piedāvājums Andrim\n"
@@ -40,6 +43,7 @@ def voice_status_answer():
 
 def build_voice_error_answer(error_text=""):
     error_text = (error_text or "").strip()
+    LAST_VOICE_DEBUG["error"] = error_text
     if error_text:
         return (
             "🎙 Balss ziņu saņēmu, bet šoreiz neizdevās to pārvērst tekstā.\n\n"
@@ -54,44 +58,89 @@ def build_voice_error_answer(error_text=""):
     )
 
 
-def _normalize_spaces(text):
-    return re.sub(r"\s+", " ", str(text or "")).strip()
+def _safe_suffix(filename):
+    name = (filename or "voice.ogg").lower().strip()
+    for suffix in [".ogg", ".oga", ".opus", ".mp3", ".m4a", ".wav", ".webm", ".mp4", ".mpeg", ".mpga"]:
+        if name.endswith(suffix):
+            return suffix
+    return ".ogg"
 
 
-def _lv_lower(text):
-    return str(text or "").strip().lower()
-
-
-def _has_any(text, words):
-    lower = _lv_lower(text)
-    return any(w in lower for w in words)
-
-
-def _detect_deadline(text):
-    lower = _lv_lower(text)
-    if _has_any(lower, ["šodien", "sodien", "šodienas"]):
-        return "šodien"
-    if _has_any(lower, ["rīt", "rit", "riit", "rītdien", "ritdien"]):
-        return "rīt"
-    if _has_any(lower, ["parīt", "parit"]):
-        return "parīt"
-    weekdays = [
-        ("pirmdien", ["pirmdien"]),
-        ("otrdien", ["otrdien"]),
-        ("trešdien", ["trešdien", "tresdien"]),
-        ("ceturtdien", ["ceturtdien"]),
-        ("piektdien", ["piektdien", "piekdien", "piktien", "piekdienā", "piektdienā"]),
-        ("sestdien", ["sestdien"]),
-        ("svētdien", ["svētdien", "svetdien"]),
-    ]
-    for canonical, variants in weekdays:
-        if any(v in lower for v in variants):
-            return canonical
+def _extract_text_from_result(result):
+    if result is None:
+        return ""
+    if isinstance(result, str):
+        return result.strip()
+    text = getattr(result, "text", None)
+    if text:
+        return str(text).strip()
+    if isinstance(result, dict):
+        text = result.get("text") or result.get("transcript")
+        if text:
+            return str(text).strip()
+    try:
+        text = result["text"]
+        if text:
+            return str(text).strip()
+    except Exception:
+        pass
     return ""
 
 
-def _has_andris(text):
-    return _has_any(text, ["andri", "andrim", "andris", "antri", "antrim", "andriem", "andriu", "andri"])
+def transcribe_audio_with_openai(openai_client, audio_bytes, filename="voice.ogg"):
+    """Telegram audio bytes -> teksts. Pilnā funkcija, lai app.py imports nekristu."""
+    if not openai_client:
+        LAST_VOICE_DEBUG["error"] = "OpenAI client nav pieejams"
+        return ""
+
+    audio_bytes = audio_bytes or b""
+    if not audio_bytes:
+        LAST_VOICE_DEBUG["error"] = "audio bytes ir tukšs"
+        return ""
+
+    suffix = _safe_suffix(filename)
+    temp_path = ""
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(audio_bytes)
+            temp_path = tmp.name
+
+        with open(temp_path, "rb") as audio_file:
+            try:
+                result = openai_client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    response_format="text",
+                    language="lv",
+                )
+            except TypeError:
+                audio_file.seek(0)
+                result = openai_client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                )
+
+        transcript = _extract_text_from_result(result)
+        LAST_VOICE_DEBUG["raw"] = transcript
+        LAST_VOICE_DEBUG["error"] = ""
+        return transcript
+
+    except Exception as e:
+        LAST_VOICE_DEBUG["error"] = repr(e)
+        print("Voice Intake transcribe kļūda:", repr(e))
+        return ""
+
+    finally:
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
+
+def _normalize_spaces(text):
+    return re.sub(r"\s+", " ", str(text or "")).strip()
 
 
 def _cleanup_noise(text):
@@ -104,129 +153,92 @@ def _cleanup_noise(text):
     replacements = {
         "pazūnīt": "piezvanīt",
         "pazunīt": "piezvanīt",
-        "pazvanīt": "piezvanīt",
+        "pazunīt": "piezvanīt",
         "pazudīt": "piezvanīt",
-        "zvanīt": "piezvanīt",
-        "piedzvanīt": "piezvanīt",
-        "piez vana": "piezvana",
-        "biedz vana": "piezvana",
-        "biedzvana": "piezvana",
-        "biedzu vana": "piezvana",
+        "pazūdīt": "piezvanīt",
+        "pazvanīt": "piezvanīt",
         "jābiedz vana": "jāpiezvana",
-        "jā biezvana": "jāpiezvana",
-        "jā piez vana": "jāpiezvana",
+        "jābied zvan": "jāpiezvana",
+        "jābiezvana": "jāpiezvana",
+        "jāpiezvana": "jāpiezvana",
+        "rit": "rīt",
+        "sodien": "šodien",
+        "japajauta": "jāpajautā",
         "japiezvana": "jāpiezvana",
-        "jāpie zvana": "jāpiezvana",
+        "janosuta": "jānosūta",
         "piedavajumu": "piedāvājumu",
         "piedavajums": "piedāvājums",
-        "piedāvājums andrim": "piedāvājums Andrim",
-        "japajauta": "jāpajautā",
-        "jā pajautā": "jāpajautā",
-        "janosuta": "jānosūta",
-        "jā nosūta": "jānosūta",
-        "jaanosuuta": "jānosūta",
-        "rit": "rīt",
-        "riit": "rīt",
-        "sodien": "šodien",
-        "piekdien": "piektdien",
-        "piktien": "piektdien",
-        "antrim": "Andrim",
-        "andriem": "Andrim",
-        "andrim": "Andrim",
-        "andris": "Andris",
-        "andri": "Andri",
+        "antrim": "andrim",
+        "andriem": "andrim",
+        "uandrim": "andrim",
     }
 
     for bad, good in replacements.items():
-        lower = lower.replace(bad, good.lower())
+        lower = lower.replace(bad, good)
 
-    # noņem runas parazītvārdus, bet nepieskaras jēgai
-    lower = re.sub(r"\b(ā|nu|emm|mm|eee|ēē|eu|nu jā|vienkārši|lūdzu)\b", " ", lower, flags=re.IGNORECASE)
+    lower = re.sub(r"\b(ā|nu|emm|mm|eee|eu|nu jā|vienkārši)\b", " ", lower)
     lower = _normalize_spaces(lower)
 
-    # normalizē Andra formas pēc tīrīšanas
-    lower = re.sub(r"\bandrim\b", "Andrim", lower, flags=re.IGNORECASE)
     lower = re.sub(r"\bandris\b", "Andris", lower, flags=re.IGNORECASE)
+    lower = re.sub(r"\bandrim\b", "Andrim", lower, flags=re.IGNORECASE)
     lower = re.sub(r"\bandri\b", "Andri", lower, flags=re.IGNORECASE)
 
     return lower.strip()
 
 
-def _rewrite_system_command(text):
-    lower = _lv_lower(text)
+def _route_command(text):
+    lower = (text or "").lower().strip()
 
-    # Initiative komandas — agresīvi virzām uz pārbaudīto tekstu
-    if (
-        "ko man" in lower and ("tagad" in lower or "darīt" in lower or "darit" in lower)
-    ) or _has_any(lower, ["kas svarīgākais", "kas svarigakais", "ko iesaki", "ar ko sākt", "ar ko sakt"]):
+    if any(x in lower for x in ["ko man tagad", "kas svarīgākais", "kas svarigakais", "ar ko sākt", "ar ko sakt", "ko iesaki"]):
         return "ko man tagad darīt", "initiative"
-
-    if _has_any(lower, ["mana diena", "darba inbox", "ko man šodien", "ko man sodien", "šodienas plāns", "sodienas plans"]):
+    if any(x in lower for x in ["mana diena", "darba inbox", "ko man šodien", "ko man sodien"]):
         return "mana diena", "daily_brief"
-
-    if lower.strip() in {"klienti", "mani klienti", "klientu pārskats", "klientu parskats"} or _has_any(lower, ["parādi klientus", "paradi klientus"]):
+    if lower in ["klienti", "mani klienti", "klientu pārskats", "klientu parskats"]:
         return "klienti", "clients"
 
-    return "", ""
+    if "jāpajautā" in lower and "andr" in lower:
+        if "piektdien" in lower:
+            return "piektdien jāpajautā Andrim par atbildi", "followup"
+        if "rīt" in lower:
+            return "rīt jāpajautā Andrim par atbildi", "followup"
+        return "jāpajautā Andrim par atbildi", "followup"
 
+    if ("piedāvāj" in lower or "piedavaj" in lower) and "andr" in lower:
+        if "rīt" in lower:
+            return "rīt jānosūta piedāvājums Andrim", "task"
+        if "šodien" in lower:
+            return "šodien jānosūta piedāvājums Andrim", "task"
+        return "jānosūta piedāvājums Andrim", "task"
 
-def _rewrite_task_command(text):
-    t = _normalize_spaces(text)
-    lower = _lv_lower(t)
-    deadline = _detect_deadline(t)
-    deadline_prefix = (deadline + " ") if deadline else ""
+    if "piezvan" in lower and "andr" in lower:
+        if "rīt" in lower:
+            return "rīt jāpiezvana Andrim", "task"
+        if "piektdien" in lower:
+            return "piektdien jāpiezvana Andrim", "task"
+        return "jāpiezvana Andrim", "task"
 
-    system_cmd, route = _rewrite_system_command(t)
-    if system_cmd:
-        return system_cmd, route
-
-    # Piedāvājums Andrim
-    if _has_andris(lower) and _has_any(lower, ["piedāvāj", "piedavaj", "offer", "tāme", "tame"]):
-        return f"{deadline_prefix}jānosūta piedāvājums Andrim".strip(), "task"
-
-    # Follow-up / pajautāt par atbildi Andrim — termiņu saglabājam obligāti
-    if _has_andris(lower) and (_has_any(lower, ["jāpajautā", "pajaut", "atbild", "follow"])):
-        return f"{deadline_prefix}jāpajautā Andrim par atbildi".strip(), "followup"
-
-    # Piezvanīt Andrim — kā īsts task
-    if _has_andris(lower) and _has_any(lower, ["piezvan", "zvan", "jāpiezvana", "japiezvana", "vana"]):
-        return f"{deadline_prefix}jāpiezvana Andrim".strip(), "task"
-
-    # Vispārīgs Andris + termiņš + neskaidra darbība: labāk izveidot follow-up, nevis pļāpāt
-    if _has_andris(lower) and deadline and _has_any(lower, ["atbild", "jaut", "pajaut", "sazin", "klient"]):
-        return f"{deadline_prefix}jāpajautā Andrim par atbildi".strip(), "followup"
-
-    return t, "general"
+    return text, "general"
 
 
 def cleanup_voice_transcript(transcript):
-    raw = str(transcript or "").strip()
-    cleaned = _cleanup_noise(raw)
+    cleaned = _cleanup_noise(transcript)
     if not cleaned:
-        LAST_VOICE_DEBUG.update({"raw": raw, "cleaned": "", "route": "empty"})
+        LAST_VOICE_DEBUG["cleaned"] = ""
+        LAST_VOICE_DEBUG["route"] = "empty"
         return ""
-
-    rewritten, route = _rewrite_task_command(cleaned)
-    rewritten = _normalize_spaces(rewritten)
-
-    LAST_VOICE_DEBUG.update({"raw": raw, "cleaned": rewritten, "route": route or "general"})
-    return rewritten
+    routed, route = _route_command(cleaned)
+    routed = _normalize_spaces(routed)
+    LAST_VOICE_DEBUG["cleaned"] = routed
+    LAST_VOICE_DEBUG["route"] = route
+    return routed
 
 
 def voice_last_debug_answer():
     return (
-        "🎙 Voice pēdējais debug\n\n"
-        f"Raw: {LAST_VOICE_DEBUG.get('raw') or '—'}\n"
-        f"Cleaned: {LAST_VOICE_DEBUG.get('cleaned') or '—'}\n"
-        f"Route: {LAST_VOICE_DEBUG.get('route') or '—'}\n\n"
-        f"Versija: {VOICE_ENGINE_VERSION}"
-    )
-
-
-def build_voice_debug_answer(original_transcript, cleaned_transcript):
-    return (
-        "🎙 Voice Cleanup debug\n\n"
-        f"Raw: {original_transcript}\n"
-        f"Cleaned: {cleaned_transcript}\n\n"
+        "🎙 Voice debug\n\n"
+        f"Raw: {LAST_VOICE_DEBUG.get('raw', '')}\n"
+        f"Cleaned: {LAST_VOICE_DEBUG.get('cleaned', '')}\n"
+        f"Route: {LAST_VOICE_DEBUG.get('route', '')}\n"
+        f"Error: {LAST_VOICE_DEBUG.get('error', '')}\n\n"
         f"Versija: {VOICE_ENGINE_VERSION}"
     )
