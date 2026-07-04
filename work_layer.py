@@ -1,6 +1,6 @@
 """
 work_layer.py
-Nina Work Layer V1.7 — Objection Handling & Closing
+Nina Work Layer V1.7.1 — Objection Context Cleanup
 
 Mērķis:
 - pārvērst klienta darba snapshotu praktiskās darba sagatavēs;
@@ -12,7 +12,7 @@ Mērķis:
 
 import re
 
-WORK_LAYER_VERSION = "Nina Work Layer V1.7 — Objection Handling & Closing"
+WORK_LAYER_VERSION = "Nina Work Layer V1.7.1 — Objection Context Cleanup"
 
 
 def _clean(value):
@@ -199,7 +199,7 @@ def is_work_layer_command(text):
 
 def work_layer_status_answer():
     return (
-        "🧰 Nina Work Layer V1.7 — Objection Handling & Closing ir aktīvs. ✅\n\n"
+        "🧰 Nina Work Layer V1.7.1 — Objection Context Cleanup ir aktīvs. ✅\n\n"
         "Ko tas dara:\n"
         "• sagatavo piedāvājuma tekstu klientam;\n"
         "• sagatavo follow-up ziņu;\n"
@@ -388,6 +388,12 @@ def _context_sentence(ctx, mode="generic"):
         when = ctx.get("call_when", "")
         if when:
             parts.append(f"zvana termiņš: {when}")
+        if ctx.get("job_start_when"):
+            parts.append(f"darbu sākšana: {ctx['job_start_when']}")
+    elif mode == "objection":
+        # V1.7.1: objection reply nav follow-up ziņa, tāpēc te nerādām follow-up termiņu.
+        add_subject()
+        add_price()
         if ctx.get("job_start_when"):
             parts.append(f"darbu sākšana: {ctx['job_start_when']}")
     else:
@@ -632,7 +638,7 @@ def build_objection_answer(user_text, client, tasks=None, memory_snapshot=None):
         notes,
         "izvēlies atbildes toni, nosūti klientam un uzreiz nofiksē konkrētu nākamo soli / follow-up.",
         ctx,
-        mode="followup",
+        mode="objection",
     )
 
 def build_call_plan(client, tasks=None, memory_snapshot=None):
