@@ -373,6 +373,36 @@ except Exception as e:
         return "Voice debug nav pieejams."
 
 
+# NinaOS Context Engine Import
+try:
+    from context_engine import (
+        resolve_context_command,
+        update_context_from_text,
+        get_active_context,
+        context_status_answer,
+        context_debug_answer,
+        CONTEXT_ENGINE_VERSION,
+    )
+except Exception as e:
+    print("context_engine.py imports nav pieejams:", e)
+    CONTEXT_ENGINE_VERSION = "Context Engine nav pieslēgts"
+
+    def resolve_context_command(text, context):
+        return text
+
+    def update_context_from_text(user_id, text, source="incoming"):
+        return {}
+
+    def get_active_context(user_id):
+        return {}
+
+    def context_status_answer(user_id=None):
+        return "Context Engine nav pieslēgts."
+
+    def context_debug_answer(user_id):
+        return "Context debug nav pieejams."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -13034,7 +13064,7 @@ class VoiceTextUpdateProxy:
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Voice Intake V1.8: Telegram voice/audio -> cleanup routing -> existing reply router via proxy update."""
+    """Voice Intake V1.8.2: Telegram voice/audio -> cleanup routing -> existing reply router via proxy update."""
     try:
         if not update.message:
             return
@@ -14611,6 +14641,19 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
 
+        # Core 2.7 — Context V1: resolve short/pronoun commands before normal routing.
+        try:
+            original_user_text = user_text
+            active_context = get_active_context(user_id)
+            resolved_user_text = resolve_context_command(user_text, active_context)
+            if resolved_user_text and resolved_user_text != user_text:
+                print(f"Context V1 rewrite: {user_text!r} -> {resolved_user_text!r}")
+                user_text = resolved_user_text
+                lower = user_text.strip().lower()
+            update_context_from_text(user_id, user_text, source="incoming_resolved")
+        except Exception as e:
+            print("Context V1 resolve kļūda:", repr(e))
+
 
         if lower in ["voice status", "voice intake status", "audio status", "balss statuss", "balss"]:
             await safe_reply_text(update, voice_status_answer())
@@ -14618,6 +14661,14 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if lower in ["voice debug", "audio debug", "balss debug"]:
             await safe_reply_text(update, voice_last_debug_answer())
+            return
+
+        if lower in ["context status", "context", "konteksts", "konteksta statuss"]:
+            await safe_reply_text(update, context_status_answer(user_id))
+            return
+
+        if lower in ["context debug", "konteksts debug", "konteksta debug"]:
+            await safe_reply_text(update, context_debug_answer(user_id))
             return
 
         if lower in ["presentation status", "language status", "valodu slānis", "valodu slanis", "presentation layer"]:
