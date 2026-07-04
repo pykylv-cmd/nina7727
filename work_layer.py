@@ -1,6 +1,6 @@
 """
 work_layer.py
-Nina Work Layer V1.6 — Call Intelligence
+Nina Work Layer V1.6.1 — Snapshot Source Cleanup
 
 Mērķis:
 - pārvērst klienta darba snapshotu praktiskās darba sagatavēs;
@@ -12,7 +12,7 @@ Mērķis:
 
 import re
 
-WORK_LAYER_VERSION = "Nina Work Layer V1.6 — Call Intelligence"
+WORK_LAYER_VERSION = "Nina Work Layer V1.6.1 — Snapshot Source Cleanup"
 
 
 def _clean(value):
@@ -98,12 +98,52 @@ def _client_tasks(client, tasks=None):
     return result
 
 
+def _is_ui_command_text(text):
+    """True, ja teksts ir Work Layer komanda, nevis saglabāts darba fakts/task."""
+    lower = _lower(text)
+    if not lower:
+        return False
+
+    command_starts = [
+        "uzraksti ", "sagatavo ", "uztaisi ", "ko rakstīt", "ko rakstit",
+        "ko sūtīt", "ko sutit", "ko nosūtīt", "ko nosutit",
+        "work layer", "nina work layer",
+    ]
+    if any(lower.startswith(x) for x in command_starts):
+        real_task_markers = [
+            "jānosūta", "janosuta", "jāpajautā", "japajauta",
+            "jāzvana", "jazvana", "jāpiezvana", "japiezvana",
+            "rīt jā", "rit jā", "rit ja", "šodien jā", "sodien jā",
+            "piektdien jā", "pirmdien jā", "otrdien jā", "trešdien jā", "tresdien jā",
+            "ceturtdien jā", "sestdien jā", "svētdien jā", "svetdien jā",
+        ]
+        return not any(marker in lower for marker in real_task_markers)
+
+    # Frāzes kā "uzraksti atgādinājums Andrim" vai "sagatavo zvana plānu Andrim" ir komandas.
+    if any(x in lower for x in ["zvana plānu", "zvana planu", "sarunas plānu", "sarunas planu"]):
+        return True
+
+    return False
+
+
+def _snapshot_value(snap, keys, kind=""):
+    for key in keys:
+        value = _clean((snap or {}).get(key, ""))
+        if value and not _is_ui_command_text(value):
+            return value
+    return ""
+
+
+def _real_client_tasks(client, tasks=None):
+    return [task for task in _client_tasks(client, tasks) if not _is_ui_command_text(_task_text(task))]
+
+
 def _find_offer_task(client, tasks=None, memory_snapshot=None):
     snap = memory_snapshot or {}
-    for key in ["offer", "last_offer", "proposal", "piedāvājums"]:
-        if snap.get(key):
-            return _clean(snap.get(key))
-    for task in _client_tasks(client, tasks):
+    value = _snapshot_value(snap, ["offer", "last_offer", "proposal", "piedāvājums"], kind="offer")
+    if value:
+        return value
+    for task in _real_client_tasks(client, tasks):
         text = _task_text(task)
         if any(x in text.lower() for x in ["piedāvāj", "piedavaj", "tāme", "tame", "jānosūta", "janosuta"]):
             return text
@@ -112,22 +152,23 @@ def _find_offer_task(client, tasks=None, memory_snapshot=None):
 
 def _find_followup_task(client, tasks=None, memory_snapshot=None):
     snap = memory_snapshot or {}
-    for key in ["followup", "follow_up", "last_followup"]:
-        if snap.get(key):
-            return _clean(snap.get(key))
-    for task in _client_tasks(client, tasks):
+    value = _snapshot_value(snap, ["followup", "follow_up", "last_followup"], kind="followup")
+    if value:
+        return value
+    for task in _real_client_tasks(client, tasks):
         text = _task_text(task)
-        if any(x in text.lower() for x in ["jāpajautā", "japajauta", "follow", "par atbildi", "atgādin", "atgadin"]):
+        lower = text.lower()
+        if any(x in lower for x in ["jāpajautā", "japajauta", "follow", "par atbildi", "atgādin", "atgadin"]):
             return text
     return ""
 
 
 def _find_call_task(client, tasks=None, memory_snapshot=None):
     snap = memory_snapshot or {}
-    for key in ["call", "zvans", "last_call"]:
-        if snap.get(key):
-            return _clean(snap.get(key))
-    for task in _client_tasks(client, tasks):
+    value = _snapshot_value(snap, ["call", "zvans", "last_call"], kind="call")
+    if value:
+        return value
+    for task in _real_client_tasks(client, tasks):
         text = _task_text(task)
         if any(x in text.lower() for x in ["jāzvana", "jazvana", "jāpiezvana", "japiezvana", "zvans"]):
             return text
@@ -156,7 +197,7 @@ def is_work_layer_command(text):
 
 def work_layer_status_answer():
     return (
-        "🧰 Nina Work Layer V1.6 — Call Intelligence ir aktīvs. ✅\n\n"
+        "🧰 Nina Work Layer V1.6.1 — Snapshot Source Cleanup ir aktīvs. ✅\n\n"
         "Ko tas dara:\n"
         "• sagatavo piedāvājuma tekstu klientam;\n"
         "• sagatavo follow-up ziņu;\n"
@@ -167,7 +208,7 @@ def work_layer_status_answer():
         "• follow-up ziņās nevajadzīgi neievelk offer termiņu;\n"
         "• ziņās ieliek darba tēmu, summu/cenu un tikai atbilstošo kontekstu no taska;\n"
         "• offer_send_when tagad ņem rīt no rīt jānosūta piedāvājums, nevis nākamnedēļ no darbu sākšanas;\n"
-        "• neko nesaglabā datubāzē — tikai sagatavo tekstu darbam.\n\n"
+        "• snapshot cleanup neuztver UI komandas kā īstus darba taskus;\n• neko nesaglabā datubāzē — tikai sagatavo tekstu darbam.\n\n"
         "Testi:\n"
         "• ko rakstīt Andrim\n"
         "• uztaisi piedāvājumu Andrim\n"
@@ -593,7 +634,7 @@ def _choose_smart_message_type(client, tasks=None, memory_snapshot=None):
     top_kind = _task_kind(top_text)
     if top_text and top_kind in ["offer", "followup", "call"]:
         candidates.append((top_kind, top_text))
-    for task in _client_tasks(client, tasks):
+    for task in _real_client_tasks(client, tasks):
         text = _task_text(task)
         kind = _task_kind(text)
         if kind in ["offer", "followup", "call"]:
@@ -601,7 +642,7 @@ def _choose_smart_message_type(client, tasks=None, memory_snapshot=None):
     deduped, seen = [], set()
     for kind, text in candidates:
         key = (kind, _clean(text).lower())
-        if text and key not in seen:
+        if text and not _is_ui_command_text(text) and key not in seen:
             seen.add(key)
             deduped.append((kind, text))
     if deduped:
