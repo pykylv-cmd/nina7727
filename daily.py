@@ -343,6 +343,36 @@ except Exception as e:
         return False
 
 
+# NinaOS Voice Intake Import
+try:
+    from voice_engine import (
+        transcribe_audio_with_openai,
+        voice_status_answer,
+        build_voice_error_answer,
+        cleanup_voice_transcript,
+        voice_last_debug_answer,
+        VOICE_ENGINE_VERSION,
+    )
+except Exception as e:
+    print("voice_engine.py imports nav pieejams:", e)
+    VOICE_ENGINE_VERSION = "Voice Intake nav pieslēgts"
+
+    def transcribe_audio_with_openai(openai_client, audio_bytes, filename="voice.ogg"):
+        return ""
+
+    def voice_status_answer():
+        return "Voice Intake nav pieslēgts."
+
+    def build_voice_error_answer(error_text=""):
+        return "Balss ziņu saņēmu, bet Voice Intake vēl nav pieslēgts."
+
+    def cleanup_voice_transcript(transcript):
+        return str(transcript or "").strip()
+
+    def voice_last_debug_answer():
+        return "Voice debug nav pieejams."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -12971,6 +13001,105 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
 
+
+class VoiceTextMessageProxy:
+    """Voice V1.5: proxy message with writable text, while reply_text stays on real Telegram message."""
+    def __init__(self, real_message, text):
+        self._real_message = real_message
+        self.text = text
+        self.caption = getattr(real_message, "caption", None)
+        self.photo = None
+        self.voice = None
+        self.audio = None
+        self.document = None
+        self.location = None
+
+    async def reply_text(self, *args, **kwargs):
+        return await self._real_message.reply_text(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._real_message, name)
+
+
+class VoiceTextUpdateProxy:
+    """Voice V1.5: proxy update so existing reply() can process transcript as normal text."""
+    def __init__(self, real_update, transcript):
+        self._real_update = real_update
+        self.message = VoiceTextMessageProxy(real_update.message, transcript)
+        self.effective_user = real_update.effective_user
+        self.effective_chat = getattr(real_update, "effective_chat", None)
+
+    def __getattr__(self, name):
+        return getattr(self._real_update, name)
+
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Voice Intake V1.8.2: Telegram voice/audio -> cleanup routing -> existing reply router via proxy update."""
+    try:
+        if not update.message:
+            return
+
+        user_id = str(update.effective_user.id) if update.effective_user else "unknown"
+
+        voice = getattr(update.message, "voice", None)
+        audio = getattr(update.message, "audio", None)
+        document = getattr(update.message, "document", None)
+
+        tg_audio = voice or audio
+        filename = "voice.ogg"
+
+        if audio and getattr(audio, "file_name", None):
+            filename = audio.file_name
+        elif voice:
+            filename = "voice.ogg"
+        elif document and getattr(document, "mime_type", "").startswith("audio/"):
+            tg_audio = document
+            filename = getattr(document, "file_name", None) or "audio.ogg"
+
+        if not tg_audio:
+            return
+
+        tg_file = await context.bot.get_file(tg_audio.file_id)
+
+        buffer = BytesIO()
+        await tg_file.download_to_memory(out=buffer)
+        audio_bytes = buffer.getvalue()
+
+        print(f"Voice Intake V1.8 handler: received file={filename} bytes={len(audio_bytes)}")
+
+        transcript = transcribe_audio_with_openai(
+            client,
+            audio_bytes,
+            filename=filename,
+        )
+
+        if not transcript:
+            await safe_reply_text(update, build_voice_error_answer(""))
+            return
+
+        cleaned_transcript = cleanup_voice_transcript(transcript)
+        if not cleaned_transcript:
+            await safe_reply_text(update, build_voice_error_answer("Voice cleanup atgrieza tukšu tekstu."))
+            return
+
+        print(f"Voice Intake V1.8 cleaned transcript: {cleaned_transcript}")
+
+        try:
+            v40_log_usage(user_id, "voice", cleaned_transcript)
+            save_conversation_state(user_id, "[VOICE] " + cleaned_transcript, "", "voice_transcript", "neutral", "voice")
+        except Exception as e:
+            print("Voice conversation save kļūda:", e)
+
+        voice_update = VoiceTextUpdateProxy(update, cleaned_transcript)
+        await reply(voice_update, context)
+
+    except Exception as e:
+        print("handle_voice V1.8 kļūda:", repr(e))
+        try:
+            await safe_reply_text(update, build_voice_error_answer(str(e)))
+        except Exception:
+            pass
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """V114.0: Telegram foto apstrāde ar Vision Engine."""
     try:
@@ -14482,6 +14611,15 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
 
+
+        if lower in ["voice status", "voice intake status", "audio status", "balss statuss", "balss"]:
+            await safe_reply_text(update, voice_status_answer())
+            return
+
+        if lower in ["voice debug", "audio debug", "balss debug"]:
+            await safe_reply_text(update, voice_last_debug_answer())
+            return
+
         if lower in ["presentation status", "language status", "valodu slānis", "valodu slanis", "presentation layer"]:
             await safe_reply_text(update, presentation_status_answer())
             return
@@ -15905,6 +16043,7 @@ telegram_app = (
 telegram_app.add_handler(CommandHandler("start", start_command))
 telegram_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 telegram_app.add_handler(MessageHandler(filters.LOCATION, handle_location))
+telegram_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.Document.AUDIO, handle_voice))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 def run_flask_server():
