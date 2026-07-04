@@ -1,6 +1,6 @@
 """
 work_layer.py
-Nina Work Layer V1.1 — Smart Message Mode
+Nina Work Layer V1.1.1 — Smart Priority Fix
 
 Mērķis:
 - pārvērst klienta darba snapshotu praktiskās darba sagatavēs;
@@ -11,7 +11,7 @@ Mērķis:
 
 import re
 
-WORK_LAYER_VERSION = "Nina Work Layer V1.1 — Smart Message Mode"
+WORK_LAYER_VERSION = "Nina Work Layer V1.1.1 — Smart Priority Fix"
 
 
 def _clean(value):
@@ -204,12 +204,13 @@ def is_work_layer_command(text):
 
 def work_layer_status_answer():
     return (
-        "🧰 Nina Work Layer V1.1 — Smart Message Mode ir aktīvs. ✅\n\n"
+        "🧰 Nina Work Layer V1.1.1 — Smart Priority Fix ir aktīvs. ✅\n\n"
         "Ko tas dara:\n"
         "• sagatavo piedāvājuma tekstu klientam;\n"
         "• sagatavo follow-up ziņu;\n"
         "• sagatavo zvana plānu;\n"
         "• Smart Message Mode pats izvēlas pareizo ziņas tipu pēc klienta darba snapshota;\n"
+        "• Smart Priority Fix dod priekšroku aktīvam piedāvājumam pirms follow-up;\n"
         "• neko nesaglabā datubāzē — tikai sagatavo tekstu darbam.\n\n"
         "Smart komandas:\n"
         "• ko rakstīt Andrim\n"
@@ -337,49 +338,86 @@ def _task_kind(text):
 
 def _snapshot_top_text(memory_snapshot=None):
     snap = memory_snapshot or {}
-    for key in ["top_task", "top_work", "priority", "last_task", "task"]:
+    for key in ["top_task", "top_work", "priority", "next_step", "last_task", "task"]:
         if snap.get(key):
             return _clean(snap.get(key))
     return ""
 
 
+def _deadline_score(text):
+    lower = _lower(text)
+    if any(x in lower for x in ["šodien", "sodien", "tagad", "today"]):
+        return 40
+    if any(x in lower for x in ["rīt", "rit", "tomorrow"]):
+        return 35
+    if any(x in lower for x in ["parīt", "parit"]):
+        return 20
+    if any(x in lower for x in ["pirmdien", "otrdien", "trešdien", "tresdien", "ceturtdien", "piektdien", "sestdien", "svētdien", "svetdien"]):
+        return 15
+    return 0
+
+
+def _candidate_score(kind, text, top_text=""):
+    # V1.1.1 svarīgākais labojums:
+    # ja klientam vienlaicīgi ir piedāvājums un follow-up, smart komanda vispirms izvēlas piedāvājumu,
+    # jo tas virza klientu uz rezultātu/naudu. Follow-up paliek pēc tam.
+    base = {
+        "offer": 130,
+        "followup": 85,
+        "call": 70,
+        "general": 10,
+    }.get(kind, 10)
+    score = base + _deadline_score(text)
+    if top_text and _clean(text).lower() == _clean(top_text).lower():
+        score += 25
+    return score
+
+
 def _choose_smart_message_type(client, tasks=None, memory_snapshot=None):
     top_text = _snapshot_top_text(memory_snapshot)
+
+    candidates = []
+
+    offer_task = _find_offer_task(client, tasks, memory_snapshot)
+    followup_task = _find_followup_task(client, tasks, memory_snapshot)
+    call_task = _find_call_task(client, tasks, memory_snapshot)
+
+    if offer_task:
+        candidates.append(("offer", offer_task))
+    if followup_task:
+        candidates.append(("followup", followup_task))
+    if call_task:
+        candidates.append(("call", call_task))
+
+    # Ja snapshot top teksts ir atsevišķs konkrēts darbs, to pievienojam kā kandidātu,
+    # bet tas vairs automātiski nepārspēj piedāvājumu.
     top_kind = _task_kind(top_text)
-    if top_kind in ["offer", "followup", "call"]:
-        return top_kind, top_text
+    if top_text and top_kind in ["offer", "followup", "call"]:
+        candidates.append((top_kind, top_text))
 
-    client_items = _client_tasks(client, tasks)
-    if client_items:
+    for task in _client_tasks(client, tasks):
+        text = _task_text(task)
+        kind = _task_kind(text)
+        if kind in ["offer", "followup", "call"]:
+            candidates.append((kind, text))
+
+    deduped = []
+    seen = set()
+    for kind, text in candidates:
+        key = (kind, _clean(text).lower())
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        deduped.append((kind, text))
+
+    if deduped:
         ranked = []
-        for task in client_items:
-            text = _task_text(task)
-            kind = _task_kind(text)
-            score = 0
-            if kind == "offer":
-                score = 90
-            elif kind == "followup":
-                score = 70
-            elif kind == "call":
-                score = 60
-            else:
-                score = 10
-            lower = _lower(text)
-            if "rīt" in lower or "rit" in lower:
-                score += 15
-            if "šodien" in lower or "sodien" in lower:
-                score += 20
-            ranked.append((score, kind, text))
+        for kind, text in deduped:
+            ranked.append((_candidate_score(kind, text, top_text), kind, text))
         ranked.sort(reverse=True, key=lambda x: x[0])
-        if ranked and ranked[0][1] in ["offer", "followup", "call"]:
-            return ranked[0][1], ranked[0][2]
+        best_score, best_kind, best_text = ranked[0]
+        return best_kind, best_text
 
-    if _find_offer_task(client, tasks, memory_snapshot):
-        return "offer", _find_offer_task(client, tasks, memory_snapshot)
-    if _find_followup_task(client, tasks, memory_snapshot):
-        return "followup", _find_followup_task(client, tasks, memory_snapshot)
-    if _find_call_task(client, tasks, memory_snapshot):
-        return "call", _find_call_task(client, tasks, memory_snapshot)
     return "followup", ""
 
 
