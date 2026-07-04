@@ -1,19 +1,19 @@
 """
 voice_engine.py
-NinaOS Voice Intake V1.7.1 — Import Fix + Routing & Deadline Fix
+NinaOS Voice Intake V1.8 — Deadline + Call Task Final Fix
 
 Mērķis:
-- salabot V1.7 import kļūdu;
-- atstāt pilnu transkripcijas funkciju;
-- saglabāt termiņu balss follow-up komandās;
-- pārvērst balss tekstu par skaidru NinaOS komandu pirms nodošanas app.py routerim.
+- saglabāt termiņu follow-up balss komandās;
+- pārvērst "rīt jāpiezvana Andrim" par īstu Task Engine komandu;
+- atstāt pilnu transkripcijas funkciju, lai app.py imports nekristu;
+- pirms nodošanas reply routerim pārrakstīt šķību balss tekstu uz stabilu NinaOS komandu.
 """
 
 import os
 import re
 import tempfile
 
-VOICE_ENGINE_VERSION = "Voice Intake V1.7.1 — Import Fix + Routing Fix"
+VOICE_ENGINE_VERSION = "Voice Intake V1.8 — Deadline + Call Task Final Fix"
 
 LAST_VOICE_DEBUG = {
     "raw": "",
@@ -23,20 +23,39 @@ LAST_VOICE_DEBUG = {
 }
 
 
+WEEKDAY_ALIASES = {
+    "šodien": "šodien",
+    "sodien": "šodien",
+    "rīt": "rīt",
+    "rit": "rīt",
+    "parīt": "parīt",
+    "parit": "parīt",
+    "pirmdien": "pirmdien",
+    "otrdien": "otrdien",
+    "trešdien": "trešdien",
+    "tresdien": "trešdien",
+    "ceturtdien": "ceturtdien",
+    "piektdien": "piektdien",
+    "piekdien": "piektdien",
+    "piktdien": "piektdien",
+    "sestdien": "sestdien",
+    "svētdien": "svētdien",
+    "svetdien": "svētdien",
+}
+
+
 def voice_status_answer():
     return (
-        "🎙 Voice Intake V1.7.1 — Import Fix + Routing Fix ir aktīvs. ✅\n\n"
+        "🎙 Voice Intake V1.8 — Deadline + Call Task Final Fix ir aktīvs. ✅\n\n"
         "Ko tas labo:\n"
-        "• Voice Engine imports vairs nekrīt;\n"
-        "• transkripcija paliek pieslēgta;\n"
         "• follow-up balss komandās saglabā termiņu;\n"
-        "• 'ko man tagad darīt' virza uz Initiative ceļu;\n"
-        "• 'rīt jāpiezvana Andrim' pārvērš par īstu uzdevumu.\n\n"
+        "• 'piektdien jāpajautā Andrim par atbildi' paliek ar piektdien;\n"
+        "• 'rīt jāpiezvana Andrim' pārvēršas par īstu uzdevumu;\n"
+        "• Initiative balss komandas paliek Initiative ceļā.\n\n"
         "Testi:\n"
-        "• rīt jānosūta piedāvājums Andrim\n"
         "• piektdien jāpajautā Andrim par atbildi\n"
-        "• ko man tagad darīt\n"
-        "• rīt jāpiezvana Andrim\n\n"
+        "• rīt jāpiezvana Andrim\n"
+        "• ko man tagad darīt\n\n"
         f"Versija: {VOICE_ENGINE_VERSION}"
     )
 
@@ -143,40 +162,75 @@ def _normalize_spaces(text):
     return re.sub(r"\s+", " ", str(text or "")).strip()
 
 
+def _normalize_deadline(lower):
+    for bad, good in WEEKDAY_ALIASES.items():
+        lower = lower.replace(bad, good)
+    return lower
+
+
+def _detect_deadline(lower):
+    lower = _normalize_deadline(lower)
+    for canonical in ["šodien", "rīt", "parīt", "pirmdien", "otrdien", "trešdien", "ceturtdien", "piektdien", "sestdien", "svētdien"]:
+        if canonical in lower:
+            return canonical
+    return ""
+
+
 def _cleanup_noise(text):
     text = str(text or "").strip()
     if not text:
         return ""
 
     lower = text.lower()
+    lower = _normalize_deadline(lower)
 
     replacements = {
+        # call / phone noisy Latvian transcription variants
         "pazūnīt": "piezvanīt",
-        "pazunīt": "piezvanīt",
         "pazunīt": "piezvanīt",
         "pazudīt": "piezvanīt",
         "pazūdīt": "piezvanīt",
         "pazvanīt": "piezvanīt",
         "jābiedz vana": "jāpiezvana",
+        "jābeidz vana": "jāpiezvana",
         "jābied zvan": "jāpiezvana",
         "jābiezvana": "jāpiezvana",
-        "jāpiezvana": "jāpiezvana",
-        "rit": "rīt",
-        "sodien": "šodien",
-        "japajauta": "jāpajautā",
+        "jābeidz zvan": "jāpiezvana",
+        "beidz vana": "piezvana",
+        "biedz vana": "piezvana",
+        "jā zvan": "jāzvana",
+        "jazvana": "jāzvana",
         "japiezvana": "jāpiezvana",
+        "jāpiezvana": "jāpiezvana",
+        "piezvani": "jāpiezvana",
+        "piezvanit": "piezvanīt",
+        "piezvanīt": "jāpiezvana",
+        # follow-up / question variants
+        "japajauta": "jāpajautā",
+        "jā pajautā": "jāpajautā",
+        "pajautāt": "jāpajautā",
+        "pajautā": "jāpajautā",
+        "jautāt": "jāpajautā",
+        "jauta": "jāpajautā",
+        # offer variants
         "janosuta": "jānosūta",
+        "jā nosūta": "jānosūta",
+        "nosūtīt": "jānosūta",
+        "nosutit": "jānosūta",
         "piedavajumu": "piedāvājumu",
         "piedavajums": "piedāvājums",
+        "piedavaj": "piedāvāj",
+        # names
         "antrim": "andrim",
         "andriem": "andrim",
         "uandrim": "andrim",
+        "andram": "andrim",
     }
 
     for bad, good in replacements.items():
         lower = lower.replace(bad, good)
 
-    lower = re.sub(r"\b(ā|nu|emm|mm|eee|eu|nu jā|vienkārši)\b", " ", lower)
+    lower = re.sub(r"\b(ā|nu|emm|mm|eee|eu|nu jā|vienkārši|lūdzu|ludzu)\b", " ", lower)
     lower = _normalize_spaces(lower)
 
     lower = re.sub(r"\bandris\b", "Andris", lower, flags=re.IGNORECASE)
@@ -186,9 +240,15 @@ def _cleanup_noise(text):
     return lower.strip()
 
 
+def _has_andris(lower):
+    return "andr" in lower
+
+
 def _route_command(text):
     lower = (text or "").lower().strip()
+    deadline = _detect_deadline(lower)
 
+    # Strict command routing first
     if any(x in lower for x in ["ko man tagad", "kas svarīgākais", "kas svarigakais", "ar ko sākt", "ar ko sakt", "ko iesaki"]):
         return "ko man tagad darīt", "initiative"
     if any(x in lower for x in ["mana diena", "darba inbox", "ko man šodien", "ko man sodien"]):
@@ -196,26 +256,20 @@ def _route_command(text):
     if lower in ["klienti", "mani klienti", "klientu pārskats", "klientu parskats"]:
         return "klienti", "clients"
 
-    if "jāpajautā" in lower and "andr" in lower:
-        if "piektdien" in lower:
-            return "piektdien jāpajautā Andrim par atbildi", "followup"
-        if "rīt" in lower:
-            return "rīt jāpajautā Andrim par atbildi", "followup"
-        return "jāpajautā Andrim par atbildi", "followup"
+    # Follow-up: always preserve deadline when it exists
+    if _has_andris(lower) and ("jāpajaut" in lower or "pajaut" in lower or "jaut" in lower or "atbild" in lower or "follow" in lower):
+        prefix = (deadline + " ") if deadline else ""
+        return f"{prefix}jāpajautā Andrim par atbildi".strip(), "followup"
 
-    if ("piedāvāj" in lower or "piedavaj" in lower) and "andr" in lower:
-        if "rīt" in lower:
-            return "rīt jānosūta piedāvājums Andrim", "task"
-        if "šodien" in lower:
-            return "šodien jānosūta piedāvājums Andrim", "task"
-        return "jānosūta piedāvājums Andrim", "task"
+    # Offer task
+    if _has_andris(lower) and ("piedāvāj" in lower or "piedavaj" in lower or "tāme" in lower or "tame" in lower):
+        prefix = (deadline + " ") if deadline else ""
+        return f"{prefix}jānosūta piedāvājums Andrim".strip(), "task"
 
-    if "piezvan" in lower and "andr" in lower:
-        if "rīt" in lower:
-            return "rīt jāpiezvana Andrim", "task"
-        if "piektdien" in lower:
-            return "piektdien jāpiezvana Andrim", "task"
-        return "jāpiezvana Andrim", "task"
+    # Call task: catch all zvan/piezvan variants, preserve deadline
+    if _has_andris(lower) and ("piezvan" in lower or "jāzvan" in lower or "zvan" in lower or "vana" in lower):
+        prefix = (deadline + " ") if deadline else ""
+        return f"{prefix}jāpiezvana Andrim".strip(), "task"
 
     return text, "general"
 
