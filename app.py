@@ -478,6 +478,28 @@ except Exception as e:
         return "Sales Brain nav pieslēgts."
 
 
+# NinaOS Platform Core V1 Import
+try:
+    from platform_core import (
+        build_platform_answer,
+        is_platform_command,
+        platform_status_answer,
+        PLATFORM_CORE_VERSION,
+    )
+except Exception as e:
+    print("platform_core.py imports nav pieejams:", e)
+    PLATFORM_CORE_VERSION = "Platform Core nav pieslēgts"
+
+    def build_platform_answer(text):
+        return "NinaOS Platform Core nav pieslēgts."
+
+    def is_platform_command(text):
+        return False
+
+    def platform_status_answer():
+        return "NinaOS Platform Core nav pieslēgts."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -14855,6 +14877,27 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if is_initiative_command(user_text):
             await safe_reply_text(update, nina_public_answer(nina_initiative_answer(user_id)))
+            return
+
+        # NinaOS Platform Core V1
+        # Platform-first pamats: workspace, gatavi AI darbinieki, amati, tiesības un Exchange virziens.
+        if is_platform_command(user_text):
+            try:
+                platform_answer = build_platform_answer(user_text)
+            except Exception as e:
+                print("Platform Core route kļūda:", repr(e))
+                platform_answer = "🧱 NinaOS Platform Core šobrīd nevarēja sagatavot atbildi.\n\nVersija: Platform Core V1"
+
+            try:
+                v40_log_usage(user_id, "platform_core_v1", user_text)
+            except Exception:
+                pass
+            try:
+                save_conversation_state(user_id, user_text, platform_answer, "platform_core_v1", v80_mood(user_text), "platform_core")
+            except Exception:
+                pass
+
+            await safe_reply_text(update, nina_public_answer(platform_answer))
             return
 
         # Core 3.1.1.1 — Sales Snapshot Cleanup
