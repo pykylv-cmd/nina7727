@@ -1,6 +1,6 @@
 """
 voice_engine.py
-NinaOS Voice Intake V1.8.1 — Call Task Routing Fix
+NinaOS Voice Intake V1.8.2 — Call Phrase Normalization
 
 Mērķis:
 - saglabāt termiņu follow-up balss komandās;
@@ -13,7 +13,7 @@ import os
 import re
 import tempfile
 
-VOICE_ENGINE_VERSION = "Voice Intake V1.8.1 — Call Task Routing Fix"
+VOICE_ENGINE_VERSION = "Voice Intake V1.8.2 — Call Phrase Normalization"
 
 LAST_VOICE_DEBUG = {
     "raw": "",
@@ -46,11 +46,11 @@ WEEKDAY_ALIASES = {
 
 def voice_status_answer():
     return (
-        "🎙 Voice Intake V1.8.1 — Call Task Routing Fix ir aktīvs. ✅\n\n"
+        "🎙 Voice Intake V1.8.2 — Call Phrase Normalization ir aktīvs. ✅\n\n"
         "Ko tas labo:\n"
         "• follow-up balss komandās saglabā termiņu;\n"
         "• 'piektdien jāpajautā Andrim par atbildi' paliek ar piektdien;\n"
-        "• 'rīt jāpiezvana Andrim' pārvēršas par Task Engine komandu 'rīt jāzvana Andrim';\n"
+        "• agresīvāk labo šķībus zvana transkriptus, piemēram: pas van andriu → rīt jāzvana Andrim;\n"
         "• Initiative balss komandas paliek Initiative ceļā.\n\n"
         "Testi:\n"
         "• piektdien jāpajautā Andrim par atbildi\n"
@@ -186,6 +186,19 @@ def _cleanup_noise(text):
 
     replacements = {
         # call / phone noisy Latvian transcription variants
+        "pas van": "jāzvana",
+        "pasvan": "jāzvana",
+        "paz van": "jāzvana",
+        "pazvan": "jāzvana",
+        "pa zvan": "jāzvana",
+        "paz vana": "jāzvana",
+        "pas vana": "jāzvana",
+        "pēs van": "jāzvana",
+        "pies van": "jāzvana",
+        "piez van": "jāzvana",
+        "zvan andriu": "jāzvana andrim",
+        "jāzvan andriu": "jāzvana andrim",
+        "jāzvana andriu": "jāzvana andrim",
         "pazūnīt": "piezvanīt",
         "pazunīt": "piezvanīt",
         "pazudīt": "piezvanīt",
@@ -225,6 +238,10 @@ def _cleanup_noise(text):
         "andriem": "andrim",
         "uandrim": "andrim",
         "andram": "andrim",
+        "andriu": "andrim",
+        "andriu.": "andrim",
+        "andru": "andrim",
+        "andriju": "andrim",
     }
 
     for bad, good in replacements.items():
@@ -266,8 +283,9 @@ def _route_command(text):
         prefix = (deadline + " ") if deadline else ""
         return f"{prefix}jānosūta piedāvājums Andrim".strip(), "task"
 
-    # Call task: catch all zvan/piezvan variants, preserve deadline
-    if _has_andris(lower) and ("piezvan" in lower or "jāzvan" in lower or "zvan" in lower or "vana" in lower):
+    # Call task: catch all zvan/piezvan/pas-van variants, preserve deadline
+    call_markers = ["piezvan", "jāzvan", "jazvan", "zvan", "vana", "pas van", "pasvan", "paz van", "pazvan"]
+    if _has_andris(lower) and any(marker in lower for marker in call_markers):
         prefix = (deadline + " ") if deadline else ""
         return f"{prefix}jāzvana Andrim".strip(), "task"
 
