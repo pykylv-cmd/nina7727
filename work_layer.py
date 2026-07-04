@@ -1,6 +1,6 @@
 """
 work_layer.py
-Nina Work Layer V1.4 — Offer Detail Extraction
+Nina Work Layer V1.4.1 — Send Deadline Fix
 
 Mērķis:
 - pārvērst klienta darba snapshotu praktiskās darba sagatavēs;
@@ -12,7 +12,7 @@ Mērķis:
 
 import re
 
-WORK_LAYER_VERSION = "Nina Work Layer V1.4 — Offer Detail Extraction"
+WORK_LAYER_VERSION = "Nina Work Layer V1.4.1 — Send Deadline Fix"
 
 
 def _clean(value):
@@ -156,7 +156,7 @@ def is_work_layer_command(text):
 
 def work_layer_status_answer():
     return (
-        "🧰 Nina Work Layer V1.4 — Offer Detail Extraction ir aktīvs. ✅\n\n"
+        "🧰 Nina Work Layer V1.4.1 — Send Deadline Fix ir aktīvs. ✅\n\n"
         "Ko tas dara:\n"
         "• sagatavo piedāvājuma tekstu klientam;\n"
         "• sagatavo follow-up ziņu;\n"
@@ -166,6 +166,7 @@ def work_layer_status_answer():
         "• offer ziņās termiņu lieto tikai kā piedāvājuma nosūtīšanas kontekstu, nevis kā darbu sākšanas frāzi;\n"
         "• follow-up ziņās nevajadzīgi neievelk offer termiņu;\n"
         "• ziņās ieliek darba tēmu, summu/cenu un tikai atbilstošo kontekstu no taska;\n"
+        "• offer_send_when tagad ņem rīt no rīt jānosūta piedāvājums, nevis nākamnedēļ no darbu sākšanas;\n"
         "• neko nesaglabā datubāzē — tikai sagatavo tekstu darbam.\n\n"
         "Testi:\n"
         "• ko rakstīt Andrim\n"
@@ -203,6 +204,42 @@ def _extract_start_or_deadline(text):
     for needle, label in phrase_map:
         if re.search(rf"\b{re.escape(needle)}\b", lower):
             return label
+    return ""
+
+
+def _deadline_words_pattern():
+    return r"(šodien|sodien|rīt|rit|parīt|parit|nākamnedēļ|nakamnedel|šonedēļ|sonedel|pirmdien|otrdien|trešdien|tresdien|ceturtdien|piektdien|sestdien|svētdien|svetdien)"
+
+
+def _normalize_deadline_word(word):
+    return _extract_start_or_deadline(word or "")
+
+
+def _extract_offer_send_deadline(text):
+    """Atrod tieši piedāvājuma nosūtīšanas termiņu, nevis darbu sākšanas laiku."""
+    raw = _clean(text)
+    lower = raw.lower()
+    if not lower:
+        return ""
+
+    word = _deadline_words_pattern()
+
+    # Termiņš pirms darbības: "rīt jānosūta piedāvājums"
+    m = re.search(rf"\b{word}\b[^.,;|]{{0,90}}(?:jānosūta|janosuta|nosūtīt|nosutit|nosūtu|nosutu|sagatavot|uztaisi|sagatavo)\s+(?:piedāvājumu|piedavajumu|piedāvājums|piedavajums|tāmi|tami)", lower)
+    if m:
+        return _normalize_deadline_word(m.group(1))
+
+    # Darbība pirms termiņa: "piedāvājums jānosūta rīt"
+    m = re.search(rf"(?:piedāvājums|piedavajums|piedāvājumu|piedavajumu|tāme|tame|tāmi|tami)[^.,;|]{{0,90}}(?:jānosūta|janosuta|nosūtīt|nosutit|nosūtu|nosutu|sagatavot|sagatavo)[^.,;|]{{0,60}}\b{word}\b", lower)
+    if m:
+        return _normalize_deadline_word(m.group(1))
+
+    # Īss offer uzdevums bez darba sākšanas frāzes: drīkst paņemt pirmo termiņu.
+    has_offer = any(x in lower for x in ["piedāvāj", "piedavaj", "tāme", "tame", "jānosūta", "janosuta", "nosūtīt", "nosutit"])
+    has_job_start = re.search(r"(?:darbus|darbu|sākt|sakt|uzsākt|uzsakt)", lower)
+    if has_offer and not has_job_start:
+        return _extract_start_or_deadline(lower)
+
     return ""
 
 
@@ -266,7 +303,7 @@ def _build_context(client, tasks=None, memory_snapshot=None):
         "call_task": call_task,
         "subject": _extract_subject(primary, client),
         "price": _extract_price(combined),
-        "offer_send_when": _extract_start_or_deadline(offer_task),
+        "offer_send_when": _extract_offer_send_deadline(offer_task),
         "job_start_when": _extract_job_start_time(combined),
         "followup_when": _extract_start_or_deadline(followup_task),
         "call_when": _extract_start_or_deadline(call_task),
