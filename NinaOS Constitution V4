@@ -1,0 +1,947 @@
+# NinaOS Constitution V4 — Full Platform Constitution
+
+## 0. Galvenais likums
+
+NinaOS nav botu būvēšanas rotaļlieta.
+
+NinaOS ir AI darbaspēka platforma, kur klients **saņem gatavu AI darbinieku**, nevis pats lauž galvu, kā viņu izveidot.
+
+Klients izvēlas:
+- kādu gatavu darbinieku vajag;
+- kādam darbam;
+- privātai lietošanai vai uzņēmumam;
+- vienu amatu vai vairākus amatus vienā darbiniekā;
+- kur viņš strādās: Telegram, WhatsApp, Web, Mobile, Email, API;
+- kādus failus, datus un atļaujas viņam dot.
+
+NinaOS rūpējas par:
+- identitāti;
+- workspace;
+- datu glabāšanu;
+- atmiņu;
+- failiem;
+- amatu kontroli;
+- tooliem;
+- kanāliem;
+- maksājumiem;
+- audit log;
+- Nina Exchange;
+- mērogošanu līdz 10 000+ gataviem AI amatiem.
+
+---
+
+# 1. Vīzija
+
+NinaOS mērķis ir kļūt par platformu, kur cilvēki, uzņēmumi un paši AI aģenti var saņemt, lietot un savstarpēji nodarbināt gatavus digitālos darbiniekus.
+
+NinaOS nav viens Telegram bots.
+NinaOS nav tikai pārdošanas asistents.
+NinaOS nav tikai čats.
+
+NinaOS ir:
+- AI darba operētājsistēma;
+- gatavu AI darbinieku katalogs;
+- workspace uzņēmumiem un privātpersonām;
+- dokumentu un darba atmiņas sistēma;
+- multi-channel AI darbinieku slānis;
+- Nina Exchange, kur boti var satikties, tirgoties un slēgt darījumus;
+- ekonomika, kur NinaOS pelna no abonementiem, usage, komisijām, enterprise un partneriem.
+
+---
+
+# 2. Produkta princips
+
+## Nepareizi
+“Klients izveido botu.”
+
+## Pareizi
+“Klients saņem gatavu AI darbinieku.”
+
+Klientam nav jāzina:
+- prompti;
+- toolu konfigurācija;
+- datubāzes;
+- agent runtime;
+- memory rules;
+- workflow arhitektūra.
+
+Klientam jāredz vienkārša izvēle:
+- Man vajag grāmatvedi.
+- Man vajag tāmētāju.
+- Man vajag pārdevēju.
+- Man vajag jurista palīgu.
+- Man vajag HR.
+- Man vajag klientu servisu.
+- Man vajag biroja vadītāju.
+- Man vajag vairākus darbiniekus uzņēmumam.
+
+NinaOS iedod gatavu darbinieku, kurš jau zina savu amatu, robežas, toolus un darba loģiku.
+
+---
+
+# 3. Lietotāju tipi
+
+## 3.1 Privātpersona
+Saņem vienu vai vairākus AI darbiniekus personīgām vajadzībām:
+- privātais asistents;
+- dokumentu palīgs;
+- juridiskais palīgs;
+- finanšu palīgs;
+- mācību palīgs;
+- veselības administratīvais palīgs;
+- ģimenes / mājas organizators.
+
+## 3.2 Mazs uzņēmums
+Saņem gatavu mazo AI biroju:
+- pārdevējs;
+- tāmētājs;
+- klientu serviss;
+- dokumentu asistents;
+- rēķinu / grāmatvedības asistents;
+- projektu koordinators.
+
+## 3.3 Vidējs / liels uzņēmums
+Saņem AI darbinieku štatu:
+- vairākas nodaļas;
+- vairāki workspace;
+- piekļuves līmeņi;
+- audit log;
+- enterprise billing;
+- integrācijas;
+- private knowledge vault.
+
+## 3.4 Citi boti / AI aģenti
+Var izmantot Nina Exchange:
+- pirkt pakalpojumu no cita bota;
+- pārdot savu darbu;
+- nodot apakšuzdevumu;
+- slēgt bot-to-bot darījumu;
+- maksāt komisiju NinaOS.
+
+---
+
+# 4. Platform Core
+
+Platform Core ir NinaOS mugurkauls. Tas jābūvē pirms jauniem lieliem amatiem.
+
+Platform Core atbild uz jautājumiem:
+- kam pieder AI darbinieks;
+- kur glabājas dati;
+- kuram workspace tie pieder;
+- kas drīkst redzēt failus;
+- kāds amats darbiniekam ir;
+- kādas tiesības viņam ir;
+- kādi tooli viņam pieejami;
+- kādi kanāli pieslēgti;
+- kā tiek logotas darbības;
+- kā tiek apstiprinātas riskantas darbības;
+- kā notiek maksājumi;
+- kā darbinieks piedalās Nina Exchange.
+
+Bez Platform Core visi amati ir gaisā.
+
+---
+
+# 5. Platform Core objekti
+
+## User
+Cilvēks sistēmā.
+
+Lomas:
+- privātpersona;
+- uzņēmuma īpašnieks;
+- uzņēmuma darbinieks;
+- admin;
+- partneris;
+- pircējs;
+- pārdevējs Nina Exchange.
+
+## Company
+Uzņēmums vai organizācija.
+
+Satur:
+- juridisko profilu;
+- nozari;
+- komandu;
+- workspace;
+- AI darbiniekus;
+- abonementus;
+- billing;
+- dokumentus;
+- audit log.
+
+## Workspace
+Darba vide, kur glabājas dati.
+
+Visam jābūt piesaistītam workspace.
+
+Workspace satur:
+- AI darbiniekus;
+- failus;
+- klientus;
+- projektus;
+- taskus;
+- dokumentus;
+- darījumus;
+- kanālus;
+- audit log;
+- abonementus;
+- Nina Exchange tiesības.
+
+## Agent
+Konkrēts gatavs AI darbinieks.
+
+Var būt:
+- viena amata;
+- vairāku amatu;
+- privāts;
+- uzņēmuma iekšējais;
+- publicējams Nina Exchange;
+- pieslēgts vienam vai vairākiem kanāliem.
+
+## RolePack
+Amata pakete.
+
+RolePack nosaka:
+- ko darbinieks dara;
+- ko nedara;
+- kādus failus drīkst lietot;
+- kādus toolus drīkst lietot;
+- kādus darba objektus redz;
+- kāda ir atmiņas robeža;
+- kad jāprasa cilvēka apstiprinājums;
+- kāds ir riska līmenis;
+- kāds ir atbildes formāts;
+- kā notiek kvalitātes kontrole.
+
+## AgentRole
+Sasaista agentu ar vienu vai vairākiem RolePack.
+
+Piemēri:
+- Nina Office Manager = pārdevējs + dokumentu asistents + projektu koordinators;
+- Nina Construction = tāmētājs + piedāvājumu rakstītājs + klientu follow-up;
+- Nina Finance = grāmatvedis + rēķinu palīgs + atskaišu asistents.
+
+## Permission
+Tiesību slānis.
+
+Nosaka:
+- read;
+- write;
+- send;
+- delete;
+- export;
+- approve;
+- trade_on_exchange;
+- access_sensitive_files;
+- use_payment_tools.
+
+## MemoryScope
+Atmiņas robežas:
+- User Memory;
+- Company Memory;
+- Workspace Memory;
+- Agent Memory;
+- Role Memory;
+- Project Memory;
+- Client Memory;
+- Document Memory;
+- Exchange Memory.
+
+## KnowledgeVault
+Failu un zināšanu glabātuve.
+
+Glabā:
+- PDF;
+- Word;
+- Excel;
+- attēlus;
+- rēķinus;
+- līgumus;
+- bankas izrakstus;
+- tāmes;
+- būvprojektus;
+- klientu sarakstes;
+- atskaites;
+- nozaru dokumentus.
+
+NinaOS failus ne tikai glabā, bet arī sagatavo AI darbam:
+- parsē;
+- indeksē;
+- strukturē;
+- piešķir workspace;
+- piešķir tiesības;
+- piesaista work object.
+
+## WorkObject
+Universāls darba objekts.
+
+Veidi:
+- task;
+- client;
+- deal;
+- lead;
+- estimate;
+- invoice;
+- contract;
+- report;
+- case;
+- project;
+- reminder;
+- document_case;
+- exchange_listing;
+- exchange_deal;
+- payment_request;
+- audit_event.
+
+## ChannelConnection
+Kanāls, kur darbinieks strādā:
+- Telegram;
+- WhatsApp;
+- Web chat;
+- Mobile app;
+- Email;
+- API;
+- Voice vēlāk.
+
+## Subscription
+Maksājumu objekts.
+
+Nosaka:
+- plānu;
+- darbinieku skaitu;
+- usage limitus;
+- premium role access;
+- exchange commission rules;
+- enterprise līgumu.
+
+## AuditLog
+Darbību žurnāls.
+
+Glabā:
+- ko AI redzēja;
+- ko sagatavoja;
+- ko nosūtīja;
+- ko mainīja;
+- kas apstiprināja;
+- kad notika;
+- kurā kanālā;
+- ar kādu role;
+- ar kādu workspace.
+
+---
+
+# 6. Role System — 10 000 amatu kontrole
+
+10 000 amati netiek rakstīti kā 10 000 dažādi kodi.
+
+Tie tiek kontrolēti ar RolePack sistēmu.
+
+Formula:
+
+**Gatavs AI darbinieks = Platform Runtime + RolePack + Workspace Data + Permissions + Channels + Billing + Audit**
+
+Katrs amats ir strukturēta konfigurācija.
+
+## RolePack satur:
+- role_id;
+- nosaukumu;
+- nozari;
+- amata aprakstu;
+- mērķi;
+- drīkst / nedrīkst;
+- pieejamos failu tipus;
+- pieejamos darba objektus;
+- pieejamos toolus;
+- atmiņas robežas;
+- apstiprināšanas noteikumus;
+- risk level;
+- output formats;
+- quality rules;
+- escalation rules;
+- exchange permissions.
+
+---
+
+# 7. Amatu matrica
+
+## 7.1 Finance / Accounting
+- grāmatvedis;
+- rēķinu asistents;
+- izdevumu kategoriju asistents;
+- atskaišu sagatavotājs;
+- nodokļu dokumentu palīgs;
+- maksājumu atgādinātājs;
+- cashflow asistents;
+- finanšu pārskatu asistents.
+
+## 7.2 Sales
+- pārdevējs;
+- lead qualifier;
+- piedāvājumu asistents;
+- follow-up agents;
+- objection closer;
+- deal closer;
+- CRM asistents;
+- pipeline vadītājs.
+
+## 7.3 Construction / Estimating
+- tāmētājs;
+- būvdarbu piedāvājumu asistents;
+- materiālu aprēķinu asistents;
+- darba apjomu jautājumu asistents;
+- projektu koordinators;
+- būvobjekta dokumentu asistents.
+
+## 7.4 Legal
+- jurista palīgs;
+- līgumu analītiķis;
+- risku izcēlājs;
+- dokumentu melnrakstu asistents;
+- compliance palīgs;
+- jautājumu sagatavotājs juristam.
+
+## 7.5 HR
+- kandidātu atlases asistents;
+- interviju jautājumu asistents;
+- onboarding asistents;
+- darbinieku FAQ;
+- iekšējo procedūru asistents;
+- apmācību asistents.
+
+## 7.6 Customer Service
+- klientu serviss;
+- sūdzību šķirotājs;
+- ticket asistents;
+- FAQ bots;
+- eskalācijas asistents;
+- klientu pieredzes asistents.
+
+## 7.7 Operations
+- projektu koordinators;
+- dienas plānotājs;
+- termiņu sargs;
+- resursu koordinators;
+- piegādātāju follow-up;
+- kvalitātes pārbaudes asistents.
+
+## 7.8 Marketing
+- satura rakstītājs;
+- reklāmu tekstu asistents;
+- social media asistents;
+- landing page asistents;
+- e-pasta kampaņu asistents;
+- lead magnet asistents.
+
+## 7.9 Personal Life
+- privātais asistents;
+- ģimenes plānotājs;
+- dokumentu asistents;
+- ceļojumu asistents;
+- mācību asistents;
+- mājas darbu koordinators.
+
+## 7.10 Industry Packs
+Nozares var apvienot vairākus RolePack:
+- Construction Office Pack;
+- Accounting Office Pack;
+- Legal Office Pack;
+- Real Estate Pack;
+- Beauty Salon Pack;
+- Auto Service Pack;
+- E-commerce Pack;
+- Medical Admin Pack;
+- Education Pack;
+- Logistics Pack.
+
+---
+
+# 8. Ready Worker Catalog
+
+Klients neizveido darbinieku.
+
+Klients katalogā izvēlas gatavu darbinieku.
+
+Katalogā jābūt:
+- gatavo darbinieku kartītēm;
+- amatu aprakstam;
+- ko viņš dara;
+- kam piemērots;
+- kādi faili vajadzīgi;
+- kādi kanāli pieejami;
+- cena;
+- demo;
+- drošības brīdinājumi;
+- aktivizācijas poga: “Saņemt šo darbinieku”.
+
+Pēc izvēles NinaOS:
+- piesaista darbinieku workspace;
+- iedod RolePack;
+- iestata permissions;
+- iestata memory scope;
+- piedāvā pieslēgt kanālu;
+- piedāvā iedot failus;
+- aktivizē darba režīmu.
+
+---
+
+# 9. Agent Runtime
+
+Agent Runtime ir iekšējais dzinējs, kas izpilda darbu.
+
+Tam jābūt neatkarīgam no amata.
+
+Runtime soļi:
+1. saņem input;
+2. nosaka workspace;
+3. nosaka agentu;
+4. ielādē RolePack;
+5. pārbauda permissions;
+6. ielādē memory;
+7. ielādē failu / work object kontekstu;
+8. izvēlas skill/tool;
+9. sagatavo rezultātu;
+10. pārbauda risku;
+11. ja vajag — prasa cilvēka apstiprinājumu;
+12. atdod atbildi;
+13. saglabā audit log.
+
+Svarīgi Runtime komponenti:
+- planner;
+- executor;
+- verifier;
+- memory retriever;
+- permission checker;
+- action queue;
+- approval gate;
+- audit logger;
+- escalation router.
+
+---
+
+# 10. Knowledge Vault
+
+Knowledge Vault ir viens no svarīgākajiem NinaOS pamatiem.
+
+Bez tā nebūs:
+- grāmatveža;
+- jurista;
+- tāmētāja;
+- dokumentu asistenta;
+- uzņēmuma AI biroja.
+
+Knowledge Vault uzdevumi:
+- glabāt failus;
+- piesaistīt workspace;
+- piesaistīt agentam vai role;
+- parsēt saturu;
+- izvilkt metadatus;
+- strukturēt dokumentu lietošanai;
+- kontrolēt tiesības;
+- saglabāt audit log.
+
+Faili jāglabā nevis haotiski, bet ar:
+- file_id;
+- workspace_id;
+- owner_id;
+- document_type;
+- sensitivity_level;
+- allowed_roles;
+- linked_work_object;
+- created_at;
+- parsed_status;
+- embedding/index status.
+
+---
+
+# 11. Universal Work Objects
+
+NinaOS jābūt vienotai darba objektu sistēmai.
+
+Katrs amats strādā ar objektiem, nevis tikai brīvu tekstu.
+
+Piemēri:
+- grāmatvedis strādā ar invoice, report, accounting_period;
+- tāmētājs ar estimate, project, material_item;
+- jurists ar contract, clause, risk;
+- pārdevējs ar lead, deal, offer, follow-up;
+- HR ar candidate, interview, onboarding_task.
+
+Katram WorkObject:
+- type;
+- title;
+- status;
+- owner_workspace;
+- assigned_agent;
+- linked_files;
+- priority;
+- due date;
+- audit trail.
+
+---
+
+# 12. Channels
+
+AI darbinieks nedrīkst būt piesiets vienam čatam.
+
+Viņam jāstrādā tur, kur klients vēlas:
+- Telegram;
+- WhatsApp;
+- Web chat;
+- Mobile app;
+- Email;
+- API;
+- vēlāk voice.
+
+Channel Layer atbild:
+- kurš agents ir pieslēgts kanālam;
+- kurš workspace;
+- kāds user;
+- kāds role;
+- kā formatēt atbildi;
+- kā glabāt sarunu;
+- kā piesaistīt failus;
+- kā sūtīt paziņojumus.
+
+---
+
+# 13. Mobile App
+
+Mobile app ir galvenā ērtā virsma privātpersonām un mazajiem uzņēmumiem.
+
+Tai jāļauj:
+- ielogoties;
+- izvēlēties gatavu AI darbinieku;
+- čatot;
+- augšupielādēt failus;
+- redzēt darba inbox;
+- redzēt dokumentus;
+- redzēt paziņojumus;
+- pārslēgt darbiniekus;
+- pieslēgt kanālus;
+- pārvaldīt abonementu;
+- atvērt Nina Exchange.
+
+UX princips:
+- nevis tehniska konfigurācija;
+- bet “izvēlies darbinieku, iedod darbu, saņem rezultātu”.
+
+---
+
+# 14. Web Workspace
+
+Web Workspace ir galvenā virsma uzņēmumiem.
+
+Jābūt:
+- dashboard;
+- AI darbinieku sarakstam;
+- darbinieka profila skatam;
+- role permissions;
+- klientiem;
+- projektiem;
+- dokumentiem;
+- taskiem;
+- darījumiem;
+- audit log;
+- billing;
+- Exchange;
+- team members;
+- settings;
+- channel connections.
+
+Web Workspace ir uzņēmuma AI birojs.
+
+---
+
+# 15. Nina Exchange
+
+Nina Exchange ir botu un AI darbinieku ekonomikas tirgus.
+
+Tas nav tikai marketplace.
+
+Tas ir tirgus, kur:
+- NinaOS darbinieki;
+- citu ražotāju boti;
+- uzņēmumu aģenti;
+- privātpersonu aģenti;
+- pakalpojumu sniedzēji;
+- klienti;
+
+var:
+- piedāvāt pakalpojumus;
+- pirkt pakalpojumus;
+- pārdot darba rezultātus;
+- nodot darbu citam botam;
+- saņemt darbu no cita bota;
+- slēgt darījumus;
+- apmainīties ar informāciju pēc atļaujām;
+- maksāt viens otram;
+- veidot bot-to-bot workflow.
+
+## Exchange objekti
+- ExchangeListing;
+- ExchangeOrder;
+- ExchangeDeal;
+- ExchangeContract;
+- ExchangePermissionGrant;
+- ExchangePayment;
+- CommissionLedger;
+- ReputationScore;
+- DisputeCase.
+
+## Exchange darījuma plūsma
+1. Bots vai cilvēks publicē vajadzību.
+2. Cits bots piedāvā pakalpojumu.
+3. Tiek pārbaudītas tiesības.
+4. Tiek izveidots ExchangeDeal.
+5. Dati tiek nodoti tikai vajadzīgajā apjomā.
+6. Darbs tiek izpildīts.
+7. Rezultāts tiek nodots atpakaļ.
+8. Notiek maksājums.
+9. NinaOS paņem komisiju.
+10. Viss tiek ierakstīts audit log.
+
+## Exchange komisijas
+Iespējamie modeļi:
+- 3–10% no bot-to-bot darījuma;
+- fiksēta platform fee;
+- premium listing fee;
+- enterprise private exchange fee;
+- settlement fee;
+- API transaction fee.
+
+## Exchange drošība
+Svarīgi:
+- bots neredz visu workspace;
+- bots redz tikai atļauto dokumenta daļu;
+- sensitīvi darījumi prasa cilvēka approval;
+- katram deal ir audit trail;
+- dispute gadījumā jāvar redzēt, kas notika.
+
+---
+
+# 16. Billing & Money Flows
+
+NinaOS pelna no:
+1. AI darbinieku abonementiem;
+2. premium amatiem;
+3. usage billing;
+4. dokumentu apstrādes;
+5. uzņēmumu plāniem;
+6. onboarding / setup;
+7. white-label;
+8. Nina Exchange komisijām;
+9. bot-to-bot darījumiem;
+10. partneru role packiem;
+11. API access;
+12. private enterprise workspaces.
+
+## Klientu plāni
+- Free / demo;
+- Personal;
+- Pro;
+- Small Business;
+- Company;
+- Enterprise;
+- Exchange Seller;
+- Partner / White-label.
+
+## Maksājumu objekti
+- Subscription;
+- UsageMeter;
+- Invoice;
+- Payment;
+- CommissionLedger;
+- Refund;
+- PartnerPayout.
+
+---
+
+# 17. Security / Trust / Approval
+
+NinaOS nevar mērogoties bez uzticības.
+
+Tāpēc katram riskantam darbam vajag:
+- permission check;
+- risk level;
+- human approval;
+- audit log;
+- rollback iespēju, ja iespējams;
+- data isolation;
+- workspace boundary.
+
+## Augsta riska piemēri
+- juridiski secinājumi;
+- nodokļu deklarācijas;
+- maksājumi;
+- līguma nosūtīšana;
+- sensitīvu dokumentu nodošana Exchange;
+- klientu datu eksportēšana;
+- automātiska darījuma slēgšana.
+
+Šajos gadījumos AI sagatavo, bet cilvēks apstiprina.
+
+---
+
+# 18. Data Architecture
+
+Nekas nedrīkst būt “vienkārši global memory”.
+
+Katram datu ierakstam jāzina:
+- owner_user_id;
+- company_id;
+- workspace_id;
+- agent_id;
+- role_id;
+- source_channel;
+- sensitivity_level;
+- permissions;
+- created_at;
+- updated_at;
+- audit_id.
+
+Galvenā hierarhija:
+1. User;
+2. Company;
+3. Workspace;
+4. Agent;
+5. RolePack;
+6. WorkObject;
+7. File / Document;
+8. MemoryScope;
+9. AuditLog;
+10. ExchangeDeal.
+
+---
+
+# 19. Build Order
+
+## Phase 1 — Platform Core V1
+Faili:
+- platform_core.py;
+- workspace_engine.py;
+- role_registry.py;
+- agent_registry.py;
+- permission_engine.py.
+
+Komandas:
+- platform status;
+- platform schema;
+- workspaces;
+- agents;
+- roles;
+- permissions status.
+
+## Phase 2 — RolePack System V1
+Faili:
+- role_pack.py;
+- role_permissions.py;
+- role_memory_rules.py;
+- role_tool_access.py.
+
+Mērķis: kontrolēt amatus.
+
+## Phase 3 — Ready Worker Catalog V1
+Mērķis: klients izvēlas gatavu darbinieku.
+
+Komandas:
+- darbinieki;
+- parādi grāmatvedi;
+- parādi tāmētāju;
+- saņemt Ninu Grāmatvedi;
+- saņemt Ninu Tāmētāju.
+
+## Phase 4 — Agent Assignment V1
+Mērķis: gatavo darbinieku piešķir workspace.
+
+## Phase 5 — Knowledge Vault V1
+Mērķis: dokumenti, faili, tiesības, parsing.
+
+## Phase 6 — Universal Work Objects V1
+Mērķis: vienoti darba objekti visiem amatiem.
+
+## Phase 7 — Channel Layer V1
+Mērķis: Telegram / WhatsApp / Web / Mobile / Email.
+
+## Phase 8 — Billing V1
+Mērķis: abonementi, usage, invoices.
+
+## Phase 9 — Nina Exchange V1
+Mērķis: bot-to-bot darījumi, listing, order, commission.
+
+## Phase 10 — Mobile + Web Product V1
+Mērķis: skaista, ērta produkta virsma.
+
+## Phase 11 — First Vertical Packs
+Pirmie pilnie gatavie darbinieki:
+- Sales Nina;
+- Estimator Nina;
+- Accountant Nina;
+- Client Support Nina;
+- Office Manager Nina.
+
+## Phase 12 — Scale to 10 000 roles
+Caur:
+- role templates;
+- industry packs;
+- partner packs;
+- exchange sellers;
+- enterprise custom packs.
+
+---
+
+# 20. Kas nākamais praktiski
+
+Tagad nedrīkst turpināt dziļināt tikai Sales moduļus.
+
+Nākamais pareizais kodēšanas solis:
+
+# NinaOS Platform Core V1
+
+Pirmais fails:
+
+# platform_core.py
+
+Tas definēs:
+- User;
+- Company;
+- Workspace;
+- Agent;
+- RolePack;
+- AgentRole;
+- Permission;
+- MemoryScope;
+- KnowledgeVault;
+- WorkObject;
+- ChannelConnection;
+- Subscription;
+- AuditLog.
+
+Pēc tam:
+- role_registry.py;
+- agent_registry.py;
+- workspace_engine.py;
+- permission_engine.py.
+
+---
+
+# 21. Konstitūcijas galīgais virziens
+
+NinaOS = gatavu AI darbinieku platforma.
+
+Klients nesaņem tukšu botu būvētāju.
+
+Klients saņem gatavu darbinieku un dod viņam darbu.
+
+NinaOS nodrošina:
+- platformas core;
+- amatu kontroli;
+- datu drošību;
+- workspace;
+- knowledge vault;
+- channel layer;
+- billing;
+- Nina Exchange;
+- audit log;
+- mērogošanu līdz 10 000+ gataviem AI amatiem.
+
