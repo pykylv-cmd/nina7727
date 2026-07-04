@@ -1,6 +1,6 @@
 """
 sales_brain.py
-NinaOS Core 3.1.1 — Sales Stage Detection
+NinaOS Core 3.1.1.1 — Sales Snapshot Cleanup
 
 Mērķis:
 - no reāliem taskiem noteikt klienta pārdošanas / darījuma posmu;
@@ -13,7 +13,7 @@ Tas tikai analizē jau esošos taskus / memory snapshotu.
 
 import re
 
-SALES_BRAIN_VERSION = "Core 3.1.1 — Sales Stage Detection"
+SALES_BRAIN_VERSION = "Core 3.1.1.1 — Sales Snapshot Cleanup"
 
 
 def _clean(value):
@@ -108,6 +108,8 @@ def client_tasks(client, tasks=None):
         text = _task_text(task)
         if not text:
             continue
+        if _is_ui_command_like(text):
+            continue
         task_client = _task_client(task)
         lower = text.lower()
         if task_client == client or any(v in lower for v in variants):
@@ -121,6 +123,53 @@ def client_tasks(client, tasks=None):
 def _contains(text, words):
     lower = _lower(text)
     return any(w in lower for w in words)
+
+
+# Core 3.1.1.1 — Sales Snapshot Cleanup
+# Šie helperi atdala īstus darba taskus no UI komandām.
+def _is_ui_command_like(text):
+    lower = _lower(text)
+    if not lower:
+        return False
+    prefixes = [
+        "uzraksti atgādinājums", "uzraksti atgadinajums",
+        "uzraksti follow-up", "uzraksti followup", "uzraksti follow up",
+        "ko rakstīt", "ko rakstit", "ko sūtīt", "ko sutit",
+        "sagatavo ziņu", "sagatavo zinu", "uztaisi piedāvājumu", "uztaisi piedavajumu",
+        "sagatavo piedāvājumu", "sagatavo piedavajumu",
+        "sagatavo zvana plānu", "sagatavo zvana planu",
+        "ko atbildēt", "ko atbildet",
+    ]
+    return any(lower.startswith(p) for p in prefixes)
+
+
+def _is_real_followup_text(text):
+    lower = _lower(text)
+    if not lower or _is_ui_command_like(lower):
+        return False
+    markers = [
+        "jāpajautā", "japajauta",
+        "pajautā", "pajauta",
+        "par atbildi",
+        "jāatgādina", "jaatgadina",
+        "atgādināt", "atgadinat",
+        "follow-up", "follow up", "followup",
+    ]
+    return any(m in lower for m in markers)
+
+
+def _is_real_offer_text(text):
+    lower = _lower(text)
+    if not lower or _is_ui_command_like(lower):
+        return False
+    return any(m in lower for m in ["jānosūta piedāvājums", "janosuta piedavajums", "piedāvājums", "piedavajums", "tāme", "tame"])
+
+
+def _is_real_call_text(text):
+    lower = _lower(text)
+    if not lower or _is_ui_command_like(lower):
+        return False
+    return any(m in lower for m in ["jāzvana", "jazvana", "jāpiezvana", "japiezvana", "zvans", "sazvan"])
 
 
 def _deadline_label(text):
@@ -211,7 +260,7 @@ def _stage_risk(stage_code):
 
 
 def detect_stage_from_tasks(tasks):
-    texts = [_task_text(t) for t in tasks or [] if _task_text(t)]
+    texts = [_task_text(t) for t in tasks or [] if _task_text(t) and not _is_ui_command_like(_task_text(t))]
     blob = "\n".join(texts).lower()
 
     evidence = []
@@ -249,13 +298,13 @@ def detect_stage_from_tasks(tasks):
 
 
 def _extract_deal_context(tasks):
-    texts = [_task_text(t) for t in tasks or [] if _task_text(t)]
+    texts = [_task_text(t) for t in tasks or [] if _task_text(t) and not _is_ui_command_like(_task_text(t))]
     combined = " | ".join(texts)
     subject = _extract_subject(combined)
     price = _extract_price(combined)
-    offer_task = next((t for t in texts if _contains(t, ["piedāvāj", "piedavaj", "tāme", "tame", "jānosūta", "janosuta"])), "")
-    followup_task = next((t for t in texts if _contains(t, ["jāpajautā", "japajauta", "par atbildi", "follow", "atgādin", "atgadin"])), "")
-    call_task = next((t for t in texts if _contains(t, ["jāzvana", "jazvana", "jāpiezvana", "japiezvana", "zvans"])), "")
+    offer_task = next((t for t in texts if _is_real_offer_text(t)), "")
+    followup_task = next((t for t in texts if _is_real_followup_text(t)), "")
+    call_task = next((t for t in texts if _is_real_call_text(t)), "")
     job_start = ""
     m = re.search(r"(?i)(?:darbus|darbu)\s+(?:varam\s+)?(?:sākt|sakt|uzsākt|uzsakt)\s+(nākamnedēļ|nakamnedel|šonedēļ|sonedel|rīt|rit|parīt|parit|pirmdien|otrdien|trešdien|tresdien|ceturtdien|piektdien|sestdien|svētdien|svetdien)", combined)
     if m:
@@ -361,6 +410,8 @@ def _all_clients_from_tasks(tasks):
         text = _task_text(task)
         candidates = []
         c = _task_client(task)
+        if _is_ui_command_like(text):
+            continue
         if c:
             candidates.append(c)
         for token in ["andris", "andri", "andrim", "jānis", "janis", "jānim", "janim", "anna", "annai"]:
@@ -387,12 +438,13 @@ def _rank_clients(tasks):
 def build_sales_status_answer(tasks=None, memory_snapshot=None):
     rows = _rank_clients(tasks or [])
     lines = [
-        "📈 Core 3.1.1 — Sales Stage Detection ir aktīvs. ✅",
+        "📈 Core 3.1.1.1 — Sales Snapshot Cleanup ir aktīvs. ✅",
         "",
         "Ko tas dara:",
         "• nosaka klienta pārdošanas / darījuma posmu no reālajiem taskiem;",
         "• izceļ klientus, kas ir tuvāk naudai;",
         "• pasaka nākamo deal soli, nevis tikai rāda tasku sarakstu.",
+        "• ignorē UI komandas kā fake sales snapshot ierakstus.",
         "",
         "Komandas:",
         "• sales status",
