@@ -1,6 +1,6 @@
 """
 work_layer.py
-Nina Work Layer V1.6.1 — Snapshot Source Cleanup
+Nina Work Layer V1.7 — Objection Handling & Closing
 
 Mērķis:
 - pārvērst klienta darba snapshotu praktiskās darba sagatavēs;
@@ -12,7 +12,7 @@ Mērķis:
 
 import re
 
-WORK_LAYER_VERSION = "Nina Work Layer V1.6.1 — Snapshot Source Cleanup"
+WORK_LAYER_VERSION = "Nina Work Layer V1.7 — Objection Handling & Closing"
 
 
 def _clean(value):
@@ -179,6 +179,8 @@ def _detect_intent(text):
     lower = _lower(text)
     if lower in ["work layer", "work layer status", "nina work layer", "work skills", "darba prasmes"]:
         return "status"
+    if _is_objection_command(text):
+        return "objection_handling"
     if any(x in lower for x in ["zvana plānu", "zvana planu", "sarunas plānu", "sarunas planu", "sagatavo zvanu", "pirms zvana"]):
         return "call_prep"
     if any(x in lower for x in ["follow-up", "followup", "follow up", "pajautāt", "pajautat", "par atbildi", "atgādinājums", "atgadinajums"]):
@@ -197,7 +199,7 @@ def is_work_layer_command(text):
 
 def work_layer_status_answer():
     return (
-        "🧰 Nina Work Layer V1.6.1 — Snapshot Source Cleanup ir aktīvs. ✅\n\n"
+        "🧰 Nina Work Layer V1.7 — Objection Handling & Closing ir aktīvs. ✅\n\n"
         "Ko tas dara:\n"
         "• sagatavo piedāvājuma tekstu klientam;\n"
         "• sagatavo follow-up ziņu;\n"
@@ -213,7 +215,7 @@ def work_layer_status_answer():
         "• ko rakstīt Andrim\n"
         "• uztaisi piedāvājumu Andrim\n"
         "• uzraksti atgādinājums Andrim\n"
-        "• sagatavo zvana plānu Andrim\n\n"
+        "• sagatavo zvana plānu Andrim\n• Andris saka ka par dārgu\n\n"
         f"Versija: {WORK_LAYER_VERSION}"
     )
 
@@ -508,6 +510,131 @@ def _call_goal(ctx):
     return "\n".join(lines)
 
 
+
+def _objection_type(text):
+    lower = _lower(text)
+    if any(x in lower for x in ["par dārgu", "par dargu", "dārgi", "dargi", "cena", "lēti", "leti", "atlaide", "discount"]):
+        return "price"
+    if any(x in lower for x in ["padomāšu", "padomasu", "padomās", "padomas", "jāpadomā", "japadoma", "vēlāk", "velak"]):
+        return "thinking"
+    if any(x in lower for x in ["salīdzin", "salidzin", "citiem", "konkurent", "vēl piedāvāj", "vel piedavaj"]):
+        return "compare"
+    if any(x in lower for x in ["ne tagad", "nav laiks", "šobrīd nē", "sobrid ne", "vēl ne", "vel ne"]):
+        return "not_now"
+    if any(x in lower for x in ["sieva", "vīrs", "virs", "partner", "kolēģ", "koleģ", "kolegis", "kolēģis", "jāsaskaņo", "jasaskano"]):
+        return "decision_partner"
+    if any(x in lower for x in ["ko atbildēt", "ko atbildet", "ko lai atbild", "atbildi klientam"]):
+        return "general"
+    return "general"
+
+
+def _is_objection_command(text):
+    lower = _lower(text)
+    markers = [
+        "par dārgu", "par dargu", "dārgi", "dargi", "padomāšu", "padomasu", "padomās", "padomas",
+        "salīdzin", "salidzin", "ne tagad", "atsūti vēlāk", "atsuti velak", "jāparunā", "japaruna",
+        "sieva", "partner", "ko atbildēt", "ko atbildet", "iebild", "closing",
+    ]
+    return any(m in lower for m in markers)
+
+
+def _objection_label(kind):
+    return {
+        "price": "cenas iebildums",
+        "thinking": "vilcināšanās / padomāšu",
+        "compare": "salīdzināšana ar citiem",
+        "not_now": "nav prioritāte šobrīd",
+        "decision_partner": "lēmums ar partneri / citu cilvēku",
+        "general": "vispārīgs iebildums",
+    }.get(kind, "vispārīgs iebildums")
+
+
+def _objection_recommendation(kind, ctx):
+    subject = ctx.get("subject") or "piedāvājumu"
+    job_start = ctx.get("job_start_when") or ""
+    if kind == "price":
+        return "Noskaidro, vai iebildums ir par kopējo summu, darba apjomu vai maksājuma grafiku. Nepazemini cenu uzreiz — vispirms precizē apjomu."
+    if kind == "thinking":
+        return "Nepalaid sarunu tukšā “padomāšu”. Sarunā konkrētu nākamo kontaktu: kad atgriežamies pie lēmuma."
+    if kind == "compare":
+        return "Noskaidro, pēc kā klients salīdzina: cenu, termiņu, kvalitāti vai uzticību. Tad izcel savu konkrēto vērtību."
+    if kind == "not_now":
+        return "Pārvērt “ne tagad” par laika plānu: kad šis kļūs aktuāli un kad atgriezties ar follow-up."
+    if kind == "decision_partner":
+        return "Iedod klientam īsu, viegli pārsūtāmu kopsavilkumu partnerim un sarunā konkrētu atgriešanās brīdi."
+    return f"Atgriez sarunu pie konkrēta nākamā soļa par {subject}." + (f" Ja viss der, mēģini rezervēt darbu sākšanu {job_start}." if job_start else "")
+
+
+def _objection_variants(kind, ctx):
+    client = ctx.get("client") or "klient"
+    voc = _client_vocative(client)
+    subject = ctx.get("subject") or "piedāvājumu"
+    price = ctx.get("price") or ""
+    job_start = ctx.get("job_start_when") or ""
+    price_txt = f" Summa ir {price}." if price else ""
+    start_txt = f" Ja viss der, darbus varam sākt {job_start}." if job_start else ""
+
+    if kind == "price":
+        return [
+            ("Maigais variants", f"Sveiks, {voc}! Saprotu par cenu. Varu īsi iziet cauri, kas tieši ir iekļauts piedāvājumā par {subject}.{price_txt} Ja vajag, varam paskatīties, vai ir kāda daļa, ko varam pielāgot apjomā."),
+            ("Normālais pārdošanas variants", f"Sveiks, {voc}! Saprotu, ka cena ir svarīga. Piedāvājumā par {subject} ir iekļauts konkrētais darba apjoms un termiņš.{price_txt}{start_txt} Ja cena ir vienīgais šķērslis, varam kopā precizēt apjomu, lai atrastu piemērotāko variantu."),
+            ("Closing variants", f"Sveiks, {voc}! Lai saprotu pareizi — vai šobrīd galvenais jautājums ir cena, nevis pats darba risinājums? Ja risinājums der, es varu precizēt apjomu un tad vienojamies, vai rezervējam darbu sākšanu."),
+        ]
+    if kind == "thinking":
+        return [
+            ("Maigais variants", f"Protams, {voc}, saprotu. Apskati mierīgi piedāvājumu par {subject}. Kad būtu ērti, lai es pieklājīgi atgādinu un noskaidroju lēmumu?"),
+            ("Normālais variants", f"Skaidrs, {voc}. Lai tas nepaliek gaisā, sarunājam konkrētu brīdi — es varu piezvanīt vai uzrakstīt pēc pāris dienām un tad pieņemam lēmumu par {subject}.{start_txt}"),
+            ("Closing variants", f"Labi, {voc}. Ja lielos vilcienos piedāvājums der, varam provizoriski rezervēt nākamo soli un detaļas pielabot pēc apstiprinājuma. Kad tev būtu ērti pieņemt gala lēmumu?"),
+        ]
+    if kind == "compare":
+        return [
+            ("Maigais variants", f"Saprotu, {voc}. Salīdzināt ir normāli. Lai varu palīdzēt, pasaki, lūdzu, ko tieši salīdzini — cenu, termiņu vai darba apjomu?"),
+            ("Normālais variants", f"Sveiks, {voc}! Ja salīdzini piedāvājumus par {subject}, svarīgi skatīties ne tikai cenu, bet arī apjomu, materiālus/izpildi un termiņu.{price_txt}{start_txt} Varu palīdzēt salīdzināt punktu pa punktam."),
+            ("Closing variants", f"Ja mūsu apjoms un termiņš tev der, pasaki, kas tieši citā piedāvājumā izskatās labāk. Tad es varu godīgi pateikt, vai varam pielāgoties vai labāk palikt pie esošā varianta."),
+        ]
+    if kind == "not_now":
+        return [
+            ("Maigais variants", f"Saprotu, {voc}. Tad neforsējam. Kad šis varētu kļūt aktuāli, lai es pieklājīgi atgriežos pie piedāvājuma par {subject}?"),
+            ("Normālais variants", f"Skaidrs. Lai nepazaudējam tēmu, varam vienoties par konkrētu follow-up laiku. Tad pārskatām {subject} un saprotam, vai ejam tālāk."),
+            ("Closing variants", f"Ja jautājums ir tikai par laiku, varam provizoriski rezervēt vēlāku logu un apstiprināt vēlāk. Kurš laiks tev būtu reālāks?"),
+        ]
+    if kind == "decision_partner":
+        return [
+            ("Maigais variants", f"Protams, {voc}. Varu sagatavot īsu kopsavilkumu, ko vari pārsūtīt tālāk: par {subject}, cenu un nākamo soli."),
+            ("Normālais variants", f"Skaidrs. Nosūtu īsu kopsavilkumu, lai vieglāk saskaņot: piedāvājums par {subject}.{price_txt}{start_txt} Kad varam atgriezties pie lēmuma?"),
+            ("Closing variants", f"Labi, {voc}. Lai saskaņošana neievelkas, sarunājam konkrētu brīdi, kad atgriežamies pie lēmuma. Es varu arī precizēt jebkuru punktu, kas partnerim nav skaidrs."),
+        ]
+    return [
+        ("Maigais variants", f"Sveiks, {voc}! Saprotu. Pasaki, lūdzu, kas tieši šobrīd traucē virzīties tālāk ar {subject}?"),
+        ("Normālais variants", f"Sveiks, {voc}! Lai varu precīzi palīdzēt, vai jautājums ir par cenu, termiņu vai darba apjomu? Tad varu uzreiz sagatavot precizējumu."),
+        ("Closing variants", f"Ja noskaidrojam šo vienu jautājumu, vai tad varam virzīties uz nākamo soli?"),
+    ]
+
+
+def build_objection_answer(user_text, client, tasks=None, memory_snapshot=None):
+    client = _normalize_client(client)
+    ctx = _build_context(client, tasks, memory_snapshot)
+    kind = _objection_type(user_text)
+    variants = _objection_variants(kind, ctx)
+    notes = [
+        f"klients: {client}",
+        f"iebilduma tips: {_objection_label(kind)}",
+        f"piedāvājums: {ctx.get('offer_task') or 'nav konkrēta piedāvājuma ieraksta'}",
+        f"darba ieteikums: {_objection_recommendation(kind, ctx)}",
+    ]
+    if ctx.get("call_task"):
+        notes.append(f"zvans: {ctx['call_task']}")
+    if ctx.get("followup_task"):
+        notes.append(f"follow-up: {ctx['followup_task']}")
+    return _render_variants(
+        f"🧲 Iebildumu atbilde — {client}",
+        variants,
+        notes,
+        "izvēlies atbildes toni, nosūti klientam un uzreiz nofiksē konkrētu nākamo soli / follow-up.",
+        ctx,
+        mode="followup",
+    )
+
 def build_call_plan(client, tasks=None, memory_snapshot=None):
     client = _normalize_client(client)
     ctx = _build_context(client, tasks, memory_snapshot)
@@ -680,9 +807,11 @@ def build_work_layer_answer(user_text, tasks=None, memory_snapshot=None):
             "Piemēri:\n"
             "• uztaisi piedāvājumu Andrim\n"
             "• uzraksti atgādinājums Andrim\n"
-            "• sagatavo zvana plānu Andrim\n\n"
+            "• sagatavo zvana plānu Andrim\n• Andris saka ka par dārgu\n\n"
             f"Versija: {WORK_LAYER_VERSION}"
         )
+    if intent == "objection_handling":
+        return build_objection_answer(user_text, client, tasks, memory_snapshot)
     if intent == "offer_message":
         return build_offer_message(client, tasks, memory_snapshot)
     if intent == "followup_message":
