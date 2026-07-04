@@ -1,6 +1,6 @@
 """
 work_layer.py
-Nina Work Layer V1.4.1 — Send Deadline Fix
+Nina Work Layer V1.5 — Follow-up Intelligence
 
 Mērķis:
 - pārvērst klienta darba snapshotu praktiskās darba sagatavēs;
@@ -12,7 +12,7 @@ Mērķis:
 
 import re
 
-WORK_LAYER_VERSION = "Nina Work Layer V1.4.1 — Send Deadline Fix"
+WORK_LAYER_VERSION = "Nina Work Layer V1.5 — Follow-up Intelligence"
 
 
 def _clean(value):
@@ -156,7 +156,7 @@ def is_work_layer_command(text):
 
 def work_layer_status_answer():
     return (
-        "🧰 Nina Work Layer V1.4.1 — Send Deadline Fix ir aktīvs. ✅\n\n"
+        "🧰 Nina Work Layer V1.5 — Follow-up Intelligence ir aktīvs. ✅\n\n"
         "Ko tas dara:\n"
         "• sagatavo piedāvājuma tekstu klientam;\n"
         "• sagatavo follow-up ziņu;\n"
@@ -327,6 +327,12 @@ def _context_sentence(ctx, mode="generic"):
         when = ctx.get("followup_when", "")
         if when:
             parts.append(f"follow-up termiņš: {when}")
+        if ctx.get("subject") and ctx.get("subject") != "pārrunāto darbu":
+            parts.append(f"saistītais piedāvājums: {ctx['subject']}")
+        if ctx.get("price"):
+            parts.append(f"summa/cena: {ctx['price']}")
+        if ctx.get("job_start_when"):
+            parts.append(f"darbu sākšana: {ctx['job_start_when']}")
     elif mode == "call":
         when = ctx.get("call_when", "")
         if when:
@@ -351,17 +357,27 @@ def _offer_body(ctx, style="normal"):
     return f"Sveiks, {voc}!\n\nNosūtu piedāvājumu par {subject}.{price_line}{start_line}{when_line}\n\nJa viss izskatās kārtībā, dod ziņu, un varam vienoties par nākamo soli vai darbu sākšanu.\n\nJa vajag ko precizēt, droši uzraksti — pielabošu."
 
 
+def _followup_context_parts(ctx):
+    """Follow-up izmanto piedāvājuma darba detaļas, bet nevelk iekšā offer send deadline."""
+    subject = ctx.get("subject") or ""
+    price = ctx.get("price") or ""
+    job_start = ctx.get("job_start_when") or ""
+
+    context = f" par {subject}" if subject and subject != "pārrunāto darbu" else ""
+    price_line = f" Piedāvājuma summa ir {price}." if price else ""
+    start_line = f" Ja viss der, darbus varam sākt {job_start}." if job_start else ""
+    return context, price_line, start_line
+
+
 def _followup_body(ctx, style="soft"):
     voc = _client_vocative(ctx["client"])
-    subject = ctx.get("subject") or "piedāvājumu"
-    price = ctx.get("price")
-    context = f" par {subject}" if subject and subject != "pārrunāto darbu" else ""
-    price_line = f" Summa/cena bija {price}." if price else ""
+    context, price_line, start_line = _followup_context_parts(ctx)
+
     if style == "direct":
-        return f"Sveiks, {voc}! Vai sanāca apskatīt manu piedāvājumu{context}?{price_line} Ja vajag ko precizēt vai pielabot, varu to izdarīt šodien."
+        return f"Sveiks, {voc}! Vai sanāca apskatīt manu piedāvājumu{context}?{price_line}{start_line} Ja vajag ko precizēt vai pielabot, varu to izdarīt šodien."
     if style == "received":
-        return f"Sveiks, {voc}! Gribu pārliecināties, ka piedāvājums{context} ir saņemts un nonācis līdz Tev.{price_line} Vai sanāca to apskatīt, un vai ir kādi jautājumi pirms ejam tālāk?"
-    return f"Sveiks, {voc}! Gribēju tikai pieklājīgi pajautāt, vai sanāca apskatīt piedāvājumu{context}.{price_line} Ja ir kādi jautājumi, droši dod ziņu."
+        return f"Sveiks, {voc}! Gribu pārliecināties, ka piedāvājums{context} ir saņemts un nonācis līdz Tev.{price_line}{start_line} Vai sanāca to apskatīt, un vai ir kādi jautājumi pirms ejam tālāk?"
+    return f"Sveiks, {voc}! Gribēju pieklājīgi pajautāt, vai sanāca apskatīt piedāvājumu{context}.{price_line}{start_line} Ja ir kādi jautājumi, droši dod ziņu."
 
 
 def _render_variants(title, variants, notes, next_step, ctx=None, mode="generic"):
