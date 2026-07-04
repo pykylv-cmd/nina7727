@@ -15020,11 +15020,11 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, task_answer)
             return
 
-        # Core Evolution 2.0 — Employee Brain test layer
-        # Šis slānis pagaidām apstrādā tikai Core/mission/next-step ziņas,
-        # lai droši testētu jauno Nina domāšanas centru, nesalaužot vecās funkcijas.
+        # Core 3.0 — Employee Brain v3
+        # Darba smadzeņu slānis Core/roadmap/status/darba vadības jautājumiem.
+        # Tas izmanto Memory Intelligence snapshotu, bet neaizstāj Task/Follow-up/Initiative routerus.
         if employee_reply and (
-            lower in ["core 2.0", "core 2.1", "core 2.2", "core 2.3", "core 2.4", "core 2.5", "core 2.5.1", "core 2.6", "core 2.6.1", "reply builder", "reply builder status", "initiative engine", "initiative status", "initiative detector", "initiative detector status", "think engine", "think status", "learning engine", "learning status", "quality engine", "quality status", "core evolution", "employee status", "core status", "nina core", "employee brain", "core"]
+            lower in ["core 2.0", "core 2.1", "core 2.2", "core 2.3", "core 2.4", "core 2.5", "core 2.5.1", "core 2.6", "core 2.6.1", "core 2.7", "core 2.8", "core 3.0", "core 30", "employee brain v3", "reply builder", "reply builder status", "initiative engine", "initiative status", "initiative detector", "initiative detector status", "think engine", "think status", "learning engine", "learning status", "quality engine", "quality status", "core evolution", "employee status", "core status", "nina core", "employee brain", "core"]
             or "ninaos misija" in lower
             or "mūsu misija" in lower
             or "musu misija" in lower
@@ -15051,6 +15051,15 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             or "kur tu kļūdījies" in lower
             or "kur tu kludijies" in lower
             or "kas ir tavs uzdevums" in lower
+            or "ko darām tālāk" in lower
+            or "ko daram talak" in lower
+            or "ko darām ar" in lower
+            or "ko daram ar" in lower
+            or "darba smadzenes" in lower
+            or "ai darbiniece" in lower
+            or "employee brain v3" in lower
+            or "core 3.0" in lower
+            or "core 30" in lower
             or "ko tu iemācījies" in lower
             or "ko tu iemacijies" in lower
             or "mācies" in lower
@@ -15069,7 +15078,17 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 user = {}
 
-            answer = employee_reply(user_id=user_id, text=user_text, user=user)
+            try:
+                answer = employee_reply(
+                    user_id=user_id,
+                    text=user_text,
+                    user=user,
+                    memory_snapshot=memory_snapshot,
+                    context_snapshot=active_ctx_for_memory,
+                )
+            except TypeError:
+                # Backward compatibility, ja serverī īslaicīgi vēl ir vecais employee_brain.py.
+                answer = employee_reply(user_id=user_id, text=user_text, user=user)
 
             try:
                 v40_log_usage(user_id, "employee_brain_core_router", user_text)
