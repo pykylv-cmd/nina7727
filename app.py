@@ -429,6 +429,29 @@ except Exception as e:
     def resolve_memory_command(text, snapshot=None):
         return text
 
+
+# Nina Work Layer V1 Import
+try:
+    from work_layer import (
+        build_work_layer_answer,
+        is_work_layer_command,
+        work_layer_status_answer,
+        WORK_LAYER_VERSION,
+    )
+except Exception as e:
+    print("work_layer.py imports nav pieejams:", e)
+    WORK_LAYER_VERSION = "Nina Work Layer nav pieslēgts"
+
+    def build_work_layer_answer(user_text, tasks=None, memory_snapshot=None):
+        return "Nina Work Layer nav pieslēgts."
+
+    def is_work_layer_command(text):
+        return False
+
+    def work_layer_status_answer():
+        return "Nina Work Layer nav pieslēgts."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -14806,6 +14829,35 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if is_initiative_command(user_text):
             await safe_reply_text(update, nina_public_answer(nina_initiative_answer(user_id)))
+            return
+
+        # Nina Work Layer V1 — Offer & Follow-up Skills
+        # Ģenerē praktiskas klientu darba sagataves, bet neko nesaglabā datubāzē.
+        if lower in ["work layer", "work layer status", "nina work layer", "work skills", "darba prasmes"]:
+            await safe_reply_text(update, nina_public_answer(work_layer_status_answer()))
+            return
+
+        if is_work_layer_command(user_text):
+            try:
+                work_tasks = nina_clean_real_tasks(user_id, limit=200)
+            except Exception:
+                work_tasks = []
+            try:
+                work_answer = build_work_layer_answer(user_text, tasks=work_tasks, memory_snapshot=memory_snapshot)
+            except Exception as e:
+                print("Work Layer route kļūda:", repr(e))
+                work_answer = "🧰 Work Layer šobrīd nevarēja sagatavot atbildi. Pamēģini vēlreiz ar klienta vārdu.\n\nVersija: Nina Work Layer V1"
+
+            try:
+                v40_log_usage(user_id, "work_layer_v1", user_text)
+            except Exception:
+                pass
+            try:
+                save_conversation_state(user_id, user_text, work_answer, "work_layer_v1", v80_mood(user_text), "work_layer")
+            except Exception:
+                pass
+
+            await safe_reply_text(update, nina_public_answer(work_answer))
             return
 
         if lower in ["guide status", "guide engine", "onboarding status"]:
