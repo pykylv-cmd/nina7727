@@ -1,6 +1,6 @@
 """
 work_layer.py
-Nina Work Layer V1.5 — Follow-up Intelligence
+Nina Work Layer V1.5.1 — Follow-up Context Cleanup
 
 Mērķis:
 - pārvērst klienta darba snapshotu praktiskās darba sagatavēs;
@@ -12,7 +12,7 @@ Mērķis:
 
 import re
 
-WORK_LAYER_VERSION = "Nina Work Layer V1.5 — Follow-up Intelligence"
+WORK_LAYER_VERSION = "Nina Work Layer V1.5.1 — Follow-up Context Cleanup"
 
 
 def _clean(value):
@@ -156,7 +156,7 @@ def is_work_layer_command(text):
 
 def work_layer_status_answer():
     return (
-        "🧰 Nina Work Layer V1.5 — Follow-up Intelligence ir aktīvs. ✅\n\n"
+        "🧰 Nina Work Layer V1.5.1 — Follow-up Context Cleanup ir aktīvs. ✅\n\n"
         "Ko tas dara:\n"
         "• sagatavo piedāvājuma tekstu klientam;\n"
         "• sagatavo follow-up ziņu;\n"
@@ -311,32 +311,46 @@ def _build_context(client, tasks=None, memory_snapshot=None):
 
 
 def _context_sentence(ctx, mode="generic"):
+    """Build a clean one-line context note without repeating subject/price twice."""
     parts = []
-    if ctx.get("subject") and ctx.get("subject") != "pārrunāto darbu":
-        parts.append(f"darba tēma: {ctx['subject']}")
-    if ctx.get("price"):
-        parts.append(f"summa/cena: {ctx['price']}")
-    when = ""
+
+    def add_subject():
+        if ctx.get("subject") and ctx.get("subject") != "pārrunāto darbu":
+            parts.append(f"darba tēma: {ctx['subject']}")
+
+    def add_price():
+        if ctx.get("price"):
+            parts.append(f"summa/cena: {ctx['price']}")
+
     if mode == "offer":
+        add_subject()
+        add_price()
         when = ctx.get("offer_send_when", "")
         if when:
             parts.append(f"piedāvājums jānosūta: {when}")
         if ctx.get("job_start_when"):
             parts.append(f"darbu sākšana: {ctx['job_start_when']}")
     elif mode == "followup":
+        # V1.5.1: follow-up piezīmēs tēma un summa parādās tikai vienreiz.
         when = ctx.get("followup_when", "")
         if when:
             parts.append(f"follow-up termiņš: {when}")
-        if ctx.get("subject") and ctx.get("subject") != "pārrunāto darbu":
-            parts.append(f"saistītais piedāvājums: {ctx['subject']}")
-        if ctx.get("price"):
-            parts.append(f"summa/cena: {ctx['price']}")
+        add_subject()
+        add_price()
         if ctx.get("job_start_when"):
             parts.append(f"darbu sākšana: {ctx['job_start_when']}")
     elif mode == "call":
+        add_subject()
+        add_price()
         when = ctx.get("call_when", "")
         if when:
             parts.append(f"zvana termiņš: {when}")
+        if ctx.get("job_start_when"):
+            parts.append(f"darbu sākšana: {ctx['job_start_when']}")
+    else:
+        add_subject()
+        add_price()
+
     return "; ".join(parts)
 
 
