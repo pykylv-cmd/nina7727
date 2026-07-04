@@ -1,6 +1,6 @@
 """
 work_layer.py
-Nina Work Layer V1.5.1 — Follow-up Context Cleanup
+Nina Work Layer V1.6 — Call Intelligence
 
 Mērķis:
 - pārvērst klienta darba snapshotu praktiskās darba sagatavēs;
@@ -12,7 +12,7 @@ Mērķis:
 
 import re
 
-WORK_LAYER_VERSION = "Nina Work Layer V1.5.1 — Follow-up Context Cleanup"
+WORK_LAYER_VERSION = "Nina Work Layer V1.6 — Call Intelligence"
 
 
 def _clean(value):
@@ -156,7 +156,7 @@ def is_work_layer_command(text):
 
 def work_layer_status_answer():
     return (
-        "🧰 Nina Work Layer V1.5.1 — Follow-up Context Cleanup ir aktīvs. ✅\n\n"
+        "🧰 Nina Work Layer V1.6 — Call Intelligence ir aktīvs. ✅\n\n"
         "Ko tas dara:\n"
         "• sagatavo piedāvājuma tekstu klientam;\n"
         "• sagatavo follow-up ziņu;\n"
@@ -439,20 +439,104 @@ def build_followup_message(client, tasks=None, memory_snapshot=None):
     return _render_variants(f"🔁 Follow-up varianti — {client}", variants, notes, "izvēlies vienu follow-up variantu, nosūti un pēc tam atzīmē klienta atbildi.", ctx, mode="followup")
 
 
+def _call_context_intro(ctx):
+    subject = ctx.get("subject") or "pārrunāto darbu"
+    price = ctx.get("price") or ""
+    job_start = ctx.get("job_start_when") or ""
+
+    parts = [f"piedāvājums par {subject}"]
+    if price:
+        parts.append(f"summa {price}")
+    if job_start:
+        parts.append(f"darbus var sākt {job_start}")
+    return "; ".join(parts)
+
+
+def _call_goal(ctx):
+    subject = ctx.get("subject") or "pārrunāto darbu"
+    price = ctx.get("price") or ""
+    job_start = ctx.get("job_start_when") or ""
+
+    lines = [
+        f"Zvana mērķis: saprast, vai Andris ir gatavs virzīties tālāk ar piedāvājumu par {subject}.",
+    ]
+    if price:
+        lines.append(f"Sarunā noteikti pieskaries summai: {price}.")
+    if job_start:
+        lines.append(f"Ja viss der, mērķis ir rezervēt darbu sākšanu {job_start}.")
+    return "\n".join(lines)
+
+
 def build_call_plan(client, tasks=None, memory_snapshot=None):
     client = _normalize_client(client)
     ctx = _build_context(client, tasks, memory_snapshot)
-    subject = ctx.get("subject") or "piedāvājumu"
-    price = f" Summa/cena: {ctx['price']}." if ctx.get("price") else ""
-    when = f" Zvana termiņš: {ctx['call_when']}." if ctx.get("call_when") else ""
-    variants = [
-        ("Īsais zvana plāns", f"1. Pajautā, vai piedāvājums par {subject} ir apskatīts.\n2. Noskaidro, vai ir jautājumi par cenu, termiņu vai darba apjomu.{price}{when}\n3. Vienojies par nākamo soli."),
-        ("Sarunas skripts", f"Sveiks, {_client_vocative(client)}! Zvanu, lai saprastu, vai sanāca apskatīt piedāvājumu par {subject} un vai ir kādi jautājumi.{price}{when} Ja kaut kas jāprecizē, varu to uzreiz piefiksēt un sagatavot nākamo versiju."),
-        ("Iebildumu jautājumi", "• Kas šobrīd traucē pieņemt lēmumu?\n• Vai jautājums ir par cenu, termiņu vai darba apjomu?\n• Ko vajag precizēt, lai varam virzīties tālāk?"),
-    ]
-    notes = [f"klients: {client}", f"zvans: {ctx.get('call_task') or 'jāzvana klientam'}", f"piedāvājums: {ctx.get('offer_task') or 'nav konkrēta piedāvājuma ieraksta'}", f"follow-up: {ctx.get('followup_task') or 'nav konkrēta follow-up ieraksta'}"]
-    return _render_variants(f"☎️ Zvana varianti — {client}", variants, notes, "izvēlies vienu zvana pieeju, piezvani un pēc sarunas ieraksti rezultātu.", ctx, mode="call")
+    voc = _client_vocative(client)
+    subject = ctx.get("subject") or "pārrunāto darbu"
+    price = ctx.get("price") or ""
+    job_start = ctx.get("job_start_when") or ""
+    call_when = ctx.get("call_when") or ""
+    intro = _call_context_intro(ctx)
 
+    price_question = "Vai par cenu ir kāds jautājums vai iebildums?" if price else "Vai ir kāds jautājums par cenu vai darba apjomu?"
+    start_question = f"Ja viss der, vai varam rezervēt darbu sākšanu {job_start}?" if job_start else "Ja viss der, kad varam vienoties par nākamo soli?"
+    price_line = f"Summa: {price}." if price else "Summa: vēl nav piefiksēta."
+    start_line = f"Darbu sākšana: {job_start}." if job_start else "Darbu sākšana: jāprecizē sarunā."
+    call_line = f"Zvana termiņš: {call_when}." if call_when else "Zvana termiņš: nav atsevišķi piefiksēts."
+
+    variants = [
+        (
+            "Īsais zvana plāns",
+            "\n".join([
+                _call_goal(ctx),
+                "",
+                "1. Pajautā, vai piedāvājums ir apskatīts.",
+                f"2. Pārbaudi kontekstu: {intro}.",
+                f"3. {price_question}",
+                f"4. {start_question}",
+                "5. Noslēdz ar konkrētu nākamo soli: piekrītam / precizējam / pārzvanām.",
+            ]),
+        ),
+        (
+            "Sarunas skripts",
+            "\n".join([
+                f"Sveiks, {voc}! Zvanu par piedāvājumu par {subject}.",
+                f"{price_line} {start_line}",
+                "Gribēju saprast, vai sanāca to apskatīt un vai ir kāds punkts, ko vajag precizēt.",
+                f"{start_question}",
+                "Ja vajag, es varu pēc zvana uzreiz sagatavot precizētu variantu.",
+            ]),
+        ),
+        (
+            "Iebildumu un closing jautājumi",
+            "\n".join([
+                "Iebildumu jautājumi:",
+                "• Kas šobrīd traucē pieņemt lēmumu?",
+                "• Vai jautājums ir par cenu, termiņu vai darba apjomu?",
+                "• Ko tieši vajag precizēt, lai varam virzīties tālāk?",
+                "",
+                "Closing frāzes:",
+                f"• Ja viss der, varam rezervēt darbu sākšanu {job_start}." if job_start else "• Ja viss der, vienojamies par nākamo konkrēto soli.",
+                "• Es piefiksēju precizējumus un atsūtu labotu piedāvājumu.",
+                "• Kad tev būtu ērti apstiprināt gala lēmumu?",
+            ]),
+        ),
+    ]
+
+    notes = [
+        f"klients: {client}",
+        f"zvans: {ctx.get('call_task') or 'jāzvana klientam'}",
+        f"piedāvājums: {ctx.get('offer_task') or 'nav konkrēta piedāvājuma ieraksta'}",
+        f"follow-up: {ctx.get('followup_task') or 'nav konkrēta follow-up ieraksta'}",
+        call_line,
+    ]
+    return _render_variants(
+        f"☎️ Zvana intelligence — {client}",
+        variants,
+        notes,
+        "piezvani klientam, nofiksē rezultātu un pēc sarunas ieraksti īsu statusu, piemēram: `Andris piekrita, jānosūta precizēta tāme`.",
+        ctx,
+        mode="call",
+    )
 
 def _task_kind(text):
     lower = _lower(text)
