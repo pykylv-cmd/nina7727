@@ -17,7 +17,7 @@ Piemēri:
 import re
 from datetime import datetime, timezone
 
-CONTEXT_ENGINE_VERSION = "Core 2.7 — Context V1"
+CONTEXT_ENGINE_VERSION = "Core 2.7.1 — Context Dedup Fix"
 _ACTIVE_CONTEXT = {}
 
 
@@ -200,7 +200,7 @@ def resolve_context_command(text, context):
 def context_status_answer(user_id=None):
     ctx = get_active_context(user_id or "default") if user_id is not None else {}
     lines = [
-        "🧠 Core 2.7 — Context V1 ir aktīvs. ✅",
+        "🧠 Core 2.7.1 — Context Dedup Fix ir aktīvs. ✅",
         "",
         "Ko tas dara:",
         "• atceras pēdējo darba klientu;",
