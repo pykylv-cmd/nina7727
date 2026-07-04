@@ -1,6 +1,6 @@
 """
 voice_engine.py
-NinaOS Voice Intake V1.8 — Deadline + Call Task Final Fix
+NinaOS Voice Intake V1.8.1 — Call Task Routing Fix
 
 Mērķis:
 - saglabāt termiņu follow-up balss komandās;
@@ -13,7 +13,7 @@ import os
 import re
 import tempfile
 
-VOICE_ENGINE_VERSION = "Voice Intake V1.8 — Deadline + Call Task Final Fix"
+VOICE_ENGINE_VERSION = "Voice Intake V1.8.1 — Call Task Routing Fix"
 
 LAST_VOICE_DEBUG = {
     "raw": "",
@@ -46,11 +46,11 @@ WEEKDAY_ALIASES = {
 
 def voice_status_answer():
     return (
-        "🎙 Voice Intake V1.8 — Deadline + Call Task Final Fix ir aktīvs. ✅\n\n"
+        "🎙 Voice Intake V1.8.1 — Call Task Routing Fix ir aktīvs. ✅\n\n"
         "Ko tas labo:\n"
         "• follow-up balss komandās saglabā termiņu;\n"
         "• 'piektdien jāpajautā Andrim par atbildi' paliek ar piektdien;\n"
-        "• 'rīt jāpiezvana Andrim' pārvēršas par īstu uzdevumu;\n"
+        "• 'rīt jāpiezvana Andrim' pārvēršas par Task Engine komandu 'rīt jāzvana Andrim';\n"
         "• Initiative balss komandas paliek Initiative ceļā.\n\n"
         "Testi:\n"
         "• piektdien jāpajautā Andrim par atbildi\n"
@@ -269,7 +269,7 @@ def _route_command(text):
     # Call task: catch all zvan/piezvan variants, preserve deadline
     if _has_andris(lower) and ("piezvan" in lower or "jāzvan" in lower or "zvan" in lower or "vana" in lower):
         prefix = (deadline + " ") if deadline else ""
-        return f"{prefix}jāpiezvana Andrim".strip(), "task"
+        return f"{prefix}jāzvana Andrim".strip(), "task"
 
     return text, "general"
 
