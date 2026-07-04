@@ -1,6 +1,6 @@
 """
 work_layer.py
-Nina Work Layer V1 — Offer & Follow-up Skills
+Nina Work Layer V1.1 — Smart Message Mode
 
 Mērķis:
 - pārvērst klienta darba snapshotu praktiskās darba sagatavēs;
@@ -11,7 +11,7 @@ Mērķis:
 
 import re
 
-WORK_LAYER_VERSION = "Nina Work Layer V1 — Offer & Follow-up Skills"
+WORK_LAYER_VERSION = "Nina Work Layer V1.1 — Smart Message Mode"
 
 
 def _clean(value):
@@ -188,7 +188,10 @@ def _detect_intent(text):
     if any(x in lower for x in ["follow-up", "followup", "follow up", "pajautāt", "pajautat", "par atbildi"]):
         if any(x in lower for x in ["uzraksti", "sagatavo", "ko rakstīt", "ko rakstit", "ziņu", "zinu"]):
             return "followup_message"
-    if any(x in lower for x in ["ko rakstīt", "ko rakstit", "uzraksti", "sagatavo ziņu", "sagatavo zinu"]):
+    if any(x in lower for x in [
+        "ko rakstīt", "ko rakstit", "uzraksti", "sagatavo ziņu", "sagatavo zinu",
+        "ko sūtīt", "ko sutit", "ko nosūtīt", "ko nosutit", "ziņu klientam", "zinu klientam"
+    ]):
         return "client_message"
     if any(x in lower for x in ["uztaisi piedāvājumu", "uztaisi piedavajumu", "sagatavo piedāvājumu", "sagatavo piedavajumu", "sagatavo tāmi", "sagatavo tami", "piedāvājuma tekstu", "piedavajuma tekstu"]):
         return "offer_message"
@@ -201,16 +204,21 @@ def is_work_layer_command(text):
 
 def work_layer_status_answer():
     return (
-        "🧰 Nina Work Layer V1 — Offer & Follow-up Skills ir aktīvs. ✅\n\n"
+        "🧰 Nina Work Layer V1.1 — Smart Message Mode ir aktīvs. ✅\n\n"
         "Ko tas dara:\n"
         "• sagatavo piedāvājuma tekstu klientam;\n"
         "• sagatavo follow-up ziņu;\n"
         "• sagatavo zvana plānu;\n"
-        "• izmanto klienta darbu snapshotu, bet neko nesaglabā datubāzē.\n\n"
-        "Testi:\n"
+        "• Smart Message Mode pats izvēlas pareizo ziņas tipu pēc klienta darba snapshota;\n"
+        "• neko nesaglabā datubāzē — tikai sagatavo tekstu darbam.\n\n"
+        "Smart komandas:\n"
+        "• ko rakstīt Andrim\n"
+        "• uzraksti Andrim\n"
+        "• sagatavo ziņu Andrim\n"
+        "• ko sūtīt Andrim\n\n"
+        "Tiešās komandas:\n"
         "• uztaisi piedāvājumu Andrim\n"
         "• uzraksti follow-up Andrim\n"
-        "• ko rakstīt Andrim\n"
         "• sagatavo zvana plānu Andrim\n\n"
         f"Versija: {WORK_LAYER_VERSION}"
     )
@@ -316,17 +324,85 @@ def build_call_plan(client, tasks=None, memory_snapshot=None):
     return "\n".join(lines)
 
 
+def _task_kind(text):
+    lower = _lower(text)
+    if any(x in lower for x in ["piedāvāj", "piedavaj", "tāme", "tame", "jānosūta", "janosuta", "offer"]):
+        return "offer"
+    if any(x in lower for x in ["jāpajautā", "japajauta", "follow", "par atbildi", "atgādin", "atgadin"]):
+        return "followup"
+    if any(x in lower for x in ["jāzvana", "jazvana", "jāpiezvana", "japiezvana", "zvans", "zvanīt", "zvanit"]):
+        return "call"
+    return "general"
+
+
+def _snapshot_top_text(memory_snapshot=None):
+    snap = memory_snapshot or {}
+    for key in ["top_task", "top_work", "priority", "last_task", "task"]:
+        if snap.get(key):
+            return _clean(snap.get(key))
+    return ""
+
+
+def _choose_smart_message_type(client, tasks=None, memory_snapshot=None):
+    top_text = _snapshot_top_text(memory_snapshot)
+    top_kind = _task_kind(top_text)
+    if top_kind in ["offer", "followup", "call"]:
+        return top_kind, top_text
+
+    client_items = _client_tasks(client, tasks)
+    if client_items:
+        ranked = []
+        for task in client_items:
+            text = _task_text(task)
+            kind = _task_kind(text)
+            score = 0
+            if kind == "offer":
+                score = 90
+            elif kind == "followup":
+                score = 70
+            elif kind == "call":
+                score = 60
+            else:
+                score = 10
+            lower = _lower(text)
+            if "rīt" in lower or "rit" in lower:
+                score += 15
+            if "šodien" in lower or "sodien" in lower:
+                score += 20
+            ranked.append((score, kind, text))
+        ranked.sort(reverse=True, key=lambda x: x[0])
+        if ranked and ranked[0][1] in ["offer", "followup", "call"]:
+            return ranked[0][1], ranked[0][2]
+
+    if _find_offer_task(client, tasks, memory_snapshot):
+        return "offer", _find_offer_task(client, tasks, memory_snapshot)
+    if _find_followup_task(client, tasks, memory_snapshot):
+        return "followup", _find_followup_task(client, tasks, memory_snapshot)
+    if _find_call_task(client, tasks, memory_snapshot):
+        return "call", _find_call_task(client, tasks, memory_snapshot)
+    return "followup", ""
+
+
 def build_client_message(client, tasks=None, memory_snapshot=None):
     client = _normalize_client(client)
-    offer_task = _find_offer_task(client, tasks, memory_snapshot)
-    followup_task = _find_followup_task(client, tasks, memory_snapshot)
+    selected, reason_text = _choose_smart_message_type(client, tasks, memory_snapshot)
 
-    # Ja redzam follow-up, drošāk piedāvāt follow-up. Ja piedāvājums ir top darbs, piedāvāt piedāvājumu.
-    if followup_task and "piedāv" not in _lower(offer_task):
-        return build_followup_message(client, tasks, memory_snapshot)
-    if offer_task:
-        return build_offer_message(client, tasks, memory_snapshot)
-    return build_followup_message(client, tasks, memory_snapshot)
+    if selected == "offer":
+        answer = build_offer_message(client, tasks, memory_snapshot)
+    elif selected == "call":
+        answer = build_call_plan(client, tasks, memory_snapshot)
+    else:
+        answer = build_followup_message(client, tasks, memory_snapshot)
+
+    note = (
+        "\n\nSmart Message izvēle:\n"
+        f"• izvēlētais tips: {selected}\n"
+        f"• pamats: {reason_text or 'klienta darba snapshot'}"
+    )
+    if "Versija:" in answer:
+        before, version = answer.rsplit("Versija:", 1)
+        return before.rstrip() + note + "\n\nVersija:" + version
+    return answer.rstrip() + note + f"\n\nVersija: {WORK_LAYER_VERSION}"
 
 
 def build_work_layer_answer(user_text, tasks=None, memory_snapshot=None):
