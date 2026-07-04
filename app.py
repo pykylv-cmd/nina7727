@@ -14857,7 +14857,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, nina_public_answer(nina_initiative_answer(user_id)))
             return
 
-        # Core 3.1.1 — Sales Stage Detection
+        # Core 3.1.1.1 — Sales Snapshot Cleanup
         # Nosaka klienta pārdošanas posmu un nākamo deal soli no reālajiem taskiem.
         if lower in ["sales", "sales status", "sales brain", "pipeline status", "deal status"]:
             try:
