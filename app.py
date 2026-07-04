@@ -13034,7 +13034,7 @@ class VoiceTextUpdateProxy:
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Voice Intake V1.7: Telegram voice/audio -> cleanup routing -> existing reply router via proxy update."""
+    """Voice Intake V1.8: Telegram voice/audio -> cleanup routing -> existing reply router via proxy update."""
     try:
         if not update.message:
             return
@@ -13065,7 +13065,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await tg_file.download_to_memory(out=buffer)
         audio_bytes = buffer.getvalue()
 
-        print(f"Voice Intake V1.7 handler: received file={filename} bytes={len(audio_bytes)}")
+        print(f"Voice Intake V1.8 handler: received file={filename} bytes={len(audio_bytes)}")
 
         transcript = transcribe_audio_with_openai(
             client,
@@ -13082,7 +13082,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, build_voice_error_answer("Voice cleanup atgrieza tukšu tekstu."))
             return
 
-        print(f"Voice Intake V1.7 cleaned transcript: {cleaned_transcript}")
+        print(f"Voice Intake V1.8 cleaned transcript: {cleaned_transcript}")
 
         try:
             v40_log_usage(user_id, "voice", cleaned_transcript)
@@ -13094,7 +13094,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply(voice_update, context)
 
     except Exception as e:
-        print("handle_voice V1.7 kļūda:", repr(e))
+        print("handle_voice V1.8 kļūda:", repr(e))
         try:
             await safe_reply_text(update, build_voice_error_answer(str(e)))
         except Exception:
