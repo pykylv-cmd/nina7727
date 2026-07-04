@@ -452,6 +452,32 @@ except Exception as e:
         return "Nina Work Layer nav pieslēgts."
 
 
+# NinaOS Sales Brain Import
+try:
+    from sales_brain import (
+        build_sales_answer,
+        is_sales_command,
+        build_sales_status_answer,
+        sales_status_answer,
+        SALES_BRAIN_VERSION,
+    )
+except Exception as e:
+    print("sales_brain.py imports nav pieejams:", e)
+    SALES_BRAIN_VERSION = "Sales Brain nav pieslēgts"
+
+    def build_sales_answer(user_text, tasks=None, memory_snapshot=None):
+        return "Sales Brain nav pieslēgts."
+
+    def is_sales_command(text):
+        return False
+
+    def build_sales_status_answer(tasks=None, memory_snapshot=None):
+        return "Sales Brain nav pieslēgts."
+
+    def sales_status_answer():
+        return "Sales Brain nav pieslēgts."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -14829,6 +14855,39 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if is_initiative_command(user_text):
             await safe_reply_text(update, nina_public_answer(nina_initiative_answer(user_id)))
+            return
+
+        # Core 3.1.1 — Sales Stage Detection
+        # Nosaka klienta pārdošanas posmu un nākamo deal soli no reālajiem taskiem.
+        if lower in ["sales", "sales status", "sales brain", "pipeline status", "deal status"]:
+            try:
+                sales_tasks = nina_clean_real_tasks(user_id, limit=200)
+            except Exception:
+                sales_tasks = []
+            await safe_reply_text(update, nina_public_answer(build_sales_status_answer(sales_tasks, memory_snapshot)))
+            return
+
+        if is_sales_command(user_text):
+            try:
+                sales_tasks = nina_clean_real_tasks(user_id, limit=200)
+            except Exception:
+                sales_tasks = []
+            try:
+                sales_answer = build_sales_answer(user_text, tasks=sales_tasks, memory_snapshot=memory_snapshot)
+            except Exception as e:
+                print("Sales Brain route kļūda:", repr(e))
+                sales_answer = "📈 Sales Brain šobrīd nevarēja noteikt pipeline posmu. Pamēģini vēlreiz ar klienta vārdu.\n\nVersija: Core 3.1.1"
+
+            try:
+                v40_log_usage(user_id, "sales_brain_311", user_text)
+            except Exception:
+                pass
+            try:
+                save_conversation_state(user_id, user_text, sales_answer, "sales_brain_311", v80_mood(user_text), "sales_brain")
+            except Exception:
+                pass
+
+            await safe_reply_text(update, nina_public_answer(sales_answer))
             return
 
         # Nina Work Layer V1.1 — Smart Message Mode
