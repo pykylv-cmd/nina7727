@@ -1,6 +1,6 @@
 """
 work_layer.py
-Nina Work Layer V1.3.1 — Offer Context Cleanup
+Nina Work Layer V1.4 — Offer Detail Extraction
 
 Mērķis:
 - pārvērst klienta darba snapshotu praktiskās darba sagatavēs;
@@ -12,7 +12,7 @@ Mērķis:
 
 import re
 
-WORK_LAYER_VERSION = "Nina Work Layer V1.3.1 — Offer Context Cleanup"
+WORK_LAYER_VERSION = "Nina Work Layer V1.4 — Offer Detail Extraction"
 
 
 def _clean(value):
@@ -156,7 +156,7 @@ def is_work_layer_command(text):
 
 def work_layer_status_answer():
     return (
-        "🧰 Nina Work Layer V1.3.1 — Offer Context Cleanup ir aktīvs. ✅\n\n"
+        "🧰 Nina Work Layer V1.4 — Offer Detail Extraction ir aktīvs. ✅\n\n"
         "Ko tas dara:\n"
         "• sagatavo piedāvājuma tekstu klientam;\n"
         "• sagatavo follow-up ziņu;\n"
@@ -191,7 +191,6 @@ def _extract_price(text):
 
 def _extract_start_or_deadline(text):
     lower = _lower(text)
-    # order matters: specific phrases before generic day words
     phrase_map = [
         ("nākamnedēļ", "nākamnedēļ"), ("nakamnedel", "nākamnedēļ"),
         ("šonedēļ", "šonedēļ"), ("sonedel", "šonedēļ"),
@@ -204,6 +203,18 @@ def _extract_start_or_deadline(text):
     for needle, label in phrase_map:
         if re.search(rf"\b{re.escape(needle)}\b", lower):
             return label
+    return ""
+
+
+def _extract_job_start_time(text):
+    lower = _lower(text)
+    for pattern,label in [
+        (r"(?:darbus|darbu|sākt|sakt|uzsākt|uzsakt).*?(nākamnedēļ|nakamnedel|šonedēļ|sonedel|rīt|rit|parīt|parit|pirmdien|otrdien|trešdien|tresdien|ceturtdien|piektdien|sestdien|svētdien|svetdien)", None),
+        (r"(nākamnedēļ|nakamnedel|šonedēļ|sonedel)\s+(?:varam\s+)?(?:sākt|sakt|uzsākt|uzsakt|darbus)", None),
+    ]:
+        m=re.search(pattern, lower)
+        if m:
+            return _extract_start_or_deadline(m.group(1))
     return ""
 
 
@@ -256,6 +267,7 @@ def _build_context(client, tasks=None, memory_snapshot=None):
         "subject": _extract_subject(primary, client),
         "price": _extract_price(combined),
         "offer_send_when": _extract_start_or_deadline(offer_task),
+        "job_start_when": _extract_job_start_time(combined),
         "followup_when": _extract_start_or_deadline(followup_task),
         "call_when": _extract_start_or_deadline(call_task),
     }
@@ -272,6 +284,8 @@ def _context_sentence(ctx, mode="generic"):
         when = ctx.get("offer_send_when", "")
         if when:
             parts.append(f"piedāvājums jānosūta: {when}")
+        if ctx.get("job_start_when"):
+            parts.append(f"darbu sākšana: {ctx['job_start_when']}")
     elif mode == "followup":
         when = ctx.get("followup_when", "")
         if when:
@@ -288,14 +302,16 @@ def _offer_body(ctx, style="normal"):
     subject = ctx.get("subject") or "pārrunāto darbu"
     price = ctx.get("price")
     send_when = ctx.get("offer_send_when")
-    price_line = f" Kopējā summa/cena: {price}." if price else ""
+    price_line = f" Kopējā summa ir {price}." if price else ""
     when_line = f" Nosūtu to {send_when}, kā runājām." if send_when else ""
+    start_when = ctx.get("job_start_when")
+    start_line = f" Darbus varam sākt {start_when}." if start_when else ""
 
     if style == "short":
-        return f"Sveiks, {voc}! Nosūtu piedāvājumu par {subject}.{price_line}{when_line} Apskati, lūdzu, un dod ziņu, ja viss der vai vajag ko precizēt."
+        return f"Sveiks, {voc}! Nosūtu piedāvājumu par {subject}.{price_line}{start_line}{when_line} Apskati, lūdzu, un dod ziņu, ja viss der vai vajag ko precizēt."
     if style == "formal":
-        return f"Labdien, {ctx['client']}!\n\nNosūtu Jums piedāvājumu par {subject}.{price_line}{when_line} Lūdzu apskatiet, un, ja viss ir pieņemami, vienosimies par nākamo soli un izpildes laiku. Ja nepieciešami precizējumi, sagatavošu labotu variantu."
-    return f"Sveiks, {voc}!\n\nNosūtu piedāvājumu par {subject}.{price_line}{when_line}\n\nJa viss izskatās kārtībā, dod ziņu, un varam vienoties par nākamo soli vai darbu sākšanu.\n\nJa vajag ko precizēt, droši uzraksti — pielabošu."
+        return f"Labdien, {ctx['client']}!\n\nNosūtu Jums piedāvājumu par {subject}.{price_line}{start_line}{when_line} Lūdzu apskatiet, un, ja viss ir pieņemami, vienosimies par nākamo soli un izpildes laiku. Ja nepieciešami precizējumi, sagatavošu labotu variantu."
+    return f"Sveiks, {voc}!\n\nNosūtu piedāvājumu par {subject}.{price_line}{start_line}{when_line}\n\nJa viss izskatās kārtībā, dod ziņu, un varam vienoties par nākamo soli vai darbu sākšanu.\n\nJa vajag ko precizēt, droši uzraksti — pielabošu."
 
 
 def _followup_body(ctx, style="soft"):
