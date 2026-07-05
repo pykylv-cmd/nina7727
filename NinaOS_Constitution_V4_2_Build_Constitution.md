@@ -1488,3 +1488,93 @@ Un NinaOS jābūvē tā, lai rezultāts būtu:
 - ready worker platform;
 - global exchange;
 - premium visual product.
+
+---
+
+## 29. Deployment & Working Environment
+
+NinaOS projekta darba vide ir oficiāli fiksēta.
+
+### 29.1 Repository
+
+NinaOS primārais un vienīgais darba repozitorijs ir:
+
+**GitHub**
+
+Visi faili, moduļi, konstitūcijas, app versijas un servisu faili tiek glabāti GitHub repo.
+
+Darba princips:
+- lietotājs nestrādā lokāli pa failiem;
+- faili tiek sagatavoti kā pilni gatavi faili vai pilni aizvietojami bloki;
+- lietotājs tos ieliek GitHub;
+- pēc tam notiek deploy caur Railway.
+
+### 29.2 Hosting / Deploy
+
+NinaOS oficiālā deploy un hosting vide ir:
+
+**Railway**
+
+Render netiek lietots kā primārā NinaOS deploy vide.
+
+Ja nākotnē tiek minēts deploy, web app, bot service, environment variables, start command vai public link, pēc noklusējuma tas nozīmē:
+
+**Railway**, nevis Render.
+
+### 29.3 Service planning
+
+NinaOS servisi jāplāno Railway struktūrai.
+
+Sākotnējie Railway servisi:
+
+1. **Telegram Bot Service**
+   - start command: `python app.py`
+   - atbild par Telegram Nina botu
+
+2. **Web App Service**
+   - start command: `python web_app.py`
+   - atbild par NinaOS vizuālo web aplikāciju
+
+Vēlāk var pievienot:
+- worker runtime service;
+- background jobs;
+- scheduler;
+- billing service;
+- exchange service;
+- API service.
+
+### 29.4 Environment variables
+
+Railway mainīgie jāglabā Railway Variables sadaļā.
+
+Piemēri:
+- `TELEGRAM_TOKEN`
+- `OPENAI_API_KEY`
+- `DATABASE_URL`
+- `STRIPE_SECRET_KEY`
+- nākotnē citi API keys
+
+Secrets netiek rakstīti čatā publiski un netiek cieti ielikti kodā.
+
+### 29.5 Assistant working rule
+
+NinaOS asistenta darba noteikums:
+
+Ja vajag mainīt kodu, asistents nedod sarežģītas manuālas instrukcijas pa failu iekšām, bet sagatavo:
+- pilnu failu;
+- vai precīzu aizvietojamu bloku;
+- vai skaidru Railway klikšķu secību.
+
+Lietotājs strādā praktiski ar:
+- GitHub;
+- Railway;
+- Telegram testiem;
+- vēlāk NinaOS web app linku.
+
+### 29.6 No Render by default
+
+Render netiek pieņemts kā noklusējuma vide.
+
+Ja kādreiz īpaši vajag Render, tam jābūt skaidri pateiktam atsevišķi.
+
+Pretējā gadījumā visi deploy norādījumi jāveido priekš Railway.
