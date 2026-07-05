@@ -1,11 +1,41 @@
 # platform_visibility.py
-# NinaOS Platform Visibility V1.0
+# NinaOS Platform Visibility V1.1
 # Build target: NinaOS Constitution V4.2
 #
 # Purpose:
-# Make NinaOS Platform Core visible in the product.
+# - Make NinaOS Platform Core visible in the product
+# - Global-first language support
+# - Default product language: English
 
-PLATFORM_VISIBILITY_VERSION = "Platform Visibility V1.0"
+PLATFORM_VISIBILITY_VERSION = "Platform Visibility V1.1"
+
+try:
+    from language_engine import (
+        t,
+        normalize_language,
+        build_office_manager_intro,
+        build_exchange_intro,
+        route_language_command,
+        LANGUAGE_ENGINE_VERSION,
+    )
+except Exception as e:
+    LANGUAGE_ENGINE_VERSION = "Language Engine not connected"
+
+    def normalize_language(language=None):
+        return "en"
+
+    def t(key, language=None, fallback=None):
+        return fallback if fallback is not None else key
+
+    def build_office_manager_intro(language=None):
+        return "🏢 Nina Office Manager SMB\n\nAI office manager for small businesses."
+
+    def build_exchange_intro(language=None):
+        return "🛒 NinaOS Exchange Preview\n\nExchange is the marketplace for NinaOS AI workers."
+
+    def route_language_command(text, language=None):
+        return None
+
 
 try:
     from role_registry import (
@@ -16,16 +46,16 @@ try:
     )
 except Exception as e:
     def role_registry_status():
-        return f"Role Registry nav pieejams: {repr(e)}"
+        return f"Role Registry not available: {repr(e)}"
 
     def build_roles_answer(include_planned=False):
-        return f"Role Registry nav pieejams: {repr(e)}"
+        return f"Role Registry not available: {repr(e)}"
 
     def build_composite_workers_answer():
-        return f"Composite Workers nav pieejami: {repr(e)}"
+        return f"Composite Workers not available: {repr(e)}"
 
     def build_office_manager_smb_answer():
-        return f"Nina Office Manager SMB nav pieejama: {repr(e)}"
+        return f"Nina Office Manager SMB not available: {repr(e)}"
 
 
 try:
@@ -36,13 +66,13 @@ try:
     )
 except Exception as e:
     def agent_registry_status():
-        return f"Agent Registry nav pieejams: {repr(e)}"
+        return f"Agent Registry not available: {repr(e)}"
 
     def build_agents_answer(include_planned=False):
-        return f"Agent Registry nav pieejams: {repr(e)}"
+        return f"Agent Registry not available: {repr(e)}"
 
     def build_office_manager_agent_answer():
-        return f"Nina Office Manager Agent nav pieejams: {repr(e)}"
+        return f"Nina Office Manager Agent not available: {repr(e)}"
 
 
 try:
@@ -53,13 +83,13 @@ try:
     )
 except Exception as e:
     def workspace_engine_status():
-        return f"Workspace Engine nav pieejams: {repr(e)}"
+        return f"Workspace Engine not available: {repr(e)}"
 
     def build_workspaces_answer():
-        return f"Workspace Engine nav pieejams: {repr(e)}"
+        return f"Workspace Engine not available: {repr(e)}"
 
     def build_small_business_workspace_answer():
-        return f"Small Business Workspace nav pieejams: {repr(e)}"
+        return f"Small Business Workspace not available: {repr(e)}"
 
 
 try:
@@ -71,37 +101,43 @@ try:
     )
 except Exception as e:
     def permission_engine_status():
-        return f"Permission Engine nav pieejams: {repr(e)}"
+        return f"Permission Engine not available: {repr(e)}"
 
     def build_permissions_answer():
-        return f"Permission Engine nav pieejams: {repr(e)}"
+        return f"Permission Engine not available: {repr(e)}"
 
     def build_office_manager_permissions_answer():
-        return f"Office Manager permissions nav pieejamas: {repr(e)}"
+        return f"Office Manager permissions not available: {repr(e)}"
 
     def build_workspace_permissions_answer(workspace_id):
-        return f"Workspace permissions nav pieejamas: {repr(e)}"
+        return f"Workspace permissions not available: {repr(e)}"
 
 
-def platform_visibility_status():
+def platform_visibility_status(language="en"):
+    lang = normalize_language(language)
+
     return (
-        "🌐 NinaOS Platform Visibility\n\n"
-        f"Versija: {PLATFORM_VISIBILITY_VERSION}\n"
-        "Mērķis: padarīt NinaOS Platform Core redzamu produktā.\n\n"
-        "Redzamie slāņi:\n"
+        f"{t('ninaos_platform_visibility', lang)}\n\n"
+        f"Version: {PLATFORM_VISIBILITY_VERSION}\n"
+        f"Language Engine: {LANGUAGE_ENGINE_VERSION}\n"
+        f"{t('platform_visibility_goal', lang)}\n\n"
+        f"{t('visible_layers', lang)}\n"
         "• Role Registry\n"
         "• Agent Registry\n"
         "• Workspace Engine\n"
         "• Permission Engine\n"
-        "• Nina Office Manager SMB\n\n"
-        "Statuss: aktīvs ✅"
+        "• Nina Office Manager SMB\n"
+        "• Language Engine\n\n"
+        f"{t('status_active', lang)}"
     )
 
 
-def build_platform_status_answer():
+def build_platform_status_answer(language="en"):
+    lang = normalize_language(language)
+
     return (
-        "🌐 NinaOS Platform Core Status\n\n"
-        f"{platform_visibility_status()}\n\n"
+        f"{t('ninaos_platform_core_status', lang)}\n\n"
+        f"{platform_visibility_status(lang)}\n\n"
         "━━━━━━━━━━━━━━\n"
         f"{role_registry_status()}\n\n"
         "━━━━━━━━━━━━━━\n"
@@ -113,12 +149,14 @@ def build_platform_status_answer():
     )
 
 
-def build_ninaos_workers_answer():
+def build_ninaos_workers_answer(language="en"):
+    lang = normalize_language(language)
+
     return (
-        "👥 NinaOS Ready Workers\n\n"
-        "Pirmais stratēģiskais gatavais darbinieks:\n"
+        f"{t('ready_workers', lang)}\n\n"
+        f"{t('first_strategic_worker', lang)}\n"
         "• Nina Office Manager SMB\n\n"
-        "Plānotie nākamie workers:\n"
+        f"{t('planned_next_workers', lang)}\n"
         "• Nina Sales\n"
         "• Nina Estimator\n"
         "• Nina Finance\n"
@@ -128,22 +166,11 @@ def build_ninaos_workers_answer():
     )
 
 
-def build_nina_office_manager_product_answer():
+def build_nina_office_manager_product_answer(language="en"):
+    lang = normalize_language(language)
+
     return (
-        "🏢 Nina Office Manager SMB\n\n"
-        "AI biroja vadītāja mazajiem uzņēmumiem.\n\n"
-        "Viņa apvieno 5 amatus vienā gatavā darbiniekā:\n"
-        "• Office Manager Core\n"
-        "• Finance Admin Assistant\n"
-        "• Estimating Assistant Basic\n"
-        "• Client Follow-up Manager\n"
-        "• Document Admin\n\n"
-        "Viņa palīdz mazam uzņēmumam:\n"
-        "• turēt kārtībā taskus un termiņus\n"
-        "• sekot klientiem un follow-up\n"
-        "• palīdzēt ar invoice admin\n"
-        "• palīdzēt ar estimate / offer draftiem\n"
-        "• sakārtot dokumentus\n\n"
+        f"{build_office_manager_intro(lang)}\n\n"
         "━━━━━━━━━━━━━━\n"
         f"{build_office_manager_agent_answer()}\n\n"
         "━━━━━━━━━━━━━━\n"
@@ -151,18 +178,20 @@ def build_nina_office_manager_product_answer():
     )
 
 
-def build_ninaos_workspace_product_answer():
+def build_ninaos_workspace_product_answer(language="en"):
+    lang = normalize_language(language)
+
     return (
-        "🏢 NinaOS Small Business Workspace\n\n"
-        "Šis ir pirmais workspace tips Nina Office Manager SMB produktam.\n\n"
-        "Dashboardam vēlāk jāparāda:\n"
-        "• Tasks Today\n"
-        "• Follow-ups\n"
-        "• Invoices Due\n"
-        "• Estimates in Progress\n"
-        "• Projects Active\n"
-        "• Recent Activities\n"
-        "• Exchange Preview\n\n"
+        f"{t('small_business_workspace', lang)}\n\n"
+        "This is the first workspace type for Nina Office Manager SMB.\n\n"
+        f"{t('dashboard_future_blocks', lang)}\n"
+        f"• {t('tasks_today', lang)}\n"
+        f"• {t('followups', lang)}\n"
+        f"• {t('invoices_due', lang)}\n"
+        f"• {t('estimates_in_progress', lang)}\n"
+        f"• {t('projects_active', lang)}\n"
+        f"• {t('recent_activities', lang)}\n"
+        f"• {t('exchange_preview', lang)}\n\n"
         "━━━━━━━━━━━━━━\n"
         f"{build_small_business_workspace_answer()}\n\n"
         "━━━━━━━━━━━━━━\n"
@@ -170,51 +199,42 @@ def build_ninaos_workspace_product_answer():
     )
 
 
-def build_ninaos_exchange_preview_answer():
-    return (
-        "🛒 NinaOS Exchange Preview\n\n"
-        "Exchange ir NinaOS AI darbinieku tirgus.\n\n"
-        "Pirmais Exchange katalogs:\n"
-        "• Nina Office Manager SMB — aktīvs\n"
-        "• Nina Sales — plānots\n"
-        "• Nina Estimator — plānots\n"
-        "• Nina Finance — plānots\n"
-        "• Nina Support — plānots\n\n"
-        "Exchange mērķis:\n"
-        "• pārdot gatavus AI darbiniekus\n"
-        "• ļaut aģentiem sadarboties\n"
-        "• veidot bot-to-bot darījumus\n"
-        "• pelnīt komisijas NinaOS platformai\n\n"
-        f"Versija: {PLATFORM_VISIBILITY_VERSION}"
-    )
+def build_ninaos_exchange_preview_answer(language="en"):
+    lang = normalize_language(language)
+    return build_exchange_intro(lang)
 
 
-def route_platform_visibility_command(text: str):
-    t = (text or "").strip().lower()
+def route_platform_visibility_command(text: str, language="en"):
+    t_raw = (text or "").strip().lower()
+    lang = normalize_language(language)
 
-    if t in ["platform status", "ninaos status", "platform"]:
-        return build_platform_status_answer()
+    language_answer = route_language_command(t_raw, lang)
+    if language_answer:
+        return language_answer
 
-    if t in ["roles", "role registry", "role status"]:
+    if t_raw in ["platform status", "ninaos status", "platform"]:
+        return build_platform_status_answer(lang)
+
+    if t_raw in ["roles", "role registry", "role status"]:
         return build_roles_answer(include_planned=True)
 
-    if t in ["workers", "agents", "ready workers", "darbinieki"]:
-        return build_ninaos_workers_answer()
+    if t_raw in ["workers", "agents", "ready workers", "darbinieki"]:
+        return build_ninaos_workers_answer(lang)
 
-    if t in ["workspaces", "workspace", "small business workspace"]:
-        return build_ninaos_workspace_product_answer()
+    if t_raw in ["workspaces", "workspace", "small business workspace"]:
+        return build_ninaos_workspace_product_answer(lang)
 
-    if t in ["permissions", "permission status", "tiesības"]:
+    if t_raw in ["permissions", "permission status", "tiesības", "tiesibas"]:
         return build_permissions_answer()
 
-    if t in ["office manager", "nina office manager", "nina office manager smb"]:
-        return build_nina_office_manager_product_answer()
+    if t_raw in ["office manager", "nina office manager", "nina office manager smb"]:
+        return build_nina_office_manager_product_answer(lang)
 
-    if t in ["exchange", "nina exchange", "exchange preview"]:
-        return build_ninaos_exchange_preview_answer()
+    if t_raw in ["exchange", "nina exchange", "exchange preview"]:
+        return build_ninaos_exchange_preview_answer(lang)
 
     return None
 
 
 if __name__ == "__main__":
-    print(build_platform_status_answer())
+    print(build_platform_status_answer("en"))
