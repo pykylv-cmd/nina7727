@@ -3,7 +3,7 @@ import os
 
 app = Flask(__name__)
 
-APP_VERSION = "Web App V7 — Reference Logo Asset"
+APP_VERSION = "Web App V8 — Globe Fix Edition"
 CORE_VERSION = "V115.4 + Core 2.5.2"
 
 WORKERS = [
@@ -41,6 +41,129 @@ CSS = """
 
 .logoWordmark{width:min(430px,92%);height:auto;display:block;filter:drop-shadow(0 18px 38px rgba(0,0,0,.45));margin-top:8px}
 .sideLogoWordmark{width:112px;height:auto;display:block;filter:drop-shadow(0 8px 18px rgba(0,0,0,.35))}
+
+/* V8 Globe Fix: right-side dashboard globe must be network-earth, not logo orb */
+.globeArea{
+    position:absolute;
+    right:18px;
+    top:14px;
+    width:365px;
+    height:230px;
+    overflow:visible;
+}
+.globe{
+    position:absolute;
+    left:8px;
+    top:0;
+    width:235px;
+    height:235px;
+    border-radius:50%;
+    overflow:hidden;
+    background:
+      radial-gradient(circle at 34% 28%, rgba(255,255,255,.26), transparent 10%),
+      radial-gradient(circle at 52% 48%, rgba(59,130,246,.30), rgba(37,99,235,.18) 38%, rgba(124,58,237,.12) 58%, rgba(5,8,18,.12) 72%),
+      linear-gradient(135deg, rgba(8,16,42,.96), rgba(4,8,20,.98));
+    border:1px solid rgba(96,165,250,.22);
+    box-shadow:
+      0 0 72px rgba(37,99,235,.38),
+      0 0 48px rgba(124,58,237,.26),
+      inset 0 0 36px rgba(34,211,238,.10);
+}
+.globe:before{
+    content:"";
+    position:absolute;
+    inset:8px;
+    border-radius:50%;
+    background:
+      radial-gradient(circle at 32% 34%, rgba(96,165,250,.95) 0 1.4px, transparent 2.2px),
+      radial-gradient(circle at 44% 24%, rgba(168,85,247,.96) 0 1.6px, transparent 2.5px),
+      radial-gradient(circle at 54% 42%, rgba(34,211,238,.95) 0 1.5px, transparent 2.4px),
+      radial-gradient(circle at 68% 30%, rgba(168,85,247,.96) 0 1.6px, transparent 2.5px),
+      radial-gradient(circle at 36% 58%, rgba(96,165,250,.95) 0 1.4px, transparent 2.3px),
+      radial-gradient(circle at 60% 64%, rgba(168,85,247,.95) 0 1.5px, transparent 2.4px),
+      radial-gradient(circle at 74% 54%, rgba(34,211,238,.95) 0 1.4px, transparent 2.2px),
+      linear-gradient(23deg, transparent 0 47%, rgba(96,165,250,.18) 48%, transparent 50%),
+      linear-gradient(-22deg, transparent 0 47%, rgba(168,85,247,.22) 48%, transparent 50%),
+      linear-gradient(78deg, transparent 0 48%, rgba(34,211,238,.14) 49%, transparent 51%),
+      radial-gradient(ellipse at 56% 42%, rgba(96,165,250,.18), transparent 45%);
+    filter:drop-shadow(0 0 10px rgba(124,58,237,.55));
+    transform:none;
+}
+.globe:after{
+    content:"";
+    position:absolute;
+    inset:0;
+    border-radius:50%;
+    background:
+      linear-gradient(110deg, transparent 0 34%, rgba(255,255,255,.08) 43%, transparent 54%),
+      radial-gradient(circle at 72% 32%, rgba(255,255,255,.12), transparent 22%);
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:inset -22px -14px 38px rgba(0,0,0,.34), inset 12px 8px 28px rgba(96,165,250,.10);
+}
+.orbit{
+    position:absolute;
+    left:-28px;
+    top:62px;
+    width:330px;
+    height:116px;
+    border:1px solid rgba(168,85,247,.45);
+    border-radius:50%;
+    transform:rotate(18deg);
+    box-shadow:0 0 18px rgba(124,58,237,.18);
+}
+.orbit.o2{
+    left:-20px;
+    top:38px;
+    width:314px;
+    height:164px;
+    transform:rotate(-24deg);
+    border-color:rgba(96,165,250,.34);
+}
+.globeArea:before{
+    content:"";
+    position:absolute;
+    left:42px;
+    top:20px;
+    width:10px;
+    height:10px;
+    border-radius:50%;
+    background:#a855f7;
+    box-shadow:
+      95px 20px 0 -2px #60a5fa,
+      148px 92px 0 -1px #a855f7,
+      50px 154px 0 -2px #22d3ee,
+      202px 148px 0 -2px #8b5cf6,
+      220px 48px 0 -2px #60a5fa,
+      0 0 18px #a855f7;
+    opacity:.95;
+}
+.globeText{
+    position:absolute;
+    right:0;
+    top:68px;
+    width:160px;
+    z-index:4;
+}
+.globeText b{
+    font-size:26px;
+    line-height:1.02;
+}
+.globeText p{
+    font-size:13px;
+    color:var(--muted);
+    margin:8px 0 12px;
+}
+.globeText .btn{
+    padding:10px 12px;
+    font-size:12px;
+}
+
+/* Keep the real NinaOS logo on the left, separate from the dashboard globe */
+.brandHero .bigLogo,
+.sideBrand .logo{
+    flex-shrink:0;
+}
+
 </style>
 """
 
