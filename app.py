@@ -545,6 +545,25 @@ except Exception as e:
         return "NinaOS Platform Core nav pieslēgts."
 
 
+
+# NinaOS Platform Visibility V1 Import
+try:
+    from platform_visibility import (
+        route_platform_visibility_command,
+        platform_visibility_status,
+        PLATFORM_VISIBILITY_VERSION,
+    )
+except Exception as e:
+    print("platform_visibility.py imports nav pieejams:", e)
+    PLATFORM_VISIBILITY_VERSION = "Platform Visibility nav pieslēgts"
+
+    def route_platform_visibility_command(text):
+        return None
+
+    def platform_visibility_status():
+        return "Platform Visibility nav pieslēgts."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -14924,6 +14943,37 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, nina_public_answer(nina_initiative_answer(user_id)))
             return
 
+
+
+
+        # NinaOS Platform Visibility V1
+        # Padara NinaOS Platform Core redzamu produktā:
+        # platform status, roles, workers, workspaces, permissions, office manager, exchange.
+        try:
+            platform_visibility_answer = route_platform_visibility_command(user_text)
+        except Exception as e:
+            print("Platform Visibility route kļūda:", repr(e))
+            platform_visibility_answer = None
+
+        if platform_visibility_answer:
+            try:
+                v40_log_usage(user_id, "platform_visibility_v1", user_text)
+            except Exception:
+                pass
+            try:
+                save_conversation_state(
+                    user_id,
+                    user_text,
+                    platform_visibility_answer,
+                    "platform_visibility_v1",
+                    v80_mood(user_text),
+                    "platform_visibility",
+                )
+            except Exception:
+                pass
+
+            await safe_reply_text(update, nina_public_answer(platform_visibility_answer))
+            return
 
 
         # NinaOS Ready Worker Catalog V1
