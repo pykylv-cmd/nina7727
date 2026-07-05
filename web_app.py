@@ -1,5 +1,122 @@
 from flask import Flask, jsonify
 import os
+from flask import Flask, jsonify
+import os
+
+app = Flask(__name__)
+
+APP_VERSION = "Web App V5 — NinaOS App Shell"
+CORE_VERSION = "V115.4 + Core 2.5.2"
+
+WORKERS = [
+    {"name":"Nina Sales","role":"AI Sales Executive","status":"ACTIVE","work":"Following up with 15 leads","tone":"purple","price":"€99","rating":"4.9"},
+    {"name":"Nina Estimator","role":"AI Estimator","status":"ACTIVE","work":"Working on 3 estimates","tone":"blue","price":"€119","rating":"4.9"},
+    {"name":"Nina Office Manager","role":"AI Office Manager","status":"ACTIVE","work":"Managing your schedule","tone":"green","price":"€89","rating":"4.8"},
+    {"name":"Nina Support","role":"AI Support Specialist","status":"IDLE","work":"Waiting for new tasks","tone":"orange","price":"€79","rating":"4.8"},
+]
+
+MARKET = WORKERS + [
+    {"name":"Nina Marketing","role":"AI Marketing Specialist","status":"ACTIVE","work":"Preparing campaigns","tone":"pink","price":"€99","rating":"4.8"},
+    {"name":"Nina HR","role":"AI HR Assistant","status":"ACTIVE","work":"Screening candidates","tone":"red","price":"€89","rating":"4.8"},
+]
+
+CSS = """
+<style>
+:root{--bg:#050711;--line:rgba(255,255,255,.11);--text:#f7fbff;--muted:#98a4c2;--purple:#7c3aed;--blue:#2563eb;--green:#22c55e;--shadow:0 22px 80px rgba(0,0,0,.45)}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 8% 8%,rgba(124,58,237,.18),transparent 28%),radial-gradient(circle at 86% 5%,rgba(37,99,235,.14),transparent 30%),linear-gradient(180deg,#030611,#070a14);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}a{text-decoration:none;color:inherit}
+.wrap{max-width:1880px;margin:auto;padding:16px}.shell{display:grid;grid-template-columns:170px minmax(0,1fr);gap:16px}.side,.main,.brandHero,.block,.panel{border:1px solid var(--line);background:linear-gradient(180deg,rgba(9,13,25,.92),rgba(6,9,18,.96));box-shadow:var(--shadow);border-radius:26px;overflow:hidden}
+.side{padding:16px 12px;display:flex;flex-direction:column;gap:12px;min-height:calc(100vh - 32px);position:sticky;top:16px}
+.sideBrand{display:flex;align-items:center;gap:10px;padding:4px 8px 14px}.logo{width:34px;height:34px;border-radius:50%;position:relative;overflow:hidden;background:radial-gradient(circle at 45% 40%,rgba(34,211,238,.24),rgba(124,58,237,.10) 58%,transparent 72%);box-shadow:0 0 34px rgba(124,58,237,.50)}.logo:before,.bigLogo:before,.globe:before{content:"";position:absolute;inset:4px;border-radius:50%;background-image:radial-gradient(circle,rgba(34,211,238,.96) 0 2px,transparent 3px),radial-gradient(circle,rgba(139,92,246,.98) 0 2px,transparent 3px),radial-gradient(circle,rgba(96,165,250,.96) 0 2px,transparent 3px);background-size:9px 9px;background-position:0 0,4px 4px,2px 6px;filter:drop-shadow(0 0 8px rgba(124,58,237,.45))}.logo:after,.bigLogo:after,.globe:after{content:"";position:absolute;inset:6px;border-radius:50%;border:1px solid rgba(255,255,255,.18)}
+.sideBrand b{font-size:20px;letter-spacing:-.04em}.os{background:linear-gradient(90deg,#60a5fa,#7c3aed);-webkit-background-clip:text;background-clip:text;color:transparent}
+.nav{display:grid;gap:7px}.nav a{display:flex;align-items:center;gap:9px;padding:11px 12px;border-radius:12px;color:#dbe4ff;font-size:13px;border:1px solid transparent}.nav a.active,.nav a:hover{background:linear-gradient(90deg,rgba(124,58,237,.42),rgba(37,99,235,.18));border-color:rgba(124,58,237,.36)}.badge{margin-left:auto;background:rgba(124,58,237,.35);border-radius:999px;padding:2px 6px;font-size:10px}.userMini{margin-top:auto;display:flex;align-items:center;gap:9px;padding:10px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.035)}.avatar{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-weight:900;background:linear-gradient(135deg,#7c3aed,#ec4899)}
+.main{padding:16px;min-width:0}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.search{width:min(520px,100%);border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.035);border-radius:999px;padding:12px 16px;color:#dbe4ff}.icons{display:flex;gap:9px}.ico{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.035)}
+.grid2{display:grid;grid-template-columns:520px minmax(0,1fr);gap:16px}.brandHero{padding:34px 28px;display:flex;flex-direction:column;align-items:center;text-align:center;min-height:590px}.bigLogo{width:150px;height:150px;border-radius:50%;position:relative;overflow:hidden;background:radial-gradient(circle at 45% 40%,rgba(34,211,238,.20),rgba(124,58,237,.08) 58%,transparent 72%);box-shadow:0 0 65px rgba(124,58,237,.36),0 0 35px rgba(34,211,238,.16)}.bigLogo:before{inset:10px;background-size:21px 21px;background-position:0 0,10px 10px,5px 15px}.bigLogo:after{inset:12px}.brandName{font-size:78px;font-weight:950;letter-spacing:-.055em;line-height:.9;margin-top:18px}.brandSub{margin-top:12px;font-size:15px;letter-spacing:.18em;text-transform:uppercase;color:#dce7ff}.heroCopy{font-size:22px;line-height:1.45;margin:34px 0 0}.heroCopy span{display:block;color:#dbe3f7}.pillars{width:100%;display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:34px 0 26px}.pillar{padding:12px 8px}.pillar .ic{font-size:36px;color:#8b5cf6;margin-bottom:12px}.pillar b{display:block;text-transform:uppercase;letter-spacing:.06em;font-size:13px}.pillar p{margin:8px 0 0;color:var(--muted);font-size:13px;line-height:1.42}.btn{display:inline-flex;align-items:center;justify-content:center;border-radius:13px;padding:12px 20px;font-weight:850;border:1px solid var(--line);background:rgba(255,255,255,.035)}.btn.primary{background:linear-gradient(90deg,#7c3aed,#2563eb);border-color:transparent;box-shadow:0 15px 36px rgba(124,58,237,.28)}.ctas{display:flex;gap:14px}.trusted{margin-top:auto;color:var(--muted);font-size:13px}.logos{width:100%;display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:16px}.logos span{font-size:12px;color:#e7eeff;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:9px 6px;background:rgba(255,255,255,.025)}
+.heroDash{position:relative;min-height:250px;border:1px solid rgba(255,255,255,.08);border-radius:22px;background:radial-gradient(circle at 74% 46%,rgba(34,211,238,.13),transparent 24%),linear-gradient(135deg,rgba(12,18,35,.96),rgba(6,10,20,.96));padding:20px;overflow:hidden}.heroDash h1{font-size:25px;margin:0 0 5px;letter-spacing:-.04em}.heroDash p{margin:0;color:var(--muted);font-size:13px}.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:20px;max-width:610px}.kpi{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.035);border-radius:15px;padding:12px;min-height:104px}.kpi small{font-size:11px;color:#e5ecff}.kpi .v{font-size:34px;font-weight:950;margin:7px 0 4px}.kpi .d{font-size:12px;color:#86efac}.kpi .p{color:#f0abfc}.kpi .b{color:#93c5fd}
+.globeArea{position:absolute;right:22px;top:16px;width:335px;height:220px}.globe{position:absolute;left:0;top:0;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle at 45% 40%,rgba(34,211,238,.18),rgba(37,99,235,.10) 40%,rgba(124,58,237,.08) 62%,transparent 72%);box-shadow:0 0 55px rgba(37,99,235,.20);overflow:hidden}.globe:before{inset:14px;background-size:17px 17px;background-position:0 0,8px 8px,4px 12px}.orbit{position:absolute;left:-28px;top:55px;width:300px;height:105px;border:1px solid rgba(124,58,237,.35);border-radius:50%;transform:rotate(19deg)}.orbit.o2{height:145px;top:36px;transform:rotate(-24deg);border-color:rgba(37,99,235,.28)}.globeText{position:absolute;right:0;top:62px;width:150px}.globeText b{font-size:25px;line-height:1.02;display:block}.globeText p{font-size:13px;color:var(--muted);line-height:1.35}.globeText .btn{padding:10px 12px;font-size:12px}
+.sectionTitle{font-size:18px;font-weight:950;margin:16px 0 12px}.workers{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px}.worker{border:1px solid rgba(255,255,255,.09);border-radius:18px;overflow:hidden;background:rgba(255,255,255,.035);min-height:265px}.wTop{height:145px;position:relative}.purple{background:linear-gradient(135deg,#3b1265,#0d1224)}.blue{background:linear-gradient(135deg,#0a4d87,#0d1224)}.green{background:linear-gradient(135deg,#0b5b37,#0d1224)}.orange{background:linear-gradient(135deg,#7c3f12,#0d1224)}.pink{background:linear-gradient(135deg,#76204f,#0d1224)}.red{background:linear-gradient(135deg,#7f1d1d,#0d1224)}.face{position:absolute;left:50%;top:53%;transform:translate(-50%,-50%);width:104px;height:104px;border-radius:50%;background:radial-gradient(circle at 35% 31%,#ffe2cd 0 13%,#c88463 14% 24%,transparent 25%),radial-gradient(circle at 50% 56%,#f3c5aa 0 30%,#bd7758 31% 36%,transparent 37%),radial-gradient(circle at 38% 43%,#23140f 0 3%,transparent 4%),radial-gradient(circle at 62% 43%,#23140f 0 3%,transparent 4%),radial-gradient(circle at 50% 20%,#3f2419 0 30%,transparent 31%),linear-gradient(180deg,#6b3d2d,#d39a7b);box-shadow:0 15px 38px rgba(0,0,0,.42),0 0 0 4px rgba(255,255,255,.08)}.wBody{padding:13px}.wBody h3{font-size:20px;line-height:1.06;margin:0 0 4px}.wBody p{margin:0 0 8px;color:var(--muted);font-size:12px}.status{font-size:11px;margin-bottom:9px}.active{color:#86efac}.idle{color:#fcd34d}.work{font-size:13px;line-height:1.35}
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}.panel{padding:14px;border-radius:18px}.panel h3,.block h2{margin:0 0 10px}.ok{color:#86efac;font-weight:800}.chart{height:80px;border-radius:13px;background:linear-gradient(180deg,rgba(124,58,237,.12),transparent);border:1px solid rgba(255,255,255,.06);position:relative;overflow:hidden}.chart svg{position:absolute;inset:0}.ws{display:flex;gap:8px;flex-wrap:wrap}.ws span{width:31px;height:31px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:900;background:linear-gradient(135deg,#7c3aed,#2563eb)}
+.bottom{display:grid;grid-template-columns:1fr;gap:16px;margin-top:16px}.block{border-radius:22px;padding:16px}.phoneRow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}.phone{border:1px solid rgba(255,255,255,.10);background:#060914;border-radius:26px;padding:9px}.screen{border-radius:20px;background:linear-gradient(180deg,#0c1224,#080c18);min-height:360px;padding:12px}.miniStats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:12px 0}.mini{background:rgba(255,255,255,.04);border-radius:12px;padding:8px;text-align:center}.mini b{font-size:18px}.mini span,.item span{display:block;color:var(--muted);font-size:10px}.item{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:9px;margin-top:8px;font-size:12px}
+.exchange{display:grid;grid-template-columns:160px minmax(0,1fr);gap:12px}.cats{display:grid;gap:8px;align-content:start}.cat{padding:9px 11px;border:1px solid rgba(255,255,255,.07);border-radius:11px;color:#dce6ff;font-size:12px;background:rgba(255,255,255,.025)}.cat.active{background:linear-gradient(90deg,rgba(124,58,237,.45),rgba(37,99,235,.18))}.marketGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}.market{border:1px solid rgba(255,255,255,.09);border-radius:16px;overflow:hidden;background:rgba(255,255,255,.035)}.market .wTop{height:118px}.market .face{width:86px;height:86px}.mBody{padding:11px}.mBody b{font-size:16px;display:block}.mBody span{display:block;color:var(--muted);font-size:11px;margin:3px 0}.price{font-size:18px;font-weight:950;margin-top:7px}.price span{display:inline;color:var(--muted);font-size:11px}.mBody .btn{padding:8px 11px;font-size:11px;margin-top:8px}
+.map{height:260px;border:1px solid rgba(255,255,255,.07);border-radius:18px;background:radial-gradient(circle at 20% 35%,rgba(124,58,237,.24),transparent 18%),radial-gradient(circle at 75% 45%,rgba(37,99,235,.18),transparent 22%),linear-gradient(180deg,#0b1020,#080c18);position:relative;overflow:hidden}.dot{position:absolute;width:10px;height:10px;border-radius:50%;background:#a855f7;box-shadow:0 0 18px #a855f7}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}.stat{border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:10px;background:rgba(255,255,255,.025)}.stat b{font-size:24px}.stat span{display:block;color:var(--muted);font-size:10px}
+.mobileNav{display:none;position:fixed;left:12px;right:12px;bottom:12px;background:rgba(8,12,24,.92);border:1px solid var(--line);border-radius:22px;z-index:20;padding:8px;backdrop-filter:blur(18px)}.mobileNav a{flex:1;text-align:center;padding:10px 4px;border-radius:14px;font-size:12px;color:#dbe4ff}.mobileNav a.active{background:rgba(124,58,237,.32)}
+@media(max-width:1500px){.grid2{grid-template-columns:1fr}.brandHero{min-height:auto}.shell{grid-template-columns:150px minmax(0,1fr)}}@media(max-width:1180px){.shell{grid-template-columns:1fr}.side{display:none}.kpis{grid-template-columns:repeat(2,1fr)}.workers{grid-template-columns:repeat(2,1fr)}.panels{grid-template-columns:1fr}.globeArea{position:relative;right:auto;top:auto;margin-top:10px}.heroDash{display:block}.exchange{grid-template-columns:1fr}.phoneRow{grid-template-columns:1fr}.mobileNav{display:flex}.wrap{padding-bottom:84px}}@media(max-width:760px){.wrap{padding:10px 10px 84px}.brandName{font-size:56px}.bigLogo{width:130px;height:130px}.pillars{grid-template-columns:repeat(2,1fr)}.ctas{flex-direction:column;width:100%}.ctas .btn{width:100%}.stats{grid-template-columns:repeat(2,1fr)}.kpis{grid-template-columns:1fr}.workers{grid-template-columns:1fr}}
+</style>
+"""
+
+def tone_class(tone):
+    return {"purple":"purple","blue":"blue","green":"green","orange":"orange","pink":"pink","red":"red"}.get(tone,"purple")
+
+def worker_card(w):
+    st = "active" if w["status"]=="ACTIVE" else "idle"
+    return f'<div class="worker"><div class="wTop {tone_class(w["tone"])}"><div class="face"></div></div><div class="wBody"><h3>{w["name"]}</h3><p>{w["role"]}</p><div class="status {st}">● {w["status"]}</div><div class="work">{w["work"]}</div></div></div>'
+
+def market_card(w):
+    return f'<div class="market"><div class="wTop {tone_class(w["tone"])}"><div class="face"></div></div><div class="mBody"><b>{w["name"]}</b><span>{w["role"]}</span><span>★ {w["rating"]} (95)</span><div class="price">{w["price"]}<span>/month</span></div><a class="btn" href="/workers">View Details</a></div></div>'
+
+def sidebar(active="dashboard"):
+    items=[("⌂","Dashboard","/dashboard","dashboard",""),("♙","Workers","/workers","workers",""),("☑","Tasks","/dashboard","tasks",""),("●","Clients","/dashboard","clients",""),("▣","Projects","/dashboard","projects",""),("◫","Calendar","/dashboard","calendar",""),("▤","Files","/dashboard","files",""),("⌁","Analytics","/dashboard","analytics",""),("◎","Exchange","/exchange","exchange","NEW"),("✦","Marketplace","/exchange","market",""),("◇","Integrations","/dashboard","integrations",""),("⚙","Settings","/dashboard","settings","")]
+    nav="".join([f'<a class="{"active" if active==key else ""}" href="{href}"><span>{icon}</span>{label}{"<span class=badge>"+badge+"</span>" if badge else ""}</a>' for icon,label,href,key,badge in items])
+    return f'<aside class="side"><a class="sideBrand" href="/"><div class="logo"></div><b>Nina<span class="os">OS</span></b></a><nav class="nav">{nav}</nav><div class="userMini"><div class="avatar">K</div><div><b>Katrin</b><br><small style="color:var(--muted)">Owner</small></div></div></aside>'
+
+def topbar():
+    return '<div class="top"><input class="search" placeholder="Search anything..." /><div class="icons"><div class="ico">🔔</div><div class="ico">🌐</div><div class="ico">☼</div><div class="avatar">K</div></div></div>'
+
+def brand_hero():
+    return '<section class="brandHero"><div class="bigLogo"></div><div class="brandName">Nina<span class="os">OS</span></div><div class="brandSub">AI Workforce Operating System</div><div class="heroCopy">One Platform. Unlimited AI Workers.<span>For every business. Everywhere.</span></div><div class="pillars"><div class="pillar"><div class="ic">◎</div><b>Global</b><p>Built for a global future</p></div><div class="pillar"><div class="ic">♙</div><b>Workforce</b><p>AI employees that work for you</p></div><div class="pillar"><div class="ic">▣</div><b>Secure</b><p>Your data. Your rules.</p></div><div class="pillar"><div class="ic">✦</div><b>Scale</b><p>From 1 to 10,000+ AI workers</p></div></div><div class="ctas"><a class="btn primary" href="/dashboard">Get Started</a><a class="btn" href="/exchange">Explore Exchange</a></div><div class="trusted">Trusted by forward-thinking companies worldwide</div><div class="logos"><span>Architects</span><span>BuildPro</span><span>NordBuild</span><span>HouseFit</span><span>VisionGroup</span></div></section>'
+
+def hero_dash():
+    return '<section class="heroDash"><div><h1>Good morning, Katrin 👋</h1><p>Here’s what’s happening in your workspace today.</p></div><div class="kpis"><div class="kpi"><small>AI Workers</small><div class="v">12</div><div class="d b">↑ 2 today</div></div><div class="kpi"><small>Tasks in Progress</small><div class="v">28</div><div class="d p">↑ 5 today</div></div><div class="kpi"><small>Completed Today</small><div class="v">15</div><div class="d">↑ 7 today</div></div><div class="kpi"><small>Upcoming</small><div class="v">6</div><div class="d b">Today</div></div></div><div class="globeArea"><div class="globe"></div><div class="orbit"></div><div class="orbit o2"></div><div class="globeText"><b>Global AI Workforce</b><p>Connected. Intelligent. Tireless.</p><a class="btn" href="/exchange">View Global Network →</a></div></div></section>'
+
+def worker_section():
+    return f'<div class="sectionTitle">Your AI Workforce</div><div class="workers">{"".join(worker_card(w) for w in WORKERS)}</div>'
+
+def status_panels():
+    return '<div class="panels"><div class="panel"><h3>System Status</h3><div class="ok">All Systems Operational <span style="float:right">Live ↗</span></div><small style="color:var(--muted)">99.9% Uptime</small><div class="chart"><svg viewBox="0 0 300 90" preserveAspectRatio="none"><polyline fill="none" stroke="#a855f7" stroke-width="3" points="0,70 25,61 50,66 75,50 100,58 125,43 150,52 175,37 200,42 225,29 250,33 275,18 300,10"/></svg></div></div><div class="panel"><h3>Active Workspaces</h3><div class="ws"><span>AB</span><span>NB</span><span>VG</span><span>HF</span><span>CP</span><span>AX</span><span>+</span></div></div></div>'
+
+def mobile_block():
+    return '<section class="block"><h2>Mobile App Preview</h2><div class="phoneRow"><div class="phone"><div class="screen"><b>Good morning, Katrin 👋</b><div class="miniStats"><div class="mini"><b>12</b><span>Workers</span></div><div class="mini"><b>28</b><span>Tasks</span></div><div class="mini"><b>15</b><span>Done</span></div><div class="mini"><b>6</b><span>Upcoming</span></div></div><div class="item">Nina Sales<span>Following up with 15 leads</span></div><div class="item">Nina Estimator<span>Working on 3 estimates</span></div><div class="item">Nina Office Manager<span>Managing your schedule</span></div></div></div><div class="phone"><div class="screen"><b>Tasks</b><div class="item">Follow up with Acme Corp<span>Nina Sales · 2 min ago</span></div><div class="item">Create estimate for Project X<span>Nina Estimator · 15 min ago</span></div><div class="item">Schedule meeting with Client Y<span>Nina Office Manager · 45 min ago</span></div><div class="item">Send proposal to Beta Ltd<span>Nina Sales · 1 hour ago</span></div></div></div><div class="phone"><div class="screen"><b>Nina Sales</b><div class="item">Email sent to Acme Corp<span>2 min ago</span></div><div class="item">Call with Client Y<span>15 min ago</span></div><div class="item">Follow up with Gamma Inc<span>30 min ago</span></div><a class="btn primary" style="width:100%;margin-top:12px">Message Worker</a></div></div></div></section>'
+
+def exchange_block():
+    cards="".join(market_card(w) for w in MARKET)
+    return f'<section class="block"><h2>Exchange — AI Workers Marketplace</h2><div class="exchange"><div class="cats"><div class="cat active">All Categories</div><div class="cat">Sales & Growth</div><div class="cat">Marketing</div><div class="cat">Construction</div><div class="cat">Finance</div><div class="cat">Operations</div><div class="cat">Support</div><div class="cat">HR & Recruiting</div><div class="cat">Legal</div></div><div class="marketGrid">{cards}</div></div></section>'
+
+def network_block():
+    return '<section class="block"><h2>Global Network</h2><div class="map"><div class="dot" style="left:15%;top:44%"></div><div class="dot" style="left:23%;top:54%"></div><div class="dot" style="left:44%;top:43%"></div><div class="dot" style="left:57%;top:32%"></div><div class="dot" style="left:72%;top:46%"></div><div class="dot" style="left:85%;top:58%"></div></div><div class="stats"><div class="stat"><b>12,458</b><span>AI Workers Online</span></div><div class="stat"><b>1,247</b><span>Workspaces</span></div><div class="stat"><b>98</b><span>Countries</span></div><div class="stat"><b>2.4M</b><span>Tasks Completed Today</span></div></div><div class="item">Nina Estimator completed estimate<span>2 min ago</span></div><div class="item">Nina Sales closed a deal<span>5 min ago</span></div><div class="item">Nina Office Manager scheduled meeting<span>8 min ago</span></div></section>'
+
+def page(active, content):
+    return f'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>NinaOS</title>{CSS}</head><body><div class="wrap"><div class="shell">{sidebar(active)}<main class="main">{topbar()}{content}</main></div><nav class="mobileNav"><a class="{"active" if active=="dashboard" else ""}" href="/dashboard">Dashboard</a><a class="{"active" if active=="workers" else ""}" href="/workers">Workers</a><a class="{"active" if active=="office" else ""}" href="/office-manager">Nina</a><a class="{"active" if active=="exchange" else ""}" href="/exchange">Exchange</a></nav></div></body></html>'
+
+@app.route("/")
+def home():
+    content=f'<div class="grid2">{brand_hero()}<div>{hero_dash()}{worker_section()}{status_panels()}</div></div><div class="bottom">{mobile_block()}{exchange_block()}{network_block()}</div>'
+    return page("dashboard", content)
+
+@app.route("/dashboard")
+def dashboard():
+    content=f'{hero_dash()}{worker_section()}{status_panels()}<div class="bottom">{mobile_block()}{exchange_block()}{network_block()}</div>'
+    return page("dashboard", content)
+
+@app.route("/workers")
+def workers():
+    content=f'<h1>Your AI Workers</h1><p style="color:var(--muted)">Ready AI workers assigned to your workspace.</p>{worker_section()}'
+    return page("workers", content)
+
+@app.route("/office-manager")
+def office_manager():
+    content='<h1>Nina Office Manager SMB</h1><p style="color:var(--muted)">The first strategic NinaOS ready worker for small businesses.</p><div class="bottom"><section class="block"><h2>Role Stack</h2><div class="item">Office Manager Core</div><div class="item">Finance Admin Assistant</div><div class="item">Estimating Assistant Basic</div><div class="item">Client Follow-up Manager</div><div class="item">Document Admin</div></section><section class="block"><h2>What Nina Handles</h2><div class="item">Tasks and daily priorities</div><div class="item">Client follow-ups</div><div class="item">Invoice admin</div><div class="item">Estimate / offer drafts</div><div class="item">Documents</div></section><section class="block"><h2>Approval Required</h2><div class="item">send_invoice</div><div class="item">approve_payment</div><div class="item">send_final_estimate</div><div class="item">share_document_external</div></section></div>'
+    return page("office", content)
+
+@app.route("/exchange")
+def exchange():
+    return page("exchange", exchange_block() + network_block())
+
+@app.route("/health")
+def health():
+    return jsonify({"ok": True, "version": APP_VERSION, "core": CORE_VERSION})
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT","8080"))
+    app.run(host="0.0.0.0", port=port, debug=False)
 
 app = Flask(__name__)
 
