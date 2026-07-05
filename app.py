@@ -478,6 +478,29 @@ except Exception as e:
         return "Sales Brain nav pieslēgts."
 
 
+
+
+# NinaOS RolePack System V1 Import
+try:
+    from role_pack import (
+        build_rolepack_answer,
+        is_rolepack_command,
+        rolepack_status_answer,
+        ROLEPACK_SYSTEM_VERSION,
+    )
+except Exception as e:
+    print("role_pack.py imports nav pieejams:", e)
+    ROLEPACK_SYSTEM_VERSION = "RolePack System nav pieslēgts"
+
+    def build_rolepack_answer(text):
+        return "NinaOS RolePack System nav pieslēgts."
+
+    def is_rolepack_command(text):
+        return False
+
+    def rolepack_status_answer():
+        return "NinaOS RolePack System nav pieslēgts."
+
 # NinaOS Platform Core V1 Import
 try:
     from platform_core import (
@@ -14877,6 +14900,28 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if is_initiative_command(user_text):
             await safe_reply_text(update, nina_public_answer(nina_initiative_answer(user_id)))
+            return
+
+
+        # NinaOS RolePack System V1
+        # Kontrolē amatus: drīkst/nedrīkst, faili, tooli, approval gates, Exchange tiesības.
+        if is_rolepack_command(user_text):
+            try:
+                rolepack_answer = build_rolepack_answer(user_text)
+            except Exception as e:
+                print("RolePack route kļūda:", repr(e))
+                rolepack_answer = "🧩 NinaOS RolePack System šobrīd nevarēja sagatavot atbildi.\n\nVersija: RolePack System V1"
+
+            try:
+                v40_log_usage(user_id, "rolepack_system_v1", user_text)
+            except Exception:
+                pass
+            try:
+                save_conversation_state(user_id, user_text, rolepack_answer, "rolepack_system_v1", v80_mood(user_text), "role_pack")
+            except Exception:
+                pass
+
+            await safe_reply_text(update, nina_public_answer(rolepack_answer))
             return
 
         # NinaOS Platform Core V1
