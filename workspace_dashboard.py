@@ -1,9 +1,10 @@
 # workspace_dashboard.py
-# NinaOS Workspace Dashboard V1.0
+# NinaOS Workspace Dashboard V1.1
 # Build target: NinaOS Constitution V4.2
 #
 # Purpose:
 # - First dashboard surface layer for approved NinaOS product vision
+# - Reads dashboard counts from work_objects.py when available
 # - Shows Small Business Workspace summary for Nina Office Manager SMB
 # - Global-first UI labels through Language Engine
 #
@@ -11,10 +12,9 @@
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
-from datetime import datetime
 
 
-WORKSPACE_DASHBOARD_VERSION = "Workspace Dashboard V1.0"
+WORKSPACE_DASHBOARD_VERSION = "Workspace Dashboard V1.1"
 
 
 try:
@@ -48,8 +48,6 @@ except Exception:
 try:
     from workspace_engine import (
         get_workspace_state,
-        get_workspace_allowed_work_objects,
-        get_workspace_agents,
         WORKSPACE_ENGINE_VERSION,
     )
 except Exception:
@@ -58,23 +56,33 @@ except Exception:
     def get_workspace_state(workspace_id):
         return None
 
-    def get_workspace_allowed_work_objects(workspace_id):
-        return []
-
-    def get_workspace_agents(workspace_id):
-        return []
-
 
 try:
-    from agent_registry import (
-        get_agent,
-        AGENT_REGISTRY_VERSION,
-    )
+    from agent_registry import AGENT_REGISTRY_VERSION
 except Exception:
     AGENT_REGISTRY_VERSION = "Agent Registry not connected"
 
-    def get_agent(agent_id):
-        return None
+
+try:
+    from work_objects import (
+        dashboard_counts,
+        list_work_objects,
+        WORK_OBJECTS_VERSION,
+    )
+except Exception:
+    WORK_OBJECTS_VERSION = "Work Objects not connected"
+
+    def dashboard_counts(workspace_id="demo_small_business"):
+        return {
+            "tasks_today": 0,
+            "followups": 0,
+            "invoices_due": 0,
+            "estimates_in_progress": 0,
+            "projects_active": 0,
+        }
+
+    def list_work_objects(workspace_id=None, object_type=None, status=None):
+        return []
 
 
 @dataclass(frozen=True)
@@ -116,19 +124,6 @@ class WorkspaceDashboard:
     status: str = "active"
 
 
-# =========================================================
-# Demo dashboard state
-# =========================================================
-
-DEMO_METRICS = {
-    "tasks_today": 0,
-    "followups": 0,
-    "invoices_due": 0,
-    "estimates_in_progress": 0,
-    "projects_active": 0,
-}
-
-
 DEMO_EXCHANGE_WORKERS = [
     "Nina Office Manager SMB — active",
     "Nina Sales — planned",
@@ -137,10 +132,6 @@ DEMO_EXCHANGE_WORKERS = [
     "Nina Support — planned",
 ]
 
-
-# =========================================================
-# Core dashboard builders
-# =========================================================
 
 def workspace_dashboard_status(language: Optional[str] = "en") -> str:
     lang = normalize_language(language)
@@ -151,8 +142,9 @@ def workspace_dashboard_status(language: Optional[str] = "en") -> str:
             f"Versija: {WORKSPACE_DASHBOARD_VERSION}\n"
             f"Language Engine: {LANGUAGE_ENGINE_VERSION}\n"
             f"Workspace Engine: {WORKSPACE_ENGINE_VERSION}\n"
-            f"Agent Registry: {AGENT_REGISTRY_VERSION}\n\n"
-            "Mērķis: pirmais produkta dashboard slānis Nina Office Manager SMB.\n\n"
+            f"Agent Registry: {AGENT_REGISTRY_VERSION}\n"
+            f"Work Objects: {WORK_OBJECTS_VERSION}\n\n"
+            "Mērķis: dashboard slānis Nina Office Manager SMB, kas lasa Work Objects skaitļus.\n\n"
             "Statuss: aktīvs ✅"
         )
 
@@ -162,8 +154,9 @@ def workspace_dashboard_status(language: Optional[str] = "en") -> str:
             f"Версия: {WORKSPACE_DASHBOARD_VERSION}\n"
             f"Language Engine: {LANGUAGE_ENGINE_VERSION}\n"
             f"Workspace Engine: {WORKSPACE_ENGINE_VERSION}\n"
-            f"Agent Registry: {AGENT_REGISTRY_VERSION}\n\n"
-            "Цель: первый слой dashboard для Nina Office Manager SMB.\n\n"
+            f"Agent Registry: {AGENT_REGISTRY_VERSION}\n"
+            f"Work Objects: {WORK_OBJECTS_VERSION}\n\n"
+            "Цель: dashboard для Nina Office Manager SMB, который читает Work Objects.\n\n"
             "Статус: активно ✅"
         )
 
@@ -172,73 +165,56 @@ def workspace_dashboard_status(language: Optional[str] = "en") -> str:
         f"Version: {WORKSPACE_DASHBOARD_VERSION}\n"
         f"Language Engine: {LANGUAGE_ENGINE_VERSION}\n"
         f"Workspace Engine: {WORKSPACE_ENGINE_VERSION}\n"
-        f"Agent Registry: {AGENT_REGISTRY_VERSION}\n\n"
-        "Goal: first product dashboard surface for Nina Office Manager SMB.\n\n"
+        f"Agent Registry: {AGENT_REGISTRY_VERSION}\n"
+        f"Work Objects: {WORK_OBJECTS_VERSION}\n\n"
+        "Goal: product dashboard surface for Nina Office Manager SMB, powered by Work Objects.\n\n"
         "Status: active ✅"
     )
 
 
-def build_demo_metrics(language: Optional[str] = "en") -> List[DashboardMetric]:
+def _metric_descriptions(language: Optional[str] = "en") -> Dict[str, str]:
+    lang = normalize_language(language)
+    if lang == "lv":
+        return {
+            "tasks_today": "Taski, kas ir atvērti vai procesā.",
+            "followups": "Klientu follow-up, kuri prasa uzmanību.",
+            "invoices_due": "Nosūtīti vai nokavēti rēķini.",
+            "estimates_in_progress": "Estimate vai offer drafti procesā.",
+            "projects_active": "Aktīvie projekti workspace.",
+        }
+    if lang == "ru":
+        return {
+            "tasks_today": "Открытые задачи или задачи в работе.",
+            "followups": "Клиентские follow-up, требующие внимания.",
+            "invoices_due": "Отправленные или просроченные счета.",
+            "estimates_in_progress": "Черновики смет или предложений в работе.",
+            "projects_active": "Активные проекты в workspace.",
+        }
+    return {
+        "tasks_today": "Open or in-progress tasks.",
+        "followups": "Client follow-ups that need attention.",
+        "invoices_due": "Sent or overdue invoices.",
+        "estimates_in_progress": "Estimate or offer drafts currently in progress.",
+        "projects_active": "Active projects in this workspace.",
+    }
+
+
+def build_metrics(workspace_id: str = "demo_small_business", language: Optional[str] = "en") -> List[DashboardMetric]:
     lang = normalize_language(language)
     labels = build_workspace_dashboard_labels(lang)
+    counts = dashboard_counts(workspace_id)
+    descriptions = _metric_descriptions(lang)
 
     return [
-        DashboardMetric(
-            metric_id="tasks_today",
-            label=labels.get("tasks_today", "Tasks Today"),
-            value=str(DEMO_METRICS["tasks_today"]),
-            description="Tasks scheduled or due today.",
-        ),
-        DashboardMetric(
-            metric_id="followups",
-            label=labels.get("followups", "Follow-ups"),
-            value=str(DEMO_METRICS["followups"]),
-            description="Client follow-ups that need attention.",
-        ),
-        DashboardMetric(
-            metric_id="invoices_due",
-            label=labels.get("invoices_due", "Invoices Due"),
-            value=str(DEMO_METRICS["invoices_due"]),
-            description="Invoices approaching due date or overdue.",
-        ),
-        DashboardMetric(
-            metric_id="estimates_in_progress",
-            label=labels.get("estimates_in_progress", "Estimates in Progress"),
-            value=str(DEMO_METRICS["estimates_in_progress"]),
-            description="Estimate or offer drafts currently in progress.",
-        ),
-        DashboardMetric(
-            metric_id="projects_active",
-            label=labels.get("projects_active", "Active Projects"),
-            value=str(DEMO_METRICS["projects_active"]),
-            description="Active projects in this workspace.",
-        ),
+        DashboardMetric("tasks_today", labels.get("tasks_today", "Tasks Today"), str(counts.get("tasks_today", 0)), descriptions["tasks_today"]),
+        DashboardMetric("followups", labels.get("followups", "Follow-ups"), str(counts.get("followups", 0)), descriptions["followups"]),
+        DashboardMetric("invoices_due", labels.get("invoices_due", "Invoices Due"), str(counts.get("invoices_due", 0)), descriptions["invoices_due"]),
+        DashboardMetric("estimates_in_progress", labels.get("estimates_in_progress", "Estimates in Progress"), str(counts.get("estimates_in_progress", 0)), descriptions["estimates_in_progress"]),
+        DashboardMetric("projects_active", labels.get("projects_active", "Active Projects"), str(counts.get("projects_active", 0)), descriptions["projects_active"]),
     ]
 
 
 def build_quick_actions(language: Optional[str] = "en") -> List[DashboardAction]:
-    lang = normalize_language(language)
-
-    if lang == "lv":
-        return [
-            DashboardAction("new_task", "New Task", "Izveidot jaunu tasku.", "write_task"),
-            DashboardAction("new_estimate", "New Estimate", "Izveidot estimate / offer draftu.", "write_estimate"),
-            DashboardAction("new_invoice", "New Invoice", "Izveidot invoice admin ierakstu.", "write_invoice"),
-            DashboardAction("add_client", "Add Client", "Pievienot klientu workspace.", "write_client"),
-            DashboardAction("upload_document", "Upload Document", "Pievienot dokumentu.", "write_document"),
-            DashboardAction("schedule_followup", "Schedule Follow-up", "Ieplānot klienta follow-up.", "write_task"),
-        ]
-
-    if lang == "ru":
-        return [
-            DashboardAction("new_task", "New Task", "Создать новую задачу.", "write_task"),
-            DashboardAction("new_estimate", "New Estimate", "Создать черновик сметы / предложения.", "write_estimate"),
-            DashboardAction("new_invoice", "New Invoice", "Создать запись invoice admin.", "write_invoice"),
-            DashboardAction("add_client", "Add Client", "Добавить клиента в workspace.", "write_client"),
-            DashboardAction("upload_document", "Upload Document", "Добавить документ.", "write_document"),
-            DashboardAction("schedule_followup", "Schedule Follow-up", "Запланировать follow-up клиента.", "write_task"),
-        ]
-
     return [
         DashboardAction("new_task", "New Task", "Create a new task.", "write_task"),
         DashboardAction("new_estimate", "New Estimate", "Create an estimate or offer draft.", "write_estimate"),
@@ -249,68 +225,43 @@ def build_quick_actions(language: Optional[str] = "en") -> List[DashboardAction]
     ]
 
 
-def build_recent_activities(language: Optional[str] = "en") -> List[DashboardActivity]:
-    lang = normalize_language(language)
-
-    if lang == "lv":
-        return [
-            DashboardActivity(
-                activity_id="dashboard_initialized",
-                title="Dashboard initialized",
-                description="Small Business Workspace dashboard surface ir pieslēgts.",
-                object_type="system",
-                status="success",
-            ),
-            DashboardActivity(
-                activity_id="office_manager_active",
-                title="Nina Office Manager SMB active",
-                description="Pirmais NinaOS gatavais darbinieks ir redzams produktā.",
-                object_type="agent",
-                status="success",
-            ),
-        ]
-
-    if lang == "ru":
-        return [
-            DashboardActivity(
-                activity_id="dashboard_initialized",
-                title="Dashboard initialized",
-                description="Dashboard для Small Business Workspace подключен.",
-                object_type="system",
-                status="success",
-            ),
-            DashboardActivity(
-                activity_id="office_manager_active",
-                title="Nina Office Manager SMB active",
-                description="Первый готовый AI-сотрудник NinaOS виден в продукте.",
-                object_type="agent",
-                status="success",
-            ),
-        ]
-
-    return [
+def build_recent_activities(workspace_id: str = "demo_small_business", language: Optional[str] = "en") -> List[DashboardActivity]:
+    objects = list_work_objects(workspace_id=workspace_id)
+    activities: List[DashboardActivity] = [
         DashboardActivity(
-            activity_id="dashboard_initialized",
-            title="Dashboard initialized",
-            description="Small Business Workspace dashboard surface is connected.",
-            object_type="system",
-            status="success",
+            "dashboard_initialized",
+            "Dashboard initialized",
+            "Small Business Workspace dashboard surface is connected.",
+            "system",
+            "success",
         ),
         DashboardActivity(
-            activity_id="office_manager_active",
-            title="Nina Office Manager SMB active",
-            description="The first NinaOS ready worker is visible inside the product.",
-            object_type="agent",
-            status="success",
+            "office_manager_active",
+            "Nina Office Manager SMB active",
+            "The first NinaOS ready worker is visible inside the product.",
+            "agent",
+            "success",
         ),
     ]
+
+    for obj in objects[-5:]:
+        activities.append(
+            DashboardActivity(
+                activity_id=f"object_{obj.object_id}",
+                title=f"{obj.object_type}: {obj.title}",
+                description=f"Status: {obj.status} · Priority: {obj.priority}",
+                object_type=obj.object_type,
+                status=obj.status,
+            )
+        )
+
+    return activities
 
 
 def build_workspace_dashboard(
     workspace_id: str = "demo_small_business",
     language: Optional[str] = "en",
 ) -> WorkspaceDashboard:
-    lang = normalize_language(language)
     workspace = get_workspace_state(workspace_id)
 
     if workspace:
@@ -321,28 +272,20 @@ def build_workspace_dashboard(
         subtitle = "Demo workspace · small_business"
 
     return WorkspaceDashboard(
-        dashboard_id="small_business_dashboard_v1",
+        dashboard_id="small_business_dashboard_v1_1",
         workspace_id=workspace_id,
         title=title,
         subtitle=subtitle,
-        metrics=build_demo_metrics(lang),
-        quick_actions=build_quick_actions(lang),
-        recent_activities=build_recent_activities(lang),
+        metrics=build_metrics(workspace_id, language),
+        quick_actions=build_quick_actions(language),
+        recent_activities=build_recent_activities(workspace_id, language),
         exchange_preview=list(DEMO_EXCHANGE_WORKERS),
         status="active",
     )
 
 
-# =========================================================
-# Human-readable product answers
-# =========================================================
-
-def build_workspace_dashboard_answer(
-    workspace_id: str = "demo_small_business",
-    language: Optional[str] = "en",
-) -> str:
-    lang = normalize_language(language)
-    dashboard = build_workspace_dashboard(workspace_id, lang)
+def build_workspace_dashboard_answer(workspace_id: str = "demo_small_business", language: Optional[str] = "en") -> str:
+    dashboard = build_workspace_dashboard(workspace_id, language)
 
     lines = [
         "📊 NinaOS Workspace Dashboard",
@@ -357,61 +300,29 @@ def build_workspace_dashboard_answer(
         lines.append(f"• {metric.label}: {metric.value}")
         lines.append(f"  {metric.description}")
 
-    lines.extend([
-        "",
-        "Quick actions:",
-    ])
-
+    lines.extend(["", "Quick actions:"])
     for action in dashboard.quick_actions:
         lines.append(f"• {action.label}")
         lines.append(f"  {action.description}")
         if action.permission_hint:
             lines.append(f"  Permission: {action.permission_hint}")
 
-    lines.extend([
-        "",
-        "Recent activities:",
-    ])
-
+    lines.extend(["", "Recent activities:"])
     for activity in dashboard.recent_activities:
         lines.append(f"• {activity.title}")
         lines.append(f"  {activity.description}")
 
-    lines.extend([
-        "",
-        "Exchange preview:",
-    ])
-
+    lines.extend(["", "Exchange preview:"])
     for worker in dashboard.exchange_preview:
         lines.append(f"• {worker}")
 
-    lines.extend([
-        "",
-        f"Version: {WORKSPACE_DASHBOARD_VERSION}",
-    ])
-
+    lines.extend(["", f"Version: {WORKSPACE_DASHBOARD_VERSION}"])
     return "\n".join(lines)
 
 
-def build_dashboard_schema_answer(
-    workspace_id: str = "demo_small_business",
-    language: Optional[str] = "en",
-) -> str:
+def build_dashboard_schema_answer(workspace_id: str = "demo_small_business", language: Optional[str] = "en") -> str:
     dashboard = build_workspace_dashboard(workspace_id, language)
-
-    data = {
-        "dashboard_id": dashboard.dashboard_id,
-        "workspace_id": dashboard.workspace_id,
-        "title": dashboard.title,
-        "subtitle": dashboard.subtitle,
-        "metrics": [m.__dict__ for m in dashboard.metrics],
-        "quick_actions": [a.__dict__ for a in dashboard.quick_actions],
-        "recent_activities": [a.__dict__ for a in dashboard.recent_activities],
-        "exchange_preview": dashboard.exchange_preview,
-        "status": dashboard.status,
-        "version": WORKSPACE_DASHBOARD_VERSION,
-    }
-
+    data = workspace_dashboard_schema(workspace_id, language)
     import json
     return json.dumps(data, ensure_ascii=False, indent=2)
 
@@ -419,37 +330,20 @@ def build_dashboard_schema_answer(
 def route_workspace_dashboard_command(text: str, language: Optional[str] = "en") -> Optional[str]:
     lower = (text or "").strip().lower()
 
-    if lower in [
-        "dashboard",
-        "workspace dashboard",
-        "ninaos dashboard",
-        "office dashboard",
-        "small business dashboard",
-    ]:
+    if lower in ["dashboard", "workspace dashboard", "ninaos dashboard", "office dashboard", "small business dashboard"]:
         return build_workspace_dashboard_answer("demo_small_business", language)
 
-    if lower in [
-        "dashboard status",
-        "workspace dashboard status",
-        "dashboard engine",
-    ]:
+    if lower in ["dashboard status", "workspace dashboard status", "dashboard engine"]:
         return workspace_dashboard_status(language)
 
-    if lower in [
-        "dashboard schema",
-        "workspace dashboard schema",
-    ]:
+    if lower in ["dashboard schema", "workspace dashboard schema"]:
         return build_dashboard_schema_answer("demo_small_business", language)
 
     return None
 
 
-def workspace_dashboard_schema(
-    workspace_id: str = "demo_small_business",
-    language: Optional[str] = "en",
-) -> Dict[str, Any]:
+def workspace_dashboard_schema(workspace_id: str = "demo_small_business", language: Optional[str] = "en") -> Dict[str, Any]:
     dashboard = build_workspace_dashboard(workspace_id, language)
-
     return {
         "dashboard_id": dashboard.dashboard_id,
         "workspace_id": dashboard.workspace_id,
@@ -461,6 +355,7 @@ def workspace_dashboard_schema(
         "exchange_preview": dashboard.exchange_preview,
         "status": dashboard.status,
         "version": WORKSPACE_DASHBOARD_VERSION,
+        "work_objects_version": WORK_OBJECTS_VERSION,
     }
 
 
