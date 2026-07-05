@@ -581,6 +581,25 @@ except Exception as e:
         return "Workspace Dashboard nav pieslēgts."
 
 
+
+
+# NinaOS Work Objects V1.0 Import
+try:
+    from work_objects import (
+        route_work_objects_command,
+        work_objects_status,
+        WORK_OBJECTS_VERSION,
+    )
+except Exception as e:
+    print("work_objects.py imports nav pieejams:", e)
+    WORK_OBJECTS_VERSION = "Work Objects nav pieslēgts"
+
+    def route_work_objects_command(text):
+        return None
+
+    def work_objects_status():
+        return "Work Objects nav pieslēgts."
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -14887,6 +14906,23 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
             await safe_reply_text(update, platform_visibility_answer)
+            return
+
+
+        # NinaOS Work Objects V1.0 — universal work object layer
+        # Raw English product surface, no Latvian presentation filter.
+        try:
+            work_objects_answer = route_work_objects_command(user_text)
+        except Exception as e:
+            print("Work Objects route kļūda:", repr(e))
+            work_objects_answer = None
+
+        if work_objects_answer:
+            try:
+                save_conversation_state(user_id, user_text, work_objects_answer, "work_objects_v1", v80_mood(user_text), "work_objects")
+            except Exception:
+                pass
+            await safe_reply_text(update, work_objects_answer)
             return
 
         # NinaOS Workspace Dashboard V1.0 — approved product dashboard surface
