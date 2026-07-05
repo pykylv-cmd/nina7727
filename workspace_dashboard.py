@@ -1,10 +1,11 @@
 # workspace_dashboard.py
-# NinaOS Workspace Dashboard V1.1
+# NinaOS Workspace Dashboard V1.2
 # Build target: NinaOS Constitution V4.2
 #
 # Purpose:
 # - First dashboard surface layer for approved NinaOS product vision
 # - Reads dashboard counts from work_objects.py when available
+# - Reads recent activities from activity_feed.py when available
 # - Shows Small Business Workspace summary for Nina Office Manager SMB
 # - Global-first UI labels through Language Engine
 #
@@ -14,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
 
-WORKSPACE_DASHBOARD_VERSION = "Workspace Dashboard V1.1"
+WORKSPACE_DASHBOARD_VERSION = "Workspace Dashboard V1.2"
 
 
 try:
@@ -85,6 +86,18 @@ except Exception:
         return []
 
 
+try:
+    from activity_feed import (
+        activity_feed_for_dashboard,
+        ACTIVITY_FEED_VERSION,
+    )
+except Exception:
+    ACTIVITY_FEED_VERSION = "Activity Feed not connected"
+
+    def activity_feed_for_dashboard(workspace_id="demo_small_business", limit=5):
+        return []
+
+
 @dataclass(frozen=True)
 class DashboardMetric:
     metric_id: str
@@ -143,7 +156,8 @@ def workspace_dashboard_status(language: Optional[str] = "en") -> str:
             f"Language Engine: {LANGUAGE_ENGINE_VERSION}\n"
             f"Workspace Engine: {WORKSPACE_ENGINE_VERSION}\n"
             f"Agent Registry: {AGENT_REGISTRY_VERSION}\n"
-            f"Work Objects: {WORK_OBJECTS_VERSION}\n\n"
+            f"Work Objects: {WORK_OBJECTS_VERSION}\n"
+            f"Activity Feed: {ACTIVITY_FEED_VERSION}\n\n"
             "Mērķis: dashboard slānis Nina Office Manager SMB, kas lasa Work Objects skaitļus.\n\n"
             "Statuss: aktīvs ✅"
         )
@@ -155,7 +169,8 @@ def workspace_dashboard_status(language: Optional[str] = "en") -> str:
             f"Language Engine: {LANGUAGE_ENGINE_VERSION}\n"
             f"Workspace Engine: {WORKSPACE_ENGINE_VERSION}\n"
             f"Agent Registry: {AGENT_REGISTRY_VERSION}\n"
-            f"Work Objects: {WORK_OBJECTS_VERSION}\n\n"
+            f"Work Objects: {WORK_OBJECTS_VERSION}\n"
+            f"Activity Feed: {ACTIVITY_FEED_VERSION}\n\n"
             "Цель: dashboard для Nina Office Manager SMB, который читает Work Objects.\n\n"
             "Статус: активно ✅"
         )
@@ -166,7 +181,8 @@ def workspace_dashboard_status(language: Optional[str] = "en") -> str:
         f"Language Engine: {LANGUAGE_ENGINE_VERSION}\n"
         f"Workspace Engine: {WORKSPACE_ENGINE_VERSION}\n"
         f"Agent Registry: {AGENT_REGISTRY_VERSION}\n"
-        f"Work Objects: {WORK_OBJECTS_VERSION}\n\n"
+        f"Work Objects: {WORK_OBJECTS_VERSION}\n"
+        f"Activity Feed: {ACTIVITY_FEED_VERSION}\n\n"
         "Goal: product dashboard surface for Nina Office Manager SMB, powered by Work Objects.\n\n"
         "Status: active ✅"
     )
@@ -226,8 +242,26 @@ def build_quick_actions(language: Optional[str] = "en") -> List[DashboardAction]
 
 
 def build_recent_activities(workspace_id: str = "demo_small_business", language: Optional[str] = "en") -> List[DashboardActivity]:
+    """Prefer Activity Feed events; fallback to Work Objects when no events exist."""
+    feed_items = activity_feed_for_dashboard(workspace_id=workspace_id, limit=6)
+    activities: List[DashboardActivity] = []
+
+    for item in feed_items:
+        activities.append(
+            DashboardActivity(
+                activity_id=str(item.get("activity_id", "")),
+                title=str(item.get("title", "Activity")),
+                description=str(item.get("description", "")),
+                object_type=str(item.get("object_type", "")),
+                status=str(item.get("status", "info")),
+            )
+        )
+
+    if activities:
+        return activities
+
     objects = list_work_objects(workspace_id=workspace_id)
-    activities: List[DashboardActivity] = [
+    activities = [
         DashboardActivity(
             "dashboard_initialized",
             "Dashboard initialized",
@@ -356,6 +390,7 @@ def workspace_dashboard_schema(workspace_id: str = "demo_small_business", langua
         "status": dashboard.status,
         "version": WORKSPACE_DASHBOARD_VERSION,
         "work_objects_version": WORK_OBJECTS_VERSION,
+        "activity_feed_version": ACTIVITY_FEED_VERSION,
     }
 
 
