@@ -618,6 +618,24 @@ except Exception as e:
     def activity_feed_status():
         return "Activity Feed nav pieslēgts."
 
+
+# NinaOS Demo Setup V1.0 Import
+try:
+    from demo_setup import (
+        route_demo_setup_command,
+        demo_setup_status,
+        DEMO_SETUP_VERSION,
+    )
+except Exception as e:
+    print("demo_setup.py imports nav pieejams:", e)
+    DEMO_SETUP_VERSION = "Demo Setup nav pieslēgts"
+
+    def route_demo_setup_command(text, language="en"):
+        return None
+
+    def demo_setup_status():
+        return "Demo Setup nav pieslēgts."
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -14924,6 +14942,23 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
             await safe_reply_text(update, platform_visibility_answer)
+            return
+
+
+        # NinaOS Demo Setup V1.0 — one-command product demo setup
+        # Raw English product surface, no Latvian presentation filter.
+        try:
+            demo_setup_answer = route_demo_setup_command(user_text, language="en")
+        except Exception as e:
+            print("Demo Setup route kļūda:", repr(e))
+            demo_setup_answer = None
+
+        if demo_setup_answer:
+            try:
+                save_conversation_state(user_id, user_text, demo_setup_answer, "demo_setup_v1", v80_mood(user_text), "demo_setup")
+            except Exception:
+                pass
+            await safe_reply_text(update, demo_setup_answer)
             return
 
 
