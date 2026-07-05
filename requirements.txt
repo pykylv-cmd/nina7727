@@ -1,5 +1,5 @@
-flask
 python-telegram-bot
 openai
 psycopg2-binary
 stripe
+Flask
