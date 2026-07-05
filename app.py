@@ -639,6 +639,25 @@ except Exception as e:
 
 
 
+
+# NinaOS App Surface V1 Import
+try:
+    from app_surface import (
+        route_app_surface_command,
+        app_surface_status,
+        APP_SURFACE_VERSION,
+    )
+except Exception as e:
+    print("app_surface.py imports nav pieejams:", e)
+    APP_SURFACE_VERSION = "App Surface nav pieslēgts"
+
+    def route_app_surface_command(text):
+        return None
+
+    def app_surface_status():
+        return "App Surface nav pieslēgts."
+
+
 # NinaOS Web Surface V1 Import
 try:
     from web_surface import (
@@ -15004,6 +15023,21 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+
+
+        # NinaOS App Surface V1 — bridge to first real browser app
+        app_surface_answer = route_app_surface_command(user_text)
+        if app_surface_answer:
+            try:
+                v40_log_usage(user_id, "app_surface_v1", user_text)
+            except Exception:
+                pass
+            try:
+                save_conversation_state(user_id, user_text, app_surface_answer, "app_surface_v1", v80_mood(user_text), "app_surface")
+            except Exception:
+                pass
+            await safe_reply_text(update, app_surface_answer)
+            return
 
         # NinaOS Web Surface V1 — browser workspace product surface
         web_surface_answer = route_web_surface_command(user_text)
