@@ -14984,6 +14984,21 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+
+        # NinaOS Mobile Surface V1 — mobile-first product surface
+        mobile_surface_answer = route_mobile_surface_command(user_text)
+        if mobile_surface_answer:
+            try:
+                v40_log_usage(user_id, "mobile_surface_v1", user_text)
+            except Exception:
+                pass
+            try:
+                save_conversation_state(user_id, user_text, mobile_surface_answer, "mobile_surface_v1", v80_mood(user_text), "mobile_surface")
+            except Exception:
+                pass
+            await safe_reply_text(update, mobile_surface_answer)
+            return
+
         # NinaOS Product Demo V1 — short customer/founder/demo routes
         product_demo_answer = route_product_demo_command(user_text, language="en")
         if product_demo_answer:
