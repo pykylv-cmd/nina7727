@@ -638,6 +638,25 @@ except Exception as e:
 
 
 
+
+# NinaOS Web Surface V1 Import
+try:
+    from web_surface import (
+        route_web_surface_command,
+        web_surface_status,
+        WEB_SURFACE_VERSION,
+    )
+except Exception as e:
+    print("web_surface.py imports nav pieejams:", e)
+    WEB_SURFACE_VERSION = "Web Surface nav pieslēgts"
+
+    def route_web_surface_command(text):
+        return None
+
+    def web_surface_status():
+        return "Web Surface nav pieslēgts."
+
+
 # NinaOS Mobile Surface V1 Import
 try:
     from mobile_surface import (
@@ -14984,6 +15003,21 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+
+
+        # NinaOS Web Surface V1 — browser workspace product surface
+        web_surface_answer = route_web_surface_command(user_text)
+        if web_surface_answer:
+            try:
+                v40_log_usage(user_id, "web_surface_v1", user_text)
+            except Exception:
+                pass
+            try:
+                save_conversation_state(user_id, user_text, web_surface_answer, "web_surface_v1", v80_mood(user_text), "web_surface")
+            except Exception:
+                pass
+            await safe_reply_text(update, web_surface_answer)
+            return
 
         # NinaOS Mobile Surface V1 — mobile-first product surface
         mobile_surface_answer = route_mobile_surface_command(user_text)
