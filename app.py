@@ -480,6 +480,28 @@ except Exception as e:
 
 
 
+
+# NinaOS Ready Worker Catalog V1 Import
+try:
+    from ready_worker_catalog import (
+        build_ready_worker_answer,
+        is_ready_worker_command,
+        worker_status_answer,
+        READY_WORKER_CATALOG_VERSION,
+    )
+except Exception as e:
+    print("ready_worker_catalog.py imports nav pieejams:", e)
+    READY_WORKER_CATALOG_VERSION = "Ready Worker Catalog nav pieslēgts"
+
+    def build_ready_worker_answer(text):
+        return "NinaOS Ready Worker Catalog nav pieslēgts."
+
+    def is_ready_worker_command(text):
+        return False
+
+    def worker_status_answer():
+        return "NinaOS Ready Worker Catalog nav pieslēgts."
+
 # NinaOS RolePack System V1 Import
 try:
     from role_pack import (
@@ -14902,6 +14924,28 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, nina_public_answer(nina_initiative_answer(user_id)))
             return
 
+
+
+        # NinaOS Ready Worker Catalog V1
+        # Klients neizveido botu — klients izvēlas un saņem gatavu AI darbinieku.
+        if is_ready_worker_command(user_text):
+            try:
+                worker_answer = build_ready_worker_answer(user_text)
+            except Exception as e:
+                print("Ready Worker Catalog route kļūda:", repr(e))
+                worker_answer = "🧑‍💼 NinaOS Ready Worker Catalog šobrīd nevarēja sagatavot atbildi.\n\nVersija: Ready Worker Catalog V1"
+
+            try:
+                v40_log_usage(user_id, "ready_worker_catalog_v1", user_text)
+            except Exception:
+                pass
+            try:
+                save_conversation_state(user_id, user_text, worker_answer, "ready_worker_catalog_v1", v80_mood(user_text), "ready_worker_catalog")
+            except Exception:
+                pass
+
+            await safe_reply_text(update, nina_public_answer(worker_answer))
+            return
 
         # NinaOS RolePack System V1
         # Kontrolē amatus: drīkst/nedrīkst, faili, tooli, approval gates, Exchange tiesības.
