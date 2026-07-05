@@ -14964,6 +14964,21 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 
+
+        # NinaOS Product Demo V1 — short customer/founder/demo routes
+        product_demo_answer = route_product_demo_command(user_text, language="en")
+        if product_demo_answer:
+            try:
+                v40_log_usage(user_id, "product_demo_v1", user_text)
+            except Exception:
+                pass
+            try:
+                save_conversation_state(user_id, user_text, product_demo_answer, "product_demo_v1", v80_mood(user_text), "product_demo")
+            except Exception:
+                pass
+            await safe_reply_text(update, product_demo_answer)
+            return
+
         # NinaOS Demo Setup V1.0 — one-command product demo setup
         # Raw English product surface, no Latvian presentation filter.
         try:
