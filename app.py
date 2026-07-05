@@ -563,6 +563,24 @@ except Exception as e:
         return "Platform Visibility nav pieslēgts."
 
 
+# NinaOS Workspace Dashboard V1.0 Import
+try:
+    from workspace_dashboard import (
+        route_workspace_dashboard_command,
+        workspace_dashboard_status,
+        WORKSPACE_DASHBOARD_VERSION,
+    )
+except Exception as e:
+    print("workspace_dashboard.py imports nav pieejams:", e)
+    WORKSPACE_DASHBOARD_VERSION = "Workspace Dashboard nav pieslēgts"
+
+    def route_workspace_dashboard_command(text, language="en"):
+        return None
+
+    def workspace_dashboard_status(language="en"):
+        return "Workspace Dashboard nav pieslēgts."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -14870,6 +14888,23 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             await safe_reply_text(update, platform_visibility_answer)
             return
+
+        # NinaOS Workspace Dashboard V1.0 — approved product dashboard surface
+        # Raw English product surface, no Latvian presentation filter.
+        try:
+            workspace_dashboard_answer = route_workspace_dashboard_command(user_text, language="en")
+        except Exception as e:
+            print("Workspace Dashboard route kļūda:", repr(e))
+            workspace_dashboard_answer = None
+
+        if workspace_dashboard_answer:
+            try:
+                save_conversation_state(user_id, user_text, workspace_dashboard_answer, "workspace_dashboard_v1", v80_mood(user_text), "workspace_dashboard")
+            except Exception:
+                pass
+            await safe_reply_text(update, workspace_dashboard_answer)
+            return
+
 
         # =========================
         # Core 2.8 — Memory Intelligence V1
