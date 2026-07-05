@@ -636,6 +636,25 @@ except Exception as e:
     def demo_setup_status():
         return "Demo Setup nav pieslēgts."
 
+
+# NinaOS Product Demo V1 Import
+try:
+    from product_demo import (
+        route_product_demo_command,
+        product_demo_status,
+        PRODUCT_DEMO_VERSION,
+    )
+except Exception as e:
+    print("product_demo.py imports nav pieejams:", e)
+    PRODUCT_DEMO_VERSION = "Product Demo nav pieslēgts"
+
+    def route_product_demo_command(text, language="en"):
+        return None
+
+    def product_demo_status():
+        return "Product Demo nav pieslēgts."
+
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
