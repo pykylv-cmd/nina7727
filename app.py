@@ -600,6 +600,24 @@ except Exception as e:
     def work_objects_status():
         return "Work Objects nav pieslēgts."
 
+
+# NinaOS Activity Feed V1.0 Import
+try:
+    from activity_feed import (
+        route_activity_feed_command,
+        activity_feed_status,
+        ACTIVITY_FEED_VERSION,
+    )
+except Exception as e:
+    print("activity_feed.py imports nav pieejams:", e)
+    ACTIVITY_FEED_VERSION = "Activity Feed nav pieslēgts"
+
+    def route_activity_feed_command(text):
+        return None
+
+    def activity_feed_status():
+        return "Activity Feed nav pieslēgts."
+
 # V114.0 Safe User Profile Engine Import
 try:
     from user_profile_engine import (
@@ -14924,6 +14942,23 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             await safe_reply_text(update, work_objects_answer)
             return
+
+        # NinaOS Activity Feed V1.0 — recent activities layer
+        # Raw English product surface, no Latvian presentation filter.
+        try:
+            activity_feed_answer = route_activity_feed_command(user_text)
+        except Exception as e:
+            print("Activity Feed route kļūda:", repr(e))
+            activity_feed_answer = None
+
+        if activity_feed_answer:
+            try:
+                save_conversation_state(user_id, user_text, activity_feed_answer, "activity_feed_v1", v80_mood(user_text), "activity_feed")
+            except Exception:
+                pass
+            await safe_reply_text(update, activity_feed_answer)
+            return
+
 
         # NinaOS Workspace Dashboard V1.0 — approved product dashboard surface
         # Raw English product surface, no Latvian presentation filter.
