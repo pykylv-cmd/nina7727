@@ -637,6 +637,25 @@ except Exception as e:
         return "Demo Setup nav pieslēgts."
 
 
+
+# NinaOS Mobile Surface V1 Import
+try:
+    from mobile_surface import (
+        route_mobile_surface_command,
+        mobile_surface_status,
+        MOBILE_SURFACE_VERSION,
+    )
+except Exception as e:
+    print("mobile_surface.py imports nav pieejams:", e)
+    MOBILE_SURFACE_VERSION = "Mobile Surface nav pieslēgts"
+
+    def route_mobile_surface_command(text):
+        return None
+
+    def mobile_surface_status():
+        return "Mobile Surface nav pieslēgts."
+
+
 # NinaOS Product Demo V1 Import
 try:
     from product_demo import (
