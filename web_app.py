@@ -3,7 +3,7 @@ import os
 
 app = Flask(__name__)
 
-APP_VERSION = "Web App V28 — Best of V26 + V24 Workspace Dashboard"
+APP_VERSION = "Web App V29 — V28 Hotfix Stable"
 CORE_VERSION = "V115.4 + Core 2.5.2"
 
 # -------------------------------
@@ -1797,12 +1797,12 @@ def open_work_block():
 
 
 def activity_block():
-    events = get_activity_events_live(limit=6)
+    events = get_recent_activities_live("demo_small_business", 6)
     rows = []
     for ev in events:
         title = ev.get("title", "Activity")
         desc = ev.get("description", "")
-        kind = ev.get("kind", "info")
+        kind = ev.get("status", ev.get("severity", "info"))
         rows.append(f"""
         <div class="activityItem">
           <div class="activityText">
@@ -1828,8 +1828,12 @@ def activity_block():
     """
 
 def build_open_work_columns():
-    data = get_dashboard_live_data()
-    groups = data.get("work_groups", {})
+    groups = {
+        "tasks": get_objects_by_type_live("task", limit=4),
+        "followups": get_objects_by_type_live("followup_task", limit=4),
+        "finance": get_objects_by_type_live("invoice", limit=4) + get_objects_by_type_live("estimate", limit=4),
+        "projects": get_objects_by_type_live("project", limit=4),
+    }
     order = [
         ("Tasks", groups.get("tasks", [])),
         ("Follow-ups", groups.get("followups", [])),
