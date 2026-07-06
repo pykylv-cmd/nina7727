@@ -3,7 +3,7 @@ import os
 
 app = Flask(__name__)
 
-APP_VERSION = "Web App V9 — Hero Globe Match Edition"
+APP_VERSION = "Web App V10 — Final Visual Polish"
 CORE_VERSION = "V115.4 + Core 2.5.2"
 
 WORKERS = [
@@ -314,6 +314,160 @@ CSS = """
     top:auto;
     width:100%;
     max-width:430px;
+    margin-top:12px;
+  }
+}
+
+
+/* V10 Final Visual Polish: right hero globe closer to reference visual */
+.heroDash{
+    background:
+      radial-gradient(circle at 76% 42%, rgba(37,99,235,.20), transparent 25%),
+      radial-gradient(circle at 86% 28%, rgba(124,58,237,.18), transparent 24%),
+      linear-gradient(135deg,rgba(12,18,35,.97),rgba(6,10,20,.97));
+}
+.globeArea{
+    position:absolute;
+    right:0;
+    top:0;
+    width:455px;
+    height:260px;
+    overflow:visible;
+}
+.globe{
+    position:absolute;
+    left:18px;
+    top:4px;
+    width:252px;
+    height:252px;
+    border-radius:50%;
+    overflow:hidden;
+    background:
+      radial-gradient(circle at 34% 26%, rgba(255,255,255,.34), transparent 9%),
+      radial-gradient(circle at 55% 50%, rgba(59,130,246,.40), rgba(37,99,235,.22) 34%, rgba(124,58,237,.17) 56%, rgba(2,6,23,.72) 76%),
+      linear-gradient(135deg, rgba(8,16,44,.98), rgba(3,7,18,.98));
+    border:1px solid rgba(96,165,250,.34);
+    box-shadow:
+      0 0 96px rgba(37,99,235,.48),
+      0 0 72px rgba(124,58,237,.38),
+      inset -26px -18px 46px rgba(0,0,0,.48),
+      inset 13px 10px 36px rgba(96,165,250,.18);
+}
+.globe:before{
+    content:"";
+    position:absolute;
+    inset:0;
+    border-radius:50%;
+    background:
+      radial-gradient(ellipse at 49% 24%, rgba(147,197,253,.54) 0 8%, transparent 9%),
+      radial-gradient(ellipse at 60% 38%, rgba(96,165,250,.50) 0 11%, transparent 12%),
+      radial-gradient(ellipse at 42% 43%, rgba(59,130,246,.36) 0 8%, transparent 9%),
+      radial-gradient(ellipse at 63% 58%, rgba(168,85,247,.46) 0 10%, transparent 11%),
+      radial-gradient(ellipse at 33% 63%, rgba(59,130,246,.35) 0 8%, transparent 9%),
+      radial-gradient(ellipse at 73% 34%, rgba(168,85,247,.42) 0 7%, transparent 8%),
+      radial-gradient(circle at 36% 34%, #60a5fa 0 2.2px, transparent 3.4px),
+      radial-gradient(circle at 49% 25%, #a855f7 0 2.2px, transparent 3.4px),
+      radial-gradient(circle at 60% 39%, #22d3ee 0 2.1px, transparent 3.3px),
+      radial-gradient(circle at 42% 52%, #60a5fa 0 2.2px, transparent 3.4px),
+      radial-gradient(circle at 68% 54%, #a855f7 0 2.2px, transparent 3.4px),
+      radial-gradient(circle at 56% 68%, #22d3ee 0 2.1px, transparent 3.3px),
+      radial-gradient(circle at 76% 31%, #60a5fa 0 2.1px, transparent 3.3px),
+      linear-gradient(25deg, transparent 0 47%, rgba(96,165,250,.24) 48%, transparent 50%),
+      linear-gradient(-19deg, transparent 0 47%, rgba(168,85,247,.28) 48%, transparent 50%),
+      linear-gradient(72deg, transparent 0 48%, rgba(34,211,238,.20) 49%, transparent 51%);
+    filter:drop-shadow(0 0 13px rgba(124,58,237,.64));
+    opacity:.98;
+}
+.globe:after{
+    content:"";
+    position:absolute;
+    inset:0;
+    border-radius:50%;
+    background:
+      linear-gradient(110deg, transparent 0 32%, rgba(255,255,255,.12) 42%, transparent 54%),
+      radial-gradient(circle at 70% 28%, rgba(255,255,255,.18), transparent 20%),
+      radial-gradient(circle at 50% 50%, transparent 0 60%, rgba(0,0,0,.46) 82%);
+    border:1px solid rgba(255,255,255,.14);
+}
+.orbit{
+    position:absolute;
+    left:-40px;
+    top:72px;
+    width:370px;
+    height:118px;
+    border:1.4px solid rgba(168,85,247,.56);
+    border-radius:50%;
+    transform:rotate(18deg);
+    box-shadow:0 0 22px rgba(124,58,237,.24);
+}
+.orbit.o2{
+    left:-24px;
+    top:38px;
+    width:352px;
+    height:174px;
+    transform:rotate(-24deg);
+    border-color:rgba(96,165,250,.44);
+}
+.globeArea:after{
+    content:"";
+    position:absolute;
+    left:8px;
+    top:52px;
+    width:375px;
+    height:154px;
+    border-radius:50%;
+    border:1px solid rgba(168,85,247,.20);
+    transform:rotate(38deg);
+    pointer-events:none;
+}
+.globeArea:before{
+    content:"";
+    position:absolute;
+    left:58px;
+    top:28px;
+    width:9px;
+    height:9px;
+    border-radius:50%;
+    background:#a855f7;
+    box-shadow:
+      108px 18px 0 -2px #60a5fa,
+      174px 92px 0 -1px #a855f7,
+      62px 160px 0 -2px #22d3ee,
+      236px 148px 0 -2px #8b5cf6,
+      242px 48px 0 -2px #60a5fa,
+      292px 88px 0 -2px #a855f7,
+      0 0 22px #a855f7;
+    opacity:.98;
+    z-index:3;
+}
+.globeText{
+    position:absolute;
+    right:6px;
+    top:78px;
+    width:172px;
+    z-index:4;
+}
+.globeText b{
+    font-size:28px;
+    line-height:1.0;
+    display:block;
+}
+.globeText p{
+    font-size:13px;
+    color:var(--muted);
+    margin:8px 0 12px;
+}
+.globeText .btn{
+    padding:10px 12px;
+    font-size:12px;
+}
+@media(max-width:1180px){
+  .globeArea{
+    position:relative;
+    right:auto;
+    top:auto;
+    width:100%;
+    max-width:455px;
     margin-top:12px;
   }
 }
