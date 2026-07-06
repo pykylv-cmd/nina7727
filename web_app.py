@@ -3,7 +3,7 @@ import os
 
 app = Flask(__name__)
 
-APP_VERSION = "Web App V23 — Live Dashboard Blocks"
+APP_VERSION = "Web App V24 — Dashboard Product Layout"
 CORE_VERSION = "V115.4 + Core 2.5.2"
 
 # -------------------------------
@@ -1231,6 +1231,32 @@ body{
   }
 }
 
+
+/* V24 Dashboard Product Layout */
+.productBlock{padding:18px;}
+.blockHead{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px;}
+.blockHead h2{margin:0 0 4px;}
+.blockHead p{margin:0;color:var(--muted);font-size:13px;}
+.liveGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:14px;}
+.liveGrid .panel{min-height:190px;}
+.activityList,.objectList{display:grid;gap:10px;}
+.activityRow,.objectRow{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:14px;
+  border:1px solid rgba(255,255,255,.075);background:rgba(255,255,255,.025);
+  border-radius:14px;padding:11px 12px;
+}
+.activityRow b,.objectRow b{display:block;font-size:13px;}
+.activityRow span,.objectRow span{display:block;color:var(--muted);font-size:11px;margin-top:3px;}
+.activityRow small,.objectRow small{color:rgba(220,231,255,.55);font-size:10px;white-space:nowrap;}
+@media(max-width:1180px){.liveGrid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(max-width:760px){
+  .blockHead{display:block;}
+  .blockHead .btn{margin-top:10px;width:100%;}
+  .liveGrid{grid-template-columns:1fr;}
+  .activityRow,.objectRow{display:block;}
+  .activityRow small,.objectRow small{display:block;margin-top:6px;}
+}
+
 </style>
 """
 
@@ -1316,9 +1342,9 @@ def sidebar(active="dashboard"):
     items = [
         ("⌂","Dashboard","/dashboard","dashboard",""),
         ("♙","Workers","/workers","workers",""),
-        ("☑","Tasks","/dashboard","tasks",""),
-        ("●","Clients","/dashboard","clients",""),
-        ("▣","Projects","/dashboard","projects",""),
+        ("☑","Tasks","/tasks","tasks",""),
+        ("●","Clients","/clients","clients",""),
+        ("▣","Projects","/projects","projects",""),
         ("◫","Calendar","/dashboard","calendar",""),
         ("▤","Files","/dashboard","files",""),
         ("⌁","Analytics","/dashboard","analytics",""),
@@ -1433,6 +1459,7 @@ def status_panels():
     """
 
 
+
 def live_objects_block():
     counts = get_dashboard_counts_live("demo_small_business")
     tasks = get_objects_by_type_live("task", limit=4)
@@ -1441,7 +1468,7 @@ def live_objects_block():
     invoices = get_objects_by_type_live("invoice", limit=4)
     estimates = get_objects_by_type_live("estimate", limit=4)
 
-    def rows(title, items, empty_text):
+    def rows(items, empty_text):
         if not items:
             return f'<div class="item">{empty_text}<span>No live items yet</span></div>'
         return "".join([
@@ -1450,35 +1477,46 @@ def live_objects_block():
         ])
 
     return f"""
-    <section class="block">
-      <h2>Live Work Objects</h2>
+    <section class="block productBlock">
+      <div class="blockHead">
+        <div>
+          <h2>Live Work Objects</h2>
+          <p>Operational objects managed inside this NinaOS workspace.</p>
+        </div>
+        <a class="btn" href="/tasks">Open Tasks</a>
+      </div>
       <div class="stats">
         <div class="stat"><b>{counts.get("tasks_today",0)}</b><span>Tasks Today</span></div>
         <div class="stat"><b>{counts.get("followups",0)}</b><span>Follow-ups</span></div>
         <div class="stat"><b>{counts.get("invoices_due",0)}</b><span>Invoices Due</span></div>
         <div class="stat"><b>{counts.get("projects_active",0)}</b><span>Active Projects</span></div>
       </div>
-      <div class="panels" style="margin-top:14px">
-        <div class="panel"><h3>Tasks</h3>{rows("Tasks", tasks, "No tasks")}</div>
-        <div class="panel"><h3>Follow-ups</h3>{rows("Follow-ups", followups, "No follow-ups")}</div>
-      </div>
-      <div class="panels" style="margin-top:14px">
-        <div class="panel"><h3>Invoices / Estimates</h3>{rows("Invoices", invoices + estimates, "No finance items")}</div>
-        <div class="panel"><h3>Projects</h3>{rows("Projects", projects, "No projects")}</div>
+      <div class="liveGrid">
+        <div class="panel"><h3>Tasks</h3>{rows(tasks, "No tasks")}</div>
+        <div class="panel"><h3>Follow-ups</h3>{rows(followups, "No follow-ups")}</div>
+        <div class="panel"><h3>Invoices / Estimates</h3>{rows(invoices + estimates, "No finance items")}</div>
+        <div class="panel"><h3>Projects</h3>{rows(projects, "No projects")}</div>
       </div>
     </section>
     """
 
+
 def live_recent_activity_block():
     activities = get_recent_activities_live("demo_small_business", 8)
     items = "".join([
-        f'<div class="item">{a.get("title","Activity")}<span>{a.get("description","")}</span></div>'
+        f'<div class="activityRow"><div><b>{a.get("title","Activity")}</b><span>{a.get("description","")}</span></div><small>{a.get("status","info")}</small></div>'
         for a in activities
     ])
     return f"""
-    <section class="block">
-      <h2>Recent Activity</h2>
-      {items}
+    <section class="block productBlock">
+      <div class="blockHead">
+        <div>
+          <h2>Recent Activity</h2>
+          <p>Latest events coming from NinaOS Activity Feed.</p>
+        </div>
+        <a class="btn" href="/api/activities">API</a>
+      </div>
+      <div class="activityList">{items}</div>
     </section>
     """
 
@@ -1547,6 +1585,98 @@ def network_block():
     </section>
     """
 
+
+def object_table_block(title, object_type=None, empty_text="No items yet"):
+    if object_type:
+        items = get_objects_by_type_live(object_type, limit=30)
+    else:
+        items = get_work_objects_live("demo_small_business", 50)
+
+    if not items:
+        rows = f'<div class="item">{empty_text}<span>Workspace is ready</span></div>'
+    else:
+        parts = []
+        for o in items:
+            parts.append(
+                f'<div class="objectRow"><div><b>{o.get("title","Untitled")}</b>'
+                f'<span>{o.get("object_type","")} · {o.get("status","")} · priority: {o.get("priority","normal")}</span>'
+                f'</div><small>{o.get("object_id","")}</small></div>'
+            )
+        rows = "".join(parts)
+
+    return f"""
+    <section class="block">
+      <h2>{title}</h2>
+      <div class="objectList">{rows}</div>
+    </section>
+    """
+
+def clients_page_block():
+    clients = get_objects_by_type_live("client", limit=30)
+    if not clients:
+        rows = '<div class="item">No clients yet<span>Demo client may be created by seed</span></div>'
+    else:
+        rows = "".join([
+            f'<div class="objectRow"><div><b>{c.get("title","Client")}</b><span>Status: {c.get("status","")}</span></div><small>{c.get("object_id","")}</small></div>'
+            for c in clients
+        ])
+
+    followups = get_objects_by_type_live("followup_task", limit=10)
+    followup_rows = "".join([
+        f'<div class="item">{f.get("title","Follow-up")}<span>{f.get("status","")} · {f.get("priority","normal")}</span></div>'
+        for f in followups
+    ]) or '<div class="item">No follow-ups<span>Nothing urgent</span></div>'
+
+    return f"""
+    <div class="bottom">
+      <section class="block"><h2>Clients</h2><div class="objectList">{rows}</div></section>
+      <section class="block"><h2>Client Follow-ups</h2>{followup_rows}</section>
+    </div>
+    """
+
+def projects_page_block():
+    projects = get_objects_by_type_live("project", limit=30)
+    tasks = get_objects_by_type_live("task", limit=20)
+    estimates = get_objects_by_type_live("estimate", limit=20)
+    invoices = get_objects_by_type_live("invoice", limit=20)
+
+    return f"""
+    <div class="bottom">
+      {object_table_block("Projects", "project", "No active projects")}
+      <section class="block">
+        <h2>Connected Work</h2>
+        <div class="stats">
+          <div class="stat"><b>{len(tasks)}</b><span>Tasks</span></div>
+          <div class="stat"><b>{len(estimates)}</b><span>Estimates</span></div>
+          <div class="stat"><b>{len(invoices)}</b><span>Invoices</span></div>
+          <div class="stat"><b>{len(projects)}</b><span>Projects</span></div>
+        </div>
+      </section>
+    </div>
+    """
+
+def workers_page_block():
+    live_states = get_worker_live_states()
+    cards = []
+    for w in WORKERS:
+        ww = dict(w)
+        state = live_states.get(ww.get("name"), {})
+        if state:
+            ww["status"] = state.get("status", ww.get("status", "ACTIVE"))
+            ww["work"] = state.get("work", ww.get("work", ""))
+        cards.append(worker_card(ww))
+    return f"""
+    <section class="block">
+      <h2>Ready AI Workers</h2>
+      <p style="color:var(--muted);margin-top:-4px">Live worker state connected to NinaOS Work Objects.</p>
+      <div class="workers">{"".join(cards)}</div>
+    </section>
+    <div class="bottom">
+      {live_objects_block()}
+      {live_recent_activity_block()}
+    </div>
+    """
+
 def page(active, content):
     return f"""
     <!doctype html>
@@ -1586,8 +1716,23 @@ def dashboard():
 
 @app.route("/workers")
 def workers():
-    content = f'<h1>Your AI Workers</h1><p style="color:var(--muted)">Ready AI workers assigned to your workspace.</p>{worker_section()}'
+    content = workers_page_block()
     return page("workers", content)
+
+@app.route("/tasks")
+def tasks():
+    content = f'<h1>Tasks</h1><p style="color:var(--muted)">Live task objects from NinaOS Work Objects.</p><div class="bottom">{object_table_block("Tasks", "task", "No tasks yet")}{object_table_block("Follow-ups", "followup_task", "No follow-ups yet")}</div>'
+    return page("tasks", content)
+
+@app.route("/clients")
+def clients():
+    content = f'<h1>Clients</h1><p style="color:var(--muted)">CRM-style view powered by Work Objects.</p>{clients_page_block()}'
+    return page("clients", content)
+
+@app.route("/projects")
+def projects():
+    content = f'<h1>Projects</h1><p style="color:var(--muted)">Project overview connecting tasks, estimates, invoices and documents.</p>{projects_page_block()}'
+    return page("projects", content)
 
 @app.route("/office-manager")
 def office_manager():
