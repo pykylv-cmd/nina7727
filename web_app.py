@@ -3,24 +3,46 @@ import os
 
 app = Flask(__name__)
 
-APP_VERSION = "Web App V21 — Live NinaOS Data Bridge"
+APP_VERSION = "Web App V22 — Seeded Real Data Hook"
 CORE_VERSION = "V115.4 + Core 2.5.2"
 
 # -------------------------------
-# NinaOS Live Data Bridge V1
+# NinaOS Real Data Hook V1
+# Uses existing NinaOS modules:
+# - work_objects.dashboard_counts()
+# - work_objects.seed_demo_work_objects()
+# - activity_feed.activity_feed_for_dashboard()
+# - activity_feed.seed_demo_activity_events()
 # -------------------------------
 
-def _safe_call(fn, *args, **kwargs):
-    try:
-        return fn(*args, **kwargs)
-    except Exception:
-        return None
+_DEMO_SEEDED = False
 
-def get_live_dashboard_counts():
+def ensure_demo_seeded():
     """
-    Tries to read NinaOS Work Objects live/demo counts.
-    Falls back safely so Railway never crashes.
+    Seeds demo Work Objects + Activity Feed once per Railway process.
+    Safe fallback: never crashes web app.
     """
+    global _DEMO_SEEDED
+    if _DEMO_SEEDED:
+        return
+
+    try:
+        from work_objects import seed_demo_work_objects
+        seed_demo_work_objects()
+    except Exception:
+        pass
+
+    try:
+        from activity_feed import seed_demo_activity_events
+        seed_demo_activity_events()
+    except Exception:
+        pass
+
+    _DEMO_SEEDED = True
+
+def get_dashboard_counts_live(workspace_id="demo_small_business"):
+    ensure_demo_seeded()
+
     fallback = {
         "tasks_today": 1,
         "followups": 1,
@@ -30,112 +52,60 @@ def get_live_dashboard_counts():
     }
 
     try:
-        import work_objects
-
-        candidate_names = [
-            "get_dashboard_counts",
-            "dashboard_counts",
-            "get_work_object_counts",
-            "count_dashboard_objects",
-        ]
-
-        for name in candidate_names:
-            fn = getattr(work_objects, name, None)
-            if callable(fn):
-                data = _safe_call(fn, "demo_small_business")
-                if isinstance(data, dict):
-                    return {
-                        "tasks_today": data.get("tasks_today", data.get("Tasks Today", fallback["tasks_today"])),
-                        "followups": data.get("followups", data.get("Follow-ups", fallback["followups"])),
-                        "invoices_due": data.get("invoices_due", data.get("Invoices Due", fallback["invoices_due"])),
-                        "estimates_in_progress": data.get("estimates_in_progress", data.get("Estimates in Progress", fallback["estimates_in_progress"])),
-                        "projects_active": data.get("projects_active", data.get("Active Projects", fallback["projects_active"])),
-                    }
-
-        # Last resort: try known in-memory stores if they exist.
-        objects = getattr(work_objects, "DEMO_WORK_OBJECTS", None) or getattr(work_objects, "WORK_OBJECTS", None)
-        if isinstance(objects, list):
+        from work_objects import dashboard_counts
+        counts = dashboard_counts(workspace_id)
+        if isinstance(counts, dict):
             return {
-                "tasks_today": sum(1 for o in objects if str(o.get("type", o.get("object_type", ""))).lower() == "task"),
-                "followups": sum(1 for o in objects if "follow" in str(o.get("type", o.get("object_type", ""))).lower()),
-                "invoices_due": sum(1 for o in objects if str(o.get("type", o.get("object_type", ""))).lower() == "invoice"),
-                "estimates_in_progress": sum(1 for o in objects if str(o.get("type", o.get("object_type", ""))).lower() in ("estimate", "offer")),
-                "projects_active": sum(1 for o in objects if str(o.get("type", o.get("object_type", ""))).lower() == "project"),
+                "tasks_today": int(counts.get("tasks_today", 0)),
+                "followups": int(counts.get("followups", 0)),
+                "invoices_due": int(counts.get("invoices_due", 0)),
+                "estimates_in_progress": int(counts.get("estimates_in_progress", 0)),
+                "projects_active": int(counts.get("projects_active", 0)),
             }
-
     except Exception:
         pass
 
     return fallback
 
-def get_live_activity_items(limit=6):
-    """
-    Tries to read NinaOS Activity Feed events.
-    Falls back safely.
-    """
+def get_recent_activities_live(workspace_id="demo_small_business", limit=6):
+    ensure_demo_seeded()
+
     fallback = [
-        {"title": "Exchange preview available", "description": "NinaOS Exchange preview is visible inside the dashboard."},
-        {"title": "Document package created", "description": "Demo client document package is ready for organization."},
-        {"title": "Invoice admin record created", "description": "Demo invoice follow-up was added to the workspace."},
-        {"title": "Estimate draft created", "description": "Demo estimate draft is now in progress."},
-        {"title": "Client follow-up scheduled", "description": "Follow up with Demo Client about offer."},
-        {"title": "Task created", "description": "Prepare today workspace priorities."},
+        {"title": "Exchange preview available", "description": "NinaOS Exchange preview is visible inside the dashboard.", "status": "info"},
+        {"title": "Document package created", "description": "Demo client document package is ready for organization.", "status": "info"},
+        {"title": "Invoice admin record created", "description": "Demo invoice follow-up was added to the workspace.", "status": "warning"},
+        {"title": "Estimate draft created", "description": "Demo estimate draft is now in progress.", "status": "info"},
+        {"title": "Client follow-up scheduled", "description": "Follow up with Demo Client about offer.", "status": "info"},
+        {"title": "Task created", "description": "Prepare today workspace priorities.", "status": "info"},
     ]
 
     try:
-        import activity_feed
-
-        candidate_names = [
-            "get_recent_activities",
-            "recent_activities",
-            "get_activity_feed",
-            "get_events",
-        ]
-
-        for name in candidate_names:
-            fn = getattr(activity_feed, name, None)
-            if callable(fn):
-                data = _safe_call(fn, "demo_small_business", limit)
-                if data is None:
-                    data = _safe_call(fn, limit)
-                if isinstance(data, list):
-                    items = []
-                    for event in data[:limit]:
-                        if isinstance(event, dict):
-                            items.append({
-                                "title": event.get("title", event.get("name", "Activity")),
-                                "description": event.get("description", event.get("body", "")),
-                            })
-                    if items:
-                        return items
-
-        events = getattr(activity_feed, "DEMO_ACTIVITY_EVENTS", None) or getattr(activity_feed, "ACTIVITY_EVENTS", None)
-        if isinstance(events, list):
-            items = []
-            for event in events[:limit]:
-                if isinstance(event, dict):
-                    items.append({
-                        "title": event.get("title", "Activity"),
-                        "description": event.get("description", ""),
-                    })
-            if items:
-                return items
-
+        from activity_feed import activity_feed_for_dashboard
+        items = activity_feed_for_dashboard(workspace_id=workspace_id, limit=limit)
+        if isinstance(items, list) and items:
+            clean = []
+            for item in items[:limit]:
+                clean.append({
+                    "title": str(item.get("title", "Activity")),
+                    "description": str(item.get("description", "")),
+                    "status": str(item.get("status", "info")),
+                    "object_type": str(item.get("object_type", "")),
+                })
+            return clean
     except Exception:
         pass
 
     return fallback[:limit]
 
-def get_live_dashboard_data():
-    counts = get_live_dashboard_counts()
-    activities = get_live_activity_items(6)
-
+def get_dashboard_live_data():
     return {
-        "counts": counts,
-        "activities": activities,
-        "system_status": "All Systems Operational",
-        "workspace": "Demo Small Business Workspace",
+        "workspace_id": "demo_small_business",
+        "workspace_name": "Demo Small Business Workspace",
+        "counts": get_dashboard_counts_live("demo_small_business"),
+        "activities": get_recent_activities_live("demo_small_business", 6),
         "active_worker": "Nina Office Manager SMB",
+        "version": APP_VERSION,
+        "core": CORE_VERSION,
     }
 
 
@@ -1318,13 +1288,12 @@ def brand_hero():
     """
 
 def hero_dash():
-    data = get_live_dashboard_data()
+    data = get_dashboard_live_data()
     counts = data["counts"]
-    tasks_today = counts.get("tasks_today", 1)
-    followups = counts.get("followups", 1)
-    invoices_due = counts.get("invoices_due", 1)
-    estimates = counts.get("estimates_in_progress", 1)
-    active_projects = counts.get("projects_active", 1)
+    tasks_today = counts.get("tasks_today", 0)
+    followups = counts.get("followups", 0)
+    invoices_due = counts.get("invoices_due", 0)
+    estimates = counts.get("estimates_in_progress", 0)
 
     return f"""
     <section class="heroDash">
@@ -1352,15 +1321,15 @@ def worker_section():
     return f'<div class="sectionTitle">Your AI Workforce</div><div class="workers">{"".join(worker_card(w) for w in WORKERS)}</div>'
 
 def status_panels():
-    data = get_live_dashboard_data()
+    data = get_dashboard_live_data()
     counts = data["counts"]
 
     return f"""
     <div class="panels">
       <div class="panel">
         <h3>System Status</h3>
-        <div class="ok">{data["system_status"]} <span style="float:right">Live ↗</span></div>
-        <small style="color:var(--muted)">Workspace: {data["workspace"]}</small>
+        <div class="ok">All Systems Operational <span style="float:right">Live ↗</span></div>
+        <small style="color:var(--muted)">Workspace: {data["workspace_name"]}</small>
         <div class="chart">
           <svg viewBox="0 0 300 90" preserveAspectRatio="none">
             <polyline fill="none" stroke="#a855f7" stroke-width="3" points="0,70 25,61 50,66 75,50 100,58 125,43 150,52 175,37 200,42 225,29 250,33 275,18 300,10"/>
@@ -1414,7 +1383,7 @@ def exchange_block():
 
 
 def live_activity_html():
-    activities = get_live_activity_items(6)
+    activities = get_recent_activities_live("demo_small_business", 6)
     return "".join([
         f'<div class="item">{a.get("title", "Activity")}<span>{a.get("description", "")}</span></div>'
         for a in activities
@@ -1505,11 +1474,15 @@ def exchange():
 
 @app.route("/api/dashboard")
 def api_dashboard():
-    return jsonify(get_live_dashboard_data())
+    return jsonify(get_dashboard_live_data())
+
+@app.route("/api/counts")
+def api_counts():
+    return jsonify(get_dashboard_counts_live("demo_small_business"))
 
 @app.route("/api/activities")
 def api_activities():
-    return jsonify({"activities": get_live_activity_items(10)})
+    return jsonify({"activities": get_recent_activities_live("demo_small_business", 10)})
 
 @app.route("/health")
 def health():
