@@ -3,7 +3,7 @@ import os
 
 app = Flask(__name__)
 
-APP_VERSION = "Web App V31 — Clean Rebuild"
+APP_VERSION = "Web App V32 — Polish Pass"
 CORE_VERSION = "V115.4 + Core 2.5.2"
 
 # -------------------------------
@@ -1731,6 +1731,140 @@ body{
   .cleanMiniBtn{margin-top:10px;width:100%}
   .cleanRow{display:block}
   .cleanRow em{display:block;margin-top:6px}
+}
+
+
+/* V32 Polish Pass — keep V31 direction, improve rhythm and premium feel */
+.main{
+  padding:18px !important;
+}
+.cleanTopGrid{
+  gap:20px;
+}
+.cleanKpiHero{
+  padding:26px;
+  border-radius:26px;
+}
+.cleanHeroText h1{
+  font-size:34px;
+}
+.cleanHeroText p{
+  font-size:14.5px;
+  max-width:680px;
+}
+.cleanKpis{
+  gap:14px;
+  margin-top:24px;
+}
+.cleanKpi{
+  min-height:118px;
+  border-color:rgba(255,255,255,.12);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.045);
+}
+.cleanKpi b{
+  font-size:40px;
+}
+.cleanGlobeCard{
+  min-height:232px;
+  border-color:rgba(255,255,255,.10);
+}
+.cleanGlobe{
+  left:20px;
+  top:26px;
+  width:188px;
+  height:188px;
+}
+.sectionTitle{
+  margin-top:20px !important;
+}
+.workers{
+  gap:15px !important;
+}
+.worker{
+  border-radius:20px !important;
+  min-height:276px !important;
+}
+.wTop{
+  height:146px !important;
+}
+.face{
+  width:96px !important;
+  height:96px !important;
+}
+.wBody h3{
+  font-size:19px !important;
+  min-height:40px !important;
+}
+.cleanMainGrid{
+  gap:20px;
+  margin-top:20px;
+}
+.cleanBlock{
+  border-radius:26px;
+  padding:20px;
+  border-color:rgba(255,255,255,.12);
+}
+.cleanBlockHead{
+  margin-bottom:16px;
+}
+.cleanBlockHead h2{
+  font-size:25px;
+}
+.cleanRow{
+  min-height:66px;
+  align-items:flex-start;
+}
+.cleanStats{
+  gap:11px;
+}
+.cleanStats div{
+  min-height:80px;
+}
+.cleanQuickLinks{
+  gap:10px;
+}
+.cleanQuickLinks a:hover,
+.cleanMiniBtn:hover{
+  border-color:rgba(124,58,237,.45);
+  background:rgba(124,58,237,.13);
+}
+.cleanOpenWork{
+  margin-top:20px;
+}
+.cleanWorkGrid{
+  gap:14px;
+}
+.cleanWorkCol{
+  min-height:196px;
+  padding:15px;
+}
+.cleanWorkCol h3{
+  font-size:18px;
+}
+.cleanWorkItem{
+  min-height:62px;
+}
+.cleanMeta{
+  margin-top:4px;
+}
+@media(max-width:1180px){
+  .cleanKpiHero{
+    min-height:auto;
+  }
+}
+@media(max-width:760px){
+  .main{
+    padding:12px !important;
+  }
+  .cleanHeroText h1{
+    font-size:28px;
+  }
+  .cleanKpis{
+    gap:10px;
+  }
+  .cleanKpi b{
+    font-size:34px;
+  }
 }
 
 </style>
