@@ -3,7 +3,7 @@ import os
 
 app = Flask(__name__)
 
-APP_VERSION = "Web App V29 — V28 Hotfix Stable"
+APP_VERSION = "Web App V30 — Usable Workspace Layout"
 CORE_VERSION = "V115.4 + Core 2.5.2"
 
 # -------------------------------
@@ -1520,6 +1520,108 @@ body{
  .snapshotTabs,.openWorkColumns{grid-template-columns:1fr}
 }
 
+
+/* V30 Usable Workspace Layout */
+.v30Grid{
+  grid-template-columns:1.15fr .85fr !important;
+  margin-top:16px;
+}
+.v30Grid .panel{
+  min-height:430px;
+}
+.activityPanel .activityList{
+  max-height:348px;
+  overflow:auto;
+  padding-right:4px;
+}
+.openWorkBlock{
+  margin-top:16px;
+}
+.openWorkBlock .sectionTitleRow h3{
+  font-size:26px;
+}
+.openWorkStats{
+  grid-template-columns:repeat(5,1fr);
+}
+.openWorkColumns{
+  margin-top:12px;
+}
+.workColumn{
+  min-height:170px;
+}
+.workPill{
+  min-height:54px;
+}
+.v30ExchangePreview{
+  margin-top:16px;
+}
+.exchangeMiniGrid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:12px;
+}
+.exchangeMiniCard{
+  border:1px solid rgba(255,255,255,.08);
+  background:linear-gradient(180deg,rgba(255,255,255,.036),rgba(255,255,255,.014));
+  border-radius:16px;
+  padding:14px;
+  min-height:132px;
+}
+.exchangeMiniCard b{
+  display:block;
+  font-size:16px;
+  line-height:1.15;
+}
+.exchangeMiniCard span{
+  display:block;
+  color:var(--muted);
+  font-size:12px;
+  margin-top:5px;
+}
+.exchangeMiniCard em{
+  display:inline-block;
+  margin-top:10px;
+  font-style:normal;
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:.08em;
+  color:#86efac;
+}
+.exchangeMiniCard small{
+  display:block;
+  color:rgba(220,231,255,.62);
+  margin-top:8px;
+  font-size:11px;
+}
+.panel{
+  overflow:hidden;
+}
+.heroDash{
+  min-height:260px;
+}
+.workspaceTriGrid{
+  align-items:stretch;
+}
+@media(max-width:1280px){
+  .v30Grid{
+    grid-template-columns:1fr !important;
+  }
+  .exchangeMiniGrid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .openWorkStats{
+    grid-template-columns:repeat(3,1fr);
+  }
+}
+@media(max-width:760px){
+  .exchangeMiniGrid{
+    grid-template-columns:1fr;
+  }
+  .openWorkStats{
+    grid-template-columns:repeat(2,1fr);
+  }
+}
+
 </style>
 """
 
@@ -1851,6 +1953,29 @@ def build_open_work_columns():
             inner = "<div class='emptyState'>No items</div>"
         cols.append(f"<div class='workColumn'><h4>{title}</h4>{inner}</div>")
     return f"<div class='openWorkColumns'>{''.join(cols)}</div>"
+
+
+def exchange_preview_block():
+    live_states = get_worker_live_states()
+    cards = []
+    for w in MARKET[:4]:
+        status = live_states.get(w.get("name"), {}).get("status", w.get("status", "ACTIVE"))
+        work = live_states.get(w.get("name"), {}).get("work", w.get("work", "Ready worker"))
+        cards.append(
+            f"<div class='exchangeMiniCard'><b>{w.get('name')}</b><span>{w.get('role')}</span><em>{status}</em><small>{work}</small></div>"
+        )
+    return f"""
+    <section class="panel v30ExchangePreview">
+      <div class="sectionTitleRow">
+        <div>
+          <h3>Exchange Preview</h3>
+          <p>Ready AI workers available for this workspace.</p>
+        </div>
+        <a class="btn" href="/exchange">Open Exchange</a>
+      </div>
+      <div class="exchangeMiniGrid">{''.join(cards)}</div>
+    </section>
+    """
 
 def worker_section():
     live_states = get_worker_live_states()
@@ -2301,12 +2426,12 @@ def page(active, content):
 
 @app.route("/")
 def home():
-    content = f'{brand_and_kpi_top()}{worker_section()}<div class="workspaceTriGrid">{status_panel_block()}{activity_block()}{snapshot_block()}</div>{open_work_block()}'
+    content = f'{brand_and_kpi_top()}{worker_section()}<div class="workspaceTriGrid v30Grid">{activity_block()}{snapshot_block()}</div>{open_work_block()}{exchange_preview_block()}'
     return page("dashboard", content)
 
 @app.route("/dashboard")
 def dashboard():
-    content = f'{brand_and_kpi_top()}{worker_section()}<div class="workspaceTriGrid">{status_panel_block()}{activity_block()}{snapshot_block()}</div>{open_work_block()}'
+    content = f'{brand_and_kpi_top()}{worker_section()}<div class="workspaceTriGrid v30Grid">{activity_block()}{snapshot_block()}</div>{open_work_block()}{exchange_preview_block()}'
     return page("dashboard", content)
 
 @app.route("/workers")
@@ -2371,7 +2496,7 @@ def api_activities():
 
 @app.route("/overview")
 def overview():
-    content = f'{brand_and_kpi_top()}{worker_section()}<div class="workspaceTriGrid">{status_panel_block()}{activity_block()}{snapshot_block()}</div>{open_work_block()}{mobile_block()}{exchange_block()}{network_block()}'
+    content = f'{brand_and_kpi_top()}{worker_section()}<div class="workspaceTriGrid v30Grid">{activity_block()}{snapshot_block()}</div>{open_work_block()}{mobile_block()}{exchange_block()}{network_block()}'
     return page("overview", content)
 
 @app.route("/health")
