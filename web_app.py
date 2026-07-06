@@ -3,7 +3,7 @@ import os
 
 app = Flask(__name__)
 
-APP_VERSION = "Web App V14.1 — Logo Duplicate Fix"
+APP_VERSION = "Web App V14.2 — Round Logo Fix"
 CORE_VERSION = "V115.4 + Core 2.5.2"
 
 WORKERS = [
@@ -610,6 +610,90 @@ a{text-decoration:none;color:inherit}
   .heroBrand .bigLogo{
     width:320px !important;
     height:140px !important;
+  }
+}
+
+
+/* V14.2: fix oval logo — return to clean round orb + wordmark, no stretched rectangle */
+.heroBrand .brandName,
+.heroBrand .brandSub{
+    display:block !important;
+}
+.heroBrand .bigLogo{
+    width:132px !important;
+    height:132px !important;
+    aspect-ratio:1 / 1 !important;
+    border-radius:50% !important;
+    background:
+      radial-gradient(circle at 45% 40%,rgba(34,211,238,.22),rgba(124,58,237,.10) 60%,transparent 74%) !important;
+    box-shadow:0 0 36px rgba(124,58,237,.42),0 0 24px rgba(34,211,238,.16) !important;
+    overflow:hidden !important;
+    margin:0 auto 0 !important;
+}
+.heroBrand .bigLogo:before{
+    display:block !important;
+    content:"" !important;
+    position:absolute !important;
+    inset:8% !important;
+    border-radius:50% !important;
+    background-image:
+      radial-gradient(circle,rgba(34,211,238,.95) 0 2.2px,transparent 3.3px),
+      radial-gradient(circle,rgba(139,92,246,.98) 0 2.2px,transparent 3.3px),
+      radial-gradient(circle,rgba(96,165,250,.95) 0 2.2px,transparent 3.3px),
+      radial-gradient(circle,rgba(217,70,239,.90) 0 2.2px,transparent 3.3px) !important;
+    background-size:16px 16px !important;
+    background-position:0 0,8px 8px,4px 12px,12px 4px !important;
+    transform:rotate(-14deg) !important;
+    filter:drop-shadow(0 0 8px rgba(124,58,237,.42)) !important;
+}
+.heroBrand .bigLogo:after{
+    display:block !important;
+    content:"" !important;
+    position:absolute !important;
+    inset:10% !important;
+    border-radius:50% !important;
+    border:1px solid rgba(255,255,255,.16) !important;
+}
+.side .brand .logo{
+    width:34px !important;
+    height:34px !important;
+    aspect-ratio:1 / 1 !important;
+    border-radius:50% !important;
+    background:
+      radial-gradient(circle at 45% 40%,rgba(34,211,238,.22),rgba(124,58,237,.10) 60%,transparent 74%) !important;
+    box-shadow:0 0 36px rgba(124,58,237,.42),0 0 24px rgba(34,211,238,.16) !important;
+    overflow:hidden !important;
+}
+.side .brand .logo:before{
+    display:block !important;
+    content:"" !important;
+    position:absolute !important;
+    inset:8% !important;
+    border-radius:50% !important;
+    background-image:
+      radial-gradient(circle,rgba(34,211,238,.95) 0 2.2px,transparent 3.3px),
+      radial-gradient(circle,rgba(139,92,246,.98) 0 2.2px,transparent 3.3px),
+      radial-gradient(circle,rgba(96,165,250,.95) 0 2.2px,transparent 3.3px),
+      radial-gradient(circle,rgba(217,70,239,.90) 0 2.2px,transparent 3.3px) !important;
+    background-size:9px 9px !important;
+    background-position:0 0,4px 4px,2px 6px,6px 2px !important;
+    transform:rotate(-14deg) !important;
+}
+.side .brand .logo:after{
+    display:block !important;
+    content:"" !important;
+    position:absolute !important;
+    inset:10% !important;
+    border-radius:50% !important;
+    border:1px solid rgba(255,255,255,.16) !important;
+}
+.side .brand b{
+    display:block !important;
+}
+@media(max-width:760px){
+  .heroBrand .bigLogo{
+    width:120px !important;
+    height:120px !important;
   }
 }
 
