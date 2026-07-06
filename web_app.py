@@ -3,35 +3,35 @@ import os
 
 app = Flask(__name__)
 
-APP_VERSION = "Web App V13 — Clean Lightweight Reset"
+APP_VERSION = "Web App V13 — Clean App Reset"
 CORE_VERSION = "V115.4 + Core 2.5.2"
 
 WORKERS = [
-    {"name": "Nina Sales", "role": "AI Sales Executive", "status": "ACTIVE", "work": "Following up with 15 leads", "tone": "purple", "price": "€99", "rating": "4.9"},
-    {"name": "Nina Estimator", "role": "AI Estimator", "status": "ACTIVE", "work": "Working on 3 estimates", "tone": "blue", "price": "€119", "rating": "4.9"},
-    {"name": "Nina Office Manager", "role": "AI Office Manager", "status": "ACTIVE", "work": "Managing your schedule", "tone": "green", "price": "€89", "rating": "4.8"},
-    {"name": "Nina Support", "role": "AI Support Specialist", "status": "IDLE", "work": "Waiting for new tasks", "tone": "orange", "price": "€79", "rating": "4.8"},
+    {"name": "Nina Sales", "role": "AI Sales Executive", "status": "ACTIVE", "work": "Following up with 15 leads", "tone": "purple", "price": "€99"},
+    {"name": "Nina Estimator", "role": "AI Estimator", "status": "ACTIVE", "work": "Working on 3 estimates", "tone": "blue", "price": "€119"},
+    {"name": "Nina Office Manager", "role": "AI Office Manager", "status": "ACTIVE", "work": "Managing your schedule", "tone": "green", "price": "€89"},
+    {"name": "Nina Support", "role": "AI Support Specialist", "status": "IDLE", "work": "Waiting for new tasks", "tone": "orange", "price": "€79"},
 ]
 
 MARKET = WORKERS + [
-    {"name": "Nina Marketing", "role": "AI Marketing Specialist", "status": "ACTIVE", "work": "Preparing campaigns", "tone": "pink", "price": "€99", "rating": "4.8"},
-    {"name": "Nina HR", "role": "AI HR Assistant", "status": "ACTIVE", "work": "Screening candidates", "tone": "red", "price": "€89", "rating": "4.8"},
+    {"name": "Nina Marketing", "role": "AI Marketing Specialist", "status": "ACTIVE", "work": "Preparing campaigns", "tone": "pink", "price": "€99"},
+    {"name": "Nina HR", "role": "AI HR Assistant", "status": "ACTIVE", "work": "Screening candidates", "tone": "red", "price": "€89"},
 ]
 
 CSS = """
 <style>
 :root{
   --bg:#050711;
-  --panel:#0a0f1d;
-  --panel2:#0d1428;
-  --line:rgba(255,255,255,.10);
+  --panel:#090d19;
+  --panel2:#0d1324;
+  --line:rgba(255,255,255,.11);
   --text:#f7fbff;
   --muted:#9aa6c5;
   --purple:#7c3aed;
   --blue:#2563eb;
   --green:#22c55e;
   --amber:#f59e0b;
-  --shadow:0 18px 60px rgba(0,0,0,.42);
+  --shadow:0 22px 80px rgba(0,0,0,.38);
 }
 *{box-sizing:border-box}
 body{
@@ -39,63 +39,76 @@ body{
   color:var(--text);
   font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
   background:
-    radial-gradient(circle at 10% 10%,rgba(124,58,237,.16),transparent 30%),
-    radial-gradient(circle at 85% 5%,rgba(37,99,235,.12),transparent 32%),
+    radial-gradient(circle at 10% 10%,rgba(124,58,237,.16),transparent 28%),
+    radial-gradient(circle at 85% 5%,rgba(37,99,235,.12),transparent 30%),
     linear-gradient(180deg,#030611,#070a14);
 }
 a{text-decoration:none;color:inherit}
-.wrap{max-width:1760px;margin:auto;padding:16px}
+.wrap{max-width:1720px;margin:0 auto;padding:16px}
 .shell{display:grid;grid-template-columns:170px minmax(0,1fr);gap:16px}
-.sidebar,.main,.card,.panel,.heroBrand,.heroDash,.block{
+
+.side,.main,.card,.block{
   border:1px solid var(--line);
-  background:linear-gradient(180deg,rgba(10,15,29,.92),rgba(6,9,18,.96));
-  border-radius:24px;
+  background:linear-gradient(180deg,rgba(9,13,25,.92),rgba(6,9,18,.96));
   box-shadow:var(--shadow);
+  border-radius:26px;
 }
-.sidebar{
+.side{
   min-height:calc(100vh - 32px);
-  position:sticky;
-  top:16px;
   padding:16px 12px;
   display:flex;
   flex-direction:column;
   gap:12px;
+  position:sticky;
+  top:16px;
 }
 .brand{
   display:flex;
   align-items:center;
   gap:10px;
-  padding:6px 8px 16px;
+  padding:4px 8px 14px;
 }
-.logoOrb,.bigOrb,.miniGlobe{
+.logo,.bigLogo{
   border-radius:50%;
   position:relative;
   overflow:hidden;
+  flex-shrink:0;
   background:
-    radial-gradient(circle at 34% 28%,rgba(255,255,255,.14),transparent 14%),
-    radial-gradient(circle at 50% 50%,rgba(34,211,238,.22),rgba(124,58,237,.10) 60%,transparent 74%);
-  box-shadow:0 0 34px rgba(124,58,237,.45),0 0 22px rgba(34,211,238,.18);
+    radial-gradient(circle at 45% 40%,rgba(34,211,238,.22),rgba(124,58,237,.10) 60%,transparent 74%);
+  box-shadow:0 0 36px rgba(124,58,237,.42),0 0 24px rgba(34,211,238,.16);
 }
-.logoOrb{width:34px;height:34px}
-.bigOrb{width:150px;height:150px}
-.logoOrb:before,.bigOrb:before,.miniGlobe:before{
+.logo{width:34px;height:34px}
+.bigLogo{width:132px;height:132px}
+.logo:before,.bigLogo:before{
   content:"";
   position:absolute;
   inset:8%;
   border-radius:50%;
   background-image:
-    radial-gradient(circle,rgba(34,211,238,.98) 0 2px,transparent 3px),
-    radial-gradient(circle,rgba(139,92,246,.98) 0 2px,transparent 3px),
-    radial-gradient(circle,rgba(96,165,250,.96) 0 2px,transparent 3px),
-    radial-gradient(circle,rgba(217,70,239,.88) 0 2px,transparent 3px);
-  background-size:14px 14px;
-  background-position:0 0,7px 7px,3px 10px,10px 3px;
+    radial-gradient(circle,rgba(34,211,238,.95) 0 2.2px,transparent 3.3px),
+    radial-gradient(circle,rgba(139,92,246,.98) 0 2.2px,transparent 3.3px),
+    radial-gradient(circle,rgba(96,165,250,.95) 0 2.2px,transparent 3.3px),
+    radial-gradient(circle,rgba(217,70,239,.90) 0 2.2px,transparent 3.3px);
+  background-size:16px 16px;
+  background-position:0 0,8px 8px,4px 12px,12px 4px;
   transform:rotate(-14deg);
-  filter:drop-shadow(0 0 8px rgba(124,58,237,.5));
+  filter:drop-shadow(0 0 8px rgba(124,58,237,.42));
 }
-.logoOrb:before{background-size:9px 9px;background-position:0 0,4px 4px,2px 6px,6px 2px}
+.logo:before{background-size:9px 9px;background-position:0 0,4px 4px,2px 6px,6px 2px}
+.logo:after,.bigLogo:after{
+  content:"";
+  position:absolute;
+  inset:10%;
+  border-radius:50%;
+  border:1px solid rgba(255,255,255,.16);
+}
 .brand b{font-size:20px;letter-spacing:-.04em}
-.os{background:linear-gradient(90deg,#60a5fa,#7c3aed);-webkit-background-clip:text;background-clip:text;color:transparent}
+.os{
+  background:linear-gradient(90deg,#60a5fa,#7c3aed);
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+}
 .nav{display:grid;gap:7px}
 .nav a{
   display:flex;
@@ -111,7 +124,13 @@ a{text-decoration:none;color:inherit}
   background:linear-gradient(90deg,rgba(124,58,237,.42),rgba(37,99,235,.18));
   border-color:rgba(124,58,237,.36);
 }
-.badge{margin-left:auto;background:rgba(124,58,237,.35);border-radius:999px;padding:2px 6px;font-size:10px}
+.badge{
+  margin-left:auto;
+  background:rgba(124,58,237,.35);
+  border-radius:999px;
+  padding:2px 6px;
+  font-size:10px;
+}
 .userMini{
   margin-top:auto;
   display:flex;
@@ -123,8 +142,12 @@ a{text-decoration:none;color:inherit}
   background:rgba(255,255,255,.035);
 }
 .avatar{
-  width:34px;height:34px;border-radius:50%;
-  display:grid;place-items:center;font-weight:900;
+  width:34px;
+  height:34px;
+  border-radius:50%;
+  display:grid;
+  place-items:center;
+  font-weight:900;
   background:linear-gradient(135deg,#7c3aed,#ec4899);
 }
 .main{padding:16px;min-width:0}
@@ -145,36 +168,48 @@ a{text-decoration:none;color:inherit}
 }
 .icons{display:flex;gap:9px}
 .ico{
-  width:34px;height:34px;border-radius:50%;
-  display:grid;place-items:center;
+  width:34px;
+  height:34px;
+  border-radius:50%;
+  display:grid;
+  place-items:center;
   border:1px solid rgba(255,255,255,.08);
   background:rgba(255,255,255,.035);
 }
-.grid2{display:grid;grid-template-columns:520px minmax(0,1fr);gap:16px}
+.homeGrid{
+  display:grid;
+  grid-template-columns:500px minmax(0,1fr);
+  gap:16px;
+}
 .heroBrand{
-  min-height:560px;
-  padding:32px 28px;
+  min-height:590px;
+  padding:32px 26px;
+  text-align:center;
   display:flex;
   flex-direction:column;
   align-items:center;
-  text-align:center;
+  border-radius:24px;
+  border:1px solid var(--line);
+  background:
+    radial-gradient(circle at 18% 20%,rgba(124,58,237,.14),transparent 30%),
+    linear-gradient(180deg,rgba(9,13,25,.94),rgba(6,9,18,.96));
 }
 .brandName{
-  font-size:78px;
+  margin-top:18px;
+  font-size:72px;
   font-weight:950;
   letter-spacing:-.06em;
   line-height:.9;
-  margin-top:18px;
 }
 .brandSub{
-  margin-top:10px;
+  margin-top:12px;
   font-size:14px;
-  letter-spacing:.17em;
+  letter-spacing:.18em;
   text-transform:uppercase;
   color:#dce7ff;
 }
 .heroCopy{
-  font-size:22px;
+  font-size:21px;
   line-height:1.45;
   margin:32px 0 0;
 }
@@ -186,10 +221,20 @@ a{text-decoration:none;color:inherit}
   gap:14px;
   margin:32px 0 24px;
 }
-.pillar{padding:12px 8px}
-.pillar .ic{font-size:35px;color:#8b5cf6;margin-bottom:12px}
-.pillar b{display:block;text-transform:uppercase;letter-spacing:.06em;font-size:13px}
-.pillar p{margin:8px 0 0;color:var(--muted);font-size:13px;line-height:1.42}
+.pillar{padding:12px 6px}
+.pillar .ic{font-size:34px;color:#8b5cf6;margin-bottom:12px}
+.pillar b{
+  display:block;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  font-size:12px;
+}
+.pillar p{
+  margin:8px 0 0;
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.42;
+}
 .btn{
   display:inline-flex;
   align-items:center;
@@ -207,7 +252,13 @@ a{text-decoration:none;color:inherit}
 }
 .ctas{display:flex;gap:14px}
 .trusted{margin-top:auto;color:var(--muted);font-size:13px}
-.logos{width:100%;display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:16px}
+.logos{
+  width:100%;
+  display:grid;
+  grid-template-columns:repeat(5,1fr);
+  gap:8px;
+  margin-top:16px;
+}
 .logos span{
   font-size:12px;
   color:#e7eeff;
@@ -217,22 +268,29 @@ a{text-decoration:none;color:inherit}
   background:rgba(255,255,255,.025);
 }
 .heroDash{
-  min-height:245px;
+  min-height:250px;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:22px;
   padding:20px;
-  position:relative;
   overflow:hidden;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 280px;
+  gap:16px;
   background:
-    radial-gradient(circle at 82% 40%,rgba(37,99,235,.14),transparent 24%),
-    linear-gradient(135deg,rgba(12,18,35,.97),rgba(6,10,20,.97));
+    radial-gradient(circle at 85% 35%,rgba(37,99,235,.16),transparent 30%),
+    linear-gradient(135deg,rgba(12,18,35,.96),rgba(6,10,20,.96));
 }
-.heroDash h1{font-size:25px;margin:0 0 5px;letter-spacing:-.04em}
+.heroDash h1{
+  font-size:25px;
+  margin:0 0 5px;
+  letter-spacing:-.04em;
+}
 .heroDash p{margin:0;color:var(--muted);font-size:13px}
 .kpis{
   display:grid;
   grid-template-columns:repeat(4,minmax(0,1fr));
   gap:12px;
   margin-top:20px;
-  max-width:600px;
 }
 .kpi{
   border:1px solid rgba(255,255,255,.08);
@@ -244,48 +302,74 @@ a{text-decoration:none;color:inherit}
 .kpi small{font-size:11px;color:#e5ecff}
 .kpi .v{font-size:34px;font-weight:950;margin:7px 0 4px}
 .kpi .d{font-size:12px;color:#86efac}
-.kpi .p{color:#f0abfc}.kpi .b{color:#93c5fd}
-.globeCard{
-  position:absolute;
-  right:20px;
-  top:24px;
-  width:290px;
-  height:188px;
-  display:grid;
-  grid-template-columns:125px 1fr;
-  gap:10px;
-  align-items:center;
-  padding:12px;
-  border-radius:20px;
-  background:linear-gradient(135deg,rgba(37,99,235,.10),rgba(124,58,237,.06));
-  border:1px solid rgba(255,255,255,.06);
-}
-.miniGlobe{
-  width:124px;height:124px;
+.kpi .p{color:#f0abfc}
+.kpi .b{color:#93c5fd}
+.globalBox{
+  position:relative;
+  min-height:220px;
+  border-radius:18px;
   background:
-    radial-gradient(circle at 34% 28%,rgba(255,255,255,.18),transparent 12%),
-    radial-gradient(circle at 52% 50%,rgba(37,99,235,.24),rgba(124,58,237,.10) 62%,transparent 76%);
+    radial-gradient(circle at 38% 35%,rgba(96,165,250,.18),transparent 24%),
+    radial-gradient(circle at 60% 48%,rgba(124,58,237,.16),transparent 28%);
+  overflow:hidden;
 }
-.miniGlobe:after{
+.globalBox:before{
   content:"";
   position:absolute;
-  inset:13px;
+  left:14px;
+  top:16px;
+  width:180px;
+  height:180px;
+  border-radius:50%;
+  background:
+    radial-gradient(circle at 35% 30%,rgba(255,255,255,.24),transparent 10%),
+    radial-gradient(circle at 58% 50%,rgba(37,99,235,.32),rgba(124,58,237,.18) 54%,rgba(2,6,23,.60) 74%);
+  border:1px solid rgba(96,165,250,.22);
+  box-shadow:0 0 55px rgba(37,99,235,.28), inset -20px -18px 36px rgba(0,0,0,.42);
+}
+.globalBox:after{
+  content:"";
+  position:absolute;
+  left:-20px;
+  top:70px;
+  width:250px;
+  height:82px;
   border-radius:50%;
   border:1px solid rgba(168,85,247,.38);
-  transform:rotate(25deg) scaleX(1.55);
+  transform:rotate(18deg);
+  box-shadow:0 0 16px rgba(124,58,237,.18);
 }
-.globeCopy b{font-size:25px;line-height:1.02;display:block}
-.globeCopy p{font-size:13px;margin:8px 0 12px;color:var(--muted)}
-.globeCopy .btn{padding:9px 11px;font-size:12px}
+.globalText{
+  position:absolute;
+  right:10px;
+  top:58px;
+  width:130px;
+  z-index:2;
+}
+.globalText b{
+  font-size:24px;
+  line-height:1.02;
+  display:block;
+}
+.globalText p{
+  font-size:12px;
+  color:var(--muted);
+  margin:8px 0 12px;
+}
+.globalText .btn{padding:9px 10px;font-size:11px}
 .sectionTitle{font-size:18px;font-weight:950;margin:16px 0 12px}
-.workers{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px}
-.worker,.market{
+.workers{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:13px;
+}
+.worker{
   border:1px solid rgba(255,255,255,.09);
   border-radius:18px;
   overflow:hidden;
   background:rgba(255,255,255,.035);
+  min-height:265px;
 }
-.worker{min-height:265px}
 .wTop{height:145px;position:relative}
 .purple{background:linear-gradient(135deg,#3b1265,#0d1224)}
 .blue{background:linear-gradient(135deg,#0a4d87,#0d1224)}
@@ -295,9 +379,12 @@ a{text-decoration:none;color:inherit}
 .red{background:linear-gradient(135deg,#7f1d1d,#0d1224)}
 .face{
   position:absolute;
-  left:50%;top:53%;
+  left:50%;
+  top:53%;
   transform:translate(-50%,-50%);
-  width:104px;height:104px;border-radius:50%;
+  width:104px;
+  height:104px;
+  border-radius:50%;
   background:
     radial-gradient(circle at 35% 31%,#ffe2cd 0 13%,#c88463 14% 24%,transparent 25%),
     radial-gradient(circle at 50% 56%,#f3c5aa 0 30%,#bd7758 31% 36%,transparent 37%),
@@ -310,31 +397,113 @@ a{text-decoration:none;color:inherit}
 .wBody{padding:13px}
 .wBody h3{font-size:20px;line-height:1.06;margin:0 0 4px}
 .wBody p{margin:0 0 8px;color:var(--muted);font-size:12px}
-.status{font-size:11px;margin-bottom:9px}.active{color:#86efac}.idle{color:#fcd34d}
+.status{font-size:11px;margin-bottom:9px}
+.active{color:#86efac}
+.idle{color:#fcd34d}
 .work{font-size:13px;line-height:1.35}
-.panels{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
-.panel{padding:14px;border-radius:18px}
+.panels{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:14px;
+  margin-top:14px;
+}
+.panel,.block{
+  padding:14px;
+  border-radius:18px;
+}
 .panel h3,.block h2{margin:0 0 10px}
 .ok{color:#86efac;font-weight:800}
-.chart{height:80px;border-radius:13px;background:linear-gradient(180deg,rgba(124,58,237,.12),transparent);border:1px solid rgba(255,255,255,.06);position:relative;overflow:hidden}
+.chart{
+  height:80px;
+  border-radius:13px;
+  background:linear-gradient(180deg,rgba(124,58,237,.12),transparent);
+  border:1px solid rgba(255,255,255,.06);
+  position:relative;
+  overflow:hidden;
+}
 .chart svg{position:absolute;inset:0}
 .ws{display:flex;gap:8px;flex-wrap:wrap}
-.ws span{width:31px;height:31px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:900;background:linear-gradient(135deg,#7c3aed,#2563eb)}
-.bottom{display:grid;grid-template-columns:1fr;gap:16px;margin-top:16px}
-.block{border-radius:22px;padding:16px}
-.phoneRow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}
-.phone{border:1px solid rgba(255,255,255,.10);background:#060914;border-radius:26px;padding:9px}
-.screen{border-radius:20px;background:linear-gradient(180deg,#0c1224,#080c18);min-height:340px;padding:12px}
-.miniStats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:12px 0}
-.mini{background:rgba(255,255,255,.04);border-radius:12px;padding:8px;text-align:center}
+.ws span{
+  width:31px;
+  height:31px;
+  border-radius:50%;
+  display:grid;
+  place-items:center;
+  font-size:10px;
+  font-weight:900;
+  background:linear-gradient(135deg,#7c3aed,#2563eb);
+}
+.bottom{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:16px;
+  margin-top:16px;
+}
+.phoneRow{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:11px;
+}
+.phone{
+  border:1px solid rgba(255,255,255,.10);
+  background:#060914;
+  border-radius:24px;
+  padding:9px;
+}
+.screen{
+  border-radius:18px;
+  background:linear-gradient(180deg,#0c1224,#080c18);
+  min-height:300px;
+  padding:12px;
+}
+.miniStats{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:6px;
+  margin:12px 0;
+}
+.mini{
+  background:rgba(255,255,255,.04);
+  border-radius:12px;
+  padding:8px;
+  text-align:center;
+}
 .mini b{font-size:18px}
 .mini span,.item span{display:block;color:var(--muted);font-size:10px}
-.item{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:9px;margin-top:8px;font-size:12px}
-.exchange{display:grid;grid-template-columns:160px minmax(0,1fr);gap:12px}
+.item{
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.06);
+  border-radius:12px;
+  padding:9px;
+  margin-top:8px;
+  font-size:12px;
+}
+.exchange{
+  display:grid;
+  grid-template-columns:160px minmax(0,1fr);
+  gap:12px;
+}
 .cats{display:grid;gap:8px;align-content:start}
-.cat{padding:9px 11px;border:1px solid rgba(255,255,255,.07);border-radius:11px;color:#dce6ff;font-size:12px;background:rgba(255,255,255,.025)}
+.cat{
+  padding:9px 11px;
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:11px;
+  color:#dce6ff;
+  font-size:12px;
+  background:rgba(255,255,255,.025);
+}
 .cat.active{background:linear-gradient(90deg,rgba(124,58,237,.45),rgba(37,99,235,.18))}
-.marketGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
+.marketGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+  gap:12px;
+}
+.market{
+  border:1px solid rgba(255,255,255,.09);
+  border-radius:16px;
+  overflow:hidden;
+  background:rgba(255,255,255,.035);
+}
 .market .wTop{height:118px}
 .market .face{width:86px;height:86px}
 .mBody{padding:11px}
@@ -343,42 +512,89 @@ a{text-decoration:none;color:inherit}
 .price{font-size:18px;font-weight:950;margin-top:7px}
 .price span{display:inline;color:var(--muted);font-size:11px}
 .mBody .btn{padding:8px 11px;font-size:11px;margin-top:8px}
-.map{height:260px;border:1px solid rgba(255,255,255,.07);border-radius:18px;background:radial-gradient(circle at 20% 35%,rgba(124,58,237,.24),transparent 18%),radial-gradient(circle at 75% 45%,rgba(37,99,235,.18),transparent 22%),linear-gradient(180deg,#0b1020,#080c18);position:relative;overflow:hidden}
-.dot{position:absolute;width:10px;height:10px;border-radius:50%;background:#a855f7;box-shadow:0 0 18px #a855f7}
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
-.stat{border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:10px;background:rgba(255,255,255,.025)}
-.stat b{font-size:24px}.stat span{display:block;color:var(--muted);font-size:10px}
-.mobileNav{display:none;position:fixed;left:12px;right:12px;bottom:12px;background:rgba(8,12,24,.92);border:1px solid var(--line);border-radius:22px;z-index:20;padding:8px;backdrop-filter:blur(18px)}
-.mobileNav a{flex:1;text-align:center;padding:10px 4px;border-radius:14px;font-size:12px;color:#dbe4ff}
+.map{
+  height:230px;
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:18px;
+  background:
+    radial-gradient(circle at 20% 35%,rgba(124,58,237,.24),transparent 18%),
+    radial-gradient(circle at 75% 45%,rgba(37,99,235,.18),transparent 22%),
+    linear-gradient(180deg,#0b1020,#080c18);
+  position:relative;
+  overflow:hidden;
+}
+.dot{
+  position:absolute;
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:#a855f7;
+  box-shadow:0 0 18px #a855f7;
+}
+.stats{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:10px;
+  margin-top:12px;
+}
+.stat{
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:12px;
+  padding:10px;
+  background:rgba(255,255,255,.025);
+}
+.stat b{font-size:24px}
+.stat span{display:block;color:var(--muted);font-size:10px}
+.mobileNav{
+  display:none;
+  position:fixed;
+  left:12px;
+  right:12px;
+  bottom:12px;
+  background:rgba(8,12,24,.92);
+  border:1px solid var(--line);
+  border-radius:22px;
+  z-index:20;
+  padding:8px;
+  backdrop-filter:blur(18px);
+}
+.mobileNav a{
+  flex:1;
+  text-align:center;
+  padding:10px 4px;
+  border-radius:14px;
+  font-size:12px;
+  color:#dbe4ff;
+}
 .mobileNav a.active{background:rgba(124,58,237,.32)}
-@media(max-width:1500px){
-  .grid2{grid-template-columns:1fr}
+@media(max-width:1450px){
+  .homeGrid{grid-template-columns:1fr}
   .heroBrand{min-height:auto}
   .shell{grid-template-columns:150px minmax(0,1fr)}
 }
 @media(max-width:1180px){
   .shell{grid-template-columns:1fr}
-  .sidebar{display:none}
+  .side{display:none}
   .kpis{grid-template-columns:repeat(2,1fr)}
   .workers{grid-template-columns:repeat(2,1fr)}
   .panels{grid-template-columns:1fr}
+  .heroDash{grid-template-columns:1fr}
+  .globalBox{min-height:210px}
   .phoneRow{grid-template-columns:1fr}
   .exchange{grid-template-columns:1fr}
   .mobileNav{display:flex}
   .wrap{padding-bottom:84px}
-  .globeCard{position:relative;right:auto;top:auto;margin-top:14px;width:100%;max-width:420px}
 }
 @media(max-width:760px){
   .wrap{padding:10px 10px 84px}
   .brandName{font-size:56px}
-  .bigOrb{width:130px;height:130px}
+  .bigLogo{width:120px;height:120px}
   .pillars{grid-template-columns:repeat(2,1fr)}
   .ctas{flex-direction:column;width:100%}
   .ctas .btn{width:100%}
   .stats{grid-template-columns:repeat(2,1fr)}
   .kpis{grid-template-columns:1fr}
   .workers{grid-template-columns:1fr}
-  .globeCard{grid-template-columns:1fr;height:auto;text-align:left}
 }
 </style>
 """
@@ -388,10 +604,31 @@ def tone_class(tone):
 
 def worker_card(w):
     st = "active" if w["status"] == "ACTIVE" else "idle"
-    return f'<div class="worker"><div class="wTop {tone_class(w["tone"])}"><div class="face"></div></div><div class="wBody"><h3>{w["name"]}</h3><p>{w["role"]}</p><div class="status {st}">● {w["status"]}</div><div class="work">{w["work"]}</div></div></div>'
+    return f"""
+    <div class="worker">
+      <div class="wTop {tone_class(w["tone"])}"><div class="face"></div></div>
+      <div class="wBody">
+        <h3>{w["name"]}</h3>
+        <p>{w["role"]}</p>
+        <div class="status {st}">● {w["status"]}</div>
+        <div class="work">{w["work"]}</div>
+      </div>
+    </div>
+    """
 
 def market_card(w):
-    return f'<div class="market"><div class="wTop {tone_class(w["tone"])}"><div class="face"></div></div><div class="mBody"><b>{w["name"]}</b><span>{w["role"]}</span><span>★ {w["rating"]} (95)</span><div class="price">{w["price"]}<span>/month</span></div><a class="btn" href="/workers">View Details</a></div></div>'
+    return f"""
+    <div class="market">
+      <div class="wTop {tone_class(w["tone"])}"><div class="face"></div></div>
+      <div class="mBody">
+        <b>{w["name"]}</b>
+        <span>{w["role"]}</span>
+        <span>★ 4.8</span>
+        <div class="price">{w["price"]}<span>/month</span></div>
+        <a class="btn" href="/workers">View Details</a>
+      </div>
+    </div>
+    """
 
 def sidebar(active="dashboard"):
     items = [
@@ -408,40 +645,179 @@ def sidebar(active="dashboard"):
         ("◇","Integrations","/dashboard","integrations",""),
         ("⚙","Settings","/dashboard","settings",""),
     ]
-    nav = "".join([f'<a class="{"active" if active==key else ""}" href="{href}"><span>{icon}</span>{label}{"<span class=badge>"+badge+"</span>" if badge else ""}</a>' for icon,label,href,key,badge in items])
-    return f'<aside class="sidebar"><a class="brand" href="/"><div class="logoOrb"></div><b>Nina<span class="os">OS</span></b></a><nav class="nav">{nav}</nav><div class="userMini"><div class="avatar">K</div><div><b>Katrin</b><br><small style="color:var(--muted)">Owner</small></div></div></aside>'
+    nav = "".join([
+        f'<a class="{"active" if active == key else ""}" href="{href}"><span>{icon}</span>{label}{"<span class=badge>"+badge+"</span>" if badge else ""}</a>'
+        for icon,label,href,key,badge in items
+    ])
+    return f"""
+    <aside class="side">
+      <a class="brand" href="/"><div class="logo"></div><b>Nina<span class="os">OS</span></b></a>
+      <nav class="nav">{nav}</nav>
+      <div class="userMini"><div class="avatar">K</div><div><b>Katrin</b><br><small style="color:var(--muted)">Owner</small></div></div>
+    </aside>
+    """
 
 def topbar():
-    return '<div class="top"><input class="search" placeholder="Search anything..." /><div class="icons"><div class="ico">🔔</div><div class="ico">🌐</div><div class="ico">☼</div><div class="avatar">K</div></div></div>'
+    return """
+    <div class="top">
+      <input class="search" placeholder="Search anything..." />
+      <div class="icons"><div class="ico">🔔</div><div class="ico">🌐</div><div class="ico">☼</div><div class="avatar">K</div></div>
+    </div>
+    """
 
 def brand_hero():
-    return '<section class="heroBrand"><div class="bigOrb"></div><div class="brandName">Nina<span class="os">OS</span></div><div class="brandSub">AI Workforce Operating System</div><div class="heroCopy">One Platform. Unlimited AI Workers.<span>For every business. Everywhere.</span></div><div class="pillars"><div class="pillar"><div class="ic">◎</div><b>Global</b><p>Built for a global future</p></div><div class="pillar"><div class="ic">♙</div><b>Workforce</b><p>AI employees that work for you</p></div><div class="pillar"><div class="ic">▣</div><b>Secure</b><p>Your data. Your rules.</p></div><div class="pillar"><div class="ic">✦</div><b>Scale</b><p>From 1 to 10,000+ AI workers</p></div></div><div class="ctas"><a class="btn primary" href="/dashboard">Get Started</a><a class="btn" href="/exchange">Explore Exchange</a></div><div class="trusted">Trusted by forward-thinking companies worldwide</div><div class="logos"><span>Architects</span><span>BuildPro</span><span>NordBuild</span><span>HouseFit</span><span>VisionGroup</span></div></section>'
+    return """
+    <section class="heroBrand">
+      <div class="bigLogo"></div>
+      <div class="brandName">Nina<span class="os">OS</span></div>
+      <div class="brandSub">AI Workforce Operating System</div>
+      <div class="heroCopy">One Platform. Unlimited AI Workers.<span>For every business. Everywhere.</span></div>
+      <div class="pillars">
+        <div class="pillar"><div class="ic">◎</div><b>Global</b><p>Built for a global future</p></div>
+        <div class="pillar"><div class="ic">♙</div><b>Workforce</b><p>AI employees that work for you</p></div>
+        <div class="pillar"><div class="ic">▣</div><b>Secure</b><p>Your data. Your rules.</p></div>
+        <div class="pillar"><div class="ic">✦</div><b>Scale</b><p>From 1 to 10,000+ AI workers</p></div>
+      </div>
+      <div class="ctas"><a class="btn primary" href="/dashboard">Get Started</a><a class="btn" href="/exchange">Explore Exchange</a></div>
+      <div class="trusted">Trusted by forward-thinking companies worldwide</div>
+      <div class="logos"><span>Architects</span><span>BuildPro</span><span>NordBuild</span><span>HouseFit</span><span>VisionGroup</span></div>
+    </section>
+    """
 
 def hero_dash():
-    return '<section class="heroDash"><div><h1>Good morning, Katrin 👋</h1><p>Here’s what’s happening in your workspace today.</p></div><div class="kpis"><div class="kpi"><small>AI Workers</small><div class="v">12</div><div class="d b">↑ 2 today</div></div><div class="kpi"><small>Tasks in Progress</small><div class="v">28</div><div class="d p">↑ 5 today</div></div><div class="kpi"><small>Completed Today</small><div class="v">15</div><div class="d">↑ 7 today</div></div><div class="kpi"><small>Upcoming</small><div class="v">6</div><div class="d b">Today</div></div></div><div class="globeCard"><div class="miniGlobe"></div><div class="globeCopy"><b>Global AI Workforce</b><p>Connected. Intelligent. Tireless.</p><a class="btn" href="/exchange">View Global Network →</a></div></div></section>'
+    return """
+    <section class="heroDash">
+      <div>
+        <h1>Good morning, Katrin 👋</h1>
+        <p>Here’s what’s happening in your workspace today.</p>
+        <div class="kpis">
+          <div class="kpi"><small>AI Workers</small><div class="v">12</div><div class="d b">↑ 2 today</div></div>
+          <div class="kpi"><small>Tasks in Progress</small><div class="v">28</div><div class="d p">↑ 5 today</div></div>
+          <div class="kpi"><small>Completed Today</small><div class="v">15</div><div class="d">↑ 7 today</div></div>
+          <div class="kpi"><small>Upcoming</small><div class="v">6</div><div class="d b">Today</div></div>
+        </div>
+      </div>
+      <div class="globalBox">
+        <div class="globalText">
+          <b>Global AI Workforce</b>
+          <p>Connected. Intelligent. Tireless.</p>
+          <a class="btn" href="/exchange">View Global Network →</a>
+        </div>
+      </div>
+    </section>
+    """
 
 def worker_section():
     return f'<div class="sectionTitle">Your AI Workforce</div><div class="workers">{"".join(worker_card(w) for w in WORKERS)}</div>'
 
 def status_panels():
-    return '<div class="panels"><div class="panel"><h3>System Status</h3><div class="ok">All Systems Operational <span style="float:right">Live ↗</span></div><small style="color:var(--muted)">99.9% Uptime</small><div class="chart"><svg viewBox="0 0 300 90" preserveAspectRatio="none"><polyline fill="none" stroke="#a855f7" stroke-width="3" points="0,70 25,61 50,66 75,50 100,58 125,43 150,52 175,37 200,42 225,29 250,33 275,18 300,10"/></svg></div></div><div class="panel"><h3>Active Workspaces</h3><div class="ws"><span>AB</span><span>NB</span><span>VG</span><span>HF</span><span>CP</span><span>AX</span><span>+</span></div></div></div>'
+    return """
+    <div class="panels">
+      <div class="panel">
+        <h3>System Status</h3>
+        <div class="ok">All Systems Operational <span style="float:right">Live ↗</span></div>
+        <small style="color:var(--muted)">99.9% Uptime</small>
+        <div class="chart">
+          <svg viewBox="0 0 300 90" preserveAspectRatio="none">
+            <polyline fill="none" stroke="#a855f7" stroke-width="3" points="0,70 25,61 50,66 75,50 100,58 125,43 150,52 175,37 200,42 225,29 250,33 275,18 300,10"/>
+          </svg>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Active Workspaces</h3>
+        <div class="ws"><span>AB</span><span>NB</span><span>VG</span><span>HF</span><span>CP</span><span>AX</span><span>+</span></div>
+      </div>
+    </div>
+    """
 
 def mobile_block():
-    return '<section class="block"><h2>Mobile App Preview</h2><div class="phoneRow"><div class="phone"><div class="screen"><b>Good morning, Katrin 👋</b><div class="miniStats"><div class="mini"><b>12</b><span>Workers</span></div><div class="mini"><b>28</b><span>Tasks</span></div><div class="mini"><b>15</b><span>Done</span></div><div class="mini"><b>6</b><span>Upcoming</span></div></div><div class="item">Nina Sales<span>Following up with 15 leads</span></div><div class="item">Nina Estimator<span>Working on 3 estimates</span></div><div class="item">Nina Office Manager<span>Managing your schedule</span></div></div></div><div class="phone"><div class="screen"><b>Tasks</b><div class="item">Follow up with Acme Corp<span>Nina Sales · 2 min ago</span></div><div class="item">Create estimate for Project X<span>Nina Estimator · 15 min ago</span></div><div class="item">Schedule meeting with Client Y<span>Nina Office Manager · 45 min ago</span></div><div class="item">Send proposal to Beta Ltd<span>Nina Sales · 1 hour ago</span></div></div></div><div class="phone"><div class="screen"><b>Nina Sales</b><div class="item">Email sent to Acme Corp<span>2 min ago</span></div><div class="item">Call with Client Y<span>15 min ago</span></div><div class="item">Follow up with Gamma Inc<span>30 min ago</span></div><a class="btn primary" style="width:100%;margin-top:12px">Message Worker</a></div></div></div></section>'
+    return """
+    <section class="block">
+      <h2>Mobile App Preview</h2>
+      <div class="phoneRow">
+        <div class="phone"><div class="screen"><b>Good morning, Katrin 👋</b><div class="miniStats"><div class="mini"><b>12</b><span>Workers</span></div><div class="mini"><b>28</b><span>Tasks</span></div><div class="mini"><b>15</b><span>Done</span></div><div class="mini"><b>6</b><span>Upcoming</span></div></div><div class="item">Nina Sales<span>Following up with 15 leads</span></div><div class="item">Nina Estimator<span>Working on 3 estimates</span></div><div class="item">Nina Office Manager<span>Managing your schedule</span></div></div></div>
+        <div class="phone"><div class="screen"><b>Tasks</b><div class="item">Follow up with Acme Corp<span>Nina Sales · 2 min ago</span></div><div class="item">Create estimate for Project X<span>Nina Estimator · 15 min ago</span></div><div class="item">Schedule meeting with Client Y<span>Nina Office Manager · 45 min ago</span></div><div class="item">Send proposal to Beta Ltd<span>Nina Sales · 1 hour ago</span></div></div></div>
+        <div class="phone"><div class="screen"><b>Nina Sales</b><div class="item">Email sent to Acme Corp<span>2 min ago</span></div><div class="item">Call with Client Y<span>15 min ago</span></div><div class="item">Follow up with Gamma Inc<span>30 min ago</span></div><a class="btn primary" style="width:100%;margin-top:12px">Message Worker</a></div></div>
+      </div>
+    </section>
+    """
 
 def exchange_block():
     cards = "".join(market_card(w) for w in MARKET)
-    return f'<section class="block"><h2>Exchange — AI Workers Marketplace</h2><div class="exchange"><div class="cats"><div class="cat active">All Categories</div><div class="cat">Sales & Growth</div><div class="cat">Marketing</div><div class="cat">Construction</div><div class="cat">Finance</div><div class="cat">Operations</div><div class="cat">Support</div><div class="cat">HR & Recruiting</div><div class="cat">Legal</div></div><div class="marketGrid">{cards}</div></div></section>'
+    return f"""
+    <section class="block">
+      <h2>Exchange — AI Workers Marketplace</h2>
+      <div class="exchange">
+        <div class="cats">
+          <div class="cat active">All Categories</div>
+          <div class="cat">Sales & Growth</div>
+          <div class="cat">Marketing</div>
+          <div class="cat">Construction</div>
+          <div class="cat">Finance</div>
+          <div class="cat">Operations</div>
+          <div class="cat">Support</div>
+          <div class="cat">HR & Recruiting</div>
+          <div class="cat">Legal</div>
+        </div>
+        <div class="marketGrid">{cards}</div>
+      </div>
+    </section>
+    """
 
 def network_block():
-    return '<section class="block"><h2>Global Network</h2><div class="map"><div class="dot" style="left:15%;top:44%"></div><div class="dot" style="left:23%;top:54%"></div><div class="dot" style="left:44%;top:43%"></div><div class="dot" style="left:57%;top:32%"></div><div class="dot" style="left:72%;top:46%"></div><div class="dot" style="left:85%;top:58%"></div></div><div class="stats"><div class="stat"><b>12,458</b><span>AI Workers Online</span></div><div class="stat"><b>1,247</b><span>Workspaces</span></div><div class="stat"><b>98</b><span>Countries</span></div><div class="stat"><b>2.4M</b><span>Tasks Completed Today</span></div></div><div class="item">Nina Estimator completed estimate<span>2 min ago</span></div><div class="item">Nina Sales closed a deal<span>5 min ago</span></div><div class="item">Nina Office Manager scheduled meeting<span>8 min ago</span></div></section>'
+    return """
+    <section class="block">
+      <h2>Global Network</h2>
+      <div class="map">
+        <div class="dot" style="left:15%;top:44%"></div>
+        <div class="dot" style="left:23%;top:54%"></div>
+        <div class="dot" style="left:44%;top:43%"></div>
+        <div class="dot" style="left:57%;top:32%"></div>
+        <div class="dot" style="left:72%;top:46%"></div>
+        <div class="dot" style="left:85%;top:58%"></div>
+      </div>
+      <div class="stats">
+        <div class="stat"><b>12,458</b><span>AI Workers Online</span></div>
+        <div class="stat"><b>1,247</b><span>Workspaces</span></div>
+        <div class="stat"><b>98</b><span>Countries</span></div>
+        <div class="stat"><b>2.4M</b><span>Tasks Completed Today</span></div>
+      </div>
+      <div class="item">Nina Estimator completed estimate<span>2 min ago</span></div>
+      <div class="item">Nina Sales closed a deal<span>5 min ago</span></div>
+      <div class="item">Nina Office Manager scheduled meeting<span>8 min ago</span></div>
+    </section>
+    """
 
 def page(active, content):
-    return f'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>NinaOS</title>{CSS}</head><body><div class="wrap"><div class="shell">{sidebar(active)}<main class="main">{topbar()}{content}</main></div><nav class="mobileNav"><a class="{"active" if active=="dashboard" else ""}" href="/dashboard">Dashboard</a><a class="{"active" if active=="workers" else ""}" href="/workers">Workers</a><a class="{"active" if active=="office" else ""}" href="/office-manager">Nina</a><a class="{"active" if active=="exchange" else ""}" href="/exchange">Exchange</a></nav></div></body></html>'
+    return f"""
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>NinaOS</title>
+      {CSS}
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="shell">
+          {sidebar(active)}
+          <main class="main">{topbar()}{content}</main>
+        </div>
+        <nav class="mobileNav">
+          <a class="{'active' if active=='dashboard' else ''}" href="/dashboard">Dashboard</a>
+          <a class="{'active' if active=='workers' else ''}" href="/workers">Workers</a>
+          <a class="{'active' if active=='office' else ''}" href="/office-manager">Nina</a>
+          <a class="{'active' if active=='exchange' else ''}" href="/exchange">Exchange</a>
+        </nav>
+      </div>
+    </body>
+    </html>
+    """
 
 @app.route("/")
 def home():
-    content = f'<div class="grid2">{brand_hero()}<div>{hero_dash()}{worker_section()}{status_panels()}</div></div><div class="bottom">{mobile_block()}{exchange_block()}{network_block()}</div>'
+    content = f'<div class="homeGrid">{brand_hero()}<div>{hero_dash()}{worker_section()}{status_panels()}</div></div><div class="bottom">{mobile_block()}{exchange_block()}{network_block()}</div>'
     return page("dashboard", content)
 
 @app.route("/dashboard")
@@ -456,7 +832,15 @@ def workers():
 
 @app.route("/office-manager")
 def office_manager():
-    content = '<h1>Nina Office Manager SMB</h1><p style="color:var(--muted)">The first strategic NinaOS ready worker for small businesses.</p><div class="bottom"><section class="block"><h2>Role Stack</h2><div class="item">Office Manager Core</div><div class="item">Finance Admin Assistant</div><div class="item">Estimating Assistant Basic</div><div class="item">Client Follow-up Manager</div><div class="item">Document Admin</div></section><section class="block"><h2>What Nina Handles</h2><div class="item">Tasks and daily priorities</div><div class="item">Client follow-ups</div><div class="item">Invoice admin</div><div class="item">Estimate / offer drafts</div><div class="item">Documents</div></section><section class="block"><h2>Approval Required</h2><div class="item">send_invoice</div><div class="item">approve_payment</div><div class="item">send_final_estimate</div><div class="item">share_document_external</div></section></div>'
+    content = """
+    <h1>Nina Office Manager SMB</h1>
+    <p style="color:var(--muted)">The first strategic NinaOS ready worker for small businesses.</p>
+    <div class="bottom">
+      <section class="block"><h2>Role Stack</h2><div class="item">Office Manager Core</div><div class="item">Finance Admin Assistant</div><div class="item">Estimating Assistant Basic</div><div class="item">Client Follow-up Manager</div><div class="item">Document Admin</div></section>
+      <section class="block"><h2>What Nina Handles</h2><div class="item">Tasks and daily priorities</div><div class="item">Client follow-ups</div><div class="item">Invoice admin</div><div class="item">Estimate / offer drafts</div><div class="item">Documents</div></section>
+      <section class="block"><h2>Approval Required</h2><div class="item">send_invoice</div><div class="item">approve_payment</div><div class="item">send_final_estimate</div><div class="item">share_document_external</div></section>
+    </div>
+    """
     return page("office", content)
 
 @app.route("/exchange")
