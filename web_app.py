@@ -1,5 +1,52 @@
 from flask import Flask, jsonify
 import os
+from flask import Flask, jsonify
+import os
+
+from dashboard_view import page, brand_hero, hero_dash, worker_section, status_panels, mobile_block, exchange_block, network_block
+from dashboard_data import APP_VERSION, CORE_VERSION
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    content = f'<div class="homeGrid">{brand_hero()}<div>{hero_dash()}{worker_section()}{status_panels()}</div></div><div class="bottom">{mobile_block()}{exchange_block()}{network_block()}</div>'
+    return page("dashboard", content)
+
+@app.route("/dashboard")
+def dashboard():
+    content = f'{hero_dash()}{worker_section()}{status_panels()}<div class="bottom">{mobile_block()}{exchange_block()}{network_block()}</div>'
+    return page("dashboard", content)
+
+@app.route("/workers")
+def workers():
+    content = f'<h1>Your AI Workers</h1><p style="color:var(--muted)">Ready AI workers assigned to your workspace.</p>{worker_section()}'
+    return page("workers", content)
+
+@app.route("/office-manager")
+def office_manager():
+    content = """
+    <h1>Nina Office Manager SMB</h1>
+    <p style="color:var(--muted)">The first strategic NinaOS ready worker for small businesses.</p>
+    <div class="bottom">
+      <section class="block"><h2>Role Stack</h2><div class="item">Office Manager Core</div><div class="item">Finance Admin Assistant</div><div class="item">Estimating Assistant Basic</div><div class="item">Client Follow-up Manager</div><div class="item">Document Admin</div></section>
+      <section class="block"><h2>What Nina Handles</h2><div class="item">Tasks and daily priorities</div><div class="item">Client follow-ups</div><div class="item">Invoice admin</div><div class="item">Estimate / offer drafts</div><div class="item">Documents</div></section>
+      <section class="block"><h2>Approval Required</h2><div class="item">send_invoice</div><div class="item">approve_payment</div><div class="item">send_final_estimate</div><div class="item">share_document_external</div></section>
+    </div>
+    """
+    return page("office", content)
+
+@app.route("/exchange")
+def exchange():
+    return page("exchange", exchange_block() + network_block())
+
+@app.route("/health")
+def health():
+    return jsonify({"ok": True, "version": APP_VERSION, "core": CORE_VERSION})
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "8080"))
+    app.run(host="0.0.0.0", port=port, debug=False)
 
 app = Flask(__name__)
 
