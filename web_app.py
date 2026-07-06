@@ -3,7 +3,7 @@ import os
 
 app = Flask(__name__)
 
-APP_VERSION = "Web App V27 — Dashboard Split Workspace First"
+APP_VERSION = "Web App V28 — Best of V26 + V24 Workspace Dashboard"
 CORE_VERSION = "V115.4 + Core 2.5.2"
 
 # -------------------------------
@@ -1423,137 +1423,101 @@ body{
 }
 
 
-/* V27 Dashboard Split — Workspace First, not hidden */
-.workspaceHero{
-    display:grid;
-    grid-template-columns:minmax(0,1fr) auto;
-    gap:18px;
-    align-items:center;
-    border:1px solid rgba(255,255,255,.13);
-    border-radius:24px;
-    padding:20px;
-    margin-bottom:16px;
-    background:
-      radial-gradient(circle at 82% 15%,rgba(37,99,235,.10),transparent 28%),
-      linear-gradient(180deg,rgba(255,255,255,.040),rgba(255,255,255,.014));
+/* V28 */
+.workspaceTriGrid{
+  display:grid;
+  grid-template-columns:1.05fr 1.35fr 1fr;
+  gap:16px;
+  margin-top:16px;
+  align-items:start;
 }
-.workspaceHero .eyebrow{
-    color:#93c5fd;
-    font-size:12px;
-    font-weight:900;
-    text-transform:uppercase;
-    letter-spacing:.10em;
-    margin-bottom:6px;
+.panel{
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:24px;
+  padding:18px;
+  background:linear-gradient(180deg,rgba(255,255,255,.032),rgba(255,255,255,.015));
+  box-shadow:var(--shadow);
 }
-.workspaceHero h1{
-    margin:0 0 6px;
-    font-size:36px;
-    letter-spacing:-.05em;
+.sectionTitleRow{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  align-items:flex-start;
+  margin-bottom:14px;
 }
-.workspaceHero p{
-    margin:0;
-    color:var(--muted);
-    max-width:740px;
+.sectionTitleRow h3{margin:0;font-size:28px;letter-spacing:-.04em}
+.sectionTitleRow p{margin:4px 0 0;color:var(--muted);font-size:13px}
+.liveTag{color:#86efac;font-weight:900}
+.apiBadge{
+  min-width:54px;height:42px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+  border:1px solid rgba(255,255,255,.10);background:rgba(59,130,246,.14);font-weight:900;color:#dbeafe
 }
-.heroActions{
-    display:flex;
-    gap:10px;
-    align-items:center;
+.systemChart{
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:18px;
+  padding:14px;
+  margin-bottom:12px;
+  background:linear-gradient(180deg,rgba(59,130,246,.08),rgba(124,58,237,.06));
 }
-.workspaceHeroStats{
-    grid-column:1 / -1;
-    display:grid;
-    grid-template-columns:repeat(4,1fr);
-    gap:10px;
+.systemLabel{font-size:13px;color:#e5eefc;margin-bottom:10px}
+.sparkline{
+  height:74px;border-radius:14px;position:relative;overflow:hidden;
+  background:
+   linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,.01)),
+   url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 100'><polyline fill='none' stroke='%23d8b4fe' stroke-width='4' points='0,80 35,88 70,60 110,72 150,42 190,58 230,30 270,38 310,18 350,24 400,6'/></svg>") center/cover no-repeat;
 }
-.workspaceHeroStats div{
-    border:1px solid rgba(255,255,255,.08);
-    background:rgba(255,255,255,.025);
-    border-radius:14px;
-    padding:12px;
+.miniStatList{display:grid;gap:10px}
+.miniStatList div,.snapshotMeta div{
+  display:flex;justify-content:space-between;gap:12px;align-items:center;
+  border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:12px;background:rgba(255,255,255,.025)
 }
-.workspaceHeroStats b{
-    display:block;
-    font-size:26px;
+.miniStatList span,.snapshotMeta span{color:var(--muted);font-size:12px}
+.snapshotStats,.openWorkStats{
+  display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:12px
 }
-.workspaceHeroStats span{
-    display:block;
-    color:var(--muted);
-    font-size:11px;
+.snapshotStats div,.openWorkStats div{
+  border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:12px;background:rgba(255,255,255,.025)
 }
-.opsHero{
-    grid-template-columns:minmax(0,1fr) 230px !important;
-    min-height:230px !important;
+.snapshotStats b,.openWorkStats b{display:block;font-size:28px;line-height:1}
+.snapshotStats span,.openWorkStats span{display:block;margin-top:6px;color:var(--muted);font-size:11px}
+.snapshotTabs{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px
 }
-.opsHero .globalBox{
-    display:none !important;
+.snapshotTabs a{
+  text-align:center;padding:12px;border-radius:14px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.025);
+  color:#eaf2ff;font-weight:900;font-size:12px
 }
-.opsQuickPanel{
-    border:1px solid rgba(255,255,255,.085);
-    background:rgba(255,255,255,.028);
-    border-radius:18px;
-    padding:14px;
+.activityList{display:grid;gap:10px}
+.activityItem{
+  display:flex;justify-content:space-between;gap:14px;align-items:flex-start;
+  border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:12px;background:rgba(255,255,255,.025)
 }
-.opsQuickPanel h3{
-    margin:0 0 10px;
+.activityText{display:grid;gap:4px}
+.activityText strong{font-size:14px}
+.activityText span{font-size:12px;color:var(--muted)}
+.activityItem em{font-style:normal;font-size:11px;color:#93c5fd;font-weight:900;text-transform:uppercase}
+.openWorkColumns{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:12px
 }
-.opsQuickPanel a{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    min-height:38px;
-    margin-top:8px;
-    padding:9px 11px;
-    border-radius:12px;
-    border:1px solid rgba(255,255,255,.075);
-    background:rgba(255,255,255,.022);
-    color:#eaf2ff;
-    font-size:12px;
-    font-weight:900;
+.workColumn{
+  border:1px solid rgba(255,255,255,.07);border-radius:18px;padding:14px;background:rgba(255,255,255,.02)
 }
-.opsQuickPanel a:after{
-    content:"→";
-    color:#93c5fd;
+.workColumn h4{margin:0 0 12px;font-size:18px}
+.workPill{
+  display:flex;justify-content:space-between;gap:10px;align-items:flex-start;
+  border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:10px;margin-bottom:10px;background:rgba(255,255,255,.03)
 }
-.opsQuickPanel a:hover{
-    border-color:rgba(124,58,237,.40);
-    background:rgba(124,58,237,.12);
-}
-.workspaceGrid{
-    margin-top:16px;
-}
-@media(max-width:1180px){
-  .workspaceHero{
-    grid-template-columns:1fr;
-  }
-  .heroActions{
-    flex-wrap:wrap;
-  }
-  .opsHero{
-    grid-template-columns:1fr !important;
-  }
-  .opsQuickPanel{
-    display:grid;
-    grid-template-columns:repeat(4,1fr);
-    gap:8px;
-  }
-  .opsQuickPanel h3{
-    grid-column:1/-1;
-  }
-  .opsQuickPanel a{
-    margin-top:0;
-  }
+.workPill strong{display:block;font-size:13px}
+.workPill span{font-size:11px;color:var(--muted);text-align:right}
+.emptyState{color:var(--muted);font-size:12px}
+@media(max-width:1280px){
+ .workspaceTriGrid{grid-template-columns:1fr}
+ .snapshotStats,.openWorkStats{grid-template-columns:repeat(3,1fr)}
+ .openWorkColumns{grid-template-columns:repeat(2,1fr)}
 }
 @media(max-width:760px){
-  .workspaceHeroStats{
-    grid-template-columns:repeat(2,1fr);
-  }
-  .heroActions .btn{
-    width:100%;
-  }
-  .opsQuickPanel{
-    grid-template-columns:repeat(2,1fr);
-  }
+ .snapshotStats,.openWorkStats{grid-template-columns:repeat(2,1fr)}
+ .snapshotTabs,.openWorkColumns{grid-template-columns:1fr}
 }
 
 </style>
@@ -1698,10 +1662,10 @@ def hero_dash():
     estimates = counts.get("estimates_in_progress", 0)
 
     return f"""
-    <section class="heroDash opsHero">
+    <section class="heroDash">
       <div>
         <h1>Good morning, Katrin 👋</h1>
-        <p>Here’s what needs attention in your NinaOS workspace today.</p>
+        <p>Here’s what’s happening in your NinaOS workspace today.</p>
         <div class="kpis">
           <div class="kpi"><small>Tasks Today</small><div class="v">{tasks_today}</div><div class="d b">Live data</div></div>
           <div class="kpi"><small>Follow-ups</small><div class="v">{followups}</div><div class="d p">Need attention</div></div>
@@ -1709,15 +1673,180 @@ def hero_dash():
           <div class="kpi"><small>Estimates</small><div class="v">{estimates}</div><div class="d b">In progress</div></div>
         </div>
       </div>
-      <div class="opsQuickPanel">
-        <h3>Quick Actions</h3>
+      <div class="globalBox">
+        <div class="globalText">
+          <b>Global AI Workforce</b>
+          <p>Connected. Intelligent. Tireless.</p>
+          <a class="btn" href="/exchange">View Global Network →</a>
+        </div>
+      </div>
+    </section>
+    """
+
+
+def brand_and_kpi_top():
+    data = get_dashboard_live_data()
+    counts = data["counts"]
+    tasks_today = counts.get("tasks_today", 0)
+    followups = counts.get("followups", 0)
+    invoices_due = counts.get("invoices_due", 0)
+    estimates = counts.get("estimates_in_progress", 0)
+
+    return f"""
+    <div class="homeGrid">
+      {brand_hero()}
+      <section class="heroDash">
+        <div>
+          <h1>Good morning, Katrin 👋</h1>
+          <p>Here’s what’s happening in your NinaOS workspace today.</p>
+          <div class="kpis">
+            <div class="kpi"><small>Tasks Today</small><div class="v">{tasks_today}</div><div class="d b">Live data</div></div>
+            <div class="kpi"><small>Follow-ups</small><div class="v">{followups}</div><div class="d p">Need attention</div></div>
+            <div class="kpi"><small>Invoices Due</small><div class="v">{invoices_due}</div><div class="d">Finance</div></div>
+            <div class="kpi"><small>Estimates</small><div class="v">{estimates}</div><div class="d b">In progress</div></div>
+          </div>
+        </div>
+        <div class="globalBox">
+          <div class="globeOrb"></div>
+          <div class="globalText">
+            <h3>Global AI Workforce</h3>
+            <p>Connected. Intelligent. Tireless.</p>
+            <a href="/exchange" class="miniBtn">View Global Network →</a>
+          </div>
+        </div>
+      </section>
+    </div>
+    """
+
+def status_panel_block():
+    counts = get_dashboard_counts_live("demo_small_business")
+    return f"""
+    <section class="panel">
+      <div class="sectionTitleRow">
+        <div>
+          <h3>System Status</h3>
+          <p>All Systems Operational <span class='liveTag'>Live ↗</span></p>
+        </div>
+      </div>
+      <div class="systemChart">
+        <div class="systemLabel">Workspace: Demo Small Business Workspace</div>
+        <div class="sparkline"></div>
+      </div>
+      <div class="miniStatList">
+        <div><span>Tasks Today</span><b>{counts.get('tasks_today',0)}</b></div>
+        <div><span>Follow-ups</span><b>{counts.get('followups',0)}</b></div>
+        <div><span>Invoices Due</span><b>{counts.get('invoices_due',0)}</b></div>
+        <div><span>Estimates</span><b>{counts.get('estimates_in_progress',0)}</b></div>
+        <div><span>Active Projects</span><b>{counts.get('projects_active',0)}</b></div>
+      </div>
+    </section>
+    """
+
+def snapshot_block():
+    counts = get_dashboard_counts_live("demo_small_business")
+    return f"""
+    <section class="panel">
+      <div class="sectionTitleRow">
+        <div>
+          <h3>Workspace Snapshot</h3>
+          <p>What Nina Office Manager SMB is handling right now.</p>
+        </div>
+        <a class="miniBtn" href="/tasks">Open Work</a>
+      </div>
+      <div class="snapshotStats">
+        <div><b>{counts.get('tasks_today',0)}</b><span>Tasks Today</span></div>
+        <div><b>{counts.get('followups',0)}</b><span>Follow-ups</span></div>
+        <div><b>{counts.get('invoices_due',0)}</b><span>Invoices Due</span></div>
+        <div><b>{counts.get('estimates_in_progress',0)}</b><span>Estimates</span></div>
+        <div><b>{counts.get('projects_active',0)}</b><span>Projects</span></div>
+      </div>
+      <div class="snapshotTabs">
         <a href="/tasks">Tasks</a>
         <a href="/clients">Clients</a>
         <a href="/projects">Projects</a>
         <a href="/workers">Workers</a>
       </div>
+      <div class="snapshotMeta">
+        <div><span>Active Worker</span><b>Nina Office Manager SMB</b></div>
+        <div><span>Data Source</span><b>Work Objects + Activity Feed</b></div>
+      </div>
     </section>
     """
+
+def open_work_block():
+    counts = get_dashboard_counts_live("demo_small_business")
+    return f"""
+    <section class="panel openWorkBlock">
+      <div class="sectionTitleRow">
+        <div>
+          <h3>Open Work</h3>
+          <p>Live work objects and current operational queues inside NinaOS.</p>
+        </div>
+        <a class="btn" href="/tasks">Open Tasks</a>
+      </div>
+      <div class="openWorkStats">
+        <div><b>{counts.get('tasks_today',0)}</b><span>Tasks Today</span></div>
+        <div><b>{counts.get('followups',0)}</b><span>Follow-ups</span></div>
+        <div><b>{counts.get('invoices_due',0)}</b><span>Invoices Due</span></div>
+        <div><b>{counts.get('estimates_in_progress',0)}</b><span>Estimates</span></div>
+        <div><b>{counts.get('projects_active',0)}</b><span>Projects</span></div>
+      </div>
+      {build_open_work_columns()}
+    </section>
+    """
+
+
+def activity_block():
+    events = get_activity_events_live(limit=6)
+    rows = []
+    for ev in events:
+        title = ev.get("title", "Activity")
+        desc = ev.get("description", "")
+        kind = ev.get("kind", "info")
+        rows.append(f"""
+        <div class="activityItem">
+          <div class="activityText">
+            <strong>{title}</strong>
+            <span>{desc}</span>
+          </div>
+          <em>{kind}</em>
+        </div>
+        """)
+    if not rows:
+        rows.append('<div class="emptyState">No recent activity yet.</div>')
+    return f"""
+    <section class="panel activityPanel">
+      <div class="sectionTitleRow">
+        <div>
+          <h3>Recent Activity</h3>
+          <p>Latest operational events from NinaOS Activity Feed.</p>
+        </div>
+        <div class="apiBadge">API</div>
+      </div>
+      <div class="activityList">{''.join(rows)}</div>
+    </section>
+    """
+
+def build_open_work_columns():
+    data = get_dashboard_live_data()
+    groups = data.get("work_groups", {})
+    order = [
+        ("Tasks", groups.get("tasks", [])),
+        ("Follow-ups", groups.get("followups", [])),
+        ("Invoices / Estimates", groups.get("finance", [])),
+        ("Projects", groups.get("projects", [])),
+    ]
+    cols = []
+    for title, items in order:
+        if items:
+            inner = "".join(
+                f"<div class='workPill'><strong>{i.get('title','Item')}</strong><span>{i.get('status','')}</span></div>"
+                for i in items[:4]
+            )
+        else:
+            inner = "<div class='emptyState'>No items</div>"
+        cols.append(f"<div class='workColumn'><h4>{title}</h4>{inner}</div>")
+    return f"<div class='openWorkColumns'>{''.join(cols)}</div>"
 
 def worker_section():
     live_states = get_worker_live_states()
@@ -1978,29 +2107,6 @@ def workers_page_block():
     """
 
 
-
-def workspace_dashboard_header():
-    counts = get_dashboard_counts_live("demo_small_business")
-    return f"""
-    <section class="workspaceHero">
-      <div>
-        <div class="eyebrow">NinaOS Workspace</div>
-        <h1>Workspace Dashboard</h1>
-        <p>Daily control center for tasks, clients, projects, invoices and Nina Office Manager SMB.</p>
-      </div>
-      <div class="heroActions">
-        <a class="btn primary" href="/tasks">Open Work Queue</a>
-        <a class="btn" href="/overview">Open Overview</a>
-      </div>
-      <div class="workspaceHeroStats">
-        <div><b>{counts.get("tasks_today",0)}</b><span>Tasks</span></div>
-        <div><b>{counts.get("followups",0)}</b><span>Follow-ups</span></div>
-        <div><b>{counts.get("invoices_due",0)}</b><span>Invoices</span></div>
-        <div><b>{counts.get("projects_active",0)}</b><span>Projects</span></div>
-      </div>
-    </section>
-    """
-
 def dashboard_activity_compact():
     activities = get_recent_activities_live("demo_small_business", 6)
     items = "".join([
@@ -2191,12 +2297,12 @@ def page(active, content):
 
 @app.route("/")
 def home():
-    content = f'{workspace_dashboard_header()}{hero_dash()}{worker_section()}<div class="workspaceGrid">{workspace_snapshot_compact()}{dashboard_activity_compact()}</div>{status_panels()}'
+    content = f'{brand_and_kpi_top()}{worker_section()}<div class="workspaceTriGrid">{status_panel_block()}{activity_block()}{snapshot_block()}</div>{open_work_block()}'
     return page("dashboard", content)
 
 @app.route("/dashboard")
 def dashboard():
-    content = f'{workspace_dashboard_header()}{hero_dash()}{worker_section()}<div class="workspaceGrid">{workspace_snapshot_compact()}{dashboard_activity_compact()}</div>{status_panels()}'
+    content = f'{brand_and_kpi_top()}{worker_section()}<div class="workspaceTriGrid">{status_panel_block()}{activity_block()}{snapshot_block()}</div>{open_work_block()}'
     return page("dashboard", content)
 
 @app.route("/workers")
@@ -2261,7 +2367,7 @@ def api_activities():
 
 @app.route("/overview")
 def overview():
-    content = f'<div class="homeGrid">{brand_hero()}<div>{hero_dash()}{worker_section()}{status_panels()}</div></div><div class="bottom">{mobile_block()}{exchange_block()}{network_block()}</div>'
+    content = f'{brand_and_kpi_top()}{worker_section()}<div class="workspaceTriGrid">{status_panel_block()}{activity_block()}{snapshot_block()}</div>{open_work_block()}{mobile_block()}{exchange_block()}{network_block()}'
     return page("overview", content)
 
 @app.route("/health")
