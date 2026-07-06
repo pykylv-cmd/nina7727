@@ -3,7 +3,7 @@ import os
 
 app = Flask(__name__)
 
-APP_VERSION = "Web App V22 — Seeded Real Data Hook"
+APP_VERSION = "Web App V23 — Live Dashboard Blocks"
 CORE_VERSION = "V115.4 + Core 2.5.2"
 
 # -------------------------------
@@ -1202,11 +1202,87 @@ body{
   .face{width:104px !important;height:104px !important;}
 }
 
+
+/* V23 Live Dashboard Blocks */
+.block .panels{
+    margin-bottom:0;
+}
+.block .panel{
+    min-height:170px;
+}
+.block .item{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    align-items:flex-start;
+}
+.block .item span{
+    text-align:right;
+    max-width:48%;
+}
+@media(max-width:760px){
+  .block .item{
+    display:block;
+  }
+  .block .item span{
+    text-align:left;
+    max-width:100%;
+    margin-top:4px;
+  }
+}
+
 </style>
 """
 
 def tone_class(tone):
     return {"purple":"purple","blue":"blue","green":"green","orange":"orange","pink":"pink","red":"red"}.get(tone,"purple")
+
+
+def get_work_objects_live(workspace_id="demo_small_business", limit=20):
+    ensure_demo_seeded()
+    try:
+        from work_objects import list_work_objects
+        objects = list_work_objects(workspace_id=workspace_id)
+        rows = []
+        for obj in objects[:limit]:
+            rows.append({
+                "object_id": getattr(obj, "object_id", ""),
+                "object_type": getattr(obj, "object_type", ""),
+                "title": getattr(obj, "title", ""),
+                "status": getattr(obj, "status", ""),
+                "priority": getattr(obj, "priority", ""),
+                "client_id": getattr(obj, "client_id", ""),
+                "project_id": getattr(obj, "project_id", ""),
+                "due_date": getattr(obj, "due_date", ""),
+            })
+        return rows
+    except Exception:
+        return []
+
+def get_objects_by_type_live(object_type, workspace_id="demo_small_business", limit=8):
+    objects = get_work_objects_live(workspace_id, 50)
+    return [o for o in objects if o.get("object_type") == object_type][:limit]
+
+def get_worker_live_states():
+    counts = get_dashboard_counts_live("demo_small_business")
+    return {
+        "Nina Sales": {
+            "status": "ACTIVE" if counts.get("followups", 0) else "IDLE",
+            "work": f'{counts.get("followups", 0)} follow-ups to handle',
+        },
+        "Nina Estimator": {
+            "status": "ACTIVE" if counts.get("estimates_in_progress", 0) else "IDLE",
+            "work": f'{counts.get("estimates_in_progress", 0)} estimates in progress',
+        },
+        "Nina Office Manager": {
+            "status": "ACTIVE" if counts.get("tasks_today", 0) or counts.get("projects_active", 0) else "IDLE",
+            "work": f'{counts.get("tasks_today", 0)} tasks · {counts.get("projects_active", 0)} active projects',
+        },
+        "Nina Support": {
+            "status": "IDLE",
+            "work": "No support queue yet",
+        },
+    }
 
 def worker_card(w):
     st = "active" if w["status"] == "ACTIVE" else "idle"
@@ -1318,7 +1394,16 @@ def hero_dash():
     """
 
 def worker_section():
-    return f'<div class="sectionTitle">Your AI Workforce</div><div class="workers">{"".join(worker_card(w) for w in WORKERS)}</div>'
+    live_states = get_worker_live_states()
+    dynamic_workers = []
+    for w in WORKERS:
+        ww = dict(w)
+        state = live_states.get(ww.get("name"), {})
+        if state:
+            ww["status"] = state.get("status", ww.get("status", "ACTIVE"))
+            ww["work"] = state.get("work", ww.get("work", ""))
+        dynamic_workers.append(ww)
+    return f'<div class="sectionTitle">Your AI Workforce</div><div class="workers">{"".join(worker_card(w) for w in dynamic_workers)}</div>' 
 
 def status_panels():
     data = get_dashboard_live_data()
@@ -1345,6 +1430,56 @@ def status_panels():
         <div class="item">Active Projects <span>{counts.get("projects_active", 0)}</span></div>
       </div>
     </div>
+    """
+
+
+def live_objects_block():
+    counts = get_dashboard_counts_live("demo_small_business")
+    tasks = get_objects_by_type_live("task", limit=4)
+    followups = get_objects_by_type_live("followup_task", limit=4)
+    projects = get_objects_by_type_live("project", limit=4)
+    invoices = get_objects_by_type_live("invoice", limit=4)
+    estimates = get_objects_by_type_live("estimate", limit=4)
+
+    def rows(title, items, empty_text):
+        if not items:
+            return f'<div class="item">{empty_text}<span>No live items yet</span></div>'
+        return "".join([
+            f'<div class="item">{o.get("title","Untitled")}<span>{o.get("object_type","")} · {o.get("status","")} · {o.get("priority","normal")}</span></div>'
+            for o in items
+        ])
+
+    return f"""
+    <section class="block">
+      <h2>Live Work Objects</h2>
+      <div class="stats">
+        <div class="stat"><b>{counts.get("tasks_today",0)}</b><span>Tasks Today</span></div>
+        <div class="stat"><b>{counts.get("followups",0)}</b><span>Follow-ups</span></div>
+        <div class="stat"><b>{counts.get("invoices_due",0)}</b><span>Invoices Due</span></div>
+        <div class="stat"><b>{counts.get("projects_active",0)}</b><span>Active Projects</span></div>
+      </div>
+      <div class="panels" style="margin-top:14px">
+        <div class="panel"><h3>Tasks</h3>{rows("Tasks", tasks, "No tasks")}</div>
+        <div class="panel"><h3>Follow-ups</h3>{rows("Follow-ups", followups, "No follow-ups")}</div>
+      </div>
+      <div class="panels" style="margin-top:14px">
+        <div class="panel"><h3>Invoices / Estimates</h3>{rows("Invoices", invoices + estimates, "No finance items")}</div>
+        <div class="panel"><h3>Projects</h3>{rows("Projects", projects, "No projects")}</div>
+      </div>
+    </section>
+    """
+
+def live_recent_activity_block():
+    activities = get_recent_activities_live("demo_small_business", 8)
+    items = "".join([
+        f'<div class="item">{a.get("title","Activity")}<span>{a.get("description","")}</span></div>'
+        for a in activities
+    ])
+    return f"""
+    <section class="block">
+      <h2>Recent Activity</h2>
+      {items}
+    </section>
     """
 
 def mobile_block():
@@ -1441,12 +1576,12 @@ def page(active, content):
 
 @app.route("/")
 def home():
-    content = f'<div class="homeGrid">{brand_hero()}<div>{hero_dash()}{worker_section()}{status_panels()}</div></div><div class="bottom">{mobile_block()}{exchange_block()}{network_block()}</div>'
+    content = f'<div class="homeGrid">{brand_hero()}<div>{hero_dash()}{worker_section()}{status_panels()}</div></div><div class="bottom">{live_objects_block()}{live_recent_activity_block()}{mobile_block()}{exchange_block()}{network_block()}</div>'
     return page("dashboard", content)
 
 @app.route("/dashboard")
 def dashboard():
-    content = f'{hero_dash()}{worker_section()}{status_panels()}<div class="bottom">{mobile_block()}{exchange_block()}{network_block()}</div>'
+    content = f'{hero_dash()}{worker_section()}{status_panels()}<div class="bottom">{live_objects_block()}{live_recent_activity_block()}{mobile_block()}{exchange_block()}{network_block()}</div>'
     return page("dashboard", content)
 
 @app.route("/workers")
@@ -1474,11 +1609,19 @@ def exchange():
 
 @app.route("/api/dashboard")
 def api_dashboard():
-    return jsonify(get_dashboard_live_data())
+    data = get_dashboard_live_data()
+    data["objects"] = get_work_objects_live("demo_small_business", 50)
+    data["worker_states"] = get_worker_live_states()
+    return jsonify(data)
 
 @app.route("/api/counts")
 def api_counts():
     return jsonify(get_dashboard_counts_live("demo_small_business"))
+
+
+@app.route("/api/objects")
+def api_objects():
+    return jsonify({"objects": get_work_objects_live("demo_small_business", 50)})
 
 @app.route("/api/activities")
 def api_activities():
