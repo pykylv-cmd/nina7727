@@ -3,7 +3,7 @@ import os
 
 app = Flask(__name__)
 
-APP_VERSION = "Web App V15 — Stable Clean Rollback"
+APP_VERSION = "Web App V16 — Left Logo Exact Fix"
 CORE_VERSION = "V115.4 + Core 2.5.2"
 
 WORKERS = [
@@ -23,14 +23,12 @@ CSS = """
 :root{
   --bg:#050711;
   --panel:#090d19;
-  --panel2:#0d1324;
   --line:rgba(255,255,255,.11);
   --text:#f7fbff;
   --muted:#9aa6c5;
   --purple:#7c3aed;
   --blue:#2563eb;
   --green:#22c55e;
-  --amber:#f59e0b;
   --shadow:0 22px 80px rgba(0,0,0,.38);
 }
 *{box-sizing:border-box}
@@ -68,39 +66,41 @@ a{text-decoration:none;color:inherit}
   gap:10px;
   padding:4px 8px 14px;
 }
-.logo,.bigLogo{
+.logo,.heroOrb{
   border-radius:50%;
   position:relative;
   overflow:hidden;
   flex-shrink:0;
   background:
-    radial-gradient(circle at 45% 40%,rgba(34,211,238,.22),rgba(124,58,237,.10) 60%,transparent 74%);
-  box-shadow:0 0 36px rgba(124,58,237,.42),0 0 24px rgba(34,211,238,.16);
+    radial-gradient(circle at 38% 30%,rgba(255,255,255,.18),transparent 14%),
+    radial-gradient(circle at 45% 40%,rgba(34,211,238,.24),rgba(37,99,235,.12) 38%,rgba(124,58,237,.12) 60%,transparent 74%);
+  box-shadow:0 0 40px rgba(124,58,237,.45),0 0 28px rgba(34,211,238,.18);
 }
 .logo{width:34px;height:34px}
-.bigLogo{width:132px;height:132px}
-.logo:before,.bigLogo:before{
+.heroOrb{width:150px;height:150px}
+.logo:before,.heroOrb:before{
   content:"";
   position:absolute;
   inset:8%;
   border-radius:50%;
   background-image:
-    radial-gradient(circle,rgba(34,211,238,.95) 0 2.2px,transparent 3.3px),
-    radial-gradient(circle,rgba(139,92,246,.98) 0 2.2px,transparent 3.3px),
-    radial-gradient(circle,rgba(96,165,250,.95) 0 2.2px,transparent 3.3px),
-    radial-gradient(circle,rgba(217,70,239,.90) 0 2.2px,transparent 3.3px);
-  background-size:16px 16px;
+    radial-gradient(circle,rgba(34,211,238,.95) 0 2.3px,transparent 3.4px),
+    radial-gradient(circle,rgba(139,92,246,.98) 0 2.3px,transparent 3.4px),
+    radial-gradient(circle,rgba(96,165,250,.95) 0 2.3px,transparent 3.4px),
+    radial-gradient(circle,rgba(217,70,239,.92) 0 2.3px,transparent 3.4px);
+  background-size:17px 17px;
   background-position:0 0,8px 8px,4px 12px,12px 4px;
   transform:rotate(-14deg);
   filter:drop-shadow(0 0 8px rgba(124,58,237,.42));
 }
 .logo:before{background-size:9px 9px;background-position:0 0,4px 4px,2px 6px,6px 2px}
-.logo:after,.bigLogo:after{
+.logo:after,.heroOrb:after{
   content:"";
   position:absolute;
   inset:10%;
   border-radius:50%;
   border:1px solid rgba(255,255,255,.16);
+  box-shadow:inset 0 0 22px rgba(34,211,238,.08);
 }
 .brand b{font-size:20px;letter-spacing:-.04em}
 .os{
@@ -194,12 +194,20 @@ a{text-decoration:none;color:inherit}
     radial-gradient(circle at 18% 20%,rgba(124,58,237,.14),transparent 30%),
     linear-gradient(180deg,rgba(9,13,25,.94),rgba(6,9,18,.96));
 }
+.heroLogoRow{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:24px;
+  margin:8px 0 0;
+}
 .brandName{
-  margin-top:18px;
   font-size:72px;
   font-weight:950;
   letter-spacing:-.06em;
   line-height:.9;
+  text-align:left;
+  text-shadow:0 10px 35px rgba(0,0,0,.35);
 }
 .brandSub{
   margin-top:12px;
@@ -207,11 +215,13 @@ a{text-decoration:none;color:inherit}
   letter-spacing:.18em;
   text-transform:uppercase;
   color:#dce7ff;
+  text-align:left;
+  white-space:nowrap;
 }
 .heroCopy{
   font-size:21px;
   line-height:1.45;
-  margin:32px 0 0;
+  margin:34px 0 0;
 }
 .heroCopy span{display:block;color:#dbe3f7}
 .pillars{
@@ -401,109 +411,29 @@ a{text-decoration:none;color:inherit}
 .active{color:#86efac}
 .idle{color:#fcd34d}
 .work{font-size:13px;line-height:1.35}
-.panels{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:14px;
-  margin-top:14px;
-}
-.panel,.block{
-  padding:14px;
-  border-radius:18px;
-}
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+.panel,.block{padding:14px;border-radius:18px}
 .panel h3,.block h2{margin:0 0 10px}
 .ok{color:#86efac;font-weight:800}
-.chart{
-  height:80px;
-  border-radius:13px;
-  background:linear-gradient(180deg,rgba(124,58,237,.12),transparent);
-  border:1px solid rgba(255,255,255,.06);
-  position:relative;
-  overflow:hidden;
-}
+.chart{height:80px;border-radius:13px;background:linear-gradient(180deg,rgba(124,58,237,.12),transparent);border:1px solid rgba(255,255,255,.06);position:relative;overflow:hidden}
 .chart svg{position:absolute;inset:0}
 .ws{display:flex;gap:8px;flex-wrap:wrap}
-.ws span{
-  width:31px;
-  height:31px;
-  border-radius:50%;
-  display:grid;
-  place-items:center;
-  font-size:10px;
-  font-weight:900;
-  background:linear-gradient(135deg,#7c3aed,#2563eb);
-}
-.bottom{
-  display:grid;
-  grid-template-columns:1fr;
-  gap:16px;
-  margin-top:16px;
-}
-.phoneRow{
-  display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
-  gap:11px;
-}
-.phone{
-  border:1px solid rgba(255,255,255,.10);
-  background:#060914;
-  border-radius:24px;
-  padding:9px;
-}
-.screen{
-  border-radius:18px;
-  background:linear-gradient(180deg,#0c1224,#080c18);
-  min-height:300px;
-  padding:12px;
-}
-.miniStats{
-  display:grid;
-  grid-template-columns:repeat(4,1fr);
-  gap:6px;
-  margin:12px 0;
-}
-.mini{
-  background:rgba(255,255,255,.04);
-  border-radius:12px;
-  padding:8px;
-  text-align:center;
-}
+.ws span{width:31px;height:31px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:900;background:linear-gradient(135deg,#7c3aed,#2563eb)}
+.bottom{display:grid;grid-template-columns:1fr;gap:16px;margin-top:16px}
+.phoneRow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}
+.phone{border:1px solid rgba(255,255,255,.10);background:#060914;border-radius:24px;padding:9px}
+.screen{border-radius:18px;background:linear-gradient(180deg,#0c1224,#080c18);min-height:300px;padding:12px}
+.miniStats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:12px 0}
+.mini{background:rgba(255,255,255,.04);border-radius:12px;padding:8px;text-align:center}
 .mini b{font-size:18px}
 .mini span,.item span{display:block;color:var(--muted);font-size:10px}
-.item{
-  background:rgba(255,255,255,.04);
-  border:1px solid rgba(255,255,255,.06);
-  border-radius:12px;
-  padding:9px;
-  margin-top:8px;
-  font-size:12px;
-}
-.exchange{
-  display:grid;
-  grid-template-columns:160px minmax(0,1fr);
-  gap:12px;
-}
+.item{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:9px;margin-top:8px;font-size:12px}
+.exchange{display:grid;grid-template-columns:160px minmax(0,1fr);gap:12px}
 .cats{display:grid;gap:8px;align-content:start}
-.cat{
-  padding:9px 11px;
-  border:1px solid rgba(255,255,255,.07);
-  border-radius:11px;
-  color:#dce6ff;
-  font-size:12px;
-  background:rgba(255,255,255,.025);
-}
+.cat{padding:9px 11px;border:1px solid rgba(255,255,255,.07);border-radius:11px;color:#dce6ff;font-size:12px;background:rgba(255,255,255,.025)}
 .cat.active{background:linear-gradient(90deg,rgba(124,58,237,.45),rgba(37,99,235,.18))}
-.marketGrid{
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
-  gap:12px;
-}
-.market{
-  border:1px solid rgba(255,255,255,.09);
-  border-radius:16px;
-  overflow:hidden;
-  background:rgba(255,255,255,.035);
-}
+.marketGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
+.market{border:1px solid rgba(255,255,255,.09);border-radius:16px;overflow:hidden;background:rgba(255,255,255,.035)}
 .market .wTop{height:118px}
 .market .face{width:86px;height:86px}
 .mBody{padding:11px}
@@ -523,49 +453,13 @@ a{text-decoration:none;color:inherit}
   position:relative;
   overflow:hidden;
 }
-.dot{
-  position:absolute;
-  width:10px;
-  height:10px;
-  border-radius:50%;
-  background:#a855f7;
-  box-shadow:0 0 18px #a855f7;
-}
-.stats{
-  display:grid;
-  grid-template-columns:repeat(4,1fr);
-  gap:10px;
-  margin-top:12px;
-}
-.stat{
-  border:1px solid rgba(255,255,255,.07);
-  border-radius:12px;
-  padding:10px;
-  background:rgba(255,255,255,.025);
-}
+.dot{position:absolute;width:10px;height:10px;border-radius:50%;background:#a855f7;box-shadow:0 0 18px #a855f7}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
+.stat{border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:10px;background:rgba(255,255,255,.025)}
 .stat b{font-size:24px}
 .stat span{display:block;color:var(--muted);font-size:10px}
-.mobileNav{
-  display:none;
-  position:fixed;
-  left:12px;
-  right:12px;
-  bottom:12px;
-  background:rgba(8,12,24,.92);
-  border:1px solid var(--line);
-  border-radius:22px;
-  z-index:20;
-  padding:8px;
-  backdrop-filter:blur(18px);
-}
-.mobileNav a{
-  flex:1;
-  text-align:center;
-  padding:10px 4px;
-  border-radius:14px;
-  font-size:12px;
-  color:#dbe4ff;
-}
+.mobileNav{display:none;position:fixed;left:12px;right:12px;bottom:12px;background:rgba(8,12,24,.92);border:1px solid var(--line);border-radius:22px;z-index:20;padding:8px;backdrop-filter:blur(18px)}
+.mobileNav a{flex:1;text-align:center;padding:10px 4px;border-radius:14px;font-size:12px;color:#dbe4ff}
 .mobileNav a.active{background:rgba(124,58,237,.32)}
 @media(max-width:1450px){
   .homeGrid{grid-template-columns:1fr}
@@ -587,8 +481,10 @@ a{text-decoration:none;color:inherit}
 }
 @media(max-width:760px){
   .wrap{padding:10px 10px 84px}
-  .brandName{font-size:56px}
-  .bigLogo{width:120px;height:120px}
+  .heroLogoRow{flex-direction:column;gap:14px}
+  .brandName{text-align:center;font-size:56px}
+  .brandSub{text-align:center;white-space:normal}
+  .heroOrb{width:120px;height:120px}
   .pillars{grid-template-columns:repeat(2,1fr)}
   .ctas{flex-direction:column;width:100%}
   .ctas .btn{width:100%}
@@ -596,29 +492,6 @@ a{text-decoration:none;color:inherit}
   .kpis{grid-template-columns:1fr}
   .workers{grid-template-columns:1fr}
 }
-
-/* V15 safeguard: no embedded image logo, no duplicate, no oval */
-.logo,
-.bigLogo{
-  background-image:none !important;
-  aspect-ratio:1 / 1 !important;
-}
-.heroBrand .brandName,
-.heroBrand .brandSub,
-.side .brand b{
-  display:block !important;
-}
-.heroBrand .bigLogo{
-  width:132px !important;
-  height:132px !important;
-  border-radius:50% !important;
-}
-.side .brand .logo{
-  width:34px !important;
-  height:34px !important;
-  border-radius:50% !important;
-}
-
 </style>
 """
 
@@ -691,9 +564,13 @@ def topbar():
 def brand_hero():
     return """
     <section class="heroBrand">
-      <div class="bigLogo"></div>
-      <div class="brandName">Nina<span class="os">OS</span></div>
-      <div class="brandSub">AI Workforce Operating System</div>
+      <div class="heroLogoRow">
+        <div class="heroOrb"></div>
+        <div>
+          <div class="brandName">Nina<span class="os">OS</span></div>
+          <div class="brandSub">AI Workforce Operating System</div>
+        </div>
+      </div>
       <div class="heroCopy">One Platform. Unlimited AI Workers.<span>For every business. Everywhere.</span></div>
       <div class="pillars">
         <div class="pillar"><div class="ic">◎</div><b>Global</b><p>Built for a global future</p></div>
