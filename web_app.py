@@ -3,7 +3,7 @@ import os
 
 app = Flask(__name__)
 
-APP_VERSION = "Web App V13 — Clean App Reset"
+APP_VERSION = "Web App V14.1 — Logo Duplicate Fix"
 CORE_VERSION = "V115.4 + Core 2.5.2"
 
 WORKERS = [
@@ -564,6 +564,55 @@ a{text-decoration:none;color:inherit}
   .kpis{grid-template-columns:1fr}
   .workers{grid-template-columns:1fr}
 }
+
+/* V14.1: stop NinaOS logo duplication */
+.heroBrand .brandName,
+.heroBrand .brandSub{
+    display:none !important;
+}
+.heroBrand{
+    gap:0;
+}
+.heroBrand .bigLogo{
+    width:390px !important;
+    max-width:92% !important;
+    height:170px !important;
+    border-radius:0 !important;
+    background-size:contain !important;
+    background-repeat:no-repeat !important;
+    background-position:center !important;
+    box-shadow:none !important;
+    overflow:visible !important;
+    margin:0 auto 22px !important;
+}
+.heroBrand .bigLogo:before,
+.heroBrand .bigLogo:after{
+    display:none !important;
+}
+.side .brand .logo{
+    width:112px !important;
+    height:42px !important;
+    border-radius:0 !important;
+    background-size:contain !important;
+    background-repeat:no-repeat !important;
+    background-position:left center !important;
+    box-shadow:none !important;
+    overflow:visible !important;
+}
+.side .brand .logo:before,
+.side .brand .logo:after{
+    display:none !important;
+}
+.side .brand b{
+    display:none !important;
+}
+@media(max-width:760px){
+  .heroBrand .bigLogo{
+    width:320px !important;
+    height:140px !important;
+  }
+}
+
 </style>
 """
 
