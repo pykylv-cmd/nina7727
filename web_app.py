@@ -3,7 +3,7 @@ import os
 
 app = Flask(__name__)
 
-APP_VERSION = "Web App V24 — Dashboard Product Layout"
+APP_VERSION = "Web App V25 — Product Workspace Pass"
 CORE_VERSION = "V115.4 + Core 2.5.2"
 
 # -------------------------------
@@ -1257,6 +1257,109 @@ body{
   .activityRow small,.objectRow small{display:block;margin-top:6px;}
 }
 
+
+/* V25 Product Workspace Pass */
+.workspaceGrid{
+    display:grid;
+    grid-template-columns:1.15fr .85fr;
+    gap:18px;
+    margin-top:18px;
+}
+.workspaceStats{
+    grid-template-columns:repeat(5,1fr);
+}
+.compactRow{
+    min-height:58px;
+}
+.workspaceHeader{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:18px;
+    margin:4px 0 18px;
+}
+.workspaceHeader h1{
+    margin:0 0 6px;
+    font-size:34px;
+    letter-spacing:-.04em;
+}
+.workspaceHeader p{
+    margin:0;
+    color:var(--muted);
+}
+.miniStatsLine{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+}
+.miniStatsLine span{
+    border:1px solid rgba(255,255,255,.09);
+    background:rgba(255,255,255,.03);
+    border-radius:999px;
+    padding:9px 11px;
+    color:#dbe7ff;
+    font-size:12px;
+    font-weight:800;
+}
+.workQueueGrid{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:16px;
+}
+.workQueueGrid.twoCol{
+    grid-template-columns:1fr 1fr;
+}
+.queueBlock{
+    min-height:420px;
+}
+.queueBlock h2{
+    margin-bottom:14px;
+}
+.workCard{
+    border:1px solid rgba(255,255,255,.085);
+    background:linear-gradient(180deg,rgba(255,255,255,.042),rgba(255,255,255,.018));
+    border-radius:15px;
+    padding:13px;
+    margin-bottom:10px;
+}
+.workCard b{
+    display:block;
+    font-size:14px;
+    line-height:1.25;
+}
+.workCard span{
+    display:block;
+    color:var(--muted);
+    font-size:12px;
+    margin-top:6px;
+}
+.workCard small{
+    display:block;
+    color:rgba(220,231,255,.48);
+    font-size:10px;
+    margin-top:8px;
+}
+.workCard.empty{
+    border-style:dashed;
+    color:rgba(255,255,255,.72);
+}
+.clientCard,.projectCard{
+    min-height:92px;
+}
+@media(max-width:1280px){
+  .workspaceGrid{grid-template-columns:1fr;}
+  .workspaceStats{grid-template-columns:repeat(3,1fr);}
+  .workQueueGrid{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media(max-width:760px){
+  .workspaceHeader{display:block;}
+  .miniStatsLine{justify-content:flex-start;margin-top:12px;}
+  .workspaceStats{grid-template-columns:repeat(2,1fr);}
+  .workQueueGrid,.workQueueGrid.twoCol{grid-template-columns:1fr;}
+  .queueBlock{min-height:auto;}
+}
+
 </style>
 """
 
@@ -1677,6 +1780,162 @@ def workers_page_block():
     </div>
     """
 
+
+def dashboard_activity_compact():
+    activities = get_recent_activities_live("demo_small_business", 6)
+    items = "".join([
+        f'<div class="activityRow compactRow"><div><b>{a.get("title","Activity")}</b><span>{a.get("description","")}</span></div><small>{a.get("status","info")}</small></div>'
+        for a in activities
+    ])
+    return f"""
+    <section class="block productBlock">
+      <div class="blockHead">
+        <div>
+          <h2>Recent Activity</h2>
+          <p>Live events from NinaOS Activity Feed.</p>
+        </div>
+        <a class="btn" href="/api/activities">API</a>
+      </div>
+      <div class="activityList">{items}</div>
+    </section>
+    """
+
+def workspace_snapshot_compact():
+    counts = get_dashboard_counts_live("demo_small_business")
+    return f"""
+    <section class="block productBlock">
+      <div class="blockHead">
+        <div>
+          <h2>Workspace Snapshot</h2>
+          <p>Nina Office Manager SMB live workspace load.</p>
+        </div>
+        <a class="btn" href="/tasks">Open Work</a>
+      </div>
+      <div class="stats workspaceStats">
+        <div class="stat"><b>{counts.get("tasks_today",0)}</b><span>Tasks Today</span></div>
+        <div class="stat"><b>{counts.get("followups",0)}</b><span>Follow-ups</span></div>
+        <div class="stat"><b>{counts.get("invoices_due",0)}</b><span>Invoices Due</span></div>
+        <div class="stat"><b>{counts.get("estimates_in_progress",0)}</b><span>Estimates</span></div>
+        <div class="stat"><b>{counts.get("projects_active",0)}</b><span>Projects</span></div>
+      </div>
+      <div class="item">Active Worker<span>Nina Office Manager SMB</span></div>
+      <div class="item">Data Source<span>Work Objects + Activity Feed</span></div>
+    </section>
+    """
+
+def task_workspace_page():
+    counts = get_dashboard_counts_live("demo_small_business")
+    tasks = get_objects_by_type_live("task", limit=20)
+    followups = get_objects_by_type_live("followup_task", limit=20)
+    estimates = get_objects_by_type_live("estimate", limit=20)
+    invoices = get_objects_by_type_live("invoice", limit=20)
+
+    def cards(items, empty_text):
+        if not items:
+            return f'<div class="workCard empty">{empty_text}<span>No live items yet</span></div>'
+        return "".join([
+            f'<div class="workCard"><b>{o.get("title","Untitled")}</b><span>{o.get("object_type","")} · {o.get("status","")} · {o.get("priority","normal")}</span><small>{o.get("object_id","")}</small></div>'
+            for o in items
+        ])
+
+    return f"""
+    <div class="workspaceHeader">
+      <div>
+        <h1>Tasks & Work Queue</h1>
+        <p>Live work objects managed by Nina Office Manager SMB.</p>
+      </div>
+      <div class="miniStatsLine">
+        <span>{counts.get("tasks_today",0)} Tasks</span>
+        <span>{counts.get("followups",0)} Follow-ups</span>
+        <span>{counts.get("invoices_due",0)} Invoices</span>
+        <span>{counts.get("estimates_in_progress",0)} Estimates</span>
+      </div>
+    </div>
+    <div class="workQueueGrid">
+      <section class="block queueBlock"><h2>Today Tasks</h2>{cards(tasks, "No tasks")}</section>
+      <section class="block queueBlock"><h2>Follow-ups</h2>{cards(followups, "No follow-ups")}</section>
+      <section class="block queueBlock"><h2>Estimates</h2>{cards(estimates, "No estimates")}</section>
+      <section class="block queueBlock"><h2>Invoices</h2>{cards(invoices, "No invoices")}</section>
+    </div>
+    """
+
+def clients_workspace_page():
+    clients = get_objects_by_type_live("client", limit=30)
+    followups = get_objects_by_type_live("followup_task", limit=20)
+    estimates = get_objects_by_type_live("estimate", limit=20)
+    invoices = get_objects_by_type_live("invoice", limit=20)
+
+    if not clients:
+        client_cards = '<div class="workCard empty">No clients yet<span>Demo client should appear after seed</span></div>'
+    else:
+        client_cards = "".join([
+            f'<div class="workCard clientCard"><b>{c.get("title","Client")}</b><span>Status: {c.get("status","")}</span><small>{c.get("object_id","")}</small></div>'
+            for c in clients
+        ])
+
+    return f"""
+    <div class="workspaceHeader">
+      <div><h1>Clients</h1><p>CRM-style client overview for the small business workspace.</p></div>
+      <div class="miniStatsLine"><span>{len(clients)} Clients</span><span>{len(followups)} Follow-ups</span><span>{len(estimates)} Estimates</span><span>{len(invoices)} Invoices</span></div>
+    </div>
+    <div class="workQueueGrid twoCol">
+      <section class="block queueBlock"><h2>Client List</h2>{client_cards}</section>
+      <section class="block queueBlock"><h2>Client Attention</h2>
+        {''.join([f'<div class="workCard"><b>{f.get("title","Follow-up")}</b><span>{f.get("status","")} · {f.get("priority","normal")}</span><small>{f.get("object_id","")}</small></div>' for f in followups]) or '<div class="workCard empty">No urgent follow-ups<span>Nothing waiting</span></div>'}
+      </section>
+    </div>
+    """
+
+def projects_workspace_page():
+    projects = get_objects_by_type_live("project", limit=30)
+    tasks = get_objects_by_type_live("task", limit=20)
+    estimates = get_objects_by_type_live("estimate", limit=20)
+    invoices = get_objects_by_type_live("invoice", limit=20)
+    project_cards = "".join([
+        f'<div class="workCard projectCard"><b>{p.get("title","Project")}</b><span>{p.get("status","")} · priority: {p.get("priority","normal")}</span><small>{p.get("object_id","")}</small></div>'
+        for p in projects
+    ]) or '<div class="workCard empty">No active projects<span>Workspace ready</span></div>'
+
+    return f"""
+    <div class="workspaceHeader">
+      <div><h1>Projects</h1><p>Project overview connected to tasks, estimates, invoices and documents.</p></div>
+      <div class="miniStatsLine"><span>{len(projects)} Projects</span><span>{len(tasks)} Tasks</span><span>{len(estimates)} Estimates</span><span>{len(invoices)} Invoices</span></div>
+    </div>
+    <div class="workQueueGrid twoCol">
+      <section class="block queueBlock"><h2>Active Projects</h2>{project_cards}</section>
+      <section class="block queueBlock"><h2>Connected Work</h2>
+        <div class="stats">
+          <div class="stat"><b>{len(tasks)}</b><span>Tasks</span></div>
+          <div class="stat"><b>{len(estimates)}</b><span>Estimates</span></div>
+          <div class="stat"><b>{len(invoices)}</b><span>Invoices</span></div>
+          <div class="stat"><b>{len(projects)}</b><span>Projects</span></div>
+        </div>
+      </section>
+    </div>
+    """
+
+def workers_workspace_page():
+    live_states = get_worker_live_states()
+    cards = []
+    for w in WORKERS:
+        ww = dict(w)
+        state = live_states.get(ww.get("name"), {})
+        if state:
+            ww["status"] = state.get("status", ww.get("status", "ACTIVE"))
+            ww["work"] = state.get("work", ww.get("work", ""))
+        cards.append(worker_card(ww))
+
+    return f"""
+    <div class="workspaceHeader">
+      <div><h1>Ready AI Workers</h1><p>Live worker state connected to NinaOS Work Objects.</p></div>
+      <div class="miniStatsLine"><span>4 Workers</span><span>1 Active Workspace</span><span>Office Manager Live</span></div>
+    </div>
+    <section class="block">
+      <div class="workers">{"".join(cards)}</div>
+    </section>
+    <div class="workspaceGrid">{workspace_snapshot_compact()}{dashboard_activity_compact()}</div>
+    """
+
 def page(active, content):
     return f"""
     <!doctype html>
@@ -1706,32 +1965,32 @@ def page(active, content):
 
 @app.route("/")
 def home():
-    content = f'<div class="homeGrid">{brand_hero()}<div>{hero_dash()}{worker_section()}{status_panels()}</div></div><div class="bottom">{live_objects_block()}{live_recent_activity_block()}{mobile_block()}{exchange_block()}{network_block()}</div>'
+    content = f'<div class="homeGrid">{brand_hero()}<div>{hero_dash()}{worker_section()}{status_panels()}</div></div><div class="workspaceGrid">{dashboard_activity_compact()}{workspace_snapshot_compact()}</div><div class="bottom">{mobile_block()}{exchange_block()}{network_block()}</div>'
     return page("dashboard", content)
 
 @app.route("/dashboard")
 def dashboard():
-    content = f'{hero_dash()}{worker_section()}{status_panels()}<div class="bottom">{live_objects_block()}{live_recent_activity_block()}{mobile_block()}{exchange_block()}{network_block()}</div>'
+    content = f'{hero_dash()}{worker_section()}{status_panels()}<div class="workspaceGrid">{dashboard_activity_compact()}{workspace_snapshot_compact()}</div><div class="bottom">{mobile_block()}{exchange_block()}{network_block()}</div>'
     return page("dashboard", content)
 
 @app.route("/workers")
 def workers():
-    content = workers_page_block()
+    content = workers_workspace_page()
     return page("workers", content)
 
 @app.route("/tasks")
 def tasks():
-    content = f'<h1>Tasks</h1><p style="color:var(--muted)">Live task objects from NinaOS Work Objects.</p><div class="bottom">{object_table_block("Tasks", "task", "No tasks yet")}{object_table_block("Follow-ups", "followup_task", "No follow-ups yet")}</div>'
+    content = task_workspace_page()
     return page("tasks", content)
 
 @app.route("/clients")
 def clients():
-    content = f'<h1>Clients</h1><p style="color:var(--muted)">CRM-style view powered by Work Objects.</p>{clients_page_block()}'
+    content = clients_workspace_page()
     return page("clients", content)
 
 @app.route("/projects")
 def projects():
-    content = f'<h1>Projects</h1><p style="color:var(--muted)">Project overview connecting tasks, estimates, invoices and documents.</p>{projects_page_block()}'
+    content = projects_workspace_page()
     return page("projects", content)
 
 @app.route("/office-manager")
