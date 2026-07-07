@@ -6026,6 +6026,17 @@ try:
 except Exception as e:
     print('Relationship Engine V114 regression check kļūda:', repr(e))
 
+
+# =========================================================
+# NinaOS Runtime Safety Rule — Sprint C Safe Split
+# =========================================================
+# Telegram production service must start with:
+#   python app.py
+#
+# web_app.py is a separate browser dashboard runtime.
+# Do not switch the Telegram Railway service to python web_app.py.
+# Confirmed recovery on 2026-07-07: Telegram works when Railway starts app.py.
+
 app = Flask(__name__)
 
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
@@ -12497,8 +12508,8 @@ def nina_progress_answer(user_id):
 # Reply Builder ir centrālais NinaOS komunikācijas slānis.
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
-REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1"
-APP_VERSION = "V115.4 + Core 2.5.2"
+REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
+APP_VERSION = "V116.0 + Core 2.5.2 — Sprint B.2 Safe Reconnect"
 
 
 def rb_remove_version_lines(text):
@@ -16770,7 +16781,7 @@ def payment_cancel_page():
 
 @app.route("/")
 def home():
-    return "Nina7727 V114.0 Premium Sales Text darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "NinaOS Telegram Runtime V116.0 darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -16796,7 +16807,7 @@ def run_flask_server():
 
 
 if __name__ == "__main__":
-    print("Nina7727 V114.0 Premium Sales Text darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print("NinaOS Telegram Runtime V116.0 starting...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
     # Stripe webhook vajag HTTP serveri. Telegram botam vienlaikus vajag polling.
     # Tāpēc Flask palaižam background threadā, bet Telegram polling atstājam galvenajā procesā.
