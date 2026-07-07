@@ -9,9 +9,9 @@
 
 import os
 from datetime import datetime
-from flask import Flask, Response, redirect
+from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V35 — C1.1 Visual Restore"
+WEB_APP_VERSION = "Web App V36 — Sprint C2 Live Data + Language Selector"
 APP_NAME = "NinaOS"
 
 app = Flask(__name__)
@@ -26,6 +26,46 @@ def safe_int(value, default=0):
 
 def html_escape(s):
     return str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def current_language():
+    lang = (request.args.get("lang") or "en").strip().lower()
+    return lang if lang in ["en", "lv", "ru"] else "en"
+
+
+def tx(key, lang=None):
+    lang = lang or current_language()
+    dictionary = {
+        "search": {
+            "en": "Search anything...",
+            "lv": "Meklēt jebko...",
+            "ru": "Искать...",
+        },
+        "dashboard": {"en": "Dashboard", "lv": "Panelis", "ru": "Панель"},
+        "workers": {"en": "Workers", "lv": "Darbinieki", "ru": "Работники"},
+        "tasks": {"en": "Tasks", "lv": "Uzdevumi", "ru": "Задачи"},
+        "clients": {"en": "Clients", "lv": "Klienti", "ru": "Клиенты"},
+        "projects": {"en": "Projects", "lv": "Projekti", "ru": "Проекты"},
+        "calendar": {"en": "Calendar", "lv": "Kalendārs", "ru": "Календарь"},
+        "files": {"en": "Files", "lv": "Faili", "ru": "Файлы"},
+        "analytics": {"en": "Analytics", "lv": "Analītika", "ru": "Аналитика"},
+        "exchange": {"en": "Exchange", "lv": "Birža", "ru": "Биржа"},
+        "good_morning": {
+            "en": "Good morning, Katrin 👋",
+            "lv": "Labrīt, Katrin 👋",
+            "ru": "Доброе утро, Katrin 👋",
+        },
+        "workspace_today": {
+            "en": "Here’s what needs attention in your NinaOS workspace today.",
+            "lv": "Šeit ir tas, kam šodien jāpievērš uzmanība NinaOS darba vidē.",
+            "ru": "Вот что сегодня требует внимания в рабочем пространстве NinaOS.",
+        },
+    }
+    return dictionary.get(key, {}).get(lang) or dictionary.get(key, {}).get("en") or key
+
+
+def with_lang(path):
+    return f"{path}?lang={current_language()}"
 
 
 def object_to_dict(obj):
@@ -99,6 +139,73 @@ def build_clients_from_objects(objects):
     return list(clients.values())
 
 
+
+def load_live_objects_from_app_db():
+    """
+    C2 live read layer.
+    Web reads shared database task rows when available.
+    Safe: read-only; no writes.
+    """
+    objects = []
+
+    database_url = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or ""
+    if database_url:
+        try:
+            import psycopg2
+            conn = psycopg2.connect(database_url)
+            cur = conn.cursor()
+            queries = [
+                """
+                SELECT id, title, status, priority, client, deadline, raw_text, followup
+                FROM tasks
+                ORDER BY id DESC
+                LIMIT 100
+                """,
+                """
+                SELECT id, title, status, priority, client_name, due_date, raw_text, followup
+                FROM tasks
+                ORDER BY id DESC
+                LIMIT 100
+                """,
+            ]
+            rows = []
+            for q in queries:
+                try:
+                    cur.execute(q)
+                    rows = cur.fetchall()
+                    break
+                except Exception:
+                    conn.rollback()
+
+            for row in rows:
+                object_id, title, status, priority, client, due, raw_text, followup = row
+                obj_type = "followup_task" if bool(followup) else "task"
+                objects.append({
+                    "object_id": f"db_task_{object_id}",
+                    "object_type": obj_type,
+                    "title": title or raw_text or "Untitled task",
+                    "status": status or "open",
+                    "priority": priority or "normal",
+                    "client_id": client or "",
+                    "project_id": "",
+                    "due_date": due or "",
+                    "metadata": {
+                        "client_name": client or "",
+                        "owner": "Telegram Nina",
+                        "source": "database",
+                    },
+                })
+
+            cur.close()
+            conn.close()
+            return objects
+        except Exception:
+            pass
+
+    return objects
+
+
+
 def load_workspace_data():
     workspace = {
         "workspace_id": "demo_small_business",
@@ -135,6 +242,10 @@ def load_workspace_data():
         objects = []
 
     normalized = [object_to_dict(o) for o in objects]
+
+    live_objects = load_live_objects_from_app_db()
+    if live_objects:
+        normalized = live_objects
 
     if not normalized:
         normalized = [
@@ -196,22 +307,23 @@ def nina_logo_html(size="small"):
 
 
 def page(title, body, active="dashboard"):
+    lang = current_language()
     nav = [
-        ("dashboard", "Dashboard", "/dashboard", "⌂"),
-        ("workers", "Workers", "/workers", "♙"),
-        ("tasks", "Tasks", "/tasks", "☑"),
-        ("clients", "Clients", "/clients", "●"),
-        ("projects", "Projects", "/projects", "▣"),
-        ("calendar", "Calendar", "/calendar", "◫"),
-        ("files", "Files", "/files", "▤"),
-        ("analytics", "Analytics", "/analytics", "⌁"),
-        ("exchange", "Exchange", "/exchange", "◎"),
+        ("dashboard", tx("dashboard", lang), "/dashboard", "⌂"),
+        ("workers", tx("workers", lang), "/workers", "♙"),
+        ("tasks", tx("tasks", lang), "/tasks", "☑"),
+        ("clients", tx("clients", lang), "/clients", "●"),
+        ("projects", tx("projects", lang), "/projects", "▣"),
+        ("calendar", tx("calendar", lang), "/calendar", "◫"),
+        ("files", tx("files", lang), "/files", "▤"),
+        ("analytics", tx("analytics", lang), "/analytics", "⌁"),
+        ("exchange", tx("exchange", lang), "/exchange", "◎"),
     ]
     nav_html = ""
     for key, label, href, icon in nav:
         cls = "nav-item active" if key == active else "nav-item"
         badge = "<span class='new'>NEW</span>" if key == "exchange" else ""
-        nav_html += f"<a class='{cls}' href='{href}'><span>{icon}</span><b>{label}</b>{badge}</a>"
+        nav_html += f"<a class='{cls}' href='{href}?lang={lang}'><span>{icon}</span><b>{label}</b>{badge}</a>"
 
     return f'''<!doctype html>
 <html lang="en">
