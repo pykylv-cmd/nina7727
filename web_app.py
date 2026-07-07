@@ -3,7 +3,7 @@ import os
 
 app = Flask(__name__)
 
-APP_VERSION = "Web App V32 — Polish Pass"
+APP_VERSION = "Web App V33 — Work Pages Upgrade"
 CORE_VERSION = "V115.4 + Core 2.5.2"
 
 # -------------------------------
@@ -1867,6 +1867,257 @@ body{
   }
 }
 
+
+/* V33 Work Pages Upgrade */
+.v33PageHero{
+  border:1px solid rgba(255,255,255,.11);
+  border-radius:26px;
+  padding:22px;
+  margin-bottom:18px;
+  background:
+    radial-gradient(circle at 88% 12%,rgba(37,99,235,.12),transparent 28%),
+    linear-gradient(180deg,rgba(255,255,255,.038),rgba(255,255,255,.014));
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:18px;
+  align-items:end;
+  box-shadow:var(--shadow);
+}
+.v33PageHero span{
+  color:#93c5fd;
+  font-size:12px;
+  font-weight:950;
+  text-transform:uppercase;
+  letter-spacing:.12em;
+}
+.v33PageHero h1{
+  margin:6px 0 6px;
+  font-size:38px;
+  letter-spacing:-.055em;
+}
+.v33PageHero p{
+  margin:0;
+  color:var(--muted);
+}
+.v33HeroStats{
+  display:grid;
+  grid-template-columns:repeat(4,100px);
+  gap:10px;
+}
+.v33HeroStats div{
+  border:1px solid rgba(255,255,255,.085);
+  border-radius:15px;
+  padding:12px;
+  background:rgba(255,255,255,.026);
+}
+.v33HeroStats b{
+  display:block;
+  font-size:24px;
+  line-height:1;
+}
+.v33HeroStats small{
+  display:block;
+  color:var(--muted);
+  margin-top:7px;
+  font-size:10px;
+}
+.v33TwoGrid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:18px;
+  margin-bottom:18px;
+}
+.v33Section{
+  border:1px solid rgba(255,255,255,.105);
+  border-radius:24px;
+  padding:18px;
+  background:linear-gradient(180deg,rgba(255,255,255,.034),rgba(255,255,255,.014));
+  box-shadow:var(--shadow);
+}
+.v33SectionHead{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:14px;
+  margin-bottom:14px;
+}
+.v33SectionHead h2{
+  margin:0 0 4px;
+  font-size:24px;
+  letter-spacing:-.04em;
+}
+.v33SectionHead p{
+  margin:0;
+  color:var(--muted);
+  font-size:13px;
+}
+.v33SectionHead strong{
+  min-width:42px;
+  height:42px;
+  border-radius:14px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border:1px solid rgba(255,255,255,.085);
+  background:rgba(124,58,237,.14);
+}
+.v33CardGrid{
+  display:grid;
+  gap:10px;
+}
+.v33Card{
+  border:1px solid rgba(255,255,255,.08);
+  background:linear-gradient(180deg,rgba(255,255,255,.036),rgba(255,255,255,.014));
+  border-radius:16px;
+  padding:13px;
+}
+.v33CardTop{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  align-items:flex-start;
+}
+.v33CardTop b{
+  display:block;
+  font-size:14px;
+  line-height:1.25;
+}
+.v33CardTop span{
+  display:block;
+  color:var(--muted);
+  font-size:12px;
+  margin-top:5px;
+}
+.v33CardTop em{
+  font-style:normal;
+  color:rgba(220,231,255,.48);
+  font-size:10px;
+  white-space:nowrap;
+}
+.v33CardFoot{
+  margin-top:12px;
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:center;
+}
+.v33CardFoot small{
+  color:#93c5fd;
+  font-size:11px;
+}
+.v33CardFoot button{
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:11px;
+  padding:8px 10px;
+  background:rgba(255,255,255,.035);
+  color:#eaf2ff;
+  font-weight:900;
+  font-size:11px;
+}
+.v33Empty{
+  border:1px dashed rgba(255,255,255,.12);
+  border-radius:16px;
+  padding:16px;
+  color:#dbe7ff;
+}
+.v33Empty span{
+  display:block;
+  color:var(--muted);
+  font-size:12px;
+  margin-top:5px;
+}
+.v33WorkerGrid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:16px;
+  margin-bottom:18px;
+}
+.v33WorkerCard{
+  border:1px solid rgba(255,255,255,.105);
+  border-radius:24px;
+  overflow:hidden;
+  background:linear-gradient(180deg,rgba(255,255,255,.034),rgba(255,255,255,.014));
+  box-shadow:var(--shadow);
+}
+.v33WorkerAvatar{
+  height:150px;
+  position:relative;
+}
+.v33WorkerAvatar .face{
+  position:absolute;
+  left:50%;
+  top:52%;
+  transform:translate(-50%,-50%);
+}
+.v33WorkerBody{
+  padding:15px;
+  display:grid;
+  gap:11px;
+}
+.v33WorkerBody h2{
+  margin:0;
+  font-size:20px;
+  letter-spacing:-.035em;
+}
+.v33WorkerBody p{
+  margin:4px 0 0;
+  color:var(--muted);
+  font-size:12px;
+}
+.v33Status{
+  color:#86efac;
+  font-size:11px;
+  font-weight:950;
+}
+.v33WorkerBody strong{
+  font-size:13px;
+  line-height:1.35;
+}
+.v33WorkerActions{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+}
+.v33WorkerActions a{
+  text-align:center;
+  border:1px solid rgba(255,255,255,.085);
+  border-radius:12px;
+  padding:10px 8px;
+  background:rgba(255,255,255,.025);
+  color:#eaf2ff;
+  font-size:11px;
+  font-weight:900;
+}
+@media(max-width:1280px){
+  .v33PageHero{
+    grid-template-columns:1fr;
+  }
+  .v33HeroStats{
+    grid-template-columns:repeat(4,1fr);
+  }
+  .v33TwoGrid{
+    grid-template-columns:1fr;
+  }
+  .v33WorkerGrid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+}
+@media(max-width:760px){
+  .v33HeroStats{
+    grid-template-columns:repeat(2,1fr);
+  }
+  .v33WorkerGrid{
+    grid-template-columns:1fr;
+  }
+  .v33CardTop,.v33CardFoot{
+    display:block;
+  }
+  .v33CardTop em,.v33CardFoot button{
+    display:block;
+    margin-top:8px;
+  }
+}
+
 </style>
 """
 
@@ -2563,6 +2814,191 @@ def clean_dashboard():
     {clean_open_work_block()}
     """
 
+
+def v33_object_card(o, action_label="Open"):
+    title = o.get("title", "Untitled")
+    obj_type = o.get("object_type", "")
+    status = o.get("status", "")
+    priority = o.get("priority", "normal")
+    object_id = o.get("object_id", "")
+    return f"""
+    <div class="v33Card">
+      <div class="v33CardTop">
+        <div>
+          <b>{title}</b>
+          <span>{obj_type} · {status} · {priority}</span>
+        </div>
+        <em>{object_id}</em>
+      </div>
+      <div class="v33CardFoot">
+        <small>Status: {status}</small>
+        <button>{action_label}</button>
+      </div>
+    </div>
+    """
+
+def v33_queue_section(title, subtitle, items, empty_text, action_label="Open"):
+    if items:
+        body = "".join([v33_object_card(o, action_label) for o in items])
+    else:
+        body = f'<div class="v33Empty">{empty_text}<span>No live items yet</span></div>'
+
+    return f"""
+    <section class="v33Section">
+      <div class="v33SectionHead">
+        <div>
+          <h2>{title}</h2>
+          <p>{subtitle}</p>
+        </div>
+        <strong>{len(items)}</strong>
+      </div>
+      <div class="v33CardGrid">{body}</div>
+    </section>
+    """
+
+def v33_tasks_page():
+    counts = get_dashboard_counts_live("demo_small_business")
+    tasks = get_objects_by_type_live("task", limit=30)
+    followups = get_objects_by_type_live("followup_task", limit=30)
+    estimates = get_objects_by_type_live("estimate", limit=30)
+    invoices = get_objects_by_type_live("invoice", limit=30)
+
+    return f"""
+    <div class="v33PageHero">
+      <div>
+        <span>Workspace Work Queue</span>
+        <h1>Tasks & Operations</h1>
+        <p>Daily work objects managed by Nina Office Manager SMB.</p>
+      </div>
+      <div class="v33HeroStats">
+        <div><b>{counts.get("tasks_today",0)}</b><small>Tasks</small></div>
+        <div><b>{counts.get("followups",0)}</b><small>Follow-ups</small></div>
+        <div><b>{counts.get("invoices_due",0)}</b><small>Invoices</small></div>
+        <div><b>{counts.get("estimates_in_progress",0)}</b><small>Estimates</small></div>
+      </div>
+    </div>
+    <div class="v33TwoGrid">
+      {v33_queue_section("Today Tasks", "Open and in-progress operational tasks.", tasks, "No tasks", "Manage")}
+      {v33_queue_section("Follow-ups", "Client follow-ups and scheduled contact work.", followups, "No follow-ups", "Follow up")}
+    </div>
+    <div class="v33TwoGrid">
+      {v33_queue_section("Estimates", "Estimate and offer drafts currently in progress.", estimates, "No estimates", "Review")}
+      {v33_queue_section("Invoices", "Invoice admin and payment follow-up items.", invoices, "No invoices", "Check")}
+    </div>
+    """
+
+def v33_clients_page():
+    clients = get_objects_by_type_live("client", limit=30)
+    followups = get_objects_by_type_live("followup_task", limit=30)
+    estimates = get_objects_by_type_live("estimate", limit=30)
+    invoices = get_objects_by_type_live("invoice", limit=30)
+
+    client_body = "".join([v33_object_card(c, "View") for c in clients]) if clients else '<div class="v33Empty">No clients yet<span>Demo client should appear after seed</span></div>'
+    attention_items = followups + estimates + invoices
+    attention_body = "".join([v33_object_card(o, "Open") for o in attention_items[:12]]) if attention_items else '<div class="v33Empty">No client attention items<span>Nothing urgent right now</span></div>'
+
+    return f"""
+    <div class="v33PageHero">
+      <div>
+        <span>CRM Workspace</span>
+        <h1>Clients</h1>
+        <p>Client overview connected to follow-ups, estimates and invoices.</p>
+      </div>
+      <div class="v33HeroStats">
+        <div><b>{len(clients)}</b><small>Clients</small></div>
+        <div><b>{len(followups)}</b><small>Follow-ups</small></div>
+        <div><b>{len(estimates)}</b><small>Estimates</small></div>
+        <div><b>{len(invoices)}</b><small>Invoices</small></div>
+      </div>
+    </div>
+    <div class="v33TwoGrid">
+      <section class="v33Section">
+        <div class="v33SectionHead"><div><h2>Client List</h2><p>Customers and active relationships.</p></div><strong>{len(clients)}</strong></div>
+        <div class="v33CardGrid">{client_body}</div>
+      </section>
+      <section class="v33Section">
+        <div class="v33SectionHead"><div><h2>Client Attention</h2><p>Follow-ups, estimates and invoice admin that need attention.</p></div><strong>{len(attention_items)}</strong></div>
+        <div class="v33CardGrid">{attention_body}</div>
+      </section>
+    </div>
+    """
+
+def v33_projects_page():
+    projects = get_objects_by_type_live("project", limit=30)
+    tasks = get_objects_by_type_live("task", limit=30)
+    estimates = get_objects_by_type_live("estimate", limit=30)
+    invoices = get_objects_by_type_live("invoice", limit=30)
+    docs = get_objects_by_type_live("document_case", limit=30)
+
+    return f"""
+    <div class="v33PageHero">
+      <div>
+        <span>Project Workspace</span>
+        <h1>Projects</h1>
+        <p>Project overview connecting clients, tasks, estimates, invoices and documents.</p>
+      </div>
+      <div class="v33HeroStats">
+        <div><b>{len(projects)}</b><small>Projects</small></div>
+        <div><b>{len(tasks)}</b><small>Tasks</small></div>
+        <div><b>{len(estimates)}</b><small>Estimates</small></div>
+        <div><b>{len(invoices)}</b><small>Invoices</small></div>
+      </div>
+    </div>
+    <div class="v33TwoGrid">
+      {v33_queue_section("Active Projects", "Projects currently open or active.", projects, "No active projects", "Open")}
+      {v33_queue_section("Connected Work", "Tasks, estimates, invoices and documents related to projects.", tasks + estimates + invoices + docs, "No connected work", "Open")}
+    </div>
+    """
+
+def v33_workers_page():
+    live_states = get_worker_live_states()
+    worker_cards = []
+    for w in WORKERS:
+        ww = dict(w)
+        state = live_states.get(ww.get("name"), {})
+        if state:
+            ww["status"] = state.get("status", ww.get("status", "ACTIVE"))
+            ww["work"] = state.get("work", ww.get("work", ""))
+        status = ww.get("status", "ACTIVE")
+        worker_cards.append(f"""
+        <div class="v33WorkerCard">
+          <div class="v33WorkerAvatar {tone_class(ww.get("tone","purple"))}"><div class="face"></div></div>
+          <div class="v33WorkerBody">
+            <div>
+              <h2>{ww.get("name")}</h2>
+              <p>{ww.get("role")}</p>
+            </div>
+            <span class="v33Status">{status}</span>
+            <strong>{ww.get("work")}</strong>
+            <div class="v33WorkerActions">
+              <a href="/tasks">View Queue</a>
+              <a href="/exchange">Exchange</a>
+            </div>
+          </div>
+        </div>
+        """)
+
+    return f"""
+    <div class="v33PageHero">
+      <div>
+        <span>AI Workforce</span>
+        <h1>Workers</h1>
+        <p>Ready AI workers connected to live NinaOS workspace data.</p>
+      </div>
+      <div class="v33HeroStats">
+        <div><b>4</b><small>Workers</small></div>
+        <div><b>1</b><small>Workspace</small></div>
+        <div><b>Live</b><small>State</small></div>
+        <div><b>SMB</b><small>Wedge</small></div>
+      </div>
+    </div>
+    <div class="v33WorkerGrid">{''.join(worker_cards)}</div>
+    <div class="v33TwoGrid">
+      {clean_snapshot_block()}
+      {clean_activity_block()}
+    </div>
+    """
+
 def page(active, content):
     return f"""
     <!doctype html>
@@ -2602,22 +3038,22 @@ def dashboard():
 
 @app.route("/workers")
 def workers():
-    content = workers_workspace_page()
+    content = v33_workers_page()
     return page("workers", content)
 
 @app.route("/tasks")
 def tasks():
-    content = task_workspace_page()
+    content = v33_tasks_page()
     return page("tasks", content)
 
 @app.route("/clients")
 def clients():
-    content = clients_workspace_page()
+    content = v33_clients_page()
     return page("clients", content)
 
 @app.route("/projects")
 def projects():
-    content = projects_workspace_page()
+    content = v33_projects_page()
     return page("projects", content)
 
 @app.route("/office-manager")
