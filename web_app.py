@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V36 CLEAN — Sprint C2 Live Data + Language Selector
+# NinaOS Web App V37 — UI Polish + Full Language Pass
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V36 CLEAN — Sprint C2 Live Data + Language Selector"
+WEB_APP_VERSION = "Web App V37 — UI Polish + Full Language Pass"
 app = Flask(__name__)
 
 
@@ -62,6 +62,32 @@ def tx(key, lang=None):
         "your_workers": {"en": "Your AI Workforce", "lv": "Tavi AI darbinieki", "ru": "Твои AI-работники"},
         "recent": {"en": "Recent Activity", "lv": "Pēdējā aktivitāte", "ru": "Последняя активность"},
         "snapshot": {"en": "Workspace Snapshot", "lv": "Darba vides pārskats", "ru": "Снимок рабочей среды"},
+        "tasks_today": {"en": "Tasks Today", "lv": "Šodienas uzdevumi", "ru": "Задачи сегодня"},
+        "followups": {"en": "Follow-ups", "lv": "Atkārtoti kontakti", "ru": "Повторные контакты"},
+        "invoices": {"en": "Invoices", "lv": "Rēķini", "ru": "Счета"},
+        "projects_kpi": {"en": "Projects", "lv": "Projekti", "ru": "Проекты"},
+        "open_work_label": {"en": "Open work", "lv": "Atvērts darbs", "ru": "Открытая работа"},
+        "need_attention": {"en": "Need attention", "lv": "Jāpievērš uzmanība", "ru": "Требует внимания"},
+        "finance": {"en": "Finance", "lv": "Finanses", "ru": "Финансы"},
+        "active": {"en": "Active", "lv": "Aktīvs", "ru": "Активно"},
+        "view_global": {"en": "View Global Network →", "lv": "Skatīt globālo tīklu →", "ru": "Смотреть глобальную сеть →"},
+        "crm": {"en": "CRM", "lv": "CRM", "ru": "CRM"},
+        "ai_workforce": {"en": "AI workforce", "lv": "AI darbinieki", "ru": "AI-команда"},
+        "estimates": {"en": "Estimates", "lv": "Tāmes", "ru": "Сметы"},
+        "in_progress": {"en": "In progress", "lv": "Procesā", "ru": "В работе"},
+        "due_sent": {"en": "Due / sent", "lv": "Termiņš / nosūtīts", "ru": "К оплате / отправлено"},
+        "tasks_sub": {"en": "Live task and follow-up queue from NinaOS workspace.", "lv": "Dzīvā uzdevumu un atkārtoto kontaktu rinda no NinaOS darba vides.", "ru": "Живая очередь задач и повторных контактов из NinaOS."},
+        "clients_sub": {"en": "CRM workspace for client work, follow-ups, estimates and invoices.", "lv": "CRM darba vide klientiem, follow-upiem, tāmēm un rēķiniem.", "ru": "CRM для клиентов, повторных контактов, смет и счетов."},
+        "projects_sub": {"en": "Project operations view with linked client work.", "lv": "Projektu darba skats ar piesaistītiem klientu darbiem.", "ru": "Проектный вид с привязанной клиентской работой."},
+        "workers_sub": {"en": "AI workforce control surface.", "lv": "AI darbinieku vadības panelis.", "ru": "Панель управления AI-работниками."},
+        "exchange_sub": {"en": "AI Workers Marketplace — preview catalog.", "lv": "AI darbinieku birža — kataloga priekšskatījums.", "ru": "Маркетплейс AI-работников — предпросмотр каталога."},
+        "calendar_sub": {"en": "Schedule and due work preview.", "lv": "Grafika un termiņu darba priekšskatījums.", "ru": "Расписание и задачи по срокам."},
+        "files_sub": {"en": "Document workspace for client and project files.", "lv": "Dokumentu darba vide klientu un projektu failiem.", "ru": "Документы клиентов и проектов."},
+        "analytics_sub": {"en": "Operational workspace analytics preview.", "lv": "Darba vides operatīvās analītikas priekšskatījums.", "ru": "Операционная аналитика рабочей среды."},
+        "open_work_action": {"en": "Open work", "lv": "Atvērt darbus", "ru": "Открыть работу"},
+        "view_details": {"en": "View Details", "lv": "Skatīt detaļas", "ru": "Подробнее"},
+        "today": {"en": "today", "lv": "šodien", "ru": "сегодня"},
+        "attention": {"en": "attention", "lv": "uzmanība", "ru": "внимание"},
     }
     return d.get(key, {}).get(lang) or d.get(key, {}).get("en") or key
 
@@ -250,7 +276,7 @@ def kpi_card(label, value, hint):
 
 def worker_card(w, marketplace=False):
     if marketplace:
-        extra = f"<div class='status'>★ 4.8 · {html_escape(w.get('category',''))}</div><b>{html_escape(w.get('price',''))}</b><br><br><span class='btn'>View Details</span>"
+        extra = f"<div class='status'>★ 4.8 · {html_escape(w.get('category',''))}</div><b>{html_escape(w.get('price',''))}</b><br><br><span class='btn'>{tx('view_details')}</span>"
     else:
         dot = "active-dot" if w["status"] == "ACTIVE" else "idle-dot"
         extra = f"<div class='status'><span class='{dot}'>●</span> {html_escape(w['status'])}</div><b>{html_escape(w['detail'])}</b>"
@@ -264,14 +290,27 @@ def activity_row(a):
 def dashboard_body(data):
     lang = current_language()
     c = data["counts"]
-    kpis = f"<div class='kpis'>{kpi_card('Tasks Today', c['tasks_today'], {'text':'Open work', 'href':'/tasks'})}{kpi_card('Follow-ups', c['followups'], {'text':'Need attention', 'href':'/tasks'})}{kpi_card('Invoices', c['invoices'], {'text':'Finance', 'href':'/clients'})}{kpi_card('Projects', c['projects'], {'text':'Active', 'href':'/projects'})}</div>"
+    kpis = (
+        "<div class='kpis'>"
+        + kpi_card(tx("tasks_today", lang), c["tasks_today"], {"text": tx("open_work_label", lang), "href": "/tasks"})
+        + kpi_card(tx("followups", lang), c["followups"], {"text": tx("need_attention", lang), "href": "/tasks"})
+        + kpi_card(tx("invoices", lang), c["invoices"], {"text": tx("finance", lang), "href": "/clients"})
+        + kpi_card(tx("projects_kpi", lang), c["projects"], {"text": tx("active", lang), "href": "/projects"})
+        + "</div>"
+    )
     workers = "".join(worker_card(w) for w in data["workers"])
     activity = "".join(activity_row(a) for a in data["activity"][:6])
-    return f"<div class='grid'><div class='hero-grid'><section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>AI WORKFORCE OPERATING SYSTEM</div></div></div><div class='bigline'>{tx('hero_line', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/tasks')}'>{tx('open_work', lang)}</a><a class='btn' href='{q('/exchange')}'>{tx('explore', lang)}</a></div><div class='trust'><span>GLOBAL</span><span>WORKFORCE</span><span>SECURE</span><span>SCALE</span></div></section><section class='card card-pad'><div class='page-title'><h1>{tx('good_morning', lang)}</h1><p>{tx('workspace_today', lang)}</p></div><br>{kpis}<br><div class='card card-pad' style='background:rgba(27,84,255,.16)'><div class='section-title'>{tx('global', lang)}</div><p class='muted'>{tx('connected', lang)}</p><a class='btn' href='{q('/exchange')}'>View Global Network →</a></div></section></div><section><div class='section-title'>{tx('your_workers', lang)}</div><div class='worker-grid'>{workers}</div></section><div class='two-col'><section class='card card-pad'><div class='section-title'>{tx('recent', lang)}</div><div class='list'>{activity}</div></section><section class='card card-pad'><div class='section-title'>{tx('snapshot', lang)}</div><div class='kpis'>{kpi_card('Clients', c['clients'], {'text':'CRM', 'href':'/clients'})}{kpi_card('Workers', c['workers'], {'text':'AI workforce', 'href':'/workers'})}{kpi_card('Estimates', c['estimates'], {'text':'In progress', 'href':'/tasks'})}{kpi_card('Invoices', c['invoices'], {'text':'Due / sent', 'href':'/clients'})}</div><br><div class='btns'><a class='btn primary' href='{q('/tasks')}'>Tasks</a><a class='btn' href='{q('/clients')}'>Clients</a><a class='btn' href='{q('/projects')}'>Projects</a><a class='btn' href='{q('/workers')}'>Workers</a></div></section></div></div>"
+    snapshot_kpis = (
+        kpi_card(tx("clients", lang), c["clients"], {"text": tx("crm", lang), "href": "/clients"})
+        + kpi_card(tx("workers", lang), c["workers"], {"text": tx("ai_workforce", lang), "href": "/workers"})
+        + kpi_card(tx("estimates", lang), c["estimates"], {"text": tx("in_progress", lang), "href": "/tasks"})
+        + kpi_card(tx("invoices", lang), c["invoices"], {"text": tx("due_sent", lang), "href": "/clients"})
+    )
+    return f"<div class='grid'><div class='hero-grid'><section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>AI WORKFORCE OPERATING SYSTEM</div></div></div><div class='bigline'>{tx('hero_line', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/tasks')}'>{tx('open_work', lang)}</a><a class='btn' href='{q('/exchange')}'>{tx('explore', lang)}</a></div><div class='trust'><span>GLOBAL</span><span>WORKFORCE</span><span>SECURE</span><span>SCALE</span></div></section><section class='card card-pad'><div class='page-title'><h1>{tx('good_morning', lang)}</h1><p>{tx('workspace_today', lang)}</p></div><br>{kpis}<br><div class='card card-pad' style='background:rgba(27,84,255,.16)'><div class='section-title'>{tx('global', lang)}</div><p class='muted'>{tx('connected', lang)}</p><a class='btn' href='{q('/exchange')}'>{tx('view_global', lang)}</a></div></section></div><section><div class='section-title'>{tx('your_workers', lang)}</div><div class='worker-grid'>{workers}</div></section><div class='two-col'><section class='card card-pad'><div class='section-title'>{tx('recent', lang)}</div><div class='list'>{activity}</div></section><section class='card card-pad'><div class='section-title'>{tx('snapshot', lang)}</div><div class='kpis'>{snapshot_kpis}</div><br><div class='btns'><a class='btn primary' href='{q('/tasks')}'>{tx('tasks', lang)}</a><a class='btn' href='{q('/clients')}'>{tx('clients', lang)}</a><a class='btn' href='{q('/projects')}'>{tx('projects', lang)}</a><a class='btn' href='{q('/workers')}'>{tx('workers', lang)}</a></div></section></div></div>"
 
 
 def work_page_header(title, subtitle):
-    return f"<div class='grid'><section class='card card-pad'><div class='page-title'><h1>{html_escape(title)}</h1><p>{html_escape(subtitle)}</p></div><br><div class='btns'><a class='btn primary' href='{q('/dashboard')}'>Dashboard</a><a class='btn' href='{q('/tasks')}'>Tasks</a><a class='btn' href='{q('/clients')}'>Clients</a><a class='btn' href='{q('/workers')}'>Workers</a><a class='btn' href='{q('/exchange')}'>Exchange</a></div></section></div><br>"
+    return f"<div class='grid'><section class='card card-pad'><div class='page-title'><h1>{html_escape(title)}</h1><p>{html_escape(subtitle)}</p></div><br><div class='btns'><a class='btn primary' href='{q('/dashboard')}'>{tx('dashboard')}</a><a class='btn' href='{q('/tasks')}'>{tx('tasks')}</a><a class='btn' href='{q('/clients')}'>{tx('clients')}</a><a class='btn' href='{q('/workers')}'>{tx('workers')}</a><a class='btn' href='{q('/exchange')}'>{tx('exchange')}</a></div></section></div><br>"
 
 
 def tasks_body(data):
@@ -280,14 +319,14 @@ def tasks_body(data):
         meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
         client = meta.get("client_name") or obj.get("client_id") or "Workspace"
         rows += f"<div class='row'><div><b>{html_escape(obj.get('title'))}</b><span class='muted'>{html_escape(client)} · {html_escape(obj.get('object_type'))}</span></div><span class='pill'>{html_escape(obj.get('status'))} · {html_escape(obj.get('priority'))}</span></div>"
-    return work_page_header(tx("tasks"), "Live task and follow-up queue from NinaOS workspace.") + f"<section class='card card-pad'><div class='list'>{rows}</div></section>"
+    return work_page_header(tx("tasks"), tx("tasks_sub")) + f"<section class='card card-pad'><div class='list'>{rows}</div></section>"
 
 
 def clients_body(data):
     rows = ""
     for client in data["clients"]:
-        rows += f"<div class='row'><div><b>{html_escape(client.get('name'))}</b><span class='muted'>follow-ups: {client.get('followups',0)} · estimates: {client.get('estimates',0)} · invoices: {client.get('invoices',0)} · projects: {client.get('projects',0)}</span></div><a class='pill' href='{q('/tasks')}'>Open work</a></div>"
-    return work_page_header(tx("clients"), "CRM workspace for client work, follow-ups, estimates and invoices.") + f"<section class='card card-pad'><div class='list'>{rows}</div></section>"
+        rows += f"<div class='row'><div><b>{html_escape(client.get('name'))}</b><span class='muted'>follow-ups: {client.get('followups',0)} · estimates: {client.get('estimates',0)} · invoices: {client.get('invoices',0)} · projects: {client.get('projects',0)}</span></div><a class='pill' href='{q('/tasks')}'>{tx('open_work_action')}</a></div>"
+    return work_page_header(tx("clients"), tx("clients_sub")) + f"<section class='card card-pad'><div class='list'>{rows}</div></section>"
 
 
 def projects_body(data):
@@ -296,11 +335,11 @@ def projects_body(data):
     for p in items:
         meta = p.get("metadata", {}) if isinstance(p.get("metadata"), dict) else {}
         rows += f"<div class='row'><div><b>{html_escape(p.get('title'))}</b><span class='muted'>{html_escape(meta.get('client_name','Workspace'))}</span></div><span class='pill'>{html_escape(p.get('status'))} · {html_escape(p.get('priority','normal'))}</span></div>"
-    return work_page_header(tx("projects"), "Project operations view with linked client work.") + f"<section class='card card-pad'><div class='list'>{rows}</div></section>"
+    return work_page_header(tx("projects"), tx("projects_sub")) + f"<section class='card card-pad'><div class='list'>{rows}</div></section>"
 
 
 def workers_body(data):
-    return work_page_header(tx("workers"), "AI workforce control surface.") + f"<div class='worker-grid'>{''.join(worker_card(w) for w in data['workers'])}</div>"
+    return work_page_header(tx("workers"), tx("workers_sub")) + f"<div class='worker-grid'>{''.join(worker_card(w) for w in data['workers'])}</div>"
 
 
 def exchange_body(data):
@@ -312,7 +351,7 @@ def exchange_body(data):
         {"name": "Nina Marketing", "role": "AI Marketing Specialist", "price": "€99/month", "category": "Marketing", "tone": "purple"},
         {"name": "Nina HR", "role": "AI HR Assistant", "price": "€89/month", "category": "HR", "tone": "orange"},
     ]
-    return work_page_header(tx("exchange"), "AI Workers Marketplace — preview catalog.") + f"<div class='worker-grid'>{''.join(worker_card(w, marketplace=True) for w in catalog)}</div>"
+    return work_page_header(tx("exchange"), tx("exchange_sub")) + f"<div class='worker-grid'>{''.join(worker_card(w, marketplace=True) for w in catalog)}</div>"
 
 
 def simple_module_body(title, subtitle, blocks):
@@ -357,13 +396,13 @@ def projects():
 
 @app.route("/calendar")
 def calendar():
-    body = simple_module_body(tx("calendar"), "Schedule and due work preview.", [("Today", "Workspace priorities and follow-ups", "live"), ("Follow-up Friday", "Ask Andris about reply", "scheduled"), ("Upcoming", "Calendar integration placeholder", "next")])
+    body = simple_module_body(tx("calendar"), tx("calendar_sub"), [("Today", "Workspace priorities and follow-ups", "live"), ("Follow-up Friday", "Ask Andris about reply", "scheduled"), ("Upcoming", "Calendar integration placeholder", "next")])
     return Response(page(tx("calendar"), body, active="calendar"), mimetype="text/html")
 
 
 @app.route("/files")
 def files():
-    body = simple_module_body(tx("files"), "Document workspace for client and project files.", [("Demo client package", "Ready for organization", "document"), ("Invoice admin record", "Linked to workspace", "finance"), ("Estimate draft", "Linked to Demo Client", "estimate")])
+    body = simple_module_body(tx("files"), tx("files_sub"), [("Demo client package", "Ready for organization", "document"), ("Invoice admin record", "Linked to workspace", "finance"), ("Estimate draft", "Linked to Demo Client", "estimate")])
     return Response(page(tx("files"), body, active="files"), mimetype="text/html")
 
 
@@ -371,8 +410,15 @@ def files():
 def analytics():
     data = load_workspace_data()
     c = data["counts"]
-    body = work_page_header(tx("analytics"), "Operational workspace analytics preview.")
-    body += f"<section class='card card-pad'><div class='kpis'>{kpi_card('Tasks', c['tasks_today'], {'text':'today', 'href':'/tasks'})}{kpi_card('Follow-ups', c['followups'], {'text':'attention', 'href':'/tasks'})}{kpi_card('Clients', c['clients'], {'text':'CRM', 'href':'/clients'})}{kpi_card('Workers', c['workers'], {'text':'active', 'href':'/workers'})}</div></section>"
+    body = work_page_header(tx("analytics"), tx("analytics_sub"))
+    body += (
+        "<section class='card card-pad'><div class='kpis'>"
+        + kpi_card(tx("tasks"), c["tasks_today"], {"text": tx("today"), "href": "/tasks"})
+        + kpi_card(tx("followups"), c["followups"], {"text": tx("attention"), "href": "/tasks"})
+        + kpi_card(tx("clients"), c["clients"], {"text": tx("crm"), "href": "/clients"})
+        + kpi_card(tx("workers"), c["workers"], {"text": tx("active"), "href": "/workers"})
+        + "</div></section>"
+    )
     return Response(page(tx("analytics"), body, active="analytics"), mimetype="text/html")
 
 
