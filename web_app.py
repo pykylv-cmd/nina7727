@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V37 — UI Polish + Full Language Pass
+# NinaOS Web App V38 — Office Manager Page + Worker Detail Screen
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V37 — UI Polish + Full Language Pass"
+WEB_APP_VERSION = "Web App V38 — Office Manager Page + Worker Detail Screen"
 app = Flask(__name__)
 
 
@@ -88,6 +88,23 @@ def tx(key, lang=None):
         "view_details": {"en": "View Details", "lv": "Skatīt detaļas", "ru": "Подробнее"},
         "today": {"en": "today", "lv": "šodien", "ru": "сегодня"},
         "attention": {"en": "attention", "lv": "uzmanība", "ru": "внимание"},
+        "office_manager": {"en": "Nina Office Manager", "lv": "Nina Office Manager", "ru": "Nina Office Manager"},
+        "worker_detail_sub": {"en": "Main desktop control center for the first ready AI worker.", "lv": "Galvenais vadības centrs pirmajam gatavajam AI darbiniekam.", "ru": "Главный центр управления первым готовым AI-работником."},
+        "role_stack": {"en": "Role Stack", "lv": "Lomu steks", "ru": "Стек ролей"},
+        "approval_required": {"en": "Approval Required", "lv": "Vajadzīgs apstiprinājums", "ru": "Требуется подтверждение"},
+        "allowed_tools": {"en": "Allowed Tools", "lv": "Atļautie rīki", "ru": "Разрешённые инструменты"},
+        "memory_scopes": {"en": "Memory Scopes", "lv": "Atmiņas zonas", "ru": "Области памяти"},
+        "permissions": {"en": "Permissions", "lv": "Atļaujas", "ru": "Права"},
+        "worker_summary": {"en": "Worker Summary", "lv": "Darbinieka pārskats", "ru": "Сводка работника"},
+        "linked_work": {"en": "Linked Work", "lv": "Piesaistītie darbi", "ru": "Связанная работа"},
+        "quick_actions": {"en": "Quick Actions", "lv": "Ātrās darbības", "ru": "Быстрые действия"},
+        "ask_nina": {"en": "Ask Nina", "lv": "Jautāt Ninai", "ru": "Спросить Нину"},
+        "new_task": {"en": "New Task", "lv": "Jauns uzdevums", "ru": "Новая задача"},
+        "followup_client": {"en": "Follow-up Client", "lv": "Sazināties ar klientu", "ru": "Повторно связаться"},
+        "create_estimate": {"en": "Create Estimate Draft", "lv": "Izveidot tāmes melnrakstu", "ru": "Создать черновик сметы"},
+        "create_invoice": {"en": "Create Invoice Admin Record", "lv": "Izveidot rēķina ierakstu", "ru": "Создать запись счёта"},
+        "upload_document": {"en": "Upload Document", "lv": "Augšupielādēt dokumentu", "ru": "Загрузить документ"},
+        "open_office_manager": {"en": "Open Office Manager", "lv": "Atvērt Office Manager", "ru": "Открыть Office Manager"},
     }
     return d.get(key, {}).get(lang) or d.get(key, {}).get("en") or key
 
@@ -180,7 +197,7 @@ def load_workspace_data():
     workers = [
         {"name": "Nina Sales", "role": "AI Sales Executive", "status": "ACTIVE", "detail": "1 follow-up to handle", "tone": "purple", "price": "€99/month", "category": "Sales & Growth"},
         {"name": "Nina Estimator", "role": "AI Estimator", "status": "ACTIVE", "detail": "1 estimate in progress", "tone": "blue", "price": "€119/month", "category": "Construction"},
-        {"name": "Nina Office Manager", "role": "AI Office Manager", "status": "ACTIVE", "detail": "1 task · 1 active project", "tone": "green", "price": "€89/month", "category": "Operations"},
+        {"name": "Nina Office Manager", "role": "AI Office Manager", "status": "ACTIVE", "detail": "1 task · 1 active project", "tone": "green", "price": "€89/month", "category": "Operations", "route": "/workers/office-manager"},
         {"name": "Nina Support", "role": "AI Support Specialist", "status": "IDLE", "detail": "No support queue yet", "tone": "orange", "price": "€79/month", "category": "Support"},
     ]
     objects = []
@@ -280,7 +297,7 @@ def worker_card(w, marketplace=False):
     else:
         dot = "active-dot" if w["status"] == "ACTIVE" else "idle-dot"
         extra = f"<div class='status'><span class='{dot}'>●</span> {html_escape(w['status'])}</div><b>{html_escape(w['detail'])}</b>"
-    return f"<a class='worker-card' href='/workers?lang={current_language()}'><div class='worker-top tone-{w.get('tone','blue')}'><div class='worker-avatar'></div></div><div class='worker-body'><h3>{html_escape(w['name'])}</h3><div class='muted'>{html_escape(w['role'])}</div>{extra}</div></a>"
+    return f"<a class='worker-card' href='{w.get('route','/workers')}?lang={current_language()}'><div class='worker-top tone-{w.get('tone','blue')}'><div class='worker-avatar'></div></div><div class='worker-body'><h3>{html_escape(w['name'])}</h3><div class='muted'>{html_escape(w['role'])}</div>{extra}</div></a>"
 
 
 def activity_row(a):
@@ -339,7 +356,11 @@ def projects_body(data):
 
 
 def workers_body(data):
-    return work_page_header(tx("workers"), tx("workers_sub")) + f"<div class='worker-grid'>{''.join(worker_card(w) for w in data['workers'])}</div>"
+    lang = current_language()
+    cards = ''.join(worker_card(w) for w in data['workers'])
+    top = work_page_header(tx("workers"), tx("workers_sub"))
+    top += f"<section class='card card-pad'><div class='section-title'>{tx('quick_actions', lang)}</div><div class='btns'><a class='btn primary' href='{q('/workers/office-manager')}'>{tx('open_office_manager', lang)}</a><a class='btn' href='{q('/exchange')}'>{tx('explore', lang)}</a></div></section><br>"
+    return top + f"<div class='worker-grid'>{cards}</div>"
 
 
 def exchange_body(data):
@@ -359,6 +380,74 @@ def simple_module_body(title, subtitle, blocks):
     return work_page_header(title, subtitle) + f"<section class='card card-pad'><div class='list'>{rows}</div></section>"
 
 
+
+def office_manager_body(data):
+    lang = current_language()
+    tasks = [o for o in data["tasks"] if o.get("object_type") in ["task", "followup_task"]]
+    invoices = [o for o in data["tasks"] if o.get("object_type") == "invoice"]
+    estimates = [o for o in data["tasks"] if o.get("object_type") == "estimate"]
+
+    def mini_list(items, empty_text):
+        if not items:
+            return f"<div class='row'><div><b>{html_escape(empty_text)}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
+        rows = ""
+        for item in items[:5]:
+            meta = item.get("metadata", {}) if isinstance(item.get("metadata"), dict) else {}
+            client = meta.get("client_name") or item.get("client_id") or "Workspace"
+            rows += f"<div class='row'><div><b>{html_escape(item.get('title'))}</b><span class='muted'>{html_escape(client)} · {html_escape(item.get('object_type'))}</span></div><span class='pill'>{html_escape(item.get('status'))}</span></div>"
+        return rows
+
+    role_rows = [
+        ("Office Manager", "Coordinates daily workspace operations", "active"),
+        ("Task Router", "Organizes tasks, follow-ups and due work", "active"),
+        ("Client Admin", "Keeps client work visible in one place", "active"),
+        ("Finance Admin", "Tracks invoice and estimate admin records", "preview"),
+    ]
+    role_html = "".join(f"<div class='row'><div><b>{html_escape(a)}</b><span class='muted'>{html_escape(b)}</span></div><span class='pill'>{html_escape(c)}</span></div>" for a,b,c in role_rows)
+
+    right_blocks = "".join([
+        f"<div class='row'><div><b>{tx('approval_required', lang)}</b><span class='muted'>No approval queue yet</span></div><span class='pill'>0</span></div>",
+        f"<div class='row'><div><b>{tx('allowed_tools', lang)}</b><span class='muted'>tasks · clients · files · estimates · invoices</span></div><span class='pill'>safe</span></div>",
+        f"<div class='row'><div><b>{tx('memory_scopes', lang)}</b><span class='muted'>workspace · client · project</span></div><span class='pill'>read</span></div>",
+        f"<div class='row'><div><b>{tx('permissions', lang)}</b><span class='muted'>write_task · write_client · write_document</span></div><span class='pill'>limited</span></div>",
+    ])
+
+    quick = "".join([
+        f"<a class='btn primary' href='{q('/tasks')}'>{tx('ask_nina', lang)}</a>",
+        f"<a class='btn' href='{q('/tasks')}'>{tx('new_task', lang)}</a>",
+        f"<a class='btn' href='{q('/clients')}'>{tx('followup_client', lang)}</a>",
+        f"<a class='btn' href='{q('/tasks')}'>{tx('create_estimate', lang)}</a>",
+        f"<a class='btn' href='{q('/clients')}'>{tx('create_invoice', lang)}</a>",
+        f"<a class='btn' href='{q('/files')}'>{tx('upload_document', lang)}</a>",
+    ])
+
+    return (
+        work_page_header(tx("office_manager", lang), tx("worker_detail_sub", lang))
+        + "<div class='hero-grid'>"
+        + "<section class='card card-pad'>"
+        + f"<div class='section-title'>{tx('worker_summary', lang)}</div>"
+        + "<div class='row'><div><b>Nina Office Manager SMB</b><span class='muted'>AI Office Manager · ACTIVE · Operations</span></div><span class='pill'>ready</span></div>"
+        + "<br><div class='kpis'>"
+        + kpi_card(tx("tasks_today", lang), data["counts"]["tasks_today"], {"text": tx("open_work_label", lang), "href": "/tasks"})
+        + kpi_card(tx("followups", lang), data["counts"]["followups"], {"text": tx("need_attention", lang), "href": "/tasks"})
+        + kpi_card(tx("invoices", lang), data["counts"]["invoices"], {"text": tx("finance", lang), "href": "/clients"})
+        + kpi_card(tx("projects_kpi", lang), data["counts"]["projects"], {"text": tx("active", lang), "href": "/projects"})
+        + "</div><br>"
+        + f"<div class='section-title'>{tx('role_stack', lang)}</div><div class='list'>{role_html}</div>"
+        + "</section>"
+        + "<section class='card card-pad'>"
+        + f"<div class='section-title'>{tx('quick_actions', lang)}</div><div class='btns'>{quick}</div><br>"
+        + f"<div class='section-title'>{tx('approval_required', lang)}</div><div class='list'>{right_blocks}</div>"
+        + "</section>"
+        + "</div><br>"
+        + "<div class='two-col'>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('linked_work', lang)}</div><div class='list'>{mini_list(tasks, 'No task queue yet')}</div></section>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('estimates', lang)} / {tx('invoices', lang)}</div><div class='list'>{mini_list(estimates + invoices, 'No finance admin queue yet')}</div></section>"
+        + "</div>"
+    )
+
+
+
 @app.route("/")
 def home():
     return redirect(q("/dashboard"))
@@ -374,6 +463,12 @@ def dashboard():
 def workers():
     data = load_workspace_data()
     return Response(page(tx("workers"), workers_body(data), active="workers"), mimetype="text/html")
+
+
+@app.route("/workers/office-manager")
+def office_manager():
+    data = load_workspace_data()
+    return Response(page(tx("office_manager"), office_manager_body(data), active="workers"), mimetype="text/html")
 
 
 @app.route("/tasks")
