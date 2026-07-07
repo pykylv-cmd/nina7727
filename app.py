@@ -12508,8 +12508,8 @@ def nina_progress_answer(user_id):
 # Reply Builder ir centrālais NinaOS komunikācijas slānis.
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
-REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V116.0 + Core 2.5.2 — Sprint B.2 Safe Reconnect"
+REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Client Work Activation"
+APP_VERSION = "V117.0 + Core 2.5.2 — Client Work Activation"
 
 
 def rb_remove_version_lines(text):
@@ -14876,6 +14876,59 @@ def nina_client_work_view_answer(user_id, user_text):
     return build_client_work_view(client_name, tasks)
 
 
+def nina_client_direct_command_v117(lower):
+    lower = (lower or "").strip().lower()
+    if lower.startswith("kas notiek ar ") or lower.startswith("kas ar "):
+        return True
+
+    direct = [
+        "andra pipeline", "andra statuss", "andris pipeline", "andris statuss",
+        "andri pipeline", "andri statuss",
+        "kas ar andri tālāk", "kas ar andri talak",
+        "andris tālāk", "andris talak", "andri tālāk", "andri talak",
+    ]
+    if lower in direct:
+        return True
+
+    if re.match(r"^(andris|andra|andri|jānis|janis|jāņa|jana|jāni|jani|anna|annas|annu)\s+(pipeline|statuss|tālāk|talak)$", lower):
+        return True
+
+    return False
+
+
+def nina_client_work_view_answer_v117(user_id, user_text):
+    """
+    V117.0: explicit client route for:
+    - kas notiek ar Andri
+    - Andra pipeline
+    - Andra statuss
+    - kas ar Andri tālāk
+    """
+    client_name = extract_client_from_query(user_text)
+
+    lower = (user_text or "").strip().lower()
+    if not client_name:
+        if any(x in lower for x in ["andra", "andris", "andri"]):
+            client_name = "Andris"
+        elif any(x in lower for x in ["jāņa", "jana", "jānis", "janis", "jāni", "jani"]):
+            client_name = "Jānis"
+        elif any(x in lower for x in ["anna", "annas", "annu"]):
+            client_name = "Anna"
+
+    if not client_name:
+        return (
+            "👥 Client Work View\n\n"
+            "Pasaki klienta vārdu, piemēram:\n"
+            "kas notiek ar Andri\n"
+            "Andra pipeline\n"
+            "Andra statuss\n\n"
+            "Versija: Client Work Activation V117.0"
+        )
+
+    tasks = nina_clean_real_tasks(user_id, limit=200)
+    return build_client_work_view(client_name, tasks)
+
+
 # =========================
 # NinaOS Sales Pipeline / Client CRM Bridge — V1.0
 # =========================
@@ -15390,6 +15443,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, nina_public_answer(nina_sales_pipeline_status_answer()))
             return
 
+        if nina_client_direct_command_v117(lower):
+            await safe_reply_text(update, nina_public_append_hint(nina_client_work_view_answer_v117(user_id, user_text), "client_view_v117"))
+            return
+
         if lower in ["klienti", "klientu pārskats", "klientu parskats", "klientu darbi", "pipeline", "klientu statuss", "parādi manus klientus", "paradi manus klientus", "crm", "client crm"]:
             await safe_reply_text(update, nina_public_append_hint(nina_sales_pipeline_answer(user_id), "pipeline"))
             return
@@ -15415,7 +15472,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if lower.startswith("kas notiek ar ") or lower.startswith("kas ar "):
-            await safe_reply_text(update, nina_public_append_hint(nina_client_work_view_answer(user_id, user_text), "client_view"))
+            await safe_reply_text(update, nina_public_append_hint(nina_client_work_view_answer_v117(user_id, user_text), "client_view_v117"))
             return
 
 
