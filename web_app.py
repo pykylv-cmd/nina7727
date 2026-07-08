@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V41 — Real Actions UI
+# NinaOS Web App V42 CLEAN MERGE — V40 Console + V41 Actions
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V41 — Real Actions UI"
+WEB_APP_VERSION = "Web App V42 CLEAN MERGE — V40 Console + V41 Actions"
 app = Flask(__name__)
 
 
@@ -150,7 +150,6 @@ def tx(key, lang=None):
         "normal": {"en": "Normal", "lv": "Normāla", "ru": "Обычный"},
         "high": {"en": "High", "lv": "Augsta", "ru": "Высокий"},
         "submit_preview": {"en": "Save Preview", "lv": "Saglabāt priekšskatījumu", "ru": "Сохранить предпросмотр"},
-        "action_preview": {"en": "Action Preview", "lv": "Darbības priekšskatījums", "ru": "Предпросмотр действия"},
         "safe_note": {"en": "Safe UI mode: forms create a web preview first. Database write comes in the next sprint.", "lv": "Drošais UI režīms: formas vispirms izveido web priekšskatījumu. Datu bāzes ieraksts nāks nākamajā sprintā.", "ru": "Безопасный режим UI: формы сначала создают предпросмотр. Запись в базу — в следующем спринте."},
         "created_preview": {"en": "Preview created", "lv": "Priekšskatījums izveidots", "ru": "Предпросмотр создан"},
         "form_type": {"en": "Form type", "lv": "Formas tips", "ru": "Тип формы"},
@@ -491,7 +490,6 @@ def action_preview_html(preview):
     if not preview:
         return ""
     lang = current_language()
-    rows = ""
     labels = [
         ("form_type", tx("form_type", lang)),
         ("task_title", tx("task_title", lang)),
@@ -502,6 +500,7 @@ def action_preview_html(preview):
         ("priority", tx("priority", lang)),
         ("notes", tx("notes", lang)),
     ]
+    rows = ""
     for key, label in labels:
         value = preview.get(key) or "—"
         rows += f"<div class='row'><div><b>{html_escape(label)}</b><span class='muted'>{html_escape(value)}</span></div><span class='pill'>preview</span></div>"
@@ -565,7 +564,6 @@ def action_form_card(form_type, title, hint, defaults=None):
 def action_center_body(data):
     lang = current_language()
     preview = get_action_preview()
-    preview_html = action_preview_html(preview)
     forms = (
         "<div class='stack-grid'>"
         + action_form_card("new_task", tx("new_task_form", lang), tx("create_task_hint", lang))
@@ -576,10 +574,11 @@ def action_center_body(data):
     )
     return (
         work_page_header(tx("action_center", lang), tx("action_center_sub", lang))
-        + preview_html
+        + action_preview_html(preview)
         + "<div class='console-nav'>"
         + f"<a class='primary' href='{q('/office-manager/actions')}'>{tx('action_center', lang)}</a>"
         + f"<a href='{q('/office-manager')}'>{tx('work_console', lang)}</a>"
+        + f"<a href='{q('/office-manager/panels')}'>{tx('action_panels', lang)}</a>"
         + f"<a href='{q('/tasks')}'>{tx('tasks', lang)}</a>"
         + f"<a href='{q('/clients')}'>{tx('clients', lang)}</a>"
         + "</div>"
@@ -620,7 +619,7 @@ def office_manager_body(data):
     ])
 
     quick = "".join([
-        f"<a class='btn primary' href='{q('/office-manager/actions')}'>{tx('action_panels', lang)}</a>",
+        f"<a class='btn primary' href='{q('/office-manager/actions')}'>{tx('action_center', lang)}</a>",
         f"<a class='btn' href='{q('/tasks')}'>{tx('new_task', lang)}</a>",
         f"<a class='btn' href='{q('/clients')}'>{tx('followup_client', lang)}</a>",
         f"<a class='btn' href='{q('/tasks')}'>{tx('create_estimate', lang)}</a>",
