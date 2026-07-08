@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V43.1 — Workspace Preview Queue Polish
+# NinaOS Web App V43.2 — Preview Approval Layer
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -7,10 +7,10 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V43.1 — Workspace Preview Queue Polish"
+WEB_APP_VERSION = "Web App V43.2 — Preview Approval Layer"
 app = Flask(__name__)
 
-# V43.1 safe in-memory workspace preview store.
+# V43.2 safe in-memory workspace preview store with approval states.
 # This does NOT write to Postgres yet and does NOT touch Telegram app.py.
 WORKSPACE_ACTION_PREVIEWS = []
 
@@ -154,7 +154,7 @@ def tx(key, lang=None):
         "normal": {"en": "Normal", "lv": "Normāla", "ru": "Обычный"},
         "high": {"en": "High", "lv": "Augsta", "ru": "Высокий"},
         "submit_preview": {"en": "Save Preview", "lv": "Saglabāt priekšskatījumu", "ru": "Сохранить предпросмотр"},
-        "safe_note": {"en": "V43.1 safe mode: forms create workspace preview objects first. Postgres write bridge comes next.", "lv": "V43.1 drošais režīms: formas vispirms izveido darba objektus priekšskatījumā. Postgres rakstīšanas bridge nāks nākamais.", "ru": "V43.1 безопасный режим: формы сначала создают рабочие объекты предпросмотра. Запись в Postgres — следующий bridge."},
+        "safe_note": {"en": "V43.2 safe mode: forms create preview objects and owner approval states first. Postgres write bridge comes next.", "lv": "V43.2 drošais režīms: formas vispirms izveido priekšskatījuma objektus un īpašnieka apstiprinājuma statusus. Postgres rakstīšanas bridge nāks nākamais.", "ru": "V43.2 безопасный режим: формы сначала создают объекты предпросмотра и статусы подтверждения владельца. Запись в Postgres — следующий bridge."},
         "created_preview": {"en": "Preview created", "lv": "Priekšskatījums izveidots", "ru": "Предпросмотр создан"},
         "form_type": {"en": "Form type", "lv": "Formas tips", "ru": "Тип формы"},
         "new_task_form": {"en": "New Task", "lv": "Jauns uzdevums", "ru": "Новая задача"},
@@ -173,6 +173,16 @@ def tx(key, lang=None):
         "source_database": {"en": "database", "lv": "datu bāze", "ru": "база данных"},
         "source_demo": {"en": "demo data", "lv": "demo dati", "ru": "демо данные"},
         "source_workspace": {"en": "workspace", "lv": "darba vide", "ru": "рабочее пространство"},
+        "preview_approval_layer": {"en": "Preview Approval Layer", "lv": "Priekšskatījumu apstiprināšanas slānis", "ru": "Слой подтверждения предпросмотра"},
+        "approval_state": {"en": "Approval state", "lv": "Apstiprinājuma statuss", "ru": "Статус подтверждения"},
+        "pending_approval": {"en": "pending approval", "lv": "gaida apstiprinājumu", "ru": "ожидает подтверждения"},
+        "approved_preview": {"en": "approved preview", "lv": "apstiprināts preview", "ru": "предпросмотр подтверждён"},
+        "held_preview": {"en": "held preview", "lv": "aizturēts preview", "ru": "предпросмотр удержан"},
+        "rejected_preview": {"en": "rejected preview", "lv": "noraidīts preview", "ru": "предпросмотр отклонён"},
+        "approve": {"en": "Approve", "lv": "Apstiprināt", "ru": "Подтвердить"},
+        "hold": {"en": "Hold", "lv": "Aizturēt", "ru": "Удержать"},
+        "reject": {"en": "Reject", "lv": "Noraidīt", "ru": "Отклонить"},
+        "approved_safe_note": {"en": "Approved in safe preview only. DB write is still disabled.", "lv": "Apstiprināts tikai drošajā priekšskatījumā. DB rakstīšana vēl ir izslēgta.", "ru": "Подтверждено только в безопасном предпросмотре. Запись в DB всё ещё отключена."},
     }
     return d.get(key, {}).get(lang) or d.get(key, {}).get("en") or key
 
@@ -305,6 +315,8 @@ def normalize_action_to_work_object(action):
         "source": "web_action_preview",
         "safe_mode": True,
         "db_write": False,
+        "approval_state": "pending_approval",
+        "approval_updated_at": "",
         "created_at": datetime.utcnow().isoformat() + "Z",
     }
 
@@ -326,6 +338,61 @@ def create_workspace_action_preview(action):
     WORKSPACE_ACTION_PREVIEWS.insert(0, obj)
     del WORKSPACE_ACTION_PREVIEWS[25:]
     return obj
+
+
+def is_preview_object(obj):
+    meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
+    return meta.get("source") in ["web_action_preview", "web_preview"]
+
+
+def approval_label_from_state(state, lang=None):
+    state = state or "pending_approval"
+    key_map = {
+        "pending_approval": "pending_approval",
+        "approved": "approved_preview",
+        "hold": "held_preview",
+        "rejected": "rejected_preview",
+    }
+    return tx(key_map.get(state, "pending_approval"), lang or current_language())
+
+
+def apply_preview_approval(object_id, decision):
+    decision = (decision or "").strip().lower()
+    if decision not in ["approve", "hold", "reject"]:
+        return None
+    state_map = {"approve": "approved", "hold": "hold", "reject": "rejected"}
+    for obj in WORKSPACE_ACTION_PREVIEWS:
+        if obj.get("object_id") == object_id:
+            meta = obj.setdefault("metadata", {})
+            meta["approval_state"] = state_map[decision]
+            meta["approval_updated_at"] = datetime.utcnow().isoformat() + "Z"
+            meta["db_write"] = False
+            return obj
+    return None
+
+
+@app.before_request
+def handle_preview_approval_query():
+    object_id = request.args.get("preview_object_id") or ""
+    decision = request.args.get("preview_decision") or ""
+    if object_id and decision:
+        apply_preview_approval(object_id, decision)
+
+
+def preview_approval_controls(obj):
+    if not is_preview_object(obj):
+        return ""
+    lang = current_language()
+    object_id = html_escape(obj.get("object_id"))
+    path = request.path or "/tasks"
+    base = f"{path}?lang={lang}&preview_object_id={object_id}"
+    return (
+        "<div class='btns' style='justify-content:flex-start;margin-top:10px'>"
+        f"<a class='btn primary' href='{base}&preview_decision=approve'>{tx('approve', lang)}</a>"
+        f"<a class='btn' href='{base}&preview_decision=hold'>{tx('hold', lang)}</a>"
+        f"<a class='btn' href='{base}&preview_decision=reject'>{tx('reject', lang)}</a>"
+        "</div>"
+    )
 
 
 def load_workspace_data():
@@ -367,7 +434,7 @@ def load_workspace_data():
         ]
 
     activity = [
-        {"title": "V43.1 workspace preview queue", "body": "Preview objects are visible in Tasks and Office Manager queues.", "kind": "work"},
+        {"title": "V43.2 preview approval layer", "body": "Preview objects can now be approved, held, or rejected in safe mode.", "kind": "work"},
         {"title": "Web service online", "body": "NinaOS web runtime is separated from Telegram runtime.", "kind": "info"},
         {"title": "Workspace loaded", "body": "V36 clean workspace data layer is active.", "kind": "info"},
         {"title": "Client follow-up scheduled", "body": "Ask Andris about reply.", "kind": "work"},
@@ -481,7 +548,7 @@ def object_source_label(obj, lang=None):
     return tx("source_workspace", lang)
 
 
-def work_object_rows(items, empty_text=None, limit=None, show_source=True):
+def work_object_rows(items, empty_text=None, limit=None, show_source=True, show_approval=True):
     lang = current_language()
     if limit:
         items = items[:limit]
@@ -494,10 +561,18 @@ def work_object_rows(items, empty_text=None, limit=None, show_source=True):
         client = meta.get("client_name") or obj.get("client_id") or "Workspace"
         source = object_source_label(obj, lang)
         source_part = f" · {html_escape(source)}" if show_source else ""
-        badge = f"{html_escape(obj.get('status'))} · {html_escape(obj.get('priority', 'normal'))}"
-        rows += f"<div class='row'><div><b>{html_escape(obj.get('title'))}</b><span class='muted'>{html_escape(client)} · {html_escape(obj.get('object_type'))}{source_part}</span></div><span class='pill'>{badge}</span></div>"
+        approval_state = meta.get("approval_state") or ("pending_approval" if is_preview_object(obj) else "")
+        approval_part = f" · {html_escape(approval_label_from_state(approval_state, lang))}" if show_approval and is_preview_object(obj) else ""
+        badge = f"{html_escape(obj.get('status'))} · {html_escape(obj.get('priority', 'normal'))}{approval_part}"
+        rows += (
+            "<div class='row'><div>"
+            f"<b>{html_escape(obj.get('title'))}</b>"
+            f"<span class='muted'>{html_escape(client)} · {html_escape(obj.get('object_type'))}{source_part}</span>"
+            f"{preview_approval_controls(obj)}"
+            "</div>"
+            f"<span class='pill'>{badge}</span></div>"
+        )
     return rows
-
 
 
 def tasks_body(data):
@@ -633,8 +708,10 @@ def action_preview_html(preview):
         rows += f"<div class='row'><div><b>{html_escape(label)}</b><span class='muted'>{html_escape(value)}</span></div><span class='pill'>preview</span></div>"
     obj = preview.get("workspace_object") or {}
     if obj:
-        rows += f"<div class='row'><div><b>{tx('object_id', lang)}</b><span class='muted'>{html_escape(obj.get('object_id'))}</span></div><span class='pill'>V43</span></div>"
+        rows += f"<div class='row'><div><b>{tx('object_id', lang)}</b><span class='muted'>{html_escape(obj.get('object_id'))}</span></div><span class='pill'>V43.2</span></div>"
         rows += f"<div class='row'><div><b>{tx('object_type', lang)}</b><span class='muted'>{html_escape(obj.get('object_type'))}</span></div><span class='pill'>{html_escape(obj.get('status'))}</span></div>"
+        meta = obj.get('metadata', {}) if isinstance(obj.get('metadata'), dict) else {}
+        rows += f"<div class='row'><div><b>{tx('approval_state', lang)}</b><span class='muted'>{html_escape(approval_label_from_state(meta.get('approval_state'), lang))}</span></div><span class='pill'>safe</span></div>"
     return f"<div class='preview-box'><b>{tx('saved_to_workspace', lang)}</b><div class='list'>{rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></div>"
 
 
@@ -700,13 +777,7 @@ def action_center_body(data):
         data["objects"].insert(0, obj)
         if obj.get("object_type") in ["task", "followup_task", "estimate", "invoice"]:
             data["tasks"].insert(0, obj)
-    preview_rows = ""
-    for obj in WORKSPACE_ACTION_PREVIEWS[:5]:
-        meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
-        client = meta.get("client_name") or obj.get("client_id") or "Workspace"
-        preview_rows += f"<div class='row'><div><b>{html_escape(obj.get('title'))}</b><span class='muted'>{html_escape(client)} · {html_escape(obj.get('object_type'))}</span></div><span class='pill'>{html_escape(obj.get('status'))}</span></div>"
-    if not preview_rows:
-        preview_rows = f"<div class='row'><div><b>{tx('no_items', lang)}</b><span class='muted'>—</span></div><span class='pill'>preview</span></div>"
+    preview_rows = work_object_rows(WORKSPACE_ACTION_PREVIEWS, empty_text=tx("no_items", lang), limit=5, show_source=True, show_approval=True)
     forms = (
         "<div class='stack-grid'>"
         + action_form_card("new_task", tx("new_task_form", lang), tx("create_task_hint", lang))
@@ -725,7 +796,7 @@ def action_center_body(data):
         + f"<a href='{q('/tasks')}'>{tx('tasks', lang)}</a>"
         + f"<a href='{q('/clients')}'>{tx('clients', lang)}</a>"
         + "</div>"
-        + f"<section class='card card-pad'><div class='section-title'>{tx('preview_queue', lang)}</div><div class='list'>{preview_rows}</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('preview_approval_layer', lang)}</div><div class='list'>{preview_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
         + forms
     )
 
