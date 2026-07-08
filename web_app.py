@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V38 — Office Manager Page + Worker Detail Screen
+# NinaOS Web App V39 — Office Manager Action Panels
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V38 — Office Manager Page + Worker Detail Screen"
+WEB_APP_VERSION = "Web App V39 — Office Manager Action Panels"
 app = Flask(__name__)
 
 
@@ -105,6 +105,22 @@ def tx(key, lang=None):
         "create_invoice": {"en": "Create Invoice Admin Record", "lv": "Izveidot rēķina ierakstu", "ru": "Создать запись счёта"},
         "upload_document": {"en": "Upload Document", "lv": "Augšupielādēt dokumentu", "ru": "Загрузить документ"},
         "open_office_manager": {"en": "Open Office Manager", "lv": "Atvērt Office Manager", "ru": "Открыть Office Manager"},
+        "action_panels": {"en": "Action Panels", "lv": "Darbību paneļi", "ru": "Панели действий"},
+        "task_panel": {"en": "Task Panel", "lv": "Uzdevumu panelis", "ru": "Панель задач"},
+        "followup_panel": {"en": "Follow-up Panel", "lv": "Follow-up panelis", "ru": "Панель повторных контактов"},
+        "estimate_panel": {"en": "Estimate Panel", "lv": "Tāmju panelis", "ru": "Панель смет"},
+        "invoice_panel": {"en": "Invoice Panel", "lv": "Rēķinu panelis", "ru": "Панель счетов"},
+        "document_panel": {"en": "Document Panel", "lv": "Dokumentu panelis", "ru": "Панель документов"},
+        "approval_queue": {"en": "Approval Queue", "lv": "Apstiprinājumu rinda", "ru": "Очередь подтверждений"},
+        "create_task_hint": {"en": "Create and organize daily work.", "lv": "Izveido un sakārto dienas darbus.", "ru": "Создать и организовать работу дня."},
+        "followup_hint": {"en": "Track repeated client contact.", "lv": "Sekot atkārtotai klientu saziņai.", "ru": "Отслеживать повторный контакт с клиентом."},
+        "estimate_hint": {"en": "Draft offers and estimates.", "lv": "Sagatavot piedāvājumus un tāmes.", "ru": "Готовить предложения и сметы."},
+        "invoice_hint": {"en": "Track sent and due invoice records.", "lv": "Sekot nosūtītiem un termiņa rēķiniem.", "ru": "Отслеживать счета и сроки оплаты."},
+        "document_hint": {"en": "Link client and project documents.", "lv": "Piesaistīt klientu un projektu dokumentus.", "ru": "Привязать документы клиентов и проектов."},
+        "approval_hint": {"en": "Owner confirmation before sensitive actions.", "lv": "Īpašnieka apstiprinājums pirms svarīgām darbībām.", "ru": "Подтверждение владельца перед важными действиями."},
+        "open_panel": {"en": "Open Panel", "lv": "Atvērt paneli", "ru": "Открыть панель"},
+        "no_approvals": {"en": "No approvals waiting.", "lv": "Nav gaidošu apstiprinājumu.", "ru": "Нет ожидающих подтверждений."},
+        "next_step": {"en": "Next step", "lv": "Nākamais solis", "ru": "Следующий шаг"},
     }
     return d.get(key, {}).get(lang) or d.get(key, {}).get("en") or key
 
@@ -381,6 +397,42 @@ def simple_module_body(title, subtitle, blocks):
 
 
 
+
+def action_panel_card(title, hint, count, href, tone="normal"):
+    return (
+        "<div class='card card-pad'>"
+        f"<div class='section-title'>{html_escape(title)}</div>"
+        f"<p class='muted'>{html_escape(hint)}</p>"
+        f"<div class='kpi'><small>{tx('active')}</small><strong>{count}</strong><em>{tx('open_work_label')}</em></div>"
+        "<br>"
+        f"<a class='btn primary' href='{href}'>{tx('open_panel')}</a>"
+        "</div>"
+    )
+
+
+def office_manager_action_panels(data):
+    lang = current_language()
+    tasks = len([o for o in data["tasks"] if o.get("object_type") == "task"])
+    followups = len([o for o in data["tasks"] if o.get("object_type") == "followup_task"])
+    estimates = len([o for o in data["tasks"] if o.get("object_type") == "estimate"])
+    invoices = len([o for o in data["tasks"] if o.get("object_type") == "invoice"])
+    documents = 3
+    approvals = 0
+
+    return (
+        f"<section class='card card-pad'><div class='section-title'>{tx('action_panels', lang)}</div>"
+        "<div class='worker-grid'>"
+        + action_panel_card(tx("task_panel", lang), tx("create_task_hint", lang), tasks, q("/tasks"))
+        + action_panel_card(tx("followup_panel", lang), tx("followup_hint", lang), followups, q("/tasks"))
+        + action_panel_card(tx("estimate_panel", lang), tx("estimate_hint", lang), estimates, q("/tasks"))
+        + action_panel_card(tx("invoice_panel", lang), tx("invoice_hint", lang), invoices, q("/clients"))
+        + action_panel_card(tx("document_panel", lang), tx("document_hint", lang), documents, q("/files"))
+        + action_panel_card(tx("approval_queue", lang), tx("approval_hint", lang), approvals, q("/workers/office-manager"))
+        + "</div></section>"
+    )
+
+
+
 def office_manager_body(data):
     lang = current_language()
     tasks = [o for o in data["tasks"] if o.get("object_type") in ["task", "followup_task"]]
@@ -413,7 +465,7 @@ def office_manager_body(data):
     ])
 
     quick = "".join([
-        f"<a class='btn primary' href='{q('/tasks')}'>{tx('ask_nina', lang)}</a>",
+        f"<a class='btn primary' href='{q('/office-manager/actions')}'>{tx('action_panels', lang)}</a>",
         f"<a class='btn' href='{q('/tasks')}'>{tx('new_task', lang)}</a>",
         f"<a class='btn' href='{q('/clients')}'>{tx('followup_client', lang)}</a>",
         f"<a class='btn' href='{q('/tasks')}'>{tx('create_estimate', lang)}</a>",
@@ -440,7 +492,8 @@ def office_manager_body(data):
         + f"<div class='section-title'>{tx('approval_required', lang)}</div><div class='list'>{right_blocks}</div>"
         + "</section>"
         + "</div><br>"
-        + "<div class='two-col'>"
+        + office_manager_action_panels(data)
+        + "<br><div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('linked_work', lang)}</div><div class='list'>{mini_list(tasks, 'No task queue yet')}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('estimates', lang)} / {tx('invoices', lang)}</div><div class='list'>{mini_list(estimates + invoices, 'No finance admin queue yet')}</div></section>"
         + "</div>"
@@ -463,6 +516,19 @@ def dashboard():
 def workers():
     data = load_workspace_data()
     return Response(page(tx("workers"), workers_body(data), active="workers"), mimetype="text/html")
+
+
+@app.route("/office-manager")
+def office_manager_short():
+    data = load_workspace_data()
+    return Response(page(tx("office_manager"), office_manager_body(data), active="workers"), mimetype="text/html")
+
+
+@app.route("/office-manager/actions")
+def office_manager_actions():
+    data = load_workspace_data()
+    body = work_page_header(tx("action_panels"), tx("worker_detail_sub")) + office_manager_action_panels(data)
+    return Response(page(tx("action_panels"), body, active="workers"), mimetype="text/html")
 
 
 @app.route("/workers/office-manager")
