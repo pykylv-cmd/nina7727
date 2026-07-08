@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V40 — Office Manager Full Work Console
+# NinaOS Web App V41 — Real Actions UI
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V40 — Office Manager Full Work Console"
+WEB_APP_VERSION = "Web App V41 — Real Actions UI"
 app = Flask(__name__)
 
 
@@ -138,6 +138,26 @@ def tx(key, lang=None):
         "open_clients": {"en": "Open clients", "lv": "Atvērt klientus", "ru": "Открыть клиентов"},
         "open_files": {"en": "Open files", "lv": "Atvērt failus", "ru": "Открыть файлы"},
         "console_sub": {"en": "What Nina Office Manager is handling right now.", "lv": "Ko Nina Office Manager šobrīd apstrādā.", "ru": "Что сейчас обрабатывает Nina Office Manager."},
+        "action_center": {"en": "Action Center", "lv": "Darbību centrs", "ru": "Центр действий"},
+        "action_center_sub": {"en": "Create operational work from the Office Manager console.", "lv": "Izveido operatīvos darbus no Office Manager konsoles.", "ru": "Создать рабочие элементы из консоли Office Manager."},
+        "task_title": {"en": "Task title", "lv": "Uzdevuma nosaukums", "ru": "Название задачи"},
+        "client_name": {"en": "Client name", "lv": "Klienta vārds", "ru": "Имя клиента"},
+        "project_name": {"en": "Project name", "lv": "Projekta nosaukums", "ru": "Название проекта"},
+        "amount": {"en": "Amount", "lv": "Summa", "ru": "Сумма"},
+        "due_date": {"en": "Due date", "lv": "Termiņš", "ru": "Срок"},
+        "notes": {"en": "Notes", "lv": "Piezīmes", "ru": "Заметки"},
+        "priority": {"en": "Priority", "lv": "Prioritāte", "ru": "Приоритет"},
+        "normal": {"en": "Normal", "lv": "Normāla", "ru": "Обычный"},
+        "high": {"en": "High", "lv": "Augsta", "ru": "Высокий"},
+        "submit_preview": {"en": "Save Preview", "lv": "Saglabāt priekšskatījumu", "ru": "Сохранить предпросмотр"},
+        "action_preview": {"en": "Action Preview", "lv": "Darbības priekšskatījums", "ru": "Предпросмотр действия"},
+        "safe_note": {"en": "Safe UI mode: forms create a web preview first. Database write comes in the next sprint.", "lv": "Drošais UI režīms: formas vispirms izveido web priekšskatījumu. Datu bāzes ieraksts nāks nākamajā sprintā.", "ru": "Безопасный режим UI: формы сначала создают предпросмотр. Запись в базу — в следующем спринте."},
+        "created_preview": {"en": "Preview created", "lv": "Priekšskatījums izveidots", "ru": "Предпросмотр создан"},
+        "form_type": {"en": "Form type", "lv": "Formas tips", "ru": "Тип формы"},
+        "new_task_form": {"en": "New Task", "lv": "Jauns uzdevums", "ru": "Новая задача"},
+        "followup_form": {"en": "Follow-up Client", "lv": "Follow-up klientam", "ru": "Повторный контакт"},
+        "estimate_form": {"en": "Estimate Draft", "lv": "Tāmes melnraksts", "ru": "Черновик сметы"},
+        "invoice_form": {"en": "Invoice Admin Record", "lv": "Rēķina ieraksts", "ru": "Запись счёта"},
     }
     return d.get(key, {}).get(lang) or d.get(key, {}).get("en") or key
 
@@ -292,7 +312,7 @@ def css():
     return """
 :root{--line:rgba(120,153,255,.26);--line2:rgba(255,255,255,.08);--text:#f8fbff;--muted:#a8b7d4;--green:#34e6a4;--shadow:0 30px 100px rgba(0,0,0,.36)}*{box-sizing:border-box}body{margin:0;min-height:100vh;color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif;background:radial-gradient(circle at 13% 14%,rgba(30,105,255,.20),transparent 25%),radial-gradient(circle at 80% 12%,rgba(80,70,255,.20),transparent 28%),linear-gradient(135deg,#080910 0%,#0a0d19 48%,#05060b 100%)}body:before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(rgba(255,255,255,.026) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.021) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(to bottom,rgba(0,0,0,.5),transparent 70%)}a{color:inherit;text-decoration:none}.layout{display:grid;grid-template-columns:210px 1fr;min-height:100vh}.sidebar{position:sticky;top:0;height:100vh;padding:22px 14px;background:radial-gradient(circle at 28px 28px,rgba(44,142,255,.24),transparent 75px),linear-gradient(180deg,rgba(18,22,37,.86),rgba(8,9,15,.83));border-right:1px solid var(--line2);backdrop-filter:blur(16px)}.brand{display:flex;align-items:center;gap:10px;margin:0 6px 28px;font-weight:950}.brand-word span:last-child{color:#2a91ff}
 .nina-logo{position:relative;border-radius:50%;overflow:hidden;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.9),transparent 5%),radial-gradient(circle at 65% 25%,rgba(84,232,255,.9),transparent 10%),radial-gradient(circle at 50% 50%,#1de0ff 0%,#2358ff 38%,#7f45ff 72%,#11152a 100%);box-shadow:0 0 24px rgba(49,140,255,.52),inset 0 0 30px rgba(255,255,255,.12)}.nina-logo.small{width:34px;height:34px}.nina-logo.hero{width:156px;height:156px;flex:0 0 156px}.dot-grid{position:absolute;inset:0;background:radial-gradient(circle,rgba(255,255,255,.86) 0 2px,transparent 2.8px);background-size:16px 16px;transform:rotate(-18deg) scale(1.1);opacity:.58;mask-image:radial-gradient(circle,#000 62%,transparent 70%)}.orbit{position:absolute;left:-22%;right:-22%;top:44%;height:2px;background:rgba(255,255,255,.45);border-radius:999px;transform:rotate(-16deg);box-shadow:0 0 14px rgba(90,190,255,.8)}.orbit-b{transform:rotate(28deg);opacity:.28;top:54%}.nav{display:flex;flex-direction:column;gap:7px}.nav-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:13px;color:#dce7ff;font-size:14px;border:1px solid transparent}.nav-item:hover{background:rgba(255,255,255,.06)}.nav-item.active{background:linear-gradient(90deg,rgba(28,128,255,.95),rgba(90,63,255,.86));color:#fff;box-shadow:0 14px 32px rgba(23,109,255,.23)}.new{margin-left:auto;font-size:10px;padding:2px 7px;border-radius:999px;background:#5638ff}.user{position:absolute;bottom:18px;left:14px;right:14px;border:1px solid var(--line);background:rgba(255,255,255,.045);border-radius:16px;padding:12px;color:var(--muted);font-size:13px}.user b{color:#fff}
-.main{padding:22px 26px 40px;max-width:1460px;width:100%;margin:0 auto}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.search{width:min(520px,55vw);border:1px solid var(--line);border-radius:18px;padding:14px 18px;color:var(--muted);background:rgba(16,24,45,.72);box-shadow:inset 0 0 0 1px rgba(255,255,255,.03),0 12px 34px rgba(0,0,0,.18)}.icons{display:flex;gap:10px;align-items:center}.icon{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.10)}.avatar{background:linear-gradient(135deg,#7c43ff,#dc42ff);font-weight:950}.lang-switch{display:flex;gap:6px}.lang-switch a{font-size:12px;font-weight:950;padding:8px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.06);color:#dbe8ff}.lang-switch a.active{background:linear-gradient(90deg,#168dff,#6443ff);color:#fff}.grid{display:grid;gap:18px}.hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:18px}.card{background:linear-gradient(180deg,rgba(26,36,68,.72),rgba(9,12,24,.70)),radial-gradient(circle at 25% 15%,rgba(40,140,255,.12),transparent 38%);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}.card-pad{padding:24px}.hero-card{min-height:390px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}.hero-lockup{display:flex;align-items:center;justify-content:center;gap:26px}.hero-title{font-size:78px;line-height:.9;font-weight:1000;letter-spacing:-5px;text-shadow:0 10px 40px rgba(0,0,0,.5)}.hero-title span{color:#2493ff}.subtitle{color:#dbe8ff;font-weight:900;letter-spacing:2px;font-size:13px;margin-top:10px}.bigline{margin-top:34px;font-size:25px;line-height:1.35;font-weight:950}.trust{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:24px}.trust span{font-size:12px;font-weight:900;padding:7px 12px;border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:999px}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.kpi{display:block;padding:18px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.025));border-radius:18px;min-height:118px}.kpi small{color:#dbe7ff;font-weight:900}.kpi strong{display:block;font-size:38px;margin:9px 0 2px}.kpi em{color:#71e9ff;font-style:normal;font-size:13px;font-weight:900}.page-title h1{margin:0;font-size:42px;letter-spacing:-1.8px;line-height:1}.page-title p{margin:8px 0 0;color:#c3d4f5;font-weight:800}.section-title{font-size:21px;font-weight:1000;margin:6px 0 13px}.worker-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:16px}.worker-card{overflow:hidden;border-radius:20px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(28,35,60,.78),rgba(9,12,24,.78));min-height:248px;box-shadow:0 20px 55px rgba(0,0,0,.22)}.worker-top{height:112px;display:grid;place-items:center;position:relative;overflow:hidden}.worker-top:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(110deg,rgba(255,255,255,.10) 0 2px,transparent 2px 10px);opacity:.35}.tone-purple{background:linear-gradient(135deg,#4830d8,#6322b7)}.tone-blue{background:linear-gradient(135deg,#058aff,#053c8c)}.tone-green{background:linear-gradient(135deg,#02b973,#095a3b)}.tone-orange{background:linear-gradient(135deg,#d47418,#56321c)}.worker-avatar{position:relative;z-index:1;width:82px;height:82px;border-radius:50%;background:radial-gradient(circle at 36% 30%,#ffe8c8 0 16%,transparent 17%),radial-gradient(circle at 53% 65%,#ffdba8 0 23%,transparent 24%),radial-gradient(circle at 46% 45%,#ef973a 0 45%,#5d3928 46% 62%,#f6c58b 63% 100%);box-shadow:0 16px 34px rgba(0,0,0,.32)}.worker-body{padding:16px}.worker-body h3{margin:0 0 4px;font-size:20px;line-height:1.02}.muted{color:var(--muted)}.status{font-weight:950;font-size:12px;margin:10px 0}.active-dot{color:var(--green)}.idle-dot{color:#ffd057}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px}.list{display:flex;flex-direction:column;gap:10px}.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 15px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(90deg,rgba(28,111,255,.12),rgba(255,255,255,.035))}.row b{display:block;margin-bottom:4px}.pill{display:inline-flex;align-items:center;padding:7px 11px;border-radius:999px;background:rgba(31,124,255,.16);border:1px solid rgba(76,147,255,.32);color:#d7e8ff;font-size:12px;font-weight:950;white-space:nowrap}.btns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}.btn{display:inline-flex;align-items:center;justify-content:center;padding:13px 18px;border-radius:14px;border:1px solid var(--line);font-weight:950;background:rgba(255,255,255,.055);box-shadow:0 12px 26px rgba(0,0,0,.18)}.btn.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.footer-note{margin-top:22px;color:var(--muted);font-size:13px;text-align:center;font-weight:700}.console-nav{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}.console-nav a{padding:10px 13px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.055);font-weight:950}.console-nav a.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.metric-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.metric-mini{padding:13px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.045)}.metric-mini small{color:var(--muted);font-weight:900}.metric-mini b{display:block;font-size:24px;margin-top:4px}.panel-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:18px}.stack-grid{display:grid;gap:12px}@media(max-width:1100px){.layout{grid-template-columns:1fr}.sidebar{position:relative;height:auto}.user{position:static;margin-top:18px}.hero-grid,.two-col{grid-template-columns:1fr}.worker-grid{grid-template-columns:repeat(2,1fr)}.kpis{grid-template-columns:repeat(2,1fr)}}@media(max-width:640px){.main{padding:16px}.worker-grid,.kpis{grid-template-columns:1fr}.hero-lockup{flex-direction:column}.hero-title{font-size:56px;letter-spacing:-3px}.nina-logo.hero{width:128px;height:128px;flex-basis:128px}.search{width:58vw}}
+.main{padding:22px 26px 40px;max-width:1460px;width:100%;margin:0 auto}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.search{width:min(520px,55vw);border:1px solid var(--line);border-radius:18px;padding:14px 18px;color:var(--muted);background:rgba(16,24,45,.72);box-shadow:inset 0 0 0 1px rgba(255,255,255,.03),0 12px 34px rgba(0,0,0,.18)}.icons{display:flex;gap:10px;align-items:center}.icon{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.10)}.avatar{background:linear-gradient(135deg,#7c43ff,#dc42ff);font-weight:950}.lang-switch{display:flex;gap:6px}.lang-switch a{font-size:12px;font-weight:950;padding:8px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.06);color:#dbe8ff}.lang-switch a.active{background:linear-gradient(90deg,#168dff,#6443ff);color:#fff}.grid{display:grid;gap:18px}.hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:18px}.card{background:linear-gradient(180deg,rgba(26,36,68,.72),rgba(9,12,24,.70)),radial-gradient(circle at 25% 15%,rgba(40,140,255,.12),transparent 38%);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}.card-pad{padding:24px}.hero-card{min-height:390px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}.hero-lockup{display:flex;align-items:center;justify-content:center;gap:26px}.hero-title{font-size:78px;line-height:.9;font-weight:1000;letter-spacing:-5px;text-shadow:0 10px 40px rgba(0,0,0,.5)}.hero-title span{color:#2493ff}.subtitle{color:#dbe8ff;font-weight:900;letter-spacing:2px;font-size:13px;margin-top:10px}.bigline{margin-top:34px;font-size:25px;line-height:1.35;font-weight:950}.trust{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:24px}.trust span{font-size:12px;font-weight:900;padding:7px 12px;border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:999px}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.kpi{display:block;padding:18px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.025));border-radius:18px;min-height:118px}.kpi small{color:#dbe7ff;font-weight:900}.kpi strong{display:block;font-size:38px;margin:9px 0 2px}.kpi em{color:#71e9ff;font-style:normal;font-size:13px;font-weight:900}.page-title h1{margin:0;font-size:42px;letter-spacing:-1.8px;line-height:1}.page-title p{margin:8px 0 0;color:#c3d4f5;font-weight:800}.section-title{font-size:21px;font-weight:1000;margin:6px 0 13px}.worker-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:16px}.worker-card{overflow:hidden;border-radius:20px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(28,35,60,.78),rgba(9,12,24,.78));min-height:248px;box-shadow:0 20px 55px rgba(0,0,0,.22)}.worker-top{height:112px;display:grid;place-items:center;position:relative;overflow:hidden}.worker-top:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(110deg,rgba(255,255,255,.10) 0 2px,transparent 2px 10px);opacity:.35}.tone-purple{background:linear-gradient(135deg,#4830d8,#6322b7)}.tone-blue{background:linear-gradient(135deg,#058aff,#053c8c)}.tone-green{background:linear-gradient(135deg,#02b973,#095a3b)}.tone-orange{background:linear-gradient(135deg,#d47418,#56321c)}.worker-avatar{position:relative;z-index:1;width:82px;height:82px;border-radius:50%;background:radial-gradient(circle at 36% 30%,#ffe8c8 0 16%,transparent 17%),radial-gradient(circle at 53% 65%,#ffdba8 0 23%,transparent 24%),radial-gradient(circle at 46% 45%,#ef973a 0 45%,#5d3928 46% 62%,#f6c58b 63% 100%);box-shadow:0 16px 34px rgba(0,0,0,.32)}.worker-body{padding:16px}.worker-body h3{margin:0 0 4px;font-size:20px;line-height:1.02}.muted{color:var(--muted)}.status{font-weight:950;font-size:12px;margin:10px 0}.active-dot{color:var(--green)}.idle-dot{color:#ffd057}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px}.list{display:flex;flex-direction:column;gap:10px}.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 15px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(90deg,rgba(28,111,255,.12),rgba(255,255,255,.035))}.row b{display:block;margin-bottom:4px}.pill{display:inline-flex;align-items:center;padding:7px 11px;border-radius:999px;background:rgba(31,124,255,.16);border:1px solid rgba(76,147,255,.32);color:#d7e8ff;font-size:12px;font-weight:950;white-space:nowrap}.btns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}.btn{display:inline-flex;align-items:center;justify-content:center;padding:13px 18px;border-radius:14px;border:1px solid var(--line);font-weight:950;background:rgba(255,255,255,.055);box-shadow:0 12px 26px rgba(0,0,0,.18)}.btn.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.footer-note{margin-top:22px;color:var(--muted);font-size:13px;text-align:center;font-weight:700}.console-nav{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}.console-nav a{padding:10px 13px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.055);font-weight:950}.console-nav a.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.metric-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.metric-mini{padding:13px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.045)}.metric-mini small{color:var(--muted);font-weight:900}.metric-mini b{display:block;font-size:24px;margin-top:4px}.panel-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:18px}.stack-grid{display:grid;gap:12px}.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field{display:flex;flex-direction:column;gap:6px}.field label{font-size:12px;font-weight:950;color:#dbe7ff}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(5,9,20,.58);color:var(--text);padding:12px 13px;font:inherit;outline:none}.field textarea{min-height:92px;resize:vertical}.form-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.preview-box{border:1px solid var(--line);border-radius:18px;background:rgba(31,124,255,.10);padding:16px;margin-bottom:16px}.preview-box b{display:block;margin-bottom:6px}.safe-note{color:#8fe7ff;font-weight:800;font-size:13px;margin-top:10px}@media(max-width:1100px){.layout{grid-template-columns:1fr}.sidebar{position:relative;height:auto}.user{position:static;margin-top:18px}.hero-grid,.two-col{grid-template-columns:1fr}.worker-grid{grid-template-columns:repeat(2,1fr)}.kpis{grid-template-columns:repeat(2,1fr)}}@media(max-width:640px){.main{padding:16px}.worker-grid,.kpis{grid-template-columns:1fr}.hero-lockup{flex-direction:column}.hero-title{font-size:56px;letter-spacing:-3px}.nina-logo.hero{width:128px;height:128px;flex-basis:128px}.search{width:58vw}}
 """
 
 
@@ -450,6 +470,124 @@ def office_manager_action_panels(data):
 
 
 
+
+def get_action_preview():
+    if request.method != "POST":
+        return None
+    form = request.form
+    return {
+        "form_type": form.get("form_type", ""),
+        "task_title": form.get("task_title", ""),
+        "client_name": form.get("client_name", ""),
+        "project_name": form.get("project_name", ""),
+        "amount": form.get("amount", ""),
+        "due_date": form.get("due_date", ""),
+        "priority": form.get("priority", "normal"),
+        "notes": form.get("notes", ""),
+    }
+
+
+def action_preview_html(preview):
+    if not preview:
+        return ""
+    lang = current_language()
+    rows = ""
+    labels = [
+        ("form_type", tx("form_type", lang)),
+        ("task_title", tx("task_title", lang)),
+        ("client_name", tx("client_name", lang)),
+        ("project_name", tx("project_name", lang)),
+        ("amount", tx("amount", lang)),
+        ("due_date", tx("due_date", lang)),
+        ("priority", tx("priority", lang)),
+        ("notes", tx("notes", lang)),
+    ]
+    for key, label in labels:
+        value = preview.get(key) or "—"
+        rows += f"<div class='row'><div><b>{html_escape(label)}</b><span class='muted'>{html_escape(value)}</span></div><span class='pill'>preview</span></div>"
+    return f"<div class='preview-box'><b>{tx('created_preview', lang)}</b><div class='list'>{rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></div>"
+
+
+def action_form_card(form_type, title, hint, defaults=None):
+    lang = current_language()
+    defaults = defaults or {}
+    action = q("/office-manager/actions")
+    return f"""
+    <section class='card card-pad'>
+      <div class='section-title'>{html_escape(title)}</div>
+      <p class='muted'>{html_escape(hint)}</p>
+      <form method='post' action='{action}'>
+        <input type='hidden' name='form_type' value='{html_escape(form_type)}'>
+        <div class='form-grid'>
+          <div class='field'>
+            <label>{tx('task_title', lang)}</label>
+            <input name='task_title' placeholder='{tx('task_title', lang)}' value='{html_escape(defaults.get('task_title',''))}'>
+          </div>
+          <div class='field'>
+            <label>{tx('client_name', lang)}</label>
+            <input name='client_name' placeholder='{tx('client_name', lang)}' value='{html_escape(defaults.get('client_name',''))}'>
+          </div>
+          <div class='field'>
+            <label>{tx('project_name', lang)}</label>
+            <input name='project_name' placeholder='{tx('project_name', lang)}' value='{html_escape(defaults.get('project_name',''))}'>
+          </div>
+          <div class='field'>
+            <label>{tx('due_date', lang)}</label>
+            <input name='due_date' placeholder='today / friday / 2026-07-10' value='{html_escape(defaults.get('due_date',''))}'>
+          </div>
+          <div class='field'>
+            <label>{tx('amount', lang)}</label>
+            <input name='amount' placeholder='€0.00' value='{html_escape(defaults.get('amount',''))}'>
+          </div>
+          <div class='field'>
+            <label>{tx('priority', lang)}</label>
+            <select name='priority'>
+              <option value='normal'>{tx('normal', lang)}</option>
+              <option value='high'>{tx('high', lang)}</option>
+            </select>
+          </div>
+        </div>
+        <br>
+        <div class='field'>
+          <label>{tx('notes', lang)}</label>
+          <textarea name='notes' placeholder='{tx('notes', lang)}'>{html_escape(defaults.get('notes',''))}</textarea>
+        </div>
+        <div class='form-actions'>
+          <button class='btn primary' type='submit'>{tx('submit_preview', lang)}</button>
+          <a class='btn' href='{q('/office-manager')}'>{tx('work_console', lang)}</a>
+        </div>
+        <div class='safe-note'>{tx('safe_note', lang)}</div>
+      </form>
+    </section>
+    """
+
+
+def action_center_body(data):
+    lang = current_language()
+    preview = get_action_preview()
+    preview_html = action_preview_html(preview)
+    forms = (
+        "<div class='stack-grid'>"
+        + action_form_card("new_task", tx("new_task_form", lang), tx("create_task_hint", lang))
+        + action_form_card("followup", tx("followup_form", lang), tx("followup_hint", lang), {"task_title": "Follow up with client"})
+        + action_form_card("estimate", tx("estimate_form", lang), tx("estimate_hint", lang), {"task_title": "Create estimate draft"})
+        + action_form_card("invoice", tx("invoice_form", lang), tx("invoice_hint", lang), {"task_title": "Create invoice admin record"})
+        + "</div>"
+    )
+    return (
+        work_page_header(tx("action_center", lang), tx("action_center_sub", lang))
+        + preview_html
+        + "<div class='console-nav'>"
+        + f"<a class='primary' href='{q('/office-manager/actions')}'>{tx('action_center', lang)}</a>"
+        + f"<a href='{q('/office-manager')}'>{tx('work_console', lang)}</a>"
+        + f"<a href='{q('/tasks')}'>{tx('tasks', lang)}</a>"
+        + f"<a href='{q('/clients')}'>{tx('clients', lang)}</a>"
+        + "</div>"
+        + forms
+    )
+
+
+
 def office_manager_body(data):
     lang = current_language()
     tasks = [o for o in data["tasks"] if o.get("object_type") in ["task", "followup_task"]]
@@ -547,11 +685,17 @@ def office_manager_console():
     return Response(page(tx("office_manager"), office_manager_body(data), active="workers"), mimetype="text/html")
 
 
-@app.route("/office-manager/actions")
-def office_manager_actions():
+@app.route("/office-manager/panels")
+def office_manager_panels():
     data = load_workspace_data()
     body = work_page_header(tx("action_panels"), tx("worker_detail_sub")) + office_manager_action_panels(data)
     return Response(page(tx("action_panels"), body, active="workers"), mimetype="text/html")
+
+
+@app.route("/office-manager/actions", methods=["GET", "POST"])
+def office_manager_actions():
+    data = load_workspace_data()
+    return Response(page(tx("action_center"), action_center_body(data), active="workers"), mimetype="text/html")
 
 
 @app.route("/workers/office-manager")
