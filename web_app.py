@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V45.2 REAL READ FIX — Existing Telegram Memory to Web Inbox Bridge
+# NinaOS Web App V45.2 DB DIAGNOSTIC FIX — Existing Telegram Memory to Web Inbox Bridge
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V45.2 REAL READ FIX — Existing Telegram Memory → Web Inbox Bridge"
+WEB_APP_VERSION = "Web App V45.2 DB DIAGNOSTIC FIX — Telegram Memory Bridge Diagnostics"
 app = Flask(__name__)
 
 # V45.2 safe in-memory workspace preview store + existing Telegram memory bridge.
@@ -214,7 +214,7 @@ def tx(key, lang=None):
         "source_channel": {"en": "Source channel", "lv": "Avota kanāls", "ru": "Канал источника"},
         "nina_prepare": {"en": "Nina, prepare work", "lv": "Nina, sagatavo darbu", "ru": "Nina, подготовь работу"},
         "voice_preview_created": {"en": "Voice intake preview created", "lv": "Balss ievades priekšskatījums izveidots", "ru": "Preview из голосового ввода создан"},
-        "voice_safe_note": {"en": "V45.2 REAL READ FIX safe mode: Web reads existing Telegram task memory, voice/photo records, recent Telegram text conversation_state and tasks table fallback. New DB writes still come later.", "lv": "V45.2 REAL READ FIX drošais režīms: web lasa esošo Telegram task atmiņu, balss/foto ierakstus, pēdējo Telegram tekstu conversation_state un tasks tabulas fallback. Jauna DB rakstīšana nāks vēlāk.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
+        "voice_safe_note": {"en": "V45.2 DB DIAGNOSTIC FIX safe mode: Web reads existing Telegram task memory, voice/photo records, recent Telegram text conversation_state and tasks table fallback. New DB writes still come later.", "lv": "V45.2 DB DIAGNOSTIC FIX drošais režīms: web lasa esošo Telegram task atmiņu, balss/foto ierakstus, pēdējo Telegram tekstu conversation_state un tasks tabulas fallback. Jauna DB rakstīšana nāks vēlāk.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
         "detected_intent": {"en": "Detected intent", "lv": "Atpazītais nodoms", "ru": "Распознанное намерение"},
         "twenty_second_century": {"en": "22nd-century work surface: clients speak, send photos and documents; Nina organizes the work.", "lv": "22. gadsimta darba virsma: klienti runā, sūta bildes un dokumentus; Nina sakārto darbu.", "ru": "Рабочая поверхность 22 века: клиенты говорят, отправляют фото и документы; Nina организует работу."},
     }
@@ -688,7 +688,7 @@ def load_existing_voice_photo_state_from_db(limit=80):
 
 
 def load_recent_conversation_state_from_db(limit=80):
-    """V45.2 REAL READ FIX: read recent Telegram conversation_state, not only voice/photo.
+    """V45.2 DB DIAGNOSTIC FIX: read recent Telegram conversation_state, not only voice/photo.
 
     app.py saves many Telegram routes into conversation_state with intents/topics such as
     human_mode, work_layer, followup, web_surface, task/work replies etc. A fresh Telegram
@@ -783,7 +783,7 @@ def load_recent_conversation_state_from_db(limit=80):
 
 
 def load_existing_tasks_table_from_db(limit=80):
-    """V45.2 REAL READ FIX: read existing app.py tasks table when present.
+    """V45.2 DB DIAGNOSTIC FIX: read existing app.py tasks table when present.
 
     Some app versions write Telegram tasks/follow-ups into a tasks table instead of only
     memory_backups. The schema has changed over time, so this reads columns dynamically.
@@ -1114,7 +1114,7 @@ def load_workspace_data():
         ]
 
     activity = [
-        {"title": "V45.2 REAL READ FIX existing Telegram memory bridge", "body": "Inbox reads app.py task_engine memory, voice/photo records, recent Telegram text state and tasks table fallback before using demo fallback.", "kind": "sync"},
+        {"title": "V45.2 DB DIAGNOSTIC FIX existing Telegram memory bridge", "body": "Inbox reads app.py task_engine memory, voice/photo records, recent Telegram text state and tasks table fallback before using demo fallback.", "kind": "sync"},
         {"title": "V43.4 preview to real task surface", "body": "Approved preview objects now appear across Dashboard, Tasks and Office Manager surfaces in safe mode.", "kind": "work"},
         {"title": "Web service online", "body": "NinaOS web runtime is separated from Telegram runtime.", "kind": "info"},
         {"title": "Workspace loaded", "body": "V36 clean workspace data layer is active.", "kind": "info"},
@@ -1278,7 +1278,7 @@ def tasks_body(data):
     telegram_sync_rows = work_object_rows(load_existing_telegram_intake_sync(), empty_text=tx("no_items", lang), limit=8, show_source=True)
     return (
         work_page_header(tx("tasks"), tx("tasks_sub"))
-        + "<section class='card card-pad'><div class='section-title'>Existing Telegram Memory / Inbox Sync</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.2 REAL READ FIX: web reads existing app.py memory_backups source=task_engine, tasks table, conversation_state voice/photo and recent Telegram text records. Telegram runtime is not modified.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>Existing Telegram Memory / Inbox Sync</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.2 DB DIAGNOSTIC FIX: web reads existing app.py memory_backups source=task_engine, tasks table, conversation_state voice/photo and recent Telegram text records. Telegram runtime is not modified.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('real_task_surface_bridge', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('all_workspace_work', lang)}</div><div class='list'>{all_rows}</div></section><br>"
@@ -1454,6 +1454,236 @@ def voice_intake_form_html(created_obj=None):
     </section>
     """
 
+
+
+# =========================
+# V45.2 DB DIAGNOSTIC FIX
+# =========================
+
+def mask_db_url(url):
+    """Show only safe DB connection signal, never expose credentials."""
+    url = str(url or "")
+    if not url:
+        return "missing"
+    try:
+        if "@" in url:
+            prefix, rest = url.split("@", 1)
+            scheme = prefix.split(":", 1)[0] if ":" in prefix else "db"
+            host = rest.split("/", 1)[0]
+            return f"{scheme}://***@{host}/***"
+        return url[:18] + "..." if len(url) > 18 else "configured"
+    except Exception:
+        return "configured"
+
+
+def _diag_table_exists(cur, table_name):
+    try:
+        cur.execute("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_name = %s
+            )
+        """, (table_name,))
+        row = cur.fetchone()
+        return bool(row[0]) if row else False
+    except Exception:
+        return False
+
+
+def _diag_count(cur, sql, params=()):
+    try:
+        cur.execute(sql, params)
+        row = cur.fetchone()
+        return int(row[0] or 0) if row else 0
+    except Exception as e:
+        return f"error: {str(e)[:160]}"
+
+
+def _diag_latest_rows(cur, sql, params=(), limit=5):
+    try:
+        cur.execute(sql, params)
+        rows = cur.fetchall() or []
+        names = [d[0] for d in cur.description]
+        out = []
+        for r in rows[:limit]:
+            item = {}
+            for name, value in zip(names, r):
+                text = str(value or "")
+                if len(text) > 220:
+                    text = text[:220] + "…"
+                item[name] = text
+            out.append(item)
+        return out
+    except Exception as e:
+        return [{"error": str(e)[:220]}]
+
+
+def telegram_bridge_db_diagnostics():
+    """Visible read-only diagnostics for the Telegram → Web sync bridge."""
+    database_url = _db_url()
+    diag = {
+        "version": WEB_APP_VERSION,
+        "database_url_present": bool(database_url),
+        "database_url_safe": mask_db_url(database_url),
+        "postgres_driver": "unknown",
+        "db_connect_ok": False,
+        "db_error": "",
+        "tables": {},
+        "counts": {},
+        "latest": {},
+        "web_reader_counts": {},
+        "note": "Read-only diagnostic. Web does not write DB in this sprint.",
+    }
+
+    try:
+        import psycopg2
+        diag["postgres_driver"] = "psycopg2 available"
+    except Exception as e:
+        diag["postgres_driver"] = "psycopg2 missing"
+        diag["db_error"] = str(e)[:220]
+        return diag
+
+    if not database_url:
+        diag["db_error"] = "DATABASE_URL / POSTGRES_URL missing in Web service"
+        return diag
+
+    conn = None
+    try:
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+        diag["db_connect_ok"] = True
+
+        for table in ["conversation_state", "memory_backups", "tasks", "intake_events"]:
+            diag["tables"][table] = _diag_table_exists(cur, table)
+
+        if diag["tables"].get("conversation_state"):
+            diag["counts"]["conversation_state_total"] = _diag_count(cur, "SELECT COUNT(*) FROM conversation_state")
+            diag["counts"]["conversation_state_voice"] = _diag_count(cur, "SELECT COUNT(*) FROM conversation_state WHERE user_text LIKE %s OR intent = %s OR topic = %s", ("[VOICE]%", "voice_transcript", "voice"))
+            diag["counts"]["conversation_state_photo"] = _diag_count(cur, "SELECT COUNT(*) FROM conversation_state WHERE user_text LIKE %s OR intent = %s OR topic = %s", ("[PHOTO]%", "photo", "vision"))
+            diag["counts"]["conversation_state_recent_text"] = _diag_count(cur, "SELECT COUNT(*) FROM conversation_state WHERE COALESCE(user_text,'') <> ''")
+            diag["latest"]["conversation_state"] = _diag_latest_rows(cur, """
+                SELECT id, user_id, user_text, intent, topic, created_at
+                FROM conversation_state
+                ORDER BY id DESC
+                LIMIT 5
+            """)
+        else:
+            diag["counts"]["conversation_state_total"] = "table missing"
+
+        if diag["tables"].get("memory_backups"):
+            diag["counts"]["memory_backups_total"] = _diag_count(cur, "SELECT COUNT(*) FROM memory_backups")
+            diag["counts"]["memory_backups_task_engine"] = _diag_count(cur, "SELECT COUNT(*) FROM memory_backups WHERE source = %s", ("task_engine",))
+            diag["latest"]["memory_backups_task_engine"] = _diag_latest_rows(cur, """
+                SELECT id, user_id, source, backup_text, created_at
+                FROM memory_backups
+                WHERE source = %s
+                ORDER BY id DESC
+                LIMIT 5
+            """, ("task_engine",))
+            diag["latest"]["memory_backups_any"] = _diag_latest_rows(cur, """
+                SELECT id, user_id, source, backup_text, created_at
+                FROM memory_backups
+                ORDER BY id DESC
+                LIMIT 5
+            """)
+        else:
+            diag["counts"]["memory_backups_total"] = "table missing"
+
+        if diag["tables"].get("tasks"):
+            diag["counts"]["tasks_total"] = _diag_count(cur, "SELECT COUNT(*) FROM tasks")
+            diag["latest"]["tasks"] = _diag_latest_rows(cur, "SELECT * FROM tasks ORDER BY id DESC LIMIT 5")
+        else:
+            diag["counts"]["tasks_total"] = "table missing"
+
+        if diag["tables"].get("intake_events"):
+            diag["counts"]["intake_events_total"] = _diag_count(cur, "SELECT COUNT(*) FROM intake_events")
+            diag["latest"]["intake_events"] = _diag_latest_rows(cur, "SELECT * FROM intake_events ORDER BY id DESC LIMIT 5")
+        else:
+            diag["counts"]["intake_events_total"] = "table missing"
+
+        cur.close()
+        conn.close()
+    except Exception as e:
+        diag["db_error"] = str(e)[:500]
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+    # These are the actual web reader outputs, so we can compare DB truth vs UI reader.
+    try:
+        diag["web_reader_counts"]["task_engine_memory_reader"] = len(load_existing_task_engine_memory_from_db())
+    except Exception as e:
+        diag["web_reader_counts"]["task_engine_memory_reader"] = "error: " + str(e)[:160]
+    try:
+        diag["web_reader_counts"]["voice_photo_reader"] = len(load_existing_voice_photo_state_from_db())
+    except Exception as e:
+        diag["web_reader_counts"]["voice_photo_reader"] = "error: " + str(e)[:160]
+    try:
+        diag["web_reader_counts"]["recent_conversation_reader"] = len(load_recent_conversation_state_from_db())
+    except Exception as e:
+        diag["web_reader_counts"]["recent_conversation_reader"] = "error: " + str(e)[:160]
+    try:
+        diag["web_reader_counts"]["tasks_table_reader"] = len(load_existing_tasks_table_from_db())
+    except Exception as e:
+        diag["web_reader_counts"]["tasks_table_reader"] = "error: " + str(e)[:160]
+    try:
+        diag["web_reader_counts"]["merged_telegram_intake_sync"] = len(load_existing_telegram_intake_sync())
+    except Exception as e:
+        diag["web_reader_counts"]["merged_telegram_intake_sync"] = "error: " + str(e)[:160]
+
+    return diag
+
+
+def diagnostic_rows_html(diag):
+    rows = []
+    def add(label, value, pill="diag"):
+        rows.append(f"<div class='row'><div><b>{html_escape(label)}</b><span class='muted'>{html_escape(value)}</span></div><span class='pill'>{html_escape(pill)}</span></div>")
+
+    add("DATABASE_URL", diag.get("database_url_safe", "missing"), "env")
+    add("DB connect", "OK" if diag.get("db_connect_ok") else (diag.get("db_error") or "not connected"), "OK" if diag.get("db_connect_ok") else "check")
+    for table, exists in (diag.get("tables") or {}).items():
+        add(f"table: {table}", "exists" if exists else "missing", "table")
+    for key, value in (diag.get("counts") or {}).items():
+        add(key, value, "count")
+    for key, value in (diag.get("web_reader_counts") or {}).items():
+        add(key, value, "reader")
+    if diag.get("db_error"):
+        add("DB error", diag.get("db_error"), "error")
+    return "".join(rows)
+
+
+def latest_debug_rows_html(diag):
+    blocks = []
+    latest = diag.get("latest") or {}
+    for group, rows in latest.items():
+        inner = ""
+        for item in rows[:5]:
+            title = str(item.get("user_text") or item.get("backup_text") or item.get("title") or item.get("raw_text") or item.get("id") or "row")
+            meta = " · ".join([f"{k}: {v}" for k, v in item.items() if k not in ["user_text", "backup_text", "title", "raw_text"]])
+            inner += f"<div class='row'><div><b>{html_escape(title)}</b><span class='muted'>{html_escape(meta)}</span></div><span class='pill'>{html_escape(group)}</span></div>"
+        if not inner:
+            inner = "<div class='row'><div><b>No rows</b><span class='muted'>—</span></div><span class='pill'>empty</span></div>"
+        blocks.append(f"<section class='card card-pad'><div class='section-title'>Latest: {html_escape(group)}</div><div class='list'>{inner}</div></section>")
+    return "<div class='stack-grid'>" + "".join(blocks) + "</div>" if blocks else ""
+
+
+def telegram_db_diagnostic_block_html():
+    diag = telegram_bridge_db_diagnostics()
+    return (
+        "<section class='card card-pad'>"
+        "<div class='section-title'>🧪 V45.2 DB Diagnostic</div>"
+        "<p class='muted'>Read-only check: does Web service see the same Postgres memory that Telegram app.py writes?</p>"
+        "<div class='list'>" + diagnostic_rows_html(diag) + "</div>"
+        "<div class='safe-note'>Open JSON: <a href='/diagnostics/telegram-sync'>/diagnostics/telegram-sync</a>. If counts are zero here but Telegram works, Railway services may not share the same DATABASE_URL or app.py writes to a different table/source.</div>"
+        "</section><br>"
+        + latest_debug_rows_html(diag)
+        + "<br>"
+    )
+
 def channel_hub_body(data):
     lang = current_language()
     created_voice_obj = get_voice_intake_preview()
@@ -1483,9 +1713,10 @@ def channel_hub_body(data):
         + f"<section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>{tx('modern_intake', lang).upper()}</div></div></div><div class='bigline'>{tx('twenty_second_century', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/office-manager/actions')}'>{tx('voice_command', lang)}</a><a class='btn' href='{q('/tasks')}'>{tx('tasks', lang)}</a><a class='btn' href='{q('/clients')}'>{tx('clients', lang)}</a></div></section><br>"
         + voice_intake_form_html(created_voice_obj)
         + "<br>"
-        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → NinaOS Inbox Sync</div><p class='muted'>V45.2 REAL READ FIX connects Web Inbox to the Telegram memory that already exists in app.py: task_engine backups, tasks table, voice/photo records and recent Telegram text conversation_state. app.py stays separate.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.2 REAL READ FIX safe mode: existing Telegram memory is visible in Inbox and approval/work queues. Web reads only; DB writes still come later.</div></section><br>"
+        + telegram_db_diagnostic_block_html()
+        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → NinaOS Inbox Sync</div><p class='muted'>V45.2 DB DIAGNOSTIC FIX connects Web Inbox to the Telegram memory that already exists in app.py: task_engine backups, tasks table, voice/photo records and recent Telegram text conversation_state. app.py stays separate.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.2 DB DIAGNOSTIC FIX safe mode: existing Telegram memory is visible in Inbox and approval/work queues. Web reads only; DB writes still come later.</div></section><br>"
         + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V45.2 REAL READ FIX memory bridge</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V45.2 DB DIAGNOSTIC FIX memory bridge</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
         + "<div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
@@ -1851,9 +2082,39 @@ def exchange():
     return Response(page(tx("exchange"), exchange_body(data), active="exchange"), mimetype="text/html")
 
 
+@app.route("/diagnostics/telegram-sync")
+def diagnostics_telegram_sync():
+    return telegram_bridge_db_diagnostics()
+
 @app.route("/health")
 def health():
-    return {"ok": True, "runtime": "web_app.py", "version": WEB_APP_VERSION, "language": current_language(), "preview_objects": len(WORKSPACE_ACTION_PREVIEWS), "approved_preview_objects": len(approved_preview_items()), "pending_or_held_preview_objects": len(pending_or_held_preview_items()), "rejected_preview_objects": len(rejected_preview_items()), "telegram_intake_sync_items": len(load_existing_telegram_intake_sync()), "real_intake_store_items": len(load_real_intake_events_from_db()), "existing_task_memory_items": len(load_existing_task_engine_memory_from_db()), "existing_voice_photo_items": len(load_existing_voice_photo_state_from_db()), "existing_recent_conversation_items": len(load_recent_conversation_state_from_db()), "existing_tasks_table_items": len(load_existing_tasks_table_from_db()), "time": datetime.utcnow().isoformat() + "Z"}
+    
+    diag = telegram_bridge_db_diagnostics()
+    return {
+        "ok": True,
+        "runtime": "web_app.py",
+        "version": WEB_APP_VERSION,
+        "language": current_language(),
+        "preview_objects": len(WORKSPACE_ACTION_PREVIEWS),
+        "approved_preview_objects": len(approved_preview_items()),
+        "pending_or_held_preview_objects": len(pending_or_held_preview_items()),
+        "rejected_preview_objects": len(rejected_preview_items()),
+        "telegram_intake_sync_items": len(load_existing_telegram_intake_sync()),
+        "real_intake_store_items": len(load_real_intake_events_from_db()),
+        "existing_task_memory_items": len(load_existing_task_engine_memory_from_db()),
+        "existing_voice_photo_items": len(load_existing_voice_photo_state_from_db()),
+        "existing_recent_conversation_items": len(load_recent_conversation_state_from_db()),
+        "existing_tasks_table_items": len(load_existing_tasks_table_from_db()),
+        "db_diagnostic": {
+            "database_url_present": diag.get("database_url_present"),
+            "db_connect_ok": diag.get("db_connect_ok"),
+            "tables": diag.get("tables"),
+            "counts": diag.get("counts"),
+            "web_reader_counts": diag.get("web_reader_counts"),
+            "db_error": diag.get("db_error"),
+        },
+        "time": datetime.utcnow().isoformat() + "Z",
+    }
 
 
 if __name__ == "__main__":
