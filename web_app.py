@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V44.1 FIX — Inbox Voice Intake Bridge"
+WEB_APP_VERSION = "Web App V44.1 POST FIX — Inbox Voice Intake Submit Bridge"
 app = Flask(__name__)
 
 # V44 safe in-memory workspace preview store + modern channel hub foundation.
@@ -213,7 +213,7 @@ def tx(key, lang=None):
         "source_channel": {"en": "Source channel", "lv": "Avota kanāls", "ru": "Канал источника"},
         "nina_prepare": {"en": "Nina, prepare work", "lv": "Nina, sagatavo darbu", "ru": "Nina, подготовь работу"},
         "voice_preview_created": {"en": "Voice intake preview created", "lv": "Balss ievades priekšskatījums izveidots", "ru": "Preview из голосового ввода создан"},
-        "voice_safe_note": {"en": "V44.1 FIX safe mode: voice/WhatsApp/Telegram text creates a real preview work object and document intake record. Owner approval and DB bridge come next.", "lv": "V44.1 FIX drošais režīms: balss/WhatsApp/Telegram teksts izveido īstu preview darba objektu un dokumentu ievades ierakstu. Īpašnieka apstiprinājums un DB bridge nāk tālāk.", "ru": "Безопасный режим V44.1 FIX: голос/WhatsApp/Telegram создаёт preview-объект работы и запись входящих документов. Подтверждение владельца и DB bridge — дальше."},
+        "voice_safe_note": {"en": "V44.1 POST FIX safe mode: voice/WhatsApp/Telegram text creates a real preview work object and document intake record. Owner approval and DB bridge come next.", "lv": "V44.1 POST FIX drošais režīms: balss/WhatsApp/Telegram teksts izveido īstu preview darba objektu un dokumentu ievades ierakstu. Īpašnieka apstiprinājums un DB bridge nāk tālāk.", "ru": "Безопасный режим V44.1 POST FIX: голос/WhatsApp/Telegram создаёт preview-объект работы и запись входящих документов. Подтверждение владельца и DB bridge — дальше."},
         "detected_intent": {"en": "Detected intent", "lv": "Atpazītais nodoms", "ru": "Распознанное намерение"},
         "twenty_second_century": {"en": "22nd-century work surface: clients speak, send photos and documents; Nina organizes the work.", "lv": "22. gadsimta darba virsma: klienti runā, sūta bildes un dokumentus; Nina sakārto darbu.", "ru": "Рабочая поверхность 22 века: клиенты говорят, отправляют фото и документы; Nina организует работу."},
     }
@@ -755,12 +755,16 @@ def get_voice_intake_preview():
     global LAST_VOICE_INTAKE_PREVIEW
     if request.method != "POST":
         return None
-    voice_text = request.form.get("voice_text", "")
+    voice_text = (request.form.get("voice_text", "") or "").strip()
     source_channel = request.form.get("source_channel", "voice")
     priority = request.form.get("priority", "normal")
-    if not voice_text.strip():
-        LAST_VOICE_INTAKE_PREVIEW = None
-        return None
+    # V44.1 POST FIX: browsers show placeholder text but do not submit it.
+    # For the current safe preview sprint, an empty submit creates a demo intake preview
+    # instead of silently returning to "No items yet".
+    if not voice_text:
+        voice_text = (request.form.get("fallback_voice_text", "") or "").strip()
+    if not voice_text:
+        voice_text = "Nina, man vajag sagatavot tāmi klientam par vannas istabas remontu un atsūtīt WhatsApp"
 
     action = detect_voice_intake_action(voice_text, source_channel, priority)
     obj = normalize_action_to_work_object(action)
@@ -803,7 +807,7 @@ def voice_intake_form_html(created_obj=None):
       <div class='section-title'>🎙 {tx('voice_intake_form', lang)}</div>
       <p class='muted'>{tx('voice_intake_hint', lang)}</p>
       {created}
-      <form method='post' action='{q('/inbox')}'>
+      <form method='post' action='/inbox?lang={lang}'>
         <div class='form-grid'>
           <div class='field'>
             <label>{tx('source_channel', lang)}</label>
@@ -817,7 +821,7 @@ def voice_intake_form_html(created_obj=None):
         <br>
         <div class='field'>
           <label>{tx('voice_text', lang)}</label>
-          <textarea name='voice_text' placeholder='Nina, man vajag sagatavot tāmi klientam par vannas istabas remontu un atsūtīt WhatsApp...'></textarea>
+          <textarea name='voice_text' placeholder='Nina, man vajag sagatavot tāmi klientam par vannas istabas remontu un atsūtīt WhatsApp...'></textarea><input type='hidden' name='fallback_voice_text' value='Nina, man vajag sagatavot tāmi klientam par vannas istabas remontu un atsūtīt WhatsApp'>
         </div>
         <div class='form-actions'>
           <button class='btn primary' type='submit'>{tx('nina_prepare', lang)}</button>
@@ -856,7 +860,7 @@ def channel_hub_body(data):
         + voice_intake_form_html(created_voice_obj)
         + "<br>"
         + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V44.1 FIX foundation</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V44.1 POST FIX foundation</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
         + "<div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
