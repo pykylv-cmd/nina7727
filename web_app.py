@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V45.4 — Client Work Threads + Follow-up Merge
+# NinaOS Web App V45.4 FIX — Thread Type Classifier Polish
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V45.4 — Client Work Threads + Follow-up Merge"
+WEB_APP_VERSION = "Web App V45.4 FIX — Thread Type Classifier Polish"
 app = Flask(__name__)
 
 # V45.4 safe in-memory workspace preview store + client work thread bridge.
@@ -214,7 +214,7 @@ def tx(key, lang=None):
         "source_channel": {"en": "Source channel", "lv": "Avota kanāls", "ru": "Канал источника"},
         "nina_prepare": {"en": "Nina, prepare work", "lv": "Nina, sagatavo darbu", "ru": "Nina, подготовь работу"},
         "voice_preview_created": {"en": "Voice intake preview created", "lv": "Balss ievades priekšskatījums izveidots", "ru": "Preview из голосового ввода создан"},
-        "voice_safe_note": {"en": "V45.4 safe mode: Web reads existing Telegram memory, deduplicates it, and groups related client work into threads. New DB writes still come later.", "lv": "V45.4 drošais režīms: web lasa esošo Telegram atmiņu, noņem dublikātus un grupē klienta darbus pavedienos. Jauna DB rakstīšana nāks vēlāk.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
+        "voice_safe_note": {"en": "V45.4 FIX safe mode: Web reads existing Telegram memory, deduplicates it, and classifies client work threads more accurately. New DB writes still come later.", "lv": "V45.4 FIX drošais režīms: web lasa esošo Telegram atmiņu, noņem dublikātus un precīzāk klasificē klienta darba pavedienus. Jauna DB rakstīšana nāks vēlāk.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
         "detected_intent": {"en": "Detected intent", "lv": "Atpazītais nodoms", "ru": "Распознанное намерение"},
         "twenty_second_century": {"en": "22nd-century work surface: clients speak, send photos and documents; Nina organizes the work.", "lv": "22. gadsimta darba virsma: klienti runā, sūta bildes un dokumentus; Nina sakārto darbu.", "ru": "Рабочая поверхность 22 века: клиенты говорят, отправляют фото и документы; Nina организует работу."},
     }
@@ -1036,23 +1036,45 @@ def dedupe_and_unify_intake_items(items, limit=30):
 
 
 def _thread_family_for_obj(obj):
-    """V45.4: classify related NinaOS work into broad thread families."""
+    """V45.4 FIX: classify related NinaOS work into broad thread families.
+
+    Important polish:
+    - Follow-up wording must not become a document thread just because the card has photo/voice evidence.
+    - Estimate/offer wording wins over generic document/photo words.
+    - Only real document/photo-only intake stays in the documents family.
+    """
     meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
     text = " ".join([
         str(obj.get("title") or ""),
         str(meta.get("raw_text") or ""),
         str(meta.get("transcript_text") or ""),
+        str(meta.get("caption") or ""),
         str(obj.get("object_type") or ""),
     ]).lower()
     obj_type = str(obj.get("object_type") or "").lower()
-    if obj_type == "document_intake" or any(x in text for x in ["foto", "photo", "bild", "image", "pdf", "dok", "document", "scan", "skan"]):
-        return "documents"
-    if obj_type in ["estimate", "offer"] or any(x in text for x in ["tāme", "tame", "estimate", "piedāvāj", "piedavaj", "offer", "quote", "€", "eur"]):
+
+    followup_terms = [
+        "follow", "pajaut", "atgādin", "atgadin", "zvana", "zvanīt", "zvanit",
+        "raksti", "uzraksti", "atbild", "sazin", "piezvan", "jāpajaut", "japajaut",
+    ]
+    estimate_terms = ["tāme", "tame", "estimate", "piedāvāj", "piedavaj", "offer", "quote", "€", "eur"]
+    invoice_terms = ["rēķin", "rekin", "invoice"]
+    document_terms = ["foto", "photo", "bild", "image", "pdf", "dok", "document", "scan", "skan", "fails", "file"]
+
+    has_followup = obj_type == "followup_task" or any(x in text for x in followup_terms)
+    has_estimate = obj_type in ["estimate", "offer"] or any(x in text for x in estimate_terms)
+    has_invoice = obj_type == "invoice" or any(x in text for x in invoice_terms)
+    has_document = obj_type == "document_intake" or any(x in text for x in document_terms)
+
+    # Business intent wins over attachment/evidence hints.
+    if has_estimate:
         return "estimate"
-    if obj_type == "invoice" or any(x in text for x in ["rēķin", "rekin", "invoice"]):
+    if has_invoice:
         return "invoice"
-    if obj_type == "followup_task" or any(x in text for x in ["follow", "pajaut", "atgādin", "atgadin", "zvana", "zvanīt", "zvanit", "raksti", "uzraksti", "atbild"]):
+    if has_followup:
         return "followup"
+    if has_document:
+        return "documents"
     return "task"
 
 
@@ -1452,7 +1474,7 @@ def load_workspace_data():
         ]
 
     activity = [
-        {"title": "V45.4 client work threads bridge", "body": "Inbox now groups real app.py memory into client work threads with follow-up merge.", "kind": "sync"},
+        {"title": "V45.4 FIX thread classifier polish", "body": "Inbox now groups real app.py memory into client work threads with follow-up merge.", "kind": "sync"},
         {"title": "V43.4 preview to real task surface", "body": "Approved preview objects now appear across Dashboard, Tasks and Office Manager surfaces in safe mode.", "kind": "work"},
         {"title": "Web service online", "body": "NinaOS web runtime is separated from Telegram runtime.", "kind": "info"},
         {"title": "Workspace loaded", "body": "V36 clean workspace data layer is active.", "kind": "info"},
@@ -1622,7 +1644,7 @@ def tasks_body(data):
     telegram_sync_rows = client_thread_rows(load_client_work_threads(), empty_text=tx("no_items", lang), limit=8)
     return (
         work_page_header(tx("tasks"), tx("tasks_sub"))
-        + "<section class='card card-pad'><div class='section-title'>Client Work Threads</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.4: related follow-ups, tasks, voice and photo evidence are merged into client work threads. Telegram runtime is not modified.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>Client Work Threads</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.4 FIX: thread classification is polished so follow-up text no longer falls into document intake just because it has photo/voice evidence. Telegram runtime is not modified.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('real_task_surface_bridge', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('all_workspace_work', lang)}</div><div class='list'>{all_rows}</div></section><br>"
@@ -2074,9 +2096,9 @@ def channel_hub_body(data):
         + voice_intake_form_html(created_voice_obj)
         + "<br>"
         + telegram_db_diagnostic_block_html()
-        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V45.4 groups existing app.py memory into client work threads: one Andris follow-up thread instead of many repeated cards, with voice/photo/task evidence preserved.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.4 safe mode: existing Telegram memory is grouped into client work threads and approval/work queues. Web reads only; DB writes still come later.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V45.4 FIX groups existing app.py memory into cleaner client work threads: follow-ups stay follow-ups, estimates stay estimates, and only real photos/files become document intake threads.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.4 FIX safe mode: existing Telegram memory is grouped into cleaner client work threads and approval/work queues. Web reads only; DB writes still come later.</div></section><br>"
         + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V45.4 client thread bridge</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V45.4 FIX thread classifier</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
         + "<div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
