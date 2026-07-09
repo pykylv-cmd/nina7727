@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V45.0 — Existing Telegram Voice/Intake to Web Inbox Sync
+# NinaOS Web App V45.2 — Existing Telegram Memory to Web Inbox Bridge
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -7,10 +7,10 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V45.1 — Real Telegram Intake Store Prep"
+WEB_APP_VERSION = "Web App V45.2 — Existing Telegram Memory → Web Inbox Bridge"
 app = Flask(__name__)
 
-# V45.1 safe in-memory workspace preview store + real intake_events store prep.
+# V45.2 safe in-memory workspace preview store + existing Telegram memory bridge.
 # This does NOT write to Postgres yet and does NOT touch Telegram app.py.
 # Telegram remains its own runtime; web_app.py only reads/surfaces shared intake/work data.
 WORKSPACE_ACTION_PREVIEWS = []
@@ -214,7 +214,7 @@ def tx(key, lang=None):
         "source_channel": {"en": "Source channel", "lv": "Avota kanāls", "ru": "Канал источника"},
         "nina_prepare": {"en": "Nina, prepare work", "lv": "Nina, sagatavo darbu", "ru": "Nina, подготовь работу"},
         "voice_preview_created": {"en": "Voice intake preview created", "lv": "Balss ievades priekšskatījums izveidots", "ru": "Preview из голосового ввода создан"},
-        "voice_safe_note": {"en": "V44.1 POST FIX safe mode: voice/WhatsApp/Telegram text creates a real preview work object and document intake record. Owner approval and DB bridge come next.", "lv": "V44.1 POST FIX drošais režīms: balss/WhatsApp/Telegram teksts izveido īstu preview darba objektu un dokumentu ievades ierakstu. Īpašnieka apstiprinājums un DB bridge nāk tālāk.", "ru": "Безопасный режим V44.1 POST FIX: голос/WhatsApp/Telegram создаёт preview-объект работы и запись входящих документов. Подтверждение владельца и DB bridge — дальше."},
+        "voice_safe_note": {"en": "V45.2 safe mode: Web reads existing Telegram memory and task backups. New DB writes still come later.", "lv": "V45.2 drošais režīms: web lasa esošo Telegram atmiņu un task backupus. Jauna DB rakstīšana nāks vēlāk.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
         "detected_intent": {"en": "Detected intent", "lv": "Atpazītais nodoms", "ru": "Распознанное намерение"},
         "twenty_second_century": {"en": "22nd-century work surface: clients speak, send photos and documents; Nina organizes the work.", "lv": "22. gadsimta darba virsma: klienti runā, sūta bildes un dokumentus; Nina sakārto darbu.", "ru": "Рабочая поверхность 22 века: клиенты говорят, отправляют фото и документы; Nina организует работу."},
     }
@@ -401,15 +401,18 @@ def _first_value(row, keys, default=""):
     return default
 
 
-def load_real_intake_events_from_db(limit=50):
-    """V45.1: prepare web_app.py to read a real shared intake_events table.
 
-    This does not write to Postgres and does not touch Telegram app.py.
-    If app.py/shared modules later save Telegram voice/text/photo/document events into
-    intake_events, the Web Inbox will automatically surface them here.
-    The mapper is deliberately schema-tolerant so early DB migrations can evolve safely.
+def _db_url():
+    return os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or ""
+
+
+def load_real_intake_events_from_db(limit=50):
+    """V45.1/V45.2 compatibility: read future shared intake_events table if it exists.
+
+    This remains read-only. V45.2 does not require intake_events yet because app.py
+    already stores useful Telegram work memory in memory_backups and conversation_state.
     """
-    database_url = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or ""
+    database_url = _db_url()
     if not database_url:
         return []
     conn = None
@@ -489,18 +492,203 @@ def load_real_intake_events_from_db(limit=50):
             pass
         return []
 
-def load_existing_telegram_intake_sync():
-    """V45.1: web-side sync view for Telegram/app intake.
 
-    Priority order:
-    1) real shared Postgres intake_events table, when present;
-    2) existing Telegram tasks table bridge;
-    3) safe demo sync items so the UI never goes blank during setup.
+def _row_get(row, index, default=""):
+    try:
+        return row[index]
+    except Exception:
+        return default
+
+
+def load_existing_task_engine_memory_from_db(limit=80):
+    """V45.2: read the existing app.py task memory store.
+
+    app.py already saves detected tasks/follow-ups as JSON into memory_backups
+    with source='task_engine'. Web should bridge to that before inventing a new table.
     """
-    real_intake = load_real_intake_events_from_db()
-    if real_intake:
-        return real_intake[:12]
+    database_url = _db_url()
+    if not database_url:
+        return []
+    conn = None
+    try:
+        import psycopg2, json
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, user_id, backup_text, created_at
+            FROM memory_backups
+            WHERE source = %s
+            ORDER BY id DESC
+            LIMIT %s
+        """, ("task_engine", int(limit)))
+        rows = cur.fetchall() or []
+        cur.close()
+        conn.close()
 
+        objects = []
+        now = datetime.utcnow().isoformat() + "Z"
+        for row in rows:
+            backup_id = _row_get(row, 0)
+            user_id = _row_get(row, 1)
+            backup_text = _row_get(row, 2) or ""
+            created_at = str(_row_get(row, 3) or "")
+            try:
+                obj = json.loads(str(backup_text)) if backup_text else {}
+                if not isinstance(obj, dict):
+                    obj = {"title": str(backup_text)}
+            except Exception:
+                obj = {"title": str(backup_text)}
+
+            title = obj.get("title") or obj.get("raw_text") or obj.get("text") or "Telegram task memory"
+            obj_type = obj.get("object_type") or obj.get("type") or infer_work_type_from_text(str(title) + " " + str(obj.get("raw_text", "")), "task")
+            if obj.get("followup") or obj.get("is_followup") or "follow" in str(obj_type).lower():
+                obj_type = "followup_task"
+            client_name = obj.get("client") or obj.get("client_name") or obj.get("contact") or obj.get("person") or ""
+            due_date = obj.get("deadline") or obj.get("due_date") or obj.get("date") or ""
+            priority = obj.get("priority") or "normal"
+            status = obj.get("status") or "synced_preview"
+            meta = dict(obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {})
+            meta.update({
+                "client_name": client_name or meta.get("client_name", ""),
+                "owner": "Telegram Nina",
+                "source": "existing_task_memory",
+                "source_channel": "Telegram",
+                "intake_kind": "task_engine_memory",
+                "raw_text": obj.get("raw_text") or obj.get("text") or title,
+                "storage_target": "memory_backups/source=task_engine",
+                "approval_state": meta.get("approval_state") or "synced_from_existing_memory",
+                "db_read": True,
+                "db_write_by_web": False,
+                "telegram_user_id": str(user_id or ""),
+                "memory_backup_id": str(backup_id or ""),
+                "created_at": created_at,
+                "synced_at": now,
+            })
+            objects.append({
+                "object_id": f"task_memory_{backup_id}",
+                "object_type": obj_type,
+                "title": title,
+                "status": status,
+                "priority": priority,
+                "client_id": client_name or "",
+                "project_id": obj.get("project_id") or obj.get("project") or "",
+                "due_date": due_date,
+                "metadata": meta,
+            })
+        return objects
+    except Exception:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+        return []
+
+
+def load_existing_voice_photo_state_from_db(limit=80):
+    """V45.2: read voice/photo records already saved by app.py in conversation_state."""
+    database_url = _db_url()
+    if not database_url:
+        return []
+    conn = None
+    try:
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, user_id, user_text, nina_text, intent, topic, created_at
+            FROM conversation_state
+            WHERE user_text LIKE %s OR user_text LIKE %s OR intent IN (%s, %s)
+            ORDER BY id DESC
+            LIMIT %s
+        """, ("[VOICE]%", "[PHOTO]%", "voice_transcript", "photo", int(limit)))
+        rows = cur.fetchall() or []
+        cur.close()
+        conn.close()
+
+        objects = []
+        now = datetime.utcnow().isoformat() + "Z"
+        for row in rows:
+            state_id = _row_get(row, 0)
+            user_id = _row_get(row, 1)
+            user_text = str(_row_get(row, 2) or "")
+            nina_text = str(_row_get(row, 3) or "")
+            intent = str(_row_get(row, 4) or "")
+            topic = str(_row_get(row, 5) or "")
+            created_at = str(_row_get(row, 6) or "")
+
+            is_voice = user_text.startswith("[VOICE]") or intent == "voice_transcript" or topic == "voice"
+            is_photo = user_text.startswith("[PHOTO]") or intent == "photo" or topic == "vision"
+            clean_text = user_text.replace("[VOICE]", "", 1).replace("[PHOTO]", "", 1).strip()
+            if not clean_text:
+                clean_text = "Telegram voice/photo intake"
+            obj_type = "document_intake" if is_photo else infer_work_type_from_text(clean_text, "task")
+            title_prefix = "Telegram voice" if is_voice else ("Telegram photo/document" if is_photo else "Telegram message")
+            meta = {
+                "client_name": "",
+                "owner": "Telegram Nina",
+                "source": "existing_conversation_state",
+                "source_channel": "Telegram voice" if is_voice else ("Telegram photo/vision" if is_photo else "Telegram"),
+                "intake_kind": "voice_transcript" if is_voice else ("photo_vision" if is_photo else "conversation_state"),
+                "raw_text": clean_text,
+                "nina_text": nina_text[:600],
+                "storage_target": "conversation_state",
+                "approval_state": "synced_from_existing_memory",
+                "db_read": True,
+                "db_write_by_web": False,
+                "telegram_user_id": str(user_id or ""),
+                "conversation_state_id": str(state_id or ""),
+                "created_at": created_at,
+                "synced_at": now,
+            }
+            objects.append({
+                "object_id": f"conversation_state_{state_id}",
+                "object_type": obj_type,
+                "title": f"{title_prefix}: {clean_text[:110]}",
+                "status": "synced_preview",
+                "priority": "normal",
+                "client_id": "",
+                "project_id": "",
+                "due_date": "",
+                "metadata": meta,
+            })
+        return objects
+    except Exception:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+        return []
+
+
+def load_existing_telegram_intake_sync():
+    """V45.2: bridge Web Inbox to the Telegram memory that already exists in app.py.
+
+    Correct priority now:
+    1) existing task_engine memory_backups (real Telegram work objects);
+    2) existing conversation_state voice/photo records;
+    3) future intake_events table if someone adds it later;
+    4) safe demo fallback.
+    """
+    task_memory = load_existing_task_engine_memory_from_db()
+    voice_photo_memory = load_existing_voice_photo_state_from_db()
+    real_intake = load_real_intake_events_from_db()
+
+    merged = []
+    seen = set()
+    for source_list in [task_memory, voice_photo_memory, real_intake]:
+        for obj in source_list or []:
+            key = str(obj.get("object_id") or obj.get("title") or "")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(obj)
+
+    if merged:
+        return merged[:18]
+
+    # Older app.py/web bridge fallback: tasks table if present.
     live = load_live_objects_from_app_db()
     synced = []
     for obj in live:
@@ -532,7 +720,6 @@ def load_existing_telegram_intake_sync():
     if synced:
         return synced[:12]
     return telegram_intake_demo_items()
-
 
 
 def normalize_action_to_work_object(action):
@@ -605,7 +792,7 @@ def create_workspace_action_preview(action):
 
 def is_preview_object(obj):
     meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
-    return meta.get("source") in ["web_action_preview", "web_preview", "web_voice_intake_preview", "telegram_intake_sync", "real_intake_store"]
+    return meta.get("source") in ["web_action_preview", "web_preview", "web_voice_intake_preview", "telegram_intake_sync", "real_intake_store", "existing_task_memory", "existing_conversation_state"]
 
 
 def preview_approval_state(obj):
@@ -733,7 +920,7 @@ def load_workspace_data():
         ]
 
     activity = [
-        {"title": "V45.1 real intake store prep", "body": "Inbox is ready to read real intake_events from Postgres, with safe Telegram demo fallback.", "kind": "sync"},
+        {"title": "V45.2 existing Telegram memory bridge", "body": "Inbox reads app.py task_engine memory plus voice/photo conversation_state before using demo fallback.", "kind": "sync"},
         {"title": "V43.4 preview to real task surface", "body": "Approved preview objects now appear across Dashboard, Tasks and Office Manager surfaces in safe mode.", "kind": "work"},
         {"title": "Web service online", "body": "NinaOS web runtime is separated from Telegram runtime.", "kind": "info"},
         {"title": "Workspace loaded", "body": "V36 clean workspace data layer is active.", "kind": "info"},
@@ -845,8 +1032,12 @@ def object_source_label(obj, lang=None):
         return tx("source_preview", lang)
     if source == "telegram_intake_sync":
         return "Telegram sync"
+    if source == "existing_task_memory":
+        return "Existing task memory" if lang == "en" else ("Esošā task atmiņa" if lang == "lv" else "Память задач")
+    if source == "existing_conversation_state":
+        return "Existing voice/photo memory" if lang == "en" else ("Esošā balss/foto atmiņa" if lang == "lv" else "Память голоса/фото")
     if source == "real_intake_store":
-        return "Real intake store" if lang == "en" else ("Telegram sync" if lang == "lv" else "Telegram sync")
+        return "Real intake store" if lang == "en" else ("Intake store" if lang == "lv" else "Intake store")
     if source == "database":
         return tx("source_database", lang)
     if source == "demo":
@@ -893,7 +1084,7 @@ def tasks_body(data):
     telegram_sync_rows = work_object_rows(load_existing_telegram_intake_sync(), empty_text=tx("no_items", lang), limit=8, show_source=True)
     return (
         work_page_header(tx("tasks"), tx("tasks_sub"))
-        + "<section class='card card-pad'><div class='section-title'>Real Intake Store / Telegram Sync</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.1: web reads intake_events when present, otherwise falls back to existing Telegram task sync/demo. Telegram runtime is not modified.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>Existing Telegram Memory / Inbox Sync</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.2: web reads existing app.py memory_backups source=task_engine and conversation_state voice/photo records. Telegram runtime is not modified.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('real_task_surface_bridge', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('all_workspace_work', lang)}</div><div class='list'>{all_rows}</div></section><br>"
@@ -1098,9 +1289,9 @@ def channel_hub_body(data):
         + f"<section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>{tx('modern_intake', lang).upper()}</div></div></div><div class='bigline'>{tx('twenty_second_century', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/office-manager/actions')}'>{tx('voice_command', lang)}</a><a class='btn' href='{q('/tasks')}'>{tx('tasks', lang)}</a><a class='btn' href='{q('/clients')}'>{tx('clients', lang)}</a></div></section><br>"
         + voice_intake_form_html(created_voice_obj)
         + "<br>"
-        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → NinaOS Inbox Sync</div><p class='muted'>V45.1 prepares a real shared intake store. If Postgres table intake_events exists, Inbox reads it; if not, NinaOS keeps a safe Telegram sync fallback. app.py stays separate.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.1 safe mode: synced Telegram intake is visible in Inbox and approval/work queues. Web is ready for real Postgres intake_events reads; DB writes still come later.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → NinaOS Inbox Sync</div><p class='muted'>V45.2 connects Web Inbox to the Telegram memory that already exists in app.py: task_engine backups, voice transcripts and photo/vision records. app.py stays separate.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.2 safe mode: existing Telegram memory is visible in Inbox and approval/work queues. Web reads only; DB writes still come later.</div></section><br>"
         + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V45.1 intake store prep</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V45.2 existing memory bridge</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
         + "<div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
@@ -1468,7 +1659,7 @@ def exchange():
 
 @app.route("/health")
 def health():
-    return {"ok": True, "runtime": "web_app.py", "version": WEB_APP_VERSION, "language": current_language(), "preview_objects": len(WORKSPACE_ACTION_PREVIEWS), "approved_preview_objects": len(approved_preview_items()), "pending_or_held_preview_objects": len(pending_or_held_preview_items()), "rejected_preview_objects": len(rejected_preview_items()), "telegram_intake_sync_items": len(load_existing_telegram_intake_sync()), "real_intake_store_items": len(load_real_intake_events_from_db()), "time": datetime.utcnow().isoformat() + "Z"}
+    return {"ok": True, "runtime": "web_app.py", "version": WEB_APP_VERSION, "language": current_language(), "preview_objects": len(WORKSPACE_ACTION_PREVIEWS), "approved_preview_objects": len(approved_preview_items()), "pending_or_held_preview_objects": len(pending_or_held_preview_items()), "rejected_preview_objects": len(rejected_preview_items()), "telegram_intake_sync_items": len(load_existing_telegram_intake_sync()), "real_intake_store_items": len(load_real_intake_events_from_db()), "existing_task_memory_items": len(load_existing_task_engine_memory_from_db()), "existing_voice_photo_items": len(load_existing_voice_photo_state_from_db()), "time": datetime.utcnow().isoformat() + "Z"}
 
 
 if __name__ == "__main__":
