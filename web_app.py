@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V43.2 — Preview Approval Layer
+# NinaOS Web App V43.3 — Approval to Workspace Queue Bridge
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -7,10 +7,10 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V43.2 — Preview Approval Layer"
+WEB_APP_VERSION = "Web App V43.3 — Approval to Workspace Queue Bridge"
 app = Flask(__name__)
 
-# V43.2 safe in-memory workspace preview store with approval states.
+# V43.3 safe in-memory workspace preview store with approval-to-workspace queue states.
 # This does NOT write to Postgres yet and does NOT touch Telegram app.py.
 WORKSPACE_ACTION_PREVIEWS = []
 
@@ -154,7 +154,7 @@ def tx(key, lang=None):
         "normal": {"en": "Normal", "lv": "Normāla", "ru": "Обычный"},
         "high": {"en": "High", "lv": "Augsta", "ru": "Высокий"},
         "submit_preview": {"en": "Save Preview", "lv": "Saglabāt priekšskatījumu", "ru": "Сохранить предпросмотр"},
-        "safe_note": {"en": "V43.2 safe mode: forms create preview objects and owner approval states first. Postgres write bridge comes next.", "lv": "V43.2 drošais režīms: formas vispirms izveido priekšskatījuma objektus un īpašnieka apstiprinājuma statusus. Postgres rakstīšanas bridge nāks nākamais.", "ru": "V43.2 безопасный режим: формы сначала создают объекты предпросмотра и статусы подтверждения владельца. Запись в Postgres — следующий bridge."},
+        "safe_note": {"en": "V43.3 safe mode: approved previews move into the workspace queue. Hold stays in approval. Reject leaves active work. Postgres write bridge comes next.", "lv": "V43.3 drošais režīms: apstiprināti preview darbi pāriet darba rindā. Aizturētie paliek apstiprināšanā. Noraidītie iziet no aktīvā darba. Postgres bridge nāks nākamais.", "ru": "V43.3 безопасный режим: подтверждённые preview задачи переходят в рабочую очередь. Hold остаётся в подтверждении. Rejected выходит из активной работы. Postgres bridge — следующий."},
         "created_preview": {"en": "Preview created", "lv": "Priekšskatījums izveidots", "ru": "Предпросмотр создан"},
         "form_type": {"en": "Form type", "lv": "Formas tips", "ru": "Тип формы"},
         "new_task_form": {"en": "New Task", "lv": "Jauns uzdevums", "ru": "Новая задача"},
@@ -183,6 +183,12 @@ def tx(key, lang=None):
         "hold": {"en": "Hold", "lv": "Aizturēt", "ru": "Удержать"},
         "reject": {"en": "Reject", "lv": "Noraidīt", "ru": "Отклонить"},
         "approved_safe_note": {"en": "Approved in safe preview only. DB write is still disabled.", "lv": "Apstiprināts tikai drošajā priekšskatījumā. DB rakstīšana vēl ir izslēgta.", "ru": "Подтверждено только в безопасном предпросмотре. Запись в DB всё ещё отключена."},
+        "approval_workspace_bridge": {"en": "Approval → Workspace Queue Bridge", "lv": "Apstiprinājums → darba rindas bridge", "ru": "Подтверждение → рабочая очередь"},
+        "approved_workspace_queue": {"en": "Approved Workspace Queue", "lv": "Apstiprinātā darba rinda", "ru": "Подтверждённая рабочая очередь"},
+        "held_preview_queue": {"en": "Held Preview Queue", "lv": "Aizturēto preview rinda", "ru": "Удержанные preview"},
+        "rejected_preview_log": {"en": "Rejected Preview Log", "lv": "Noraidīto preview žurnāls", "ru": "Журнал отклонённых preview"},
+        "pending_or_held": {"en": "Pending / held approvals", "lv": "Gaida / aizturēti apstiprinājumi", "ru": "Ожидает / удержано"},
+        "approved_work_note": {"en": "Approved preview work is now visible in the active workspace queue, but still not written to Postgres.", "lv": "Apstiprinātais preview darbs tagad ir redzams aktīvajā darba rindā, bet vēl nav rakstīts Postgres.", "ru": "Подтверждённая preview работа видна в активной рабочей очереди, но ещё не записана в Postgres."},
     }
     return d.get(key, {}).get(lang) or d.get(key, {}).get("en") or key
 
@@ -345,6 +351,27 @@ def is_preview_object(obj):
     return meta.get("source") in ["web_action_preview", "web_preview"]
 
 
+def preview_approval_state(obj):
+    meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
+    return meta.get("approval_state") or "pending_approval"
+
+
+def approved_preview_items():
+    return [o for o in WORKSPACE_ACTION_PREVIEWS if preview_approval_state(o) == "approved"]
+
+
+def pending_or_held_preview_items():
+    return [o for o in WORKSPACE_ACTION_PREVIEWS if preview_approval_state(o) in ["pending_approval", "hold"]]
+
+
+def rejected_preview_items():
+    return [o for o in WORKSPACE_ACTION_PREVIEWS if preview_approval_state(o) == "rejected"]
+
+
+def active_preview_items():
+    return [o for o in WORKSPACE_ACTION_PREVIEWS if preview_approval_state(o) != "rejected"]
+
+
 def approval_label_from_state(state, lang=None):
     state = state or "pending_approval"
     key_map = {
@@ -364,9 +391,13 @@ def apply_preview_approval(object_id, decision):
     for obj in WORKSPACE_ACTION_PREVIEWS:
         if obj.get("object_id") == object_id:
             meta = obj.setdefault("metadata", {})
-            meta["approval_state"] = state_map[decision]
+            new_state = state_map[decision]
+            meta["approval_state"] = new_state
             meta["approval_updated_at"] = datetime.utcnow().isoformat() + "Z"
             meta["db_write"] = False
+            meta["workspace_queue_state"] = "active_approved" if new_state == "approved" else new_state
+            if new_state == "approved":
+                obj["status"] = obj.get("status") or "open"
             return obj
     return None
 
@@ -380,7 +411,7 @@ def handle_preview_approval_query():
 
 
 def preview_approval_controls(obj):
-    if not is_preview_object(obj):
+    if not is_preview_object(obj) or preview_approval_state(obj) == "rejected":
         return ""
     lang = current_language()
     object_id = html_escape(obj.get("object_id"))
@@ -421,8 +452,9 @@ def load_workspace_data():
     if live_objects:
         normalized = live_objects
 
-    if WORKSPACE_ACTION_PREVIEWS:
-        normalized = list(WORKSPACE_ACTION_PREVIEWS) + normalized
+    approved_previews = approved_preview_items()
+    if approved_previews:
+        normalized = list(approved_previews) + normalized
 
     if not normalized:
         normalized = [
@@ -434,7 +466,7 @@ def load_workspace_data():
         ]
 
     activity = [
-        {"title": "V43.2 preview approval layer", "body": "Preview objects can now be approved, held, or rejected in safe mode.", "kind": "work"},
+        {"title": "V43.3 approval to workspace bridge", "body": "Approved preview objects now move into the active workspace queue in safe mode.", "kind": "work"},
         {"title": "Web service online", "body": "NinaOS web runtime is separated from Telegram runtime.", "kind": "info"},
         {"title": "Workspace loaded", "body": "V36 clean workspace data layer is active.", "kind": "info"},
         {"title": "Client follow-up scheduled", "body": "Ask Andris about reply.", "kind": "work"},
@@ -577,16 +609,19 @@ def work_object_rows(items, empty_text=None, limit=None, show_source=True, show_
 
 def tasks_body(data):
     lang = current_language()
-    preview_items = [
-        o for o in data["tasks"]
-        if isinstance(o.get("metadata"), dict) and o.get("metadata", {}).get("source") in ["web_action_preview", "web_preview"]
-    ]
+    approved_items = approved_preview_items()
+    pending_items = pending_or_held_preview_items()
+    rejected_items = rejected_preview_items()
     all_rows = work_object_rows(data["tasks"], empty_text=tx("no_items", lang), show_source=True)
-    preview_rows = work_object_rows(preview_items, empty_text=tx("no_items", lang), show_source=True)
+    approved_rows = work_object_rows(approved_items, empty_text=tx("no_items", lang), show_source=True)
+    pending_rows = work_object_rows(pending_items, empty_text=tx("no_items", lang), show_source=True)
+    rejected_rows = work_object_rows(rejected_items, empty_text=tx("no_items", lang), show_source=True)
     return (
         work_page_header(tx("tasks"), tx("tasks_sub"))
-        + f"<section class='card card-pad'><div class='section-title'>{tx('workspace_preview_queue', lang)}</div><div class='list'>{preview_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>{tx('all_workspace_work', lang)}</div><div class='list'>{all_rows}</div></section>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('approved_workspace_queue', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('all_workspace_work', lang)}</div><div class='list'>{all_rows}</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('rejected_preview_log', lang)}</div><div class='list'>{rejected_rows}</div></section>"
     )
 
 
@@ -708,7 +743,7 @@ def action_preview_html(preview):
         rows += f"<div class='row'><div><b>{html_escape(label)}</b><span class='muted'>{html_escape(value)}</span></div><span class='pill'>preview</span></div>"
     obj = preview.get("workspace_object") or {}
     if obj:
-        rows += f"<div class='row'><div><b>{tx('object_id', lang)}</b><span class='muted'>{html_escape(obj.get('object_id'))}</span></div><span class='pill'>V43.2</span></div>"
+        rows += f"<div class='row'><div><b>{tx('object_id', lang)}</b><span class='muted'>{html_escape(obj.get('object_id'))}</span></div><span class='pill'>V43.3</span></div>"
         rows += f"<div class='row'><div><b>{tx('object_type', lang)}</b><span class='muted'>{html_escape(obj.get('object_type'))}</span></div><span class='pill'>{html_escape(obj.get('status'))}</span></div>"
         meta = obj.get('metadata', {}) if isinstance(obj.get('metadata'), dict) else {}
         rows += f"<div class='row'><div><b>{tx('approval_state', lang)}</b><span class='muted'>{html_escape(approval_label_from_state(meta.get('approval_state'), lang))}</span></div><span class='pill'>safe</span></div>"
@@ -777,7 +812,9 @@ def action_center_body(data):
         data["objects"].insert(0, obj)
         if obj.get("object_type") in ["task", "followup_task", "estimate", "invoice"]:
             data["tasks"].insert(0, obj)
-    preview_rows = work_object_rows(WORKSPACE_ACTION_PREVIEWS, empty_text=tx("no_items", lang), limit=5, show_source=True, show_approval=True)
+    preview_rows = work_object_rows(pending_or_held_preview_items(), empty_text=tx("no_items", lang), limit=5, show_source=True, show_approval=True)
+    approved_rows = work_object_rows(approved_preview_items(), empty_text=tx("no_items", lang), limit=5, show_source=True, show_approval=True)
+    rejected_rows = work_object_rows(rejected_preview_items(), empty_text=tx("no_items", lang), limit=5, show_source=True, show_approval=True)
     forms = (
         "<div class='stack-grid'>"
         + action_form_card("new_task", tx("new_task_form", lang), tx("create_task_hint", lang))
@@ -796,7 +833,9 @@ def action_center_body(data):
         + f"<a href='{q('/tasks')}'>{tx('tasks', lang)}</a>"
         + f"<a href='{q('/clients')}'>{tx('clients', lang)}</a>"
         + "</div>"
-        + f"<section class='card card-pad'><div class='section-title'>{tx('preview_approval_layer', lang)}</div><div class='list'>{preview_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{preview_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('approved_workspace_queue', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('rejected_preview_log', lang)}</div><div class='list'>{rejected_rows}</div></section><br>"
         + forms
     )
 
@@ -856,7 +895,9 @@ def office_manager_body(data):
         + "</div><br>"
         + office_manager_action_panels(data)
         + "<br>"
-        + f"<section class='card card-pad'><div class='section-title'>{tx('workspace_preview_queue', lang)}</div><div class='list'>{work_object_rows([o for o in data['tasks'] if isinstance(o.get('metadata'), dict) and o.get('metadata', {}).get('source') in ['web_action_preview', 'web_preview']], empty_text=tx('no_items', lang), limit=5, show_source=True)}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{work_object_rows(pending_or_held_preview_items(), empty_text=tx('no_items', lang), limit=5, show_source=True)}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
+        + "<br>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('approved_workspace_queue', lang)}</div><div class='list'>{work_object_rows(approved_preview_items(), empty_text=tx('no_items', lang), limit=5, show_source=True)}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section>"
         + "<br><div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('linked_work', lang)}</div><div class='list'>{mini_list(tasks, 'No task queue yet')}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('estimates', lang)} / {tx('invoices', lang)}</div><div class='list'>{mini_list(estimates + invoices, 'No finance admin queue yet')}</div></section>"
@@ -967,7 +1008,7 @@ def exchange():
 
 @app.route("/health")
 def health():
-    return {"ok": True, "runtime": "web_app.py", "version": WEB_APP_VERSION, "language": current_language(), "preview_objects": len(WORKSPACE_ACTION_PREVIEWS), "time": datetime.utcnow().isoformat() + "Z"}
+    return {"ok": True, "runtime": "web_app.py", "version": WEB_APP_VERSION, "language": current_language(), "preview_objects": len(WORKSPACE_ACTION_PREVIEWS), "approved_preview_objects": len(approved_preview_items()), "pending_or_held_preview_objects": len(pending_or_held_preview_items()), "rejected_preview_objects": len(rejected_preview_items()), "time": datetime.utcnow().isoformat() + "Z"}
 
 
 if __name__ == "__main__":
