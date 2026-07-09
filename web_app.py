@@ -7,12 +7,13 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V44.1 — Inbox Voice Intake Form"
+WEB_APP_VERSION = "Web App V44.1 FIX — Inbox Voice Intake Bridge"
 app = Flask(__name__)
 
 # V44 safe in-memory workspace preview store + modern channel hub foundation.
 # This does NOT write to Postgres yet and does NOT touch Telegram app.py.
 WORKSPACE_ACTION_PREVIEWS = []
+LAST_VOICE_INTAKE_PREVIEW = None
 
 
 def safe_int(value, default=0):
@@ -212,7 +213,7 @@ def tx(key, lang=None):
         "source_channel": {"en": "Source channel", "lv": "Avota kanāls", "ru": "Канал источника"},
         "nina_prepare": {"en": "Nina, prepare work", "lv": "Nina, sagatavo darbu", "ru": "Nina, подготовь работу"},
         "voice_preview_created": {"en": "Voice intake preview created", "lv": "Balss ievades priekšskatījums izveidots", "ru": "Preview из голосового ввода создан"},
-        "voice_safe_note": {"en": "V44.1 safe mode: voice text creates a preview object only. Owner approval and DB bridge come next.", "lv": "V44.1 drošais režīms: balss teksts izveido tikai preview objektu. Īpašnieka apstiprinājums un DB bridge nāk tālāk.", "ru": "Безопасный режим V44.1: голосовой текст создаёт только preview-объект. Подтверждение владельца и DB bridge — дальше."},
+        "voice_safe_note": {"en": "V44.1 FIX safe mode: voice/WhatsApp/Telegram text creates a real preview work object and document intake record. Owner approval and DB bridge come next.", "lv": "V44.1 FIX drošais režīms: balss/WhatsApp/Telegram teksts izveido īstu preview darba objektu un dokumentu ievades ierakstu. Īpašnieka apstiprinājums un DB bridge nāk tālāk.", "ru": "Безопасный режим V44.1 FIX: голос/WhatsApp/Telegram создаёт preview-объект работы и запись входящих документов. Подтверждение владельца и DB bridge — дальше."},
         "detected_intent": {"en": "Detected intent", "lv": "Atpazītais nodoms", "ru": "Распознанное намерение"},
         "twenty_second_century": {"en": "22nd-century work surface: clients speak, send photos and documents; Nina organizes the work.", "lv": "22. gadsimta darba virsma: klienti runā, sūta bildes un dokumentus; Nina sakārto darbu.", "ru": "Рабочая поверхность 22 века: клиенты говорят, отправляют фото и документы; Nina организует работу."},
     }
@@ -711,53 +712,74 @@ def channel_card(title, body, status, icon="●"):
 
 
 
-def detect_voice_intake_action(voice_text, source_channel="voice"):
+def detect_voice_intake_action(voice_text, source_channel="voice", priority="normal"):
     text = (voice_text or "").strip()
     low = text.lower()
 
-    if any(w in low for w in ["tāme", "tami", "estimate", "offer", "piedāvāj"]):
+    if any(w in low for w in ["tāme", "tame", "tami", "estimate", "quote", "offer", "piedāvāj", "piedavaj"]):
         form_type = "estimate"
-    elif any(w in low for w in ["rēķin", "rekins", "invoice"]):
+    elif any(w in low for w in ["rēķin", "rekin", "rekins", "invoice", "bill"]):
         form_type = "invoice"
-    elif any(w in low for w in ["piezvan", "atgādin", "follow", "sazin", "pajaut"]):
+    elif any(w in low for w in ["piezvan", "atgādin", "atgadin", "follow", "sazin", "pajaut", "uzrakst", "atsūti", "atsuti"]):
         form_type = "followup"
     else:
         form_type = "new_task"
 
     client_name = ""
-    for name in ["andris", "jānis", "marija", "katrin"]:
+    # Simple V44.1 FIX extraction: enough for safe preview; real CRM extraction comes later.
+    for name in ["andris", "jānis", "janis", "marija", "katrin", "klients", "client"]:
         if name in low:
-            client_name = name[:1].upper() + name[1:]
+            client_name = "Klients" if name in ["klients", "client"] else name[:1].upper() + name[1:]
             break
+
+    title = text[:140] if text else "Inbox intake work"
+    if form_type == "estimate" and "tāme" not in low and "estimate" not in low:
+        title = "Prepare estimate from inbox intake"
+    elif form_type == "invoice":
+        title = "Prepare invoice/admin record from inbox intake"
+    elif form_type == "followup":
+        title = "Follow up from inbox intake"
 
     return {
         "form_type": form_type,
-        "task_title": text[:140] if text else "Voice intake work",
+        "task_title": title,
         "client_name": client_name,
         "project_name": "",
         "amount": "",
         "due_date": "",
-        "priority": "normal",
-        "notes": f"Voice/source intake from {source_channel}: {text}",
+        "priority": priority or "normal",
+        "notes": f"Omnichannel intake from {source_channel}: {text}",
     }
 
-
 def get_voice_intake_preview():
+    global LAST_VOICE_INTAKE_PREVIEW
     if request.method != "POST":
         return None
     voice_text = request.form.get("voice_text", "")
     source_channel = request.form.get("source_channel", "voice")
+    priority = request.form.get("priority", "normal")
     if not voice_text.strip():
+        LAST_VOICE_INTAKE_PREVIEW = None
         return None
-    action = detect_voice_intake_action(voice_text, source_channel)
-    obj = create_workspace_action_preview(action)
+
+    action = detect_voice_intake_action(voice_text, source_channel, priority)
+    obj = normalize_action_to_work_object(action)
     meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
+    meta["source"] = "web_voice_intake_preview"
     meta["source_channel"] = source_channel
     meta["voice_text"] = voice_text.strip()
-    meta["source"] = "web_voice_intake_preview"
+    meta["intake_kind"] = "omnichannel_voice_text"
+    meta["document_intake"] = True
+    meta["storage_target"] = "NinaOS client workspace"
+    meta["send_back_channels"] = "WhatsApp / Telegram / Email"
+    meta["approval_state"] = "pending_approval"
     obj["metadata"] = meta
-    return obj
+    obj["object_id"] = obj.get("object_id", "web_preview_voice") .replace("web_preview_", "web_voice_preview_", 1)
 
+    WORKSPACE_ACTION_PREVIEWS.insert(0, obj)
+    del WORKSPACE_ACTION_PREVIEWS[25:]
+    LAST_VOICE_INTAKE_PREVIEW = obj
+    return obj
 
 def voice_intake_form_html(created_obj=None):
     lang = current_language()
@@ -810,7 +832,10 @@ def channel_hub_body(data):
     lang = current_language()
     created_voice_obj = get_voice_intake_preview()
     approved_rows = work_object_rows(approved_preview_items(), empty_text=tx("no_items", lang), limit=5, show_source=True)
-    pending_rows = work_object_rows(pending_or_held_preview_items(), empty_text=tx("no_items", lang), limit=5, show_source=True)
+    pending_items = pending_or_held_preview_items()
+    if created_voice_obj and all(o.get("object_id") != created_voice_obj.get("object_id") for o in pending_items):
+        pending_items = [created_voice_obj] + pending_items
+    pending_rows = work_object_rows(pending_items, empty_text=tx("no_items", lang), limit=5, show_source=True)
     intake_cards = (
         channel_card(tx("voice_command", lang), tx("voice_command_hint", lang), "ready · voice first", "🎙")
         + channel_card(tx("whatsapp_business", lang), "Client messages, photos, object images, documents and estimate requests flow into NinaOS work intake.", "connector foundation", "🟢")
@@ -831,6 +856,7 @@ def channel_hub_body(data):
         + voice_intake_form_html(created_voice_obj)
         + "<br>"
         + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V44.1 FIX foundation</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
         + "<div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
@@ -1099,7 +1125,7 @@ def dashboard():
 
 @app.route("/inbox", methods=["GET", "POST"])
 def inbox():
-    return page(tx("channel_hub"), channel_hub_body(load_workspace_data()), "inbox")
+    return Response(page(tx("channel_hub"), channel_hub_body(load_workspace_data()), "inbox"), mimetype="text/html")
 
 
 @app.route("/channel-hub")
