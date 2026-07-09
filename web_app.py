@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V45.4 FIX — Thread Type Classifier Polish
+# NinaOS Web App V46.0 — Approval Actions to Real Workspace Queue
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -7,13 +7,17 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V45.4 FIX — Thread Type Classifier Polish"
+WEB_APP_VERSION = "Web App V46.0 — Approval Actions to Real Workspace Queue"
 app = Flask(__name__)
 
-# V45.4 safe in-memory workspace preview store + client work thread bridge.
+# V46.0 safe in-memory workspace preview store + client work thread workflow bridge.
 # This does NOT write to Postgres yet and does NOT touch Telegram app.py.
 # Telegram remains its own runtime; web_app.py only reads/surfaces shared intake/work data.
 WORKSPACE_ACTION_PREVIEWS = []
+# V46.0: read-only Telegram/client threads cannot yet be written back to app.py DB.
+# Their owner decisions are tracked safely in web runtime memory so the UI can promote
+# approved threads into the active workspace surfaces without mutating Postgres.
+THREAD_WORKFLOW_STATES = {}
 LAST_VOICE_INTAKE_PREVIEW = None
 
 
@@ -214,7 +218,7 @@ def tx(key, lang=None):
         "source_channel": {"en": "Source channel", "lv": "Avota kanāls", "ru": "Канал источника"},
         "nina_prepare": {"en": "Nina, prepare work", "lv": "Nina, sagatavo darbu", "ru": "Nina, подготовь работу"},
         "voice_preview_created": {"en": "Voice intake preview created", "lv": "Balss ievades priekšskatījums izveidots", "ru": "Preview из голосового ввода создан"},
-        "voice_safe_note": {"en": "V45.4 FIX safe mode: Web reads existing Telegram memory, deduplicates it, and classifies client work threads more accurately. New DB writes still come later.", "lv": "V45.4 FIX drošais režīms: web lasa esošo Telegram atmiņu, noņem dublikātus un precīzāk klasificē klienta darba pavedienus. Jauna DB rakstīšana nāks vēlāk.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
+        "voice_safe_note": {"en": "V46.0 safe mode: owner approval decisions now route client work threads into active workspace queues. Web still reads existing Telegram memory and does not write to Postgres yet.", "lv": "V46.0 drošais režīms: īpašnieka apstiprinājumi tagad pārvieto klienta darba pavedienus aktīvajās darba rindās. Web joprojām tikai lasa esošo Telegram atmiņu un vēl neraksta Postgres.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
         "detected_intent": {"en": "Detected intent", "lv": "Atpazītais nodoms", "ru": "Распознанное намерение"},
         "twenty_second_century": {"en": "22nd-century work surface: clients speak, send photos and documents; Nina organizes the work.", "lv": "22. gadsimta darba virsma: klienti runā, sūta bildes un dokumentus; Nina sakārto darbu.", "ru": "Рабочая поверхность 22 века: клиенты говорят, отправляют фото и документы; Nina организует работу."},
     }
@@ -1181,7 +1185,90 @@ def load_client_work_threads():
     return build_client_work_threads(load_existing_telegram_intake_sync(), limit=20)
 
 
-def client_thread_rows(items, empty_text=None, limit=None):
+
+def thread_workflow_state(obj):
+    """V46.0: approval state for client work threads.
+
+    Threads are read from existing app.py memory. Until a write-back table exists,
+    owner decisions live in THREAD_WORKFLOW_STATES for the current web runtime.
+    """
+    object_id = str((obj or {}).get("object_id") or "")
+    meta = (obj or {}).get("metadata", {}) if isinstance((obj or {}).get("metadata"), dict) else {}
+    return THREAD_WORKFLOW_STATES.get(object_id) or meta.get("thread_approval_state") or "pending_approval"
+
+
+def apply_thread_approval(object_id, decision):
+    decision = (decision or "").strip().lower()
+    if decision not in ["approve", "hold", "reject"]:
+        return None
+    state_map = {"approve": "approved", "hold": "hold", "reject": "rejected"}
+    new_state = state_map[decision]
+    object_id = str(object_id or "").strip()
+    if not object_id:
+        return None
+    THREAD_WORKFLOW_STATES[object_id] = new_state
+    return {"object_id": object_id, "approval_state": new_state, "updated_at": datetime.utcnow().isoformat() + "Z"}
+
+
+def _with_thread_state(obj):
+    obj = dict(obj or {})
+    meta = dict(obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {})
+    state = thread_workflow_state(obj)
+    meta["approval_state"] = state
+    meta["thread_approval_state"] = state
+    meta["workspace_queue_state"] = "active_approved_thread" if state == "approved" else state
+    meta["db_write"] = False
+    obj["metadata"] = meta
+    if state == "approved":
+        obj["status"] = "open"
+    if state == "rejected":
+        obj["status"] = "rejected"
+    return obj
+
+
+def client_threads_by_state(state=None):
+    threads = [_with_thread_state(o) for o in load_client_work_threads()]
+    if state is None:
+        return threads
+    if isinstance(state, (list, tuple, set)):
+        allowed = set(state)
+        return [o for o in threads if thread_workflow_state(o) in allowed]
+    return [o for o in threads if thread_workflow_state(o) == state]
+
+
+def approved_client_thread_items():
+    return client_threads_by_state("approved")
+
+
+def pending_or_held_client_thread_items():
+    return client_threads_by_state(["pending_approval", "hold"])
+
+
+def rejected_client_thread_items():
+    return client_threads_by_state("rejected")
+
+
+def thread_approval_controls(obj):
+    state = thread_workflow_state(obj)
+    if state not in ["pending_approval", "hold"]:
+        return ""
+    lang = current_language()
+    try:
+        from urllib.parse import quote_plus
+        object_id = quote_plus(str(obj.get("object_id") or ""))
+    except Exception:
+        object_id = html_escape(obj.get("object_id"))
+    path = request.path or "/inbox"
+    base = f"{path}?lang={lang}&thread_object_id={object_id}"
+    return (
+        "<div class='btns' style='justify-content:flex-start;margin-top:10px'>"
+        f"<a class='btn primary' href='{base}&thread_decision=approve'>{tx('approve', lang)}</a>"
+        f"<a class='btn' href='{base}&thread_decision=hold'>{tx('hold', lang)}</a>"
+        f"<a class='btn' href='{base}&thread_decision=reject'>{tx('reject', lang)}</a>"
+        "</div>"
+    )
+
+def client_thread_rows(items, empty_text=None, limit=None, show_controls=True, show_state=True):
     lang = current_language()
     if limit:
         items = items[:limit]
@@ -1190,6 +1277,7 @@ def client_thread_rows(items, empty_text=None, limit=None):
         return f"<div class='row'><div><b>{html_escape(label)}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
     rows = ""
     for obj in items:
+        obj = _with_thread_state(obj)
         meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
         client = meta.get("thread_client") or obj.get("client_id") or "Workspace"
         family = meta.get("thread_family") or obj.get("object_type") or "work"
@@ -1202,15 +1290,18 @@ def client_thread_rows(items, empty_text=None, limit=None):
         evidence_text = " | ".join(str(x) for x in evidence[:3] if x)
         if len(evidence) > 3:
             evidence_text += f" | +{len(evidence)-3} more"
+        state = thread_workflow_state(obj)
+        state_text = approval_label_from_state(state, lang)
         muted = f"{client} · {family} · {count} linked item{'s' if count != 1 else ''} · {badge_text}"
+        state_suffix = f" · {state_text}" if show_state else ""
         rows += (
             "<div class='row'><div>"
             f"<b>{html_escape(obj.get('title'))}</b>"
             f"<span class='muted'>{html_escape(muted)}</span>"
             + (f"<span class='muted'>{html_escape(evidence_text)}</span>" if evidence_text else "")
-            + f"{preview_approval_controls(obj)}"
-            "</div>"
-            f"<span class='pill'>{html_escape(obj.get('status'))} · {html_escape(obj.get('priority', 'normal'))} · thread</span></div>"
+            + (thread_approval_controls(obj) if show_controls else "")
+            + "</div>"
+            f"<span class='pill'>{html_escape(obj.get('status'))} · {html_escape(obj.get('priority', 'normal'))} · thread{html_escape(state_suffix)}</span></div>"
         )
     return rows
 
@@ -1411,6 +1502,16 @@ def handle_preview_approval_query():
     if object_id and decision:
         apply_preview_approval(object_id, decision)
 
+    thread_id = request.args.get("thread_object_id") or ""
+    thread_decision = request.args.get("thread_decision") or ""
+    if thread_id and thread_decision:
+        try:
+            from urllib.parse import unquote_plus
+            thread_id = unquote_plus(thread_id)
+        except Exception:
+            pass
+        apply_thread_approval(thread_id, thread_decision)
+
 
 def preview_approval_controls(obj):
     # V43.3 FIX: show decision buttons only for preview objects that are still actionable.
@@ -1474,7 +1575,7 @@ def load_workspace_data():
         ]
 
     activity = [
-        {"title": "V45.4 FIX thread classifier polish", "body": "Inbox now groups real app.py memory into client work threads with follow-up merge.", "kind": "sync"},
+        {"title": "V46.0 approval workflow polish", "body": "Inbox now groups real app.py memory into client work threads with follow-up merge.", "kind": "sync"},
         {"title": "V43.4 preview to real task surface", "body": "Approved preview objects now appear across Dashboard, Tasks and Office Manager surfaces in safe mode.", "kind": "work"},
         {"title": "Web service online", "body": "NinaOS web runtime is separated from Telegram runtime.", "kind": "info"},
         {"title": "Workspace loaded", "body": "V36 clean workspace data layer is active.", "kind": "info"},
@@ -1637,20 +1738,22 @@ def tasks_body(data):
     approved_items = approved_preview_items()
     pending_items = pending_or_held_preview_items()
     rejected_items = rejected_preview_items()
+    approved_threads = approved_client_thread_items()
+    pending_threads = pending_or_held_client_thread_items()
+    rejected_threads = rejected_client_thread_items()
     all_rows = work_object_rows(data["tasks"], empty_text=tx("no_items", lang), show_source=True)
-    approved_rows = work_object_rows(approved_items, empty_text=tx("no_items", lang), show_source=True)
-    pending_rows = work_object_rows(pending_items, empty_text=tx("no_items", lang), show_source=True)
-    rejected_rows = work_object_rows(rejected_items, empty_text=tx("no_items", lang), show_source=True)
-    telegram_sync_rows = client_thread_rows(load_client_work_threads(), empty_text=tx("no_items", lang), limit=8)
+    approved_rows = client_thread_rows(approved_threads, empty_text=tx("no_items", lang), limit=8, show_controls=False) + work_object_rows(approved_items, empty_text="", show_source=True) if approved_threads or approved_items else work_object_rows([], empty_text=tx("no_items", lang), show_source=True)
+    pending_rows = client_thread_rows(pending_threads, empty_text=tx("no_items", lang), limit=8, show_controls=True) + work_object_rows(pending_items, empty_text="", show_source=True) if pending_threads or pending_items else work_object_rows([], empty_text=tx("no_items", lang), show_source=True)
+    rejected_rows = client_thread_rows(rejected_threads, empty_text=tx("no_items", lang), limit=8, show_controls=False) + work_object_rows(rejected_items, empty_text="", show_source=True) if rejected_threads or rejected_items else work_object_rows([], empty_text=tx("no_items", lang), show_source=True)
+    telegram_sync_rows = client_thread_rows(client_threads_by_state(), empty_text=tx("no_items", lang), limit=8, show_controls=True)
     return (
         work_page_header(tx("tasks"), tx("tasks_sub"))
-        + "<section class='card card-pad'><div class='section-title'>Client Work Threads</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.4 FIX: thread classification is polished so follow-up text no longer falls into document intake just because it has photo/voice evidence. Telegram runtime is not modified.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>{tx('real_task_surface_bridge', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>Client Work Threads</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V46.0: owner decisions now route client work threads. Approve promotes a thread into the active workspace queue; Hold keeps it pending; Reject moves it to the rejected log. DB writes are still disabled.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved Client Work Queue</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('all_workspace_work', lang)}</div><div class='list'>{all_rows}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('rejected_preview_log', lang)}</div><div class='list'>{rejected_rows}</div></section>"
     )
-
 
 def clients_body(data):
     rows = ""
@@ -2056,7 +2159,7 @@ def telegram_db_diagnostic_block_html():
     diag = telegram_bridge_db_diagnostics()
     return (
         "<section class='card card-pad'>"
-        "<div class='section-title'>🧪 V45.4 DB Diagnostic</div>"
+        "<div class='section-title'>🧪 V46.0 DB Diagnostic</div>"
         "<p class='muted'>Read-only check: does Web service see the same Postgres memory that Telegram app.py writes?</p>"
         "<div class='list'>" + diagnostic_rows_html(diag) + "</div>"
         "<div class='safe-note'>Open JSON: <a href='/diagnostics/telegram-sync'>/diagnostics/telegram-sync</a>. If counts are zero here but Telegram works, Railway services may not share the same DATABASE_URL or app.py writes to a different table/source.</div>"
@@ -2070,12 +2173,17 @@ def channel_hub_body(data):
     created_voice_obj = get_voice_intake_preview()
     telegram_sync_items = load_existing_telegram_intake_sync()
     client_threads = build_client_work_threads(telegram_sync_items, limit=20)
-    telegram_sync_rows = client_thread_rows(client_threads, empty_text=tx("no_items", lang), limit=8)
-    approved_rows = work_object_rows(approved_preview_items(), empty_text=tx("no_items", lang), limit=5, show_source=True)
-    pending_items = client_threads + pending_or_held_preview_items()
+    telegram_sync_rows = client_thread_rows(client_threads_by_state(), empty_text=tx("no_items", lang), limit=8, show_controls=True)
+    approved_rows = client_thread_rows(approved_client_thread_items(), empty_text=tx("no_items", lang), limit=8, show_controls=False)
+    if approved_preview_items():
+        approved_rows += work_object_rows(approved_preview_items(), empty_text="", limit=5, show_source=True)
+    pending_thread_items = pending_or_held_client_thread_items()
+    pending_items = pending_thread_items + pending_or_held_preview_items()
     if created_voice_obj and all(o.get("object_id") != created_voice_obj.get("object_id") for o in pending_items):
         pending_items = [created_voice_obj] + pending_items
-    pending_rows = work_object_rows(pending_items, empty_text=tx("no_items", lang), limit=5, show_source=True)
+    pending_rows = client_thread_rows(pending_thread_items, empty_text=tx("no_items", lang), limit=8, show_controls=True)
+    if created_voice_obj or pending_or_held_preview_items():
+        pending_rows += work_object_rows(([created_voice_obj] if created_voice_obj else []) + pending_or_held_preview_items(), empty_text="", limit=5, show_source=True)
     intake_cards = (
         channel_card(tx("voice_command", lang), tx("voice_command_hint", lang), "ready · voice first", "🎙")
         + channel_card(tx("whatsapp_business", lang), "Client messages, photos, object images, documents and estimate requests flow into NinaOS work intake.", "connector foundation", "🟢")
@@ -2096,9 +2204,9 @@ def channel_hub_body(data):
         + voice_intake_form_html(created_voice_obj)
         + "<br>"
         + telegram_db_diagnostic_block_html()
-        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V45.4 FIX groups existing app.py memory into cleaner client work threads: follow-ups stay follow-ups, estimates stay estimates, and only real photos/files become document intake threads.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.4 FIX safe mode: existing Telegram memory is grouped into cleaner client work threads and approval/work queues. Web reads only; DB writes still come later.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V46.0 groups existing app.py memory into client work threads and lets the owner approve, hold or reject each thread before it becomes active workspace work.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V46.0 safe mode: approved client threads are promoted into workspace queues. Web reads existing Telegram memory and tracks decisions safely; DB writes still come later.</div></section><br>"
         + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V45.4 FIX thread classifier</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V46.0 approval workflow</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
         + "<div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
