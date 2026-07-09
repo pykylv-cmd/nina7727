@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V43.3 — Approval to Workspace Queue Bridge
+# NinaOS Web App V44 — Unified Work Inbox / Channel Hub Foundation
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -7,10 +7,10 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V43.4 — Preview to Real Task Surface Bridge"
+WEB_APP_VERSION = "Web App V44 — Unified Work Inbox / Channel Hub Foundation"
 app = Flask(__name__)
 
-# V43.4 safe in-memory workspace preview store with approval-to-task-surface bridge states.
+# V44 safe in-memory workspace preview store + modern channel hub foundation.
 # This does NOT write to Postgres yet and does NOT touch Telegram app.py.
 WORKSPACE_ACTION_PREVIEWS = []
 
@@ -191,6 +191,22 @@ def tx(key, lang=None):
         "approved_work_note": {"en": "Approved preview work is now promoted into the active workspace surfaces, but still not written to Postgres.", "lv": "Apstiprinātais preview darbs tagad ir pacelts aktīvajās darba virsmās, bet vēl nav rakstīts Postgres.", "ru": "Подтверждённая preview работа поднята в активные рабочие поверхности, но ещё не записана в Postgres."},
         "real_task_surface_bridge": {"en": "Preview → Real Task Surface Bridge", "lv": "Preview → īstā darba virsmas bridge", "ru": "Preview → мост реальной рабочей поверхности"},
         "active_workspace_queue": {"en": "Active Workspace Queue", "lv": "Aktīvā darba rinda", "ru": "Активная рабочая очередь"},
+        "inbox": {"en": "Inbox", "lv": "Ienākošie", "ru": "Входящие"},
+        "channel_hub": {"en": "Channel Hub", "lv": "Kanālu centrs", "ru": "Центр каналов"},
+        "channel_hub_sub": {"en": "One modern intake layer for voice, WhatsApp, Telegram, files and client work.", "lv": "Viena moderna ienākošā darba kārta balsij, WhatsApp, Telegram, failiem un klientu darbiem.", "ru": "Единый современный слой входящей работы для голоса, WhatsApp, Telegram, файлов и клиентов."},
+        "voice_command": {"en": "Voice Command", "lv": "Balss komanda", "ru": "Голосовая команда"},
+        "voice_command_hint": {"en": "Say it once. Nina turns it into client work, tasks, documents and approvals.", "lv": "Pasaki vienreiz. Nina to pārvērš klienta darbā, uzdevumos, dokumentos un apstiprinājumos.", "ru": "Скажи один раз. Nina превращает это в клиентскую работу, задачи, документы и подтверждения."},
+        "connected_channels": {"en": "Connected Channels", "lv": "Savienotie kanāli", "ru": "Подключённые каналы"},
+        "whatsapp_business": {"en": "WhatsApp Business", "lv": "WhatsApp Business", "ru": "WhatsApp Business"},
+        "telegram_channel": {"en": "Telegram", "lv": "Telegram", "ru": "Telegram"},
+        "email_channel": {"en": "Email", "lv": "E-pasts", "ru": "Почта"},
+        "files_channel": {"en": "Files / scans", "lv": "Faili / skeni", "ru": "Файлы / сканы"},
+        "modern_intake": {"en": "Modern Work Intake", "lv": "Moderna darba ievade", "ru": "Современный приём работы"},
+        "client_timeline": {"en": "Client Timeline", "lv": "Klienta laika līnija", "ru": "Лента клиента"},
+        "owner_send_back": {"en": "Send Back to Client", "lv": "Nosūtīt atpakaļ klientam", "ru": "Отправить клиенту"},
+        "ai_auto_prepare": {"en": "AI Auto-Prepare", "lv": "AI automātiskā sagatavošana", "ru": "AI автоподготовка"},
+        "owner_approval_gate": {"en": "Owner Approval Gate", "lv": "Īpašnieka apstiprinājuma vārti", "ru": "Подтверждение владельца"},
+        "twenty_second_century": {"en": "22nd-century work surface: clients speak, send photos and documents; Nina organizes the work.", "lv": "22. gadsimta darba virsma: klienti runā, sūta bildes un dokumentus; Nina sakārto darbu.", "ru": "Рабочая поверхность 22 века: клиенты говорят, отправляют фото и документы; Nina организует работу."},
     }
     return d.get(key, {}).get(lang) or d.get(key, {}).get("en") or key
 
@@ -517,6 +533,7 @@ def page(title, body, active="dashboard"):
     lang = current_language()
     nav = [
         ("dashboard", tx("dashboard", lang), "/dashboard", "⌂"),
+        ("inbox", tx("inbox", lang), "/inbox", "✦"),
         ("workers", tx("workers", lang), "/workers", "♙"),
         ("tasks", tx("tasks", lang), "/tasks", "☑"),
         ("clients", tx("clients", lang), "/clients", "●"),
@@ -574,7 +591,7 @@ def dashboard_body(data):
         + kpi_card(tx("estimates", lang), c["estimates"], {"text": tx("in_progress", lang), "href": "/tasks"})
         + kpi_card(tx("invoices", lang), c["invoices"], {"text": tx("due_sent", lang), "href": "/clients"})
     )
-    return f"<div class='grid'><div class='hero-grid'><section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>AI WORKFORCE OPERATING SYSTEM</div></div></div><div class='bigline'>{tx('hero_line', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/tasks')}'>{tx('open_work', lang)}</a><a class='btn' href='{q('/exchange')}'>{tx('explore', lang)}</a></div><div class='trust'><span>GLOBAL</span><span>WORKFORCE</span><span>SECURE</span><span>SCALE</span></div></section><section class='card card-pad'><div class='page-title'><h1>{tx('good_morning', lang)}</h1><p>{tx('workspace_today', lang)}</p></div><br>{kpis}<br><div class='card card-pad' style='background:rgba(27,84,255,.16)'><div class='section-title'>{tx('global', lang)}</div><p class='muted'>{tx('connected', lang)}</p><a class='btn' href='{q('/exchange')}'>{tx('view_global', lang)}</a></div></section></div><section><div class='section-title'>{tx('your_workers', lang)}</div><div class='worker-grid'>{workers}</div></section><div class='two-col'><section class='card card-pad'><div class='section-title'>{tx('recent', lang)}</div><div class='list'>{activity}</div></section><section class='card card-pad'><div class='section-title'>{tx('snapshot', lang)}</div><div class='kpis'>{snapshot_kpis}</div><br><div class='btns'><a class='btn primary' href='{q('/tasks')}'>{tx('tasks', lang)}</a><a class='btn' href='{q('/clients')}'>{tx('clients', lang)}</a><a class='btn' href='{q('/projects')}'>{tx('projects', lang)}</a><a class='btn' href='{q('/workers')}'>{tx('workers', lang)}</a></div></section></div><section class='card card-pad'><div class='section-title'>{tx('active_workspace_queue', lang)}</div><div class='list'>{approved_dashboard_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section></div>"
+    return f"<div class='grid'><div class='hero-grid'><section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>AI WORKFORCE OPERATING SYSTEM</div></div></div><div class='bigline'>{tx('hero_line', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/inbox')}'>{tx('channel_hub', lang)}</a><a class='btn' href='{q('/tasks')}'>{tx('open_work', lang)}</a><a class='btn' href='{q('/exchange')}'>{tx('explore', lang)}</a></div><div class='trust'><span>GLOBAL</span><span>WORKFORCE</span><span>SECURE</span><span>SCALE</span></div></section><section class='card card-pad'><div class='page-title'><h1>{tx('good_morning', lang)}</h1><p>{tx('workspace_today', lang)}</p></div><br>{kpis}<br><div class='card card-pad' style='background:rgba(27,84,255,.16)'><div class='section-title'>{tx('global', lang)}</div><p class='muted'>{tx('connected', lang)}</p><a class='btn' href='{q('/exchange')}'>{tx('view_global', lang)}</a></div></section></div><section><div class='section-title'>{tx('your_workers', lang)}</div><div class='worker-grid'>{workers}</div></section><div class='two-col'><section class='card card-pad'><div class='section-title'>{tx('recent', lang)}</div><div class='list'>{activity}</div></section><section class='card card-pad'><div class='section-title'>{tx('snapshot', lang)}</div><div class='kpis'>{snapshot_kpis}</div><br><div class='btns'><a class='btn primary' href='{q('/tasks')}'>{tx('tasks', lang)}</a><a class='btn' href='{q('/clients')}'>{tx('clients', lang)}</a><a class='btn' href='{q('/projects')}'>{tx('projects', lang)}</a><a class='btn' href='{q('/workers')}'>{tx('workers', lang)}</a></div></section></div><section class='card card-pad'><div class='section-title'>{tx('active_workspace_queue', lang)}</div><div class='list'>{approved_dashboard_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section></div>"
 
 
 def work_page_header(title, subtitle):
@@ -672,6 +689,47 @@ def exchange_body(data):
         {"name": "Nina HR", "role": "AI HR Assistant", "price": "€89/month", "category": "HR", "tone": "orange"},
     ]
     return work_page_header(tx("exchange"), tx("exchange_sub")) + f"<div class='worker-grid'>{''.join(worker_card(w, marketplace=True) for w in catalog)}</div>"
+
+
+
+def channel_card(title, body, status, icon="●"):
+    return (
+        "<div class='card card-pad'>"
+        f"<div class='section-title'>{icon} {html_escape(title)}</div>"
+        f"<p class='muted'>{html_escape(body)}</p>"
+        f"<span class='pill'>{html_escape(status)}</span>"
+        "</div>"
+    )
+
+
+def channel_hub_body(data):
+    lang = current_language()
+    approved_rows = work_object_rows(approved_preview_items(), empty_text=tx("no_items", lang), limit=5, show_source=True)
+    pending_rows = work_object_rows(pending_or_held_preview_items(), empty_text=tx("no_items", lang), limit=5, show_source=True)
+    intake_cards = (
+        channel_card(tx("voice_command", lang), tx("voice_command_hint", lang), "ready · voice first", "🎙")
+        + channel_card(tx("whatsapp_business", lang), "Client messages, photos, object images, documents and estimate requests flow into NinaOS work intake.", "connector foundation", "🟢")
+        + channel_card(tx("telegram_channel", lang), "Telegram remains the fast owner/work-intake channel and stays separate from web runtime.", "active runtime", "✈")
+        + channel_card(tx("email_channel", lang), "Offers, invoices and formal files can later be received and sent back through email.", "planned bridge", "✉")
+        + channel_card(tx("files_channel", lang), "Scanned documents, phone photos, PDFs and object images become client work material.", "document intake", "▤")
+        + channel_card(tx("owner_approval_gate", lang), "Nina prepares the work; owner approves sensitive sending, finance and client-facing actions.", "safe mode", "✓")
+    )
+    timeline = "".join([
+        "<div class='row'><div><b>1. Client sends voice/photo/document</b><span class='muted'>WhatsApp / Telegram / web upload / email</span></div><span class='pill'>intake</span></div>",
+        "<div class='row'><div><b>2. Nina understands and structures it</b><span class='muted'>client · task · estimate · invoice · files · notes</span></div><span class='pill'>AI prepare</span></div>",
+        "<div class='row'><div><b>3. Owner approves</b><span class='muted'>Approve / Hold / Reject before sending or saving permanently</span></div><span class='pill'>control</span></div>",
+        "<div class='row'><div><b>4. Nina sends back</b><span class='muted'>WhatsApp / Telegram / email with prepared documents or answer</span></div><span class='pill'>send back</span></div>",
+    ])
+    return (
+        work_page_header(tx("channel_hub", lang), tx("channel_hub_sub", lang))
+        + f"<section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>{tx('modern_intake', lang).upper()}</div></div></div><div class='bigline'>{tx('twenty_second_century', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/office-manager/actions')}'>{tx('voice_command', lang)}</a><a class='btn' href='{q('/tasks')}'>{tx('tasks', lang)}</a><a class='btn' href='{q('/clients')}'>{tx('clients', lang)}</a></div></section><br>"
+        + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
+        + "<div class='two-col'>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
+        + "</div><br>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('owner_send_back', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section>"
+    )
 
 
 def simple_module_body(title, subtitle, blocks):
@@ -930,6 +988,16 @@ def home():
 def dashboard():
     data = load_workspace_data()
     return Response(page(tx("dashboard"), dashboard_body(data), active="dashboard"), mimetype="text/html")
+
+
+@app.route("/inbox")
+def inbox():
+    return page(tx("channel_hub"), channel_hub_body(load_workspace_data()), "inbox")
+
+
+@app.route("/channel-hub")
+def channel_hub():
+    return redirect(q("/inbox"))
 
 
 @app.route("/workers")
