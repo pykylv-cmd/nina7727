@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V43.3 — Approval to Workspace Queue Bridge"
+WEB_APP_VERSION = "Web App V43.3 FIX — Approval State Routing"
 app = Flask(__name__)
 
 # V43.3 safe in-memory workspace preview store with approval-to-workspace queue states.
@@ -397,7 +397,11 @@ def apply_preview_approval(object_id, decision):
             meta["db_write"] = False
             meta["workspace_queue_state"] = "active_approved" if new_state == "approved" else new_state
             if new_state == "approved":
+                # Keep the business status stable, but mark routing clearly in metadata.
                 obj["status"] = obj.get("status") or "open"
+                meta["approved_queue_visible"] = True
+            elif new_state == "rejected":
+                meta["approved_queue_visible"] = False
             return obj
     return None
 
@@ -411,7 +415,13 @@ def handle_preview_approval_query():
 
 
 def preview_approval_controls(obj):
-    if not is_preview_object(obj) or preview_approval_state(obj) == "rejected":
+    # V43.3 FIX: show decision buttons only for preview objects that are still actionable.
+    # Approved work must move to the approved workspace queue without action buttons.
+    # Rejected work must stay in the rejected log without action buttons.
+    if not is_preview_object(obj):
+        return ""
+    state = preview_approval_state(obj)
+    if state not in ["pending_approval", "hold"]:
         return ""
     lang = current_language()
     object_id = html_escape(obj.get("object_id"))
