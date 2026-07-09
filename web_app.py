@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V44 — Unified Work Inbox / Channel Hub Foundation"
+WEB_APP_VERSION = "Web App V44.1 — Inbox Voice Intake Form"
 app = Flask(__name__)
 
 # V44 safe in-memory workspace preview store + modern channel hub foundation.
@@ -206,6 +206,14 @@ def tx(key, lang=None):
         "owner_send_back": {"en": "Send Back to Client", "lv": "Nosūtīt atpakaļ klientam", "ru": "Отправить клиенту"},
         "ai_auto_prepare": {"en": "AI Auto-Prepare", "lv": "AI automātiskā sagatavošana", "ru": "AI автоподготовка"},
         "owner_approval_gate": {"en": "Owner Approval Gate", "lv": "Īpašnieka apstiprinājuma vārti", "ru": "Подтверждение владельца"},
+        "voice_intake_form": {"en": "Voice Intake Form", "lv": "Balss darba ievade", "ru": "Форма голосового ввода"},
+        "voice_intake_hint": {"en": "Paste or type what the owner/client said. Nina converts it into a safe preview work object.", "lv": "Ielīmē vai ieraksti, ko īpašnieks/klients pateica. Nina to pārvērš drošā darba priekšskatījumā.", "ru": "Вставь или напиши, что сказал владелец/клиент. Nina превратит это в безопасный preview-объект."},
+        "voice_text": {"en": "Voice text", "lv": "Balss teksts", "ru": "Текст голоса"},
+        "source_channel": {"en": "Source channel", "lv": "Avota kanāls", "ru": "Канал источника"},
+        "nina_prepare": {"en": "Nina, prepare work", "lv": "Nina, sagatavo darbu", "ru": "Nina, подготовь работу"},
+        "voice_preview_created": {"en": "Voice intake preview created", "lv": "Balss ievades priekšskatījums izveidots", "ru": "Preview из голосового ввода создан"},
+        "voice_safe_note": {"en": "V44.1 safe mode: voice text creates a preview object only. Owner approval and DB bridge come next.", "lv": "V44.1 drošais režīms: balss teksts izveido tikai preview objektu. Īpašnieka apstiprinājums un DB bridge nāk tālāk.", "ru": "Безопасный режим V44.1: голосовой текст создаёт только preview-объект. Подтверждение владельца и DB bridge — дальше."},
+        "detected_intent": {"en": "Detected intent", "lv": "Atpazītais nodoms", "ru": "Распознанное намерение"},
         "twenty_second_century": {"en": "22nd-century work surface: clients speak, send photos and documents; Nina organizes the work.", "lv": "22. gadsimta darba virsma: klienti runā, sūta bildes un dokumentus; Nina sakārto darbu.", "ru": "Рабочая поверхность 22 века: клиенты говорят, отправляют фото и документы; Nina организует работу."},
     }
     return d.get(key, {}).get(lang) or d.get(key, {}).get("en") or key
@@ -366,7 +374,7 @@ def create_workspace_action_preview(action):
 
 def is_preview_object(obj):
     meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
-    return meta.get("source") in ["web_action_preview", "web_preview"]
+    return meta.get("source") in ["web_action_preview", "web_preview", "web_voice_intake_preview"]
 
 
 def preview_approval_state(obj):
@@ -702,8 +710,105 @@ def channel_card(title, body, status, icon="●"):
     )
 
 
+
+def detect_voice_intake_action(voice_text, source_channel="voice"):
+    text = (voice_text or "").strip()
+    low = text.lower()
+
+    if any(w in low for w in ["tāme", "tami", "estimate", "offer", "piedāvāj"]):
+        form_type = "estimate"
+    elif any(w in low for w in ["rēķin", "rekins", "invoice"]):
+        form_type = "invoice"
+    elif any(w in low for w in ["piezvan", "atgādin", "follow", "sazin", "pajaut"]):
+        form_type = "followup"
+    else:
+        form_type = "new_task"
+
+    client_name = ""
+    for name in ["andris", "jānis", "marija", "katrin"]:
+        if name in low:
+            client_name = name[:1].upper() + name[1:]
+            break
+
+    return {
+        "form_type": form_type,
+        "task_title": text[:140] if text else "Voice intake work",
+        "client_name": client_name,
+        "project_name": "",
+        "amount": "",
+        "due_date": "",
+        "priority": "normal",
+        "notes": f"Voice/source intake from {source_channel}: {text}",
+    }
+
+
+def get_voice_intake_preview():
+    if request.method != "POST":
+        return None
+    voice_text = request.form.get("voice_text", "")
+    source_channel = request.form.get("source_channel", "voice")
+    if not voice_text.strip():
+        return None
+    action = detect_voice_intake_action(voice_text, source_channel)
+    obj = create_workspace_action_preview(action)
+    meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
+    meta["source_channel"] = source_channel
+    meta["voice_text"] = voice_text.strip()
+    meta["source"] = "web_voice_intake_preview"
+    obj["metadata"] = meta
+    return obj
+
+
+def voice_intake_form_html(created_obj=None):
+    lang = current_language()
+    source_options = ["voice", "WhatsApp", "Telegram", "Email", "Files", "Web"]
+    options = "".join(f"<option value='{html_escape(x)}'>{html_escape(x)}</option>" for x in source_options)
+    created = ""
+    if created_obj:
+        meta = created_obj.get("metadata", {}) if isinstance(created_obj.get("metadata"), dict) else {}
+        created = (
+            "<div class='preview-box'>"
+            f"<b>{tx('voice_preview_created', lang)}</b>"
+            "<div class='list'>"
+            f"<div class='row'><div><b>{html_escape(created_obj.get('title'))}</b><span class='muted'>{html_escape(created_obj.get('object_type'))} · {html_escape(meta.get('source_channel','voice'))}</span></div><span class='pill'>{tx('pending_preview', lang)}</span></div>"
+            f"<div class='row'><div><b>{tx('detected_intent', lang)}</b><span class='muted'>{html_escape(created_obj.get('object_type'))}</span></div><span class='pill'>V44.1</span></div>"
+            "</div>"
+            f"<div class='safe-note'>{tx('voice_safe_note', lang)}</div>"
+            "</div>"
+        )
+    return f"""
+    <section class='card card-pad'>
+      <div class='section-title'>🎙 {tx('voice_intake_form', lang)}</div>
+      <p class='muted'>{tx('voice_intake_hint', lang)}</p>
+      {created}
+      <form method='post' action='{q('/inbox')}'>
+        <div class='form-grid'>
+          <div class='field'>
+            <label>{tx('source_channel', lang)}</label>
+            <select name='source_channel'>{options}</select>
+          </div>
+          <div class='field'>
+            <label>{tx('priority', lang)}</label>
+            <select name='priority'><option value='normal'>{tx('normal', lang)}</option><option value='high'>{tx('high', lang)}</option></select>
+          </div>
+        </div>
+        <br>
+        <div class='field'>
+          <label>{tx('voice_text', lang)}</label>
+          <textarea name='voice_text' placeholder='Nina, man vajag sagatavot tāmi klientam par vannas istabas remontu un atsūtīt WhatsApp...'></textarea>
+        </div>
+        <div class='form-actions'>
+          <button class='btn primary' type='submit'>{tx('nina_prepare', lang)}</button>
+          <a class='btn' href='{q('/office-manager/actions')}'>{tx('approval_required', lang)}</a>
+        </div>
+        <div class='safe-note'>{tx('voice_safe_note', lang)}</div>
+      </form>
+    </section>
+    """
+
 def channel_hub_body(data):
     lang = current_language()
+    created_voice_obj = get_voice_intake_preview()
     approved_rows = work_object_rows(approved_preview_items(), empty_text=tx("no_items", lang), limit=5, show_source=True)
     pending_rows = work_object_rows(pending_or_held_preview_items(), empty_text=tx("no_items", lang), limit=5, show_source=True)
     intake_cards = (
@@ -723,6 +828,8 @@ def channel_hub_body(data):
     return (
         work_page_header(tx("channel_hub", lang), tx("channel_hub_sub", lang))
         + f"<section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>{tx('modern_intake', lang).upper()}</div></div></div><div class='bigline'>{tx('twenty_second_century', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/office-manager/actions')}'>{tx('voice_command', lang)}</a><a class='btn' href='{q('/tasks')}'>{tx('tasks', lang)}</a><a class='btn' href='{q('/clients')}'>{tx('clients', lang)}</a></div></section><br>"
+        + voice_intake_form_html(created_voice_obj)
+        + "<br>"
         + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
         + "<div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
@@ -990,7 +1097,7 @@ def dashboard():
     return Response(page(tx("dashboard"), dashboard_body(data), active="dashboard"), mimetype="text/html")
 
 
-@app.route("/inbox")
+@app.route("/inbox", methods=["GET", "POST"])
 def inbox():
     return page(tx("channel_hub"), channel_hub_body(load_workspace_data()), "inbox")
 
