@@ -7,10 +7,10 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V43.3 FIX — Approval State Routing"
+WEB_APP_VERSION = "Web App V43.4 — Preview to Real Task Surface Bridge"
 app = Flask(__name__)
 
-# V43.3 safe in-memory workspace preview store with approval-to-workspace queue states.
+# V43.4 safe in-memory workspace preview store with approval-to-task-surface bridge states.
 # This does NOT write to Postgres yet and does NOT touch Telegram app.py.
 WORKSPACE_ACTION_PREVIEWS = []
 
@@ -154,7 +154,7 @@ def tx(key, lang=None):
         "normal": {"en": "Normal", "lv": "Normāla", "ru": "Обычный"},
         "high": {"en": "High", "lv": "Augsta", "ru": "Высокий"},
         "submit_preview": {"en": "Save Preview", "lv": "Saglabāt priekšskatījumu", "ru": "Сохранить предпросмотр"},
-        "safe_note": {"en": "V43.3 safe mode: approved previews move into the workspace queue. Hold stays in approval. Reject leaves active work. Postgres write bridge comes next.", "lv": "V43.3 drošais režīms: apstiprināti preview darbi pāriet darba rindā. Aizturētie paliek apstiprināšanā. Noraidītie iziet no aktīvā darba. Postgres bridge nāks nākamais.", "ru": "V43.3 безопасный режим: подтверждённые preview задачи переходят в рабочую очередь. Hold остаётся в подтверждении. Rejected выходит из активной работы. Postgres bridge — следующий."},
+        "safe_note": {"en": "V43.4 safe mode: approved previews are surfaced as real workspace work across Dashboard, Tasks and Office Manager. Postgres write bridge comes next.", "lv": "V43.4 drošais režīms: apstiprināti preview darbi redzami kā īsti darba vides darbi Dashboard, Uzdevumos un Office Manager. Postgres bridge nāks nākamais.", "ru": "V43.4 безопасный режим: подтверждённые preview задачи видны как реальные рабочие элементы в Dashboard, Tasks и Office Manager. Postgres bridge — следующий."},
         "created_preview": {"en": "Preview created", "lv": "Priekšskatījums izveidots", "ru": "Предпросмотр создан"},
         "form_type": {"en": "Form type", "lv": "Formas tips", "ru": "Тип формы"},
         "new_task_form": {"en": "New Task", "lv": "Jauns uzdevums", "ru": "Новая задача"},
@@ -188,7 +188,9 @@ def tx(key, lang=None):
         "held_preview_queue": {"en": "Held Preview Queue", "lv": "Aizturēto preview rinda", "ru": "Удержанные preview"},
         "rejected_preview_log": {"en": "Rejected Preview Log", "lv": "Noraidīto preview žurnāls", "ru": "Журнал отклонённых preview"},
         "pending_or_held": {"en": "Pending / held approvals", "lv": "Gaida / aizturēti apstiprinājumi", "ru": "Ожидает / удержано"},
-        "approved_work_note": {"en": "Approved preview work is now visible in the active workspace queue, but still not written to Postgres.", "lv": "Apstiprinātais preview darbs tagad ir redzams aktīvajā darba rindā, bet vēl nav rakstīts Postgres.", "ru": "Подтверждённая preview работа видна в активной рабочей очереди, но ещё не записана в Postgres."},
+        "approved_work_note": {"en": "Approved preview work is now promoted into the active workspace surfaces, but still not written to Postgres.", "lv": "Apstiprinātais preview darbs tagad ir pacelts aktīvajās darba virsmās, bet vēl nav rakstīts Postgres.", "ru": "Подтверждённая preview работа поднята в активные рабочие поверхности, но ещё не записана в Postgres."},
+        "real_task_surface_bridge": {"en": "Preview → Real Task Surface Bridge", "lv": "Preview → īstā darba virsmas bridge", "ru": "Preview → мост реальной рабочей поверхности"},
+        "active_workspace_queue": {"en": "Active Workspace Queue", "lv": "Aktīvā darba rinda", "ru": "Активная рабочая очередь"},
     }
     return d.get(key, {}).get(lang) or d.get(key, {}).get("en") or key
 
@@ -476,7 +478,7 @@ def load_workspace_data():
         ]
 
     activity = [
-        {"title": "V43.3 approval to workspace bridge", "body": "Approved preview objects now move into the active workspace queue in safe mode.", "kind": "work"},
+        {"title": "V43.4 preview to real task surface", "body": "Approved preview objects now appear across Dashboard, Tasks and Office Manager surfaces in safe mode.", "kind": "work"},
         {"title": "Web service online", "body": "NinaOS web runtime is separated from Telegram runtime.", "kind": "info"},
         {"title": "Workspace loaded", "body": "V36 clean workspace data layer is active.", "kind": "info"},
         {"title": "Client follow-up scheduled", "body": "Ask Andris about reply.", "kind": "work"},
@@ -565,13 +567,14 @@ def dashboard_body(data):
     )
     workers = "".join(worker_card(w) for w in data["workers"])
     activity = "".join(activity_row(a) for a in data["activity"][:6])
+    approved_dashboard_rows = work_object_rows(approved_preview_items(), empty_text=tx("no_items", lang), limit=4, show_source=True)
     snapshot_kpis = (
         kpi_card(tx("clients", lang), c["clients"], {"text": tx("crm", lang), "href": "/clients"})
         + kpi_card(tx("workers", lang), c["workers"], {"text": tx("ai_workforce", lang), "href": "/workers"})
         + kpi_card(tx("estimates", lang), c["estimates"], {"text": tx("in_progress", lang), "href": "/tasks"})
         + kpi_card(tx("invoices", lang), c["invoices"], {"text": tx("due_sent", lang), "href": "/clients"})
     )
-    return f"<div class='grid'><div class='hero-grid'><section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>AI WORKFORCE OPERATING SYSTEM</div></div></div><div class='bigline'>{tx('hero_line', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/tasks')}'>{tx('open_work', lang)}</a><a class='btn' href='{q('/exchange')}'>{tx('explore', lang)}</a></div><div class='trust'><span>GLOBAL</span><span>WORKFORCE</span><span>SECURE</span><span>SCALE</span></div></section><section class='card card-pad'><div class='page-title'><h1>{tx('good_morning', lang)}</h1><p>{tx('workspace_today', lang)}</p></div><br>{kpis}<br><div class='card card-pad' style='background:rgba(27,84,255,.16)'><div class='section-title'>{tx('global', lang)}</div><p class='muted'>{tx('connected', lang)}</p><a class='btn' href='{q('/exchange')}'>{tx('view_global', lang)}</a></div></section></div><section><div class='section-title'>{tx('your_workers', lang)}</div><div class='worker-grid'>{workers}</div></section><div class='two-col'><section class='card card-pad'><div class='section-title'>{tx('recent', lang)}</div><div class='list'>{activity}</div></section><section class='card card-pad'><div class='section-title'>{tx('snapshot', lang)}</div><div class='kpis'>{snapshot_kpis}</div><br><div class='btns'><a class='btn primary' href='{q('/tasks')}'>{tx('tasks', lang)}</a><a class='btn' href='{q('/clients')}'>{tx('clients', lang)}</a><a class='btn' href='{q('/projects')}'>{tx('projects', lang)}</a><a class='btn' href='{q('/workers')}'>{tx('workers', lang)}</a></div></section></div></div>"
+    return f"<div class='grid'><div class='hero-grid'><section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>AI WORKFORCE OPERATING SYSTEM</div></div></div><div class='bigline'>{tx('hero_line', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/tasks')}'>{tx('open_work', lang)}</a><a class='btn' href='{q('/exchange')}'>{tx('explore', lang)}</a></div><div class='trust'><span>GLOBAL</span><span>WORKFORCE</span><span>SECURE</span><span>SCALE</span></div></section><section class='card card-pad'><div class='page-title'><h1>{tx('good_morning', lang)}</h1><p>{tx('workspace_today', lang)}</p></div><br>{kpis}<br><div class='card card-pad' style='background:rgba(27,84,255,.16)'><div class='section-title'>{tx('global', lang)}</div><p class='muted'>{tx('connected', lang)}</p><a class='btn' href='{q('/exchange')}'>{tx('view_global', lang)}</a></div></section></div><section><div class='section-title'>{tx('your_workers', lang)}</div><div class='worker-grid'>{workers}</div></section><div class='two-col'><section class='card card-pad'><div class='section-title'>{tx('recent', lang)}</div><div class='list'>{activity}</div></section><section class='card card-pad'><div class='section-title'>{tx('snapshot', lang)}</div><div class='kpis'>{snapshot_kpis}</div><br><div class='btns'><a class='btn primary' href='{q('/tasks')}'>{tx('tasks', lang)}</a><a class='btn' href='{q('/clients')}'>{tx('clients', lang)}</a><a class='btn' href='{q('/projects')}'>{tx('projects', lang)}</a><a class='btn' href='{q('/workers')}'>{tx('workers', lang)}</a></div></section></div><section class='card card-pad'><div class='section-title'>{tx('active_workspace_queue', lang)}</div><div class='list'>{approved_dashboard_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section></div>"
 
 
 def work_page_header(title, subtitle):
@@ -628,8 +631,8 @@ def tasks_body(data):
     rejected_rows = work_object_rows(rejected_items, empty_text=tx("no_items", lang), show_source=True)
     return (
         work_page_header(tx("tasks"), tx("tasks_sub"))
+        + f"<section class='card card-pad'><div class='section-title'>{tx('real_task_surface_bridge', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>{tx('approved_workspace_queue', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('all_workspace_work', lang)}</div><div class='list'>{all_rows}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('rejected_preview_log', lang)}</div><div class='list'>{rejected_rows}</div></section>"
     )
@@ -904,6 +907,8 @@ def office_manager_body(data):
         + "</section>"
         + "</div><br>"
         + office_manager_action_panels(data)
+        + "<br>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('real_task_surface_bridge', lang)}</div><div class='list'>{work_object_rows(approved_preview_items(), empty_text=tx('no_items', lang), limit=5, show_source=True)}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section>"
         + "<br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{work_object_rows(pending_or_held_preview_items(), empty_text=tx('no_items', lang), limit=5, show_source=True)}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
         + "<br>"
