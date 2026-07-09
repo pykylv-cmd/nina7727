@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V45.3 — Real Intake Dedup + Unified Inbox Cards
+# NinaOS Web App V45.4 — Client Work Threads + Follow-up Merge
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -7,10 +7,10 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V45.3 — Real Intake Dedup + Unified Inbox Cards"
+WEB_APP_VERSION = "Web App V45.4 — Client Work Threads + Follow-up Merge"
 app = Flask(__name__)
 
-# V45.3 safe in-memory workspace preview store + real intake dedup bridge.
+# V45.4 safe in-memory workspace preview store + client work thread bridge.
 # This does NOT write to Postgres yet and does NOT touch Telegram app.py.
 # Telegram remains its own runtime; web_app.py only reads/surfaces shared intake/work data.
 WORKSPACE_ACTION_PREVIEWS = []
@@ -214,7 +214,7 @@ def tx(key, lang=None):
         "source_channel": {"en": "Source channel", "lv": "Avota kanāls", "ru": "Канал источника"},
         "nina_prepare": {"en": "Nina, prepare work", "lv": "Nina, sagatavo darbu", "ru": "Nina, подготовь работу"},
         "voice_preview_created": {"en": "Voice intake preview created", "lv": "Balss ievades priekšskatījums izveidots", "ru": "Preview из голосового ввода создан"},
-        "voice_safe_note": {"en": "V45.3 safe mode: Web reads existing Telegram task memory, voice/photo records, recent Telegram text conversation_state and tasks table fallback. New DB writes still come later.", "lv": "V45.3 drošais režīms: web lasa esošo Telegram task atmiņu, balss/foto ierakstus, pēdējo Telegram tekstu conversation_state un tasks tabulas fallback. Jauna DB rakstīšana nāks vēlāk.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
+        "voice_safe_note": {"en": "V45.4 safe mode: Web reads existing Telegram memory, deduplicates it, and groups related client work into threads. New DB writes still come later.", "lv": "V45.4 drošais režīms: web lasa esošo Telegram atmiņu, noņem dublikātus un grupē klienta darbus pavedienos. Jauna DB rakstīšana nāks vēlāk.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
         "detected_intent": {"en": "Detected intent", "lv": "Atpazītais nodoms", "ru": "Распознанное намерение"},
         "twenty_second_century": {"en": "22nd-century work surface: clients speak, send photos and documents; Nina organizes the work.", "lv": "22. gadsimta darba virsma: klienti runā, sūta bildes un dokumentus; Nina sakārto darbu.", "ru": "Рабочая поверхность 22 века: клиенты говорят, отправляют фото и документы; Nina организует работу."},
     }
@@ -1034,6 +1034,164 @@ def dedupe_and_unify_intake_items(items, limit=30):
     unified.sort(key=lambda o: (_rank_intake_obj(o), str((o.get("metadata") or {}).get("created_at") or "")), reverse=True)
     return unified[:int(limit or 30)]
 
+
+def _thread_family_for_obj(obj):
+    """V45.4: classify related NinaOS work into broad thread families."""
+    meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
+    text = " ".join([
+        str(obj.get("title") or ""),
+        str(meta.get("raw_text") or ""),
+        str(meta.get("transcript_text") or ""),
+        str(obj.get("object_type") or ""),
+    ]).lower()
+    obj_type = str(obj.get("object_type") or "").lower()
+    if obj_type == "document_intake" or any(x in text for x in ["foto", "photo", "bild", "image", "pdf", "dok", "document", "scan", "skan"]):
+        return "documents"
+    if obj_type in ["estimate", "offer"] or any(x in text for x in ["tāme", "tame", "estimate", "piedāvāj", "piedavaj", "offer", "quote", "€", "eur"]):
+        return "estimate"
+    if obj_type == "invoice" or any(x in text for x in ["rēķin", "rekin", "invoice"]):
+        return "invoice"
+    if obj_type == "followup_task" or any(x in text for x in ["follow", "pajaut", "atgādin", "atgadin", "zvana", "zvanīt", "zvanit", "raksti", "uzraksti", "atbild"]):
+        return "followup"
+    return "task"
+
+
+def _thread_client_for_obj(obj):
+    meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
+    client = meta.get("client_name") or obj.get("client_id") or ""
+    title = str(obj.get("title") or meta.get("raw_text") or "")
+    if not client:
+        # Small practical Latvian client extraction fallback for existing task memory.
+        import re
+        m = re.search(r"\b(?:Andrim|Andri|Andris)\b", title, flags=re.IGNORECASE)
+        if m:
+            client = "Andris"
+    return str(client or "Workspace").strip() or "Workspace"
+
+
+def _thread_sort_time(obj):
+    meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
+    return str(meta.get("created_at") or meta.get("synced_at") or "")
+
+
+def build_client_work_threads(items, limit=20):
+    """V45.4: group deduplicated intake cards into client work threads.
+
+    This is intentionally read-only. It does not mutate Postgres or app.py.
+    Several similar Andris follow-ups become one follow-up thread with evidence count/source badges.
+    """
+    groups = {}
+    order = []
+    for obj in items or []:
+        if not isinstance(obj, dict):
+            continue
+        client = _thread_client_for_obj(obj)
+        family = _thread_family_for_obj(obj)
+        key = _canonical_text_key(client) + "|" + family
+        if key not in groups:
+            meta = dict(obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {})
+            meta["thread_client"] = client
+            meta["thread_family"] = family
+            meta["thread_items_count"] = 1
+            meta["thread_evidence_titles"] = [str(obj.get("title") or "Telegram work")[:140]]
+            meta["thread_latest_at"] = _thread_sort_time(obj)
+            badges = list(meta.get("source_badges") or [])
+            badge = _source_badge_for_obj(obj)
+            if badge and badge not in badges:
+                badges.append(badge)
+            meta["source_badges"] = badges[:6]
+            thread_obj = dict(obj)
+            thread_obj["metadata"] = meta
+            thread_obj["object_id"] = "client_thread_" + key.replace("|", "_")[:120]
+            thread_obj["client_id"] = client
+            # Human-friendly title for the thread.
+            label = {
+                "followup": "Follow-up thread",
+                "estimate": "Estimate / offer thread",
+                "invoice": "Invoice thread",
+                "documents": "Document intake thread",
+                "task": "Task thread",
+            }.get(family, "Work thread")
+            if client != "Workspace":
+                thread_obj["title"] = f"{client} — {label}"
+            else:
+                thread_obj["title"] = label
+            groups[key] = thread_obj
+            order.append(key)
+            continue
+
+        current = groups[key]
+        cm = current.get("metadata", {}) if isinstance(current.get("metadata"), dict) else {}
+        cm["thread_items_count"] = int(cm.get("thread_items_count") or 1) + 1
+        ev = list(cm.get("thread_evidence_titles") or [])
+        t = str(obj.get("title") or "Telegram work")[:140]
+        if t and t not in ev:
+            ev.append(t)
+        cm["thread_evidence_titles"] = ev[:8]
+        # Merge source badges.
+        badges = list(cm.get("source_badges") or [])
+        for b in (obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}).get("source_badges", []) or []:
+            if b and b not in badges:
+                badges.append(b)
+        b = _source_badge_for_obj(obj)
+        if b and b not in badges:
+            badges.append(b)
+        cm["source_badges"] = badges[:6]
+        if _thread_sort_time(obj) > str(cm.get("thread_latest_at") or ""):
+            cm["thread_latest_at"] = _thread_sort_time(obj)
+        # Prefer canonical visible details from strongest work object.
+        if _rank_intake_obj(obj) > _rank_intake_obj(current):
+            replacement = dict(current)
+            replacement["object_type"] = obj.get("object_type") or current.get("object_type")
+            replacement["status"] = obj.get("status") or current.get("status")
+            replacement["priority"] = obj.get("priority") or current.get("priority")
+            replacement["metadata"] = cm
+            groups[key] = replacement
+        else:
+            current["metadata"] = cm
+
+    threads = [groups[k] for k in order if k in groups]
+    threads.sort(key=lambda o: (_rank_intake_obj(o), str((o.get("metadata") or {}).get("thread_latest_at") or "")), reverse=True)
+    return threads[:int(limit or 20)]
+
+
+def load_client_work_threads():
+    return build_client_work_threads(load_existing_telegram_intake_sync(), limit=20)
+
+
+def client_thread_rows(items, empty_text=None, limit=None):
+    lang = current_language()
+    if limit:
+        items = items[:limit]
+    if not items:
+        label = empty_text or tx("no_items", lang)
+        return f"<div class='row'><div><b>{html_escape(label)}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
+    rows = ""
+    for obj in items:
+        meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
+        client = meta.get("thread_client") or obj.get("client_id") or "Workspace"
+        family = meta.get("thread_family") or obj.get("object_type") or "work"
+        count = int(meta.get("thread_items_count") or 1)
+        badges = meta.get("source_badges") or []
+        if isinstance(badges, str):
+            badges = [badges]
+        badge_text = " + ".join(str(b) for b in badges[:5] if b) or object_source_label(obj, lang)
+        evidence = meta.get("thread_evidence_titles") or []
+        evidence_text = " | ".join(str(x) for x in evidence[:3] if x)
+        if len(evidence) > 3:
+            evidence_text += f" | +{len(evidence)-3} more"
+        muted = f"{client} · {family} · {count} linked item{'s' if count != 1 else ''} · {badge_text}"
+        rows += (
+            "<div class='row'><div>"
+            f"<b>{html_escape(obj.get('title'))}</b>"
+            f"<span class='muted'>{html_escape(muted)}</span>"
+            + (f"<span class='muted'>{html_escape(evidence_text)}</span>" if evidence_text else "")
+            + f"{preview_approval_controls(obj)}"
+            "</div>"
+            f"<span class='pill'>{html_escape(obj.get('status'))} · {html_escape(obj.get('priority', 'normal'))} · thread</span></div>"
+        )
+    return rows
+
 def load_existing_telegram_intake_sync():
     """V45.2: bridge Web Inbox to the Telegram memory that already exists in app.py.
 
@@ -1294,7 +1452,7 @@ def load_workspace_data():
         ]
 
     activity = [
-        {"title": "V45.3 existing Telegram memory bridge", "body": "Inbox now deduplicates real app.py task memory, voice/photo evidence and recent Telegram conversation state into unified cards.", "kind": "sync"},
+        {"title": "V45.4 client work threads bridge", "body": "Inbox now groups real app.py memory into client work threads with follow-up merge.", "kind": "sync"},
         {"title": "V43.4 preview to real task surface", "body": "Approved preview objects now appear across Dashboard, Tasks and Office Manager surfaces in safe mode.", "kind": "work"},
         {"title": "Web service online", "body": "NinaOS web runtime is separated from Telegram runtime.", "kind": "info"},
         {"title": "Workspace loaded", "body": "V36 clean workspace data layer is active.", "kind": "info"},
@@ -1461,10 +1619,10 @@ def tasks_body(data):
     approved_rows = work_object_rows(approved_items, empty_text=tx("no_items", lang), show_source=True)
     pending_rows = work_object_rows(pending_items, empty_text=tx("no_items", lang), show_source=True)
     rejected_rows = work_object_rows(rejected_items, empty_text=tx("no_items", lang), show_source=True)
-    telegram_sync_rows = work_object_rows(load_existing_telegram_intake_sync(), empty_text=tx("no_items", lang), limit=8, show_source=True)
+    telegram_sync_rows = client_thread_rows(load_client_work_threads(), empty_text=tx("no_items", lang), limit=8)
     return (
         work_page_header(tx("tasks"), tx("tasks_sub"))
-        + "<section class='card card-pad'><div class='section-title'>Unified Telegram Inbox Cards</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.3: web reads existing app.py memory_backups source=task_engine, tasks table, conversation_state voice/photo and recent Telegram text records. Telegram runtime is not modified.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>Client Work Threads</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.4: related follow-ups, tasks, voice and photo evidence are merged into client work threads. Telegram runtime is not modified.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('real_task_surface_bridge', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('all_workspace_work', lang)}</div><div class='list'>{all_rows}</div></section><br>"
@@ -1824,6 +1982,7 @@ def telegram_bridge_db_diagnostics():
         unified_items = load_existing_telegram_intake_sync()
         diag["web_reader_counts"]["merged_telegram_intake_sync"] = len(unified_items)
         diag["web_reader_counts"]["unified_dedup_cards"] = len(unified_items)
+        diag["web_reader_counts"]["client_work_threads"] = len(build_client_work_threads(unified_items, limit=50))
     except Exception as e:
         diag["web_reader_counts"]["merged_telegram_intake_sync"] = "error: " + str(e)[:160]
 
@@ -1875,7 +2034,7 @@ def telegram_db_diagnostic_block_html():
     diag = telegram_bridge_db_diagnostics()
     return (
         "<section class='card card-pad'>"
-        "<div class='section-title'>🧪 V45.3 DB Diagnostic</div>"
+        "<div class='section-title'>🧪 V45.4 DB Diagnostic</div>"
         "<p class='muted'>Read-only check: does Web service see the same Postgres memory that Telegram app.py writes?</p>"
         "<div class='list'>" + diagnostic_rows_html(diag) + "</div>"
         "<div class='safe-note'>Open JSON: <a href='/diagnostics/telegram-sync'>/diagnostics/telegram-sync</a>. If counts are zero here but Telegram works, Railway services may not share the same DATABASE_URL or app.py writes to a different table/source.</div>"
@@ -1888,9 +2047,10 @@ def channel_hub_body(data):
     lang = current_language()
     created_voice_obj = get_voice_intake_preview()
     telegram_sync_items = load_existing_telegram_intake_sync()
-    telegram_sync_rows = work_object_rows(telegram_sync_items, empty_text=tx("no_items", lang), limit=8, show_source=True)
+    client_threads = build_client_work_threads(telegram_sync_items, limit=20)
+    telegram_sync_rows = client_thread_rows(client_threads, empty_text=tx("no_items", lang), limit=8)
     approved_rows = work_object_rows(approved_preview_items(), empty_text=tx("no_items", lang), limit=5, show_source=True)
-    pending_items = telegram_sync_items + pending_or_held_preview_items()
+    pending_items = client_threads + pending_or_held_preview_items()
     if created_voice_obj and all(o.get("object_id") != created_voice_obj.get("object_id") for o in pending_items):
         pending_items = [created_voice_obj] + pending_items
     pending_rows = work_object_rows(pending_items, empty_text=tx("no_items", lang), limit=5, show_source=True)
@@ -1914,9 +2074,9 @@ def channel_hub_body(data):
         + voice_intake_form_html(created_voice_obj)
         + "<br>"
         + telegram_db_diagnostic_block_html()
-        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Unified NinaOS Inbox</div><p class='muted'>V45.3 connects Web Inbox to the Telegram memory that already exists in app.py: task_engine backups, voice/photo evidence and recent Telegram text as deduplicated unified cards. app.py stays separate.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.3 safe mode: existing Telegram memory is deduplicated into clean Inbox cards and approval/work queues. Web reads only; DB writes still come later.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V45.4 groups existing app.py memory into client work threads: one Andris follow-up thread instead of many repeated cards, with voice/photo/task evidence preserved.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.4 safe mode: existing Telegram memory is grouped into client work threads and approval/work queues. Web reads only; DB writes still come later.</div></section><br>"
         + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V45.3 memory bridge</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V45.4 client thread bridge</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
         + "<div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
