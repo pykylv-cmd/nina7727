@@ -7,10 +7,10 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V45.0 — Existing Telegram Voice/Intake → Web Inbox Sync"
+WEB_APP_VERSION = "Web App V45.1 — Real Telegram Intake Store Prep"
 app = Flask(__name__)
 
-# V45 safe in-memory workspace preview store + existing Telegram intake sync foundation.
+# V45.1 safe in-memory workspace preview store + real intake_events store prep.
 # This does NOT write to Postgres yet and does NOT touch Telegram app.py.
 # Telegram remains its own runtime; web_app.py only reads/surfaces shared intake/work data.
 WORKSPACE_ACTION_PREVIEWS = []
@@ -393,13 +393,114 @@ def telegram_intake_demo_items():
     return demo
 
 
-def load_existing_telegram_intake_sync():
-    """V45: web-side sync view for existing Telegram app.py intake.
 
-    app.py stays separate. web_app.py reads the same Postgres work/task layer when it exists,
-    then presents those rows as Telegram intake records in Inbox. Until the Telegram side writes
-    a dedicated intake table, this function uses the current tasks table shape as the bridge.
+def _first_value(row, keys, default=""):
+    for key in keys:
+        if key in row and row.get(key) not in [None, ""]:
+            return row.get(key)
+    return default
+
+
+def load_real_intake_events_from_db(limit=50):
+    """V45.1: prepare web_app.py to read a real shared intake_events table.
+
+    This does not write to Postgres and does not touch Telegram app.py.
+    If app.py/shared modules later save Telegram voice/text/photo/document events into
+    intake_events, the Web Inbox will automatically surface them here.
+    The mapper is deliberately schema-tolerant so early DB migrations can evolve safely.
     """
+    database_url = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or ""
+    if not database_url:
+        return []
+    conn = None
+    try:
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'intake_events'
+        """)
+        columns = [r[0] for r in cur.fetchall()]
+        if not columns:
+            cur.close()
+            conn.close()
+            return []
+
+        order_col = "created_at" if "created_at" in columns else ("id" if "id" in columns else columns[0])
+        cur.execute(f"SELECT * FROM intake_events ORDER BY {order_col} DESC LIMIT %s", (int(limit),))
+        names = [d[0] for d in cur.description]
+        rows = [dict(zip(names, r)) for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+
+        objects = []
+        now = datetime.utcnow().isoformat() + "Z"
+        for idx, row in enumerate(rows):
+            raw_text = _first_value(row, ["raw_text", "message_text", "transcript", "text", "body", "content", "caption"], "")
+            title = _first_value(row, ["title", "summary", "subject"], "") or str(raw_text or "Incoming Telegram intake")[:140]
+            source_channel = _first_value(row, ["source_channel", "channel", "source", "platform"], "Telegram")
+            event_type = _first_value(row, ["event_type", "intake_kind", "kind", "type", "content_type"], "telegram_intake")
+            client_name = _first_value(row, ["client_name", "client", "customer_name", "contact_name", "sender_name"], "")
+            priority = _first_value(row, ["priority"], "normal") or "normal"
+            status = _first_value(row, ["status", "state"], "synced_preview") or "synced_preview"
+            approval_state = _first_value(row, ["approval_state", "approval", "owner_state"], "pending_approval") or "pending_approval"
+            object_type = _first_value(row, ["object_type", "work_type"], "") or infer_work_type_from_text(str(title) + " " + str(raw_text), "task")
+            file_name = _first_value(row, ["file_name", "filename", "document_name", "attachment_name"], "")
+            if file_name and object_type == "task":
+                object_type = "document_intake"
+            object_id = _first_value(row, ["object_id", "event_id", "id"], f"intake_event_{idx}")
+            created_at = _first_value(row, ["created_at", "timestamp", "received_at"], "")
+            if created_at:
+                created_at = str(created_at)
+            meta = {
+                "client_name": client_name,
+                "owner": "Telegram Nina",
+                "source": "real_intake_store",
+                "source_channel": source_channel,
+                "intake_kind": event_type,
+                "raw_text": raw_text,
+                "file_name": file_name,
+                "storage_target": "NinaOS client workspace",
+                "approval_state": approval_state,
+                "db_read": True,
+                "db_write_by_web": False,
+                "synced_at": now,
+                "created_at": created_at,
+            }
+            objects.append({
+                "object_id": f"intake_event_{object_id}",
+                "object_type": object_type,
+                "title": title or "Incoming Telegram intake",
+                "status": status,
+                "priority": priority,
+                "client_id": client_name,
+                "project_id": _first_value(row, ["project_id", "project_name"], ""),
+                "due_date": _first_value(row, ["due_date", "deadline"], ""),
+                "metadata": meta,
+            })
+        return objects
+    except Exception:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+        return []
+
+def load_existing_telegram_intake_sync():
+    """V45.1: web-side sync view for Telegram/app intake.
+
+    Priority order:
+    1) real shared Postgres intake_events table, when present;
+    2) existing Telegram tasks table bridge;
+    3) safe demo sync items so the UI never goes blank during setup.
+    """
+    real_intake = load_real_intake_events_from_db()
+    if real_intake:
+        return real_intake[:12]
+
     live = load_live_objects_from_app_db()
     synced = []
     for obj in live:
@@ -504,7 +605,7 @@ def create_workspace_action_preview(action):
 
 def is_preview_object(obj):
     meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
-    return meta.get("source") in ["web_action_preview", "web_preview", "web_voice_intake_preview", "telegram_intake_sync"]
+    return meta.get("source") in ["web_action_preview", "web_preview", "web_voice_intake_preview", "telegram_intake_sync", "real_intake_store"]
 
 
 def preview_approval_state(obj):
@@ -632,7 +733,7 @@ def load_workspace_data():
         ]
 
     activity = [
-        {"title": "V45 Telegram intake sync", "body": "Existing Telegram voice/text/file intake is surfaced inside NinaOS Inbox as synchronized work context.", "kind": "sync"},
+        {"title": "V45.1 real intake store prep", "body": "Inbox is ready to read real intake_events from Postgres, with safe Telegram demo fallback.", "kind": "sync"},
         {"title": "V43.4 preview to real task surface", "body": "Approved preview objects now appear across Dashboard, Tasks and Office Manager surfaces in safe mode.", "kind": "work"},
         {"title": "Web service online", "body": "NinaOS web runtime is separated from Telegram runtime.", "kind": "info"},
         {"title": "Workspace loaded", "body": "V36 clean workspace data layer is active.", "kind": "info"},
@@ -743,7 +844,9 @@ def object_source_label(obj, lang=None):
     if source in ["web_action_preview", "web_preview", "web_voice_intake_preview"]:
         return tx("source_preview", lang)
     if source == "telegram_intake_sync":
-        return "Telegram sync" if lang == "en" else ("Telegram sync" if lang == "lv" else "Telegram sync")
+        return "Telegram sync"
+    if source == "real_intake_store":
+        return "Real intake store" if lang == "en" else ("Telegram sync" if lang == "lv" else "Telegram sync")
     if source == "database":
         return tx("source_database", lang)
     if source == "demo":
@@ -790,7 +893,7 @@ def tasks_body(data):
     telegram_sync_rows = work_object_rows(load_existing_telegram_intake_sync(), empty_text=tx("no_items", lang), limit=8, show_source=True)
     return (
         work_page_header(tx("tasks"), tx("tasks_sub"))
-        + "<section class='card card-pad'><div class='section-title'>Telegram Intake Sync</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45: Telegram voice/text/file intake is visible as NinaOS work context. Telegram runtime is not modified.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>Real Intake Store / Telegram Sync</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.1: web reads intake_events when present, otherwise falls back to existing Telegram task sync/demo. Telegram runtime is not modified.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('real_task_surface_bridge', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('all_workspace_work', lang)}</div><div class='list'>{all_rows}</div></section><br>"
@@ -995,9 +1098,9 @@ def channel_hub_body(data):
         + f"<section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>{tx('modern_intake', lang).upper()}</div></div></div><div class='bigline'>{tx('twenty_second_century', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/office-manager/actions')}'>{tx('voice_command', lang)}</a><a class='btn' href='{q('/tasks')}'>{tx('tasks', lang)}</a><a class='btn' href='{q('/clients')}'>{tx('clients', lang)}</a></div></section><br>"
         + voice_intake_form_html(created_voice_obj)
         + "<br>"
-        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → NinaOS Inbox Sync</div><p class='muted'>Existing Telegram voice, text, follow-up, photo and document intake is shown here as NinaOS work context. app.py stays separate; web_app.py only reads and displays the shared work layer.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45 safe mode: synced Telegram intake is visible in Inbox and approval/work queues. Dedicated Postgres intake table comes next.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → NinaOS Inbox Sync</div><p class='muted'>V45.1 prepares a real shared intake store. If Postgres table intake_events exists, Inbox reads it; if not, NinaOS keeps a safe Telegram sync fallback. app.py stays separate.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V45.1 safe mode: synced Telegram intake is visible in Inbox and approval/work queues. Web is ready for real Postgres intake_events reads; DB writes still come later.</div></section><br>"
         + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V45 sync foundation</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V45.1 intake store prep</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
         + "<div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
@@ -1365,7 +1468,7 @@ def exchange():
 
 @app.route("/health")
 def health():
-    return {"ok": True, "runtime": "web_app.py", "version": WEB_APP_VERSION, "language": current_language(), "preview_objects": len(WORKSPACE_ACTION_PREVIEWS), "approved_preview_objects": len(approved_preview_items()), "pending_or_held_preview_objects": len(pending_or_held_preview_items()), "rejected_preview_objects": len(rejected_preview_items()), "telegram_intake_sync_items": len(load_existing_telegram_intake_sync()), "time": datetime.utcnow().isoformat() + "Z"}
+    return {"ok": True, "runtime": "web_app.py", "version": WEB_APP_VERSION, "language": current_language(), "preview_objects": len(WORKSPACE_ACTION_PREVIEWS), "approved_preview_objects": len(approved_preview_items()), "pending_or_held_preview_objects": len(pending_or_held_preview_items()), "rejected_preview_objects": len(rejected_preview_items()), "telegram_intake_sync_items": len(load_existing_telegram_intake_sync()), "real_intake_store_items": len(load_real_intake_events_from_db()), "time": datetime.utcnow().isoformat() + "Z"}
 
 
 if __name__ == "__main__":
