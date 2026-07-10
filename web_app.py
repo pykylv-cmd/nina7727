@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V51.1 — Telegram Recipient Resolution Prep
+# NinaOS Web App V51.1 FIX — Preserve Review + Send-Prep State
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -8,7 +8,7 @@ from datetime import datetime
 from urllib.parse import quote_plus, unquote_plus
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V51.1 — Telegram Recipient Resolution Prep"
+WEB_APP_VERSION = "Web App V51.1 FIX — Preserve Review + Send-Prep State"
 app = Flask(__name__)
 
 # V47.1 safe workspace-object surface polish.
@@ -1956,7 +1956,7 @@ def save_draft_review_state_to_db(draft_key, review_state, decision=""):
     review_state = str(review_state or "draft_saved")
     payload = {
         "type": "sendback_draft_review_state",
-        "version": "V51.0",
+        "version": "V51.1 FIX",
         "draft_key": draft_key,
         "review_state": review_state,
         "approval_state": review_state,
@@ -2094,7 +2094,7 @@ def save_telegram_send_prep_to_db(draft_key, action="prepare"):
     ensure_telegram_send_prep_states_loaded()
     payload = {
         "type": "telegram_send_prep",
-        "version": "V51.1",
+        "version": "V51.1 FIX",
         "draft_key": draft_key,
         "channel": "Telegram",
         "send_prep_state": "telegram_send_prepared",
@@ -2229,7 +2229,7 @@ def save_telegram_recipient_resolution_to_db(draft):
     resolved = bool(chat_id)
     payload = {
         "type": "telegram_recipient_resolution",
-        "version": "V51.1",
+        "version": "V51.1 FIX",
         "draft_key": draft_key,
         "client_name": draft.get("client_name") or "Workspace",
         "channel": "Telegram",
@@ -2302,7 +2302,7 @@ def outbox_recipient_banner_html():
         "<div class='section-title'>Telegram recipient resolution</div>"
         "<div class='list'>"
         f"<div class='row'><div><b>{html_escape(label)}</b><span class='muted'>{html_escape(draft_key)}</span><span class='muted'>{note}</span></div><span class='pill'>{html_escape(result.get('save_status') or '')}</span></div>"
-        "</div><div class='safe-note'>V51.1 safe mode: recipient resolution only. No Telegram message was sent.</div></section><br>"
+        "</div><div class='safe-note'>V51.1 FIX safe mode: recipient resolution is stored without changing review or send-prep state. No Telegram message was sent.</div></section><br>"
     )
 
 
@@ -2317,7 +2317,7 @@ def outbox_send_prep_banner_html():
         "<div class='section-title'>Telegram send action prepared</div>"
         "<div class='list'>"
         f"<div class='row'><div><b>Prepared, not sent</b><span class='muted'>{html_escape(draft_key)}</span></div><span class='pill'>{html_escape(result.get('save_status') or '')}</span></div>"
-        "</div><div class='safe-note'>V51.1 safe mode: NinaOS prepared a Telegram send action only. No Telegram message was sent.</div></section><br>"
+        "</div><div class='safe-note'>V51.1 FIX safe mode: send preparation is stored without changing review or recipient state. No Telegram message was sent.</div></section><br>"
     )
 
 
@@ -2380,7 +2380,7 @@ def save_sendback_draft_to_db(client_name, item, channel, draft):
     meta = (item or {}).get("metadata") if isinstance((item or {}).get("metadata"), dict) else {}
     payload = {
         "type": "sendback_draft",
-        "version": "V51.0",
+        "version": "V51.1 FIX",
         "draft_key": draft_key,
         "client_name": client_name or meta.get("client_name") or "Workspace",
         "client_slug": _client_profile_slug(client_name or meta.get("client_name") or "Workspace"),
@@ -2604,13 +2604,13 @@ def outbox_body(data=None):
             return global_outbox_rows(limit=len(items))
 
     return (
-        work_page_header("Outbox", "V51.1 Telegram Recipient Resolution Prep — resolve the verified Telegram recipient before any real send bridge.")
+        work_page_header("Outbox", "V51.1 FIX — preserve review state, send-prep state and recipient resolution as separate layers.")
         + review_banner
         + send_prep_banner
         + recipient_banner
-        + f"<section class='card card-pad'>{outbox_channel_kpis()}<br><div class='safe-note'>V51.1: approved Telegram drafts can be prepared and recipient-checked, but no client message is sent yet.</div></section><br>"
+        + f"<section class='card card-pad'>{outbox_channel_kpis()}<br><div class='safe-note'>V51.1 FIX: review, send-prep and recipient states are preserved independently. No client message is sent yet.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Saved Drafts Review Queue</div><div class='list'>{global_outbox_rows(limit=40, empty_text=tx('no_items', lang))}</div><div class='safe-note'>Use Approve for send / Needs edit / Reject draft. Approved Telegram drafts can prepare a safe send action and resolve a verified recipient.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Approved To Send Queue</div><div class='list'>{global_outbox_rows_for_items(approved) if approved else rows_for([], 'No approved drafts yet.')}</div><div class='safe-note'>V51.1: prepare the send and resolve the Telegram recipient. Real sending is still disabled.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved To Send Queue</div><div class='list'>{global_outbox_rows_for_items(approved) if approved else rows_for([], 'No approved drafts yet.')}</div><div class='safe-note'>V51.1 FIX: approved state remains intact while send-prep and recipient resolution are added. Real sending is still disabled.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Telegram Send Prep Queue</div><div class='list'>{global_outbox_rows_for_items(telegram_prepared) if telegram_prepared else rows_for([], 'No prepared Telegram send actions yet.')}</div><div class='safe-note'>Prepared means queued for future bridge review only. Recipient resolution is separate and no Telegram API call has been made.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Telegram Recipient Resolution Queue</div><div class='list'>{global_outbox_rows_for_items(recipient_resolved) if recipient_resolved else rows_for([], 'No resolved Telegram recipients yet.')}</div><div class='safe-note'>Only drafts with a verified Telegram chat_id can move toward a future real send bridge.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Unresolved Telegram Recipients</div><div class='list'>{global_outbox_rows_for_items(recipient_unresolved) if recipient_unresolved else rows_for([], 'No unresolved Telegram recipients.')}</div><div class='safe-note'>Unresolved drafts are blocked from real sending until a client contact mapping exists.</div></section><br>"
@@ -4097,6 +4097,32 @@ def client_profile(client_key):
 
 @app.route("/outbox")
 def outbox():
+    """V51.1 FIX: process one state-changing action, then redirect to a clean URL.
+
+    This prevents stale query parameters (especially draft_decision=reset) from being
+    re-applied on refresh/redeploy and preserves review, send-prep and recipient states
+    as three independent persistent layers.
+    """
+    draft_key = unquote_plus((request.args.get("draft_key") or "").strip())
+    decision = (request.args.get("draft_decision") or "").strip().lower()
+    send_prep = (request.args.get("send_prep") or "").strip().lower()
+    recipient_action = (request.args.get("recipient_action") or "").strip().lower()
+
+    acted = False
+    if draft_key and decision:
+        apply_draft_review_decision(draft_key, decision)
+        acted = True
+    elif draft_key and send_prep == "telegram":
+        apply_telegram_send_prep(draft_key)
+        acted = True
+    elif draft_key and recipient_action == "resolve_telegram":
+        apply_telegram_recipient_resolution(draft_key)
+        acted = True
+
+    if acted:
+        # PRG pattern: remove the state-changing query so browser refresh cannot replay it.
+        return redirect(q("/outbox"))
+
     data = load_workspace_data()
     return Response(page("Outbox", outbox_body(data), active="tasks"), mimetype="text/html")
 
