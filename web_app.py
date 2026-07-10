@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V51.2 FIX — Outbox Mapping Render Fix
+# NinaOS Web App V51.2 SAFETY FIX — Unique Telegram Contact Mapping
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -8,14 +8,14 @@ from datetime import datetime
 from urllib.parse import quote_plus, unquote_plus
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V51.2 FIX — Outbox Mapping Render Fix"
+WEB_APP_VERSION = "Web App V51.2 SAFETY FIX — Unique Telegram Contact Mapping"
 app = Flask(__name__)
 
 # V47.1 safe workspace-object surface polish.
 # This writes only safe web workspace-object snapshots into memory_backups and does NOT touch Telegram app.py.
 # Telegram remains its own runtime; web_app.py only reads/surfaces shared intake/work data.
 WORKSPACE_ACTION_PREVIEWS = []
-# V51.2: adds verified Telegram client contact mappings before any real sending.
+# V51.2 SAFETY FIX: verified Telegram client mappings are unique by normalized client and chat_id.
 # Owner approval decisions are saved safely into memory_backups with source='web_thread_approval_state'.
 # This avoids losing Approve/Hold/Reject after web reload/redeploy without touching app.py.
 THREAD_WORKFLOW_STATES = {}
@@ -2146,14 +2146,24 @@ def apply_telegram_send_prep(draft_key):
 
 
 def _normalize_client_key(value):
+    """Stable client identity key: case/space insensitive."""
     return " ".join(str(value or "").strip().lower().split())
 
 
-def load_persistent_telegram_client_contact_mappings_from_db(limit=500):
-    """V51.2: load latest verified Telegram contact mapping per client.
+def _mapping_is_active(payload):
+    return bool(
+        isinstance(payload, dict)
+        and payload.get("verified") is True
+        and str(payload.get("mapping_state") or "verified").lower() not in ("inactive", "revoked", "deleted")
+    )
 
-    Mapping records are stored independently from drafts and send states with
-    source='web_telegram_client_contact_mapping'. Latest record wins.
+
+def load_persistent_telegram_client_contact_mappings_from_db(limit=500):
+    """Load latest mapping state per normalized client.
+
+    Latest record wins. Inactive/revoked records suppress older verified mappings.
+    Active duplicate chat_ids remain visible for diagnostics but are blocked from
+    recipient resolution by telegram_mapping_conflicts().
     """
     database_url = _db_url()
     if not database_url:
@@ -2176,20 +2186,21 @@ def load_persistent_telegram_client_contact_mappings_from_db(limit=500):
         rows = cur.fetchall()
         cur.close()
         conn.close()
-        mappings = {}
+        latest = {}
         for text, created_at, row_id in rows:
             payload = _json_loads_safe(text)
             if not isinstance(payload, dict):
                 continue
-            client_key = _normalize_client_key(payload.get("client_name"))
-            if not client_key or client_key in mappings:
+            client_key = _normalize_client_key(payload.get("normalized_client_key") or payload.get("client_name"))
+            if not client_key or client_key in latest:
                 continue
+            payload["normalized_client_key"] = client_key
             payload["created_at"] = str(payload.get("created_at") or created_at or "")
             payload["db_id"] = row_id
-            mappings[client_key] = payload
-        return mappings
+            latest[client_key] = payload
+        return {k: v for k, v in latest.items() if _mapping_is_active(v)}
     except Exception as e:
-        print("V51.2 load client contact mappings error:", repr(e))
+        print("V51.2 SAFETY load client contact mappings error:", repr(e))
         try:
             if conn:
                 conn.close()
@@ -2198,17 +2209,40 @@ def load_persistent_telegram_client_contact_mappings_from_db(limit=500):
         return {}
 
 
-def ensure_telegram_client_contact_mappings_loaded():
+def _reload_telegram_client_contact_mappings():
     global TELEGRAM_CLIENT_CONTACT_MAPPINGS_LOADED, TELEGRAM_CLIENT_CONTACT_MAPPINGS
-    if TELEGRAM_CLIENT_CONTACT_MAPPINGS_LOADED:
-        return
-    TELEGRAM_CLIENT_CONTACT_MAPPINGS = load_persistent_telegram_client_contact_mappings_from_db(limit=800)
+    TELEGRAM_CLIENT_CONTACT_MAPPINGS = load_persistent_telegram_client_contact_mappings_from_db(limit=1200)
     TELEGRAM_CLIENT_CONTACT_MAPPINGS_LOADED = True
+    return TELEGRAM_CLIENT_CONTACT_MAPPINGS
+
+
+def ensure_telegram_client_contact_mappings_loaded():
+    global TELEGRAM_CLIENT_CONTACT_MAPPINGS_LOADED
+    if not TELEGRAM_CLIENT_CONTACT_MAPPINGS_LOADED:
+        _reload_telegram_client_contact_mappings()
+
+
+def telegram_mapping_conflicts():
+    """Return chat_id -> sorted client keys when an active id has multiple owners."""
+    ensure_telegram_client_contact_mappings_loaded()
+    owners = {}
+    for client_key, payload in TELEGRAM_CLIENT_CONTACT_MAPPINGS.items():
+        chat_id = str(payload.get("telegram_chat_id") or "").strip()
+        if chat_id:
+            owners.setdefault(chat_id, []).append(client_key)
+    return {chat_id: sorted(keys) for chat_id, keys in owners.items() if len(set(keys)) > 1}
 
 
 def telegram_client_contact_mapping(client_name):
     ensure_telegram_client_contact_mappings_loaded()
-    return TELEGRAM_CLIENT_CONTACT_MAPPINGS.get(_normalize_client_key(client_name)) or {}
+    key = _normalize_client_key(client_name)
+    payload = TELEGRAM_CLIENT_CONTACT_MAPPINGS.get(key) or {}
+    if not payload:
+        return {}
+    chat_id = str(payload.get("telegram_chat_id") or "").strip()
+    if chat_id in telegram_mapping_conflicts():
+        return {}  # ambiguous mappings are never eligible for sending
+    return payload
 
 
 def _valid_telegram_chat_id(value):
@@ -2221,22 +2255,43 @@ def _valid_telegram_chat_id(value):
 
 
 def save_telegram_client_contact_mapping_to_db(client_name, chat_id, verified=False, note=""):
-    """Persist one verified client → Telegram chat_id mapping. Never sends a message."""
+    """Persist one unique verified client → Telegram chat_id mapping.
+
+    A chat_id already owned by another active normalized client is rejected.
+    Saving a new id for the same normalized client intentionally replaces that
+    client's prior mapping because latest record wins.
+    """
     database_url = _db_url()
-    client_name = str(client_name or "").strip()
+    client_name = " ".join(str(client_name or "").strip().split())
+    client_key = _normalize_client_key(client_name)
     chat_id = str(chat_id or "").strip()
     if not database_url:
         return False, "missing_database_url", {}
-    if not client_name:
+    if not client_key:
         return False, "missing_client_name", {}
     if not _valid_telegram_chat_id(chat_id):
         return False, "invalid_chat_id", {}
     if not verified:
         return False, "verification_required", {}
+
+    current = _reload_telegram_client_contact_mappings()
+    conflicting_clients = [
+        key for key, mapping in current.items()
+        if key != client_key and str(mapping.get("telegram_chat_id") or "").strip() == chat_id
+    ]
+    if conflicting_clients:
+        return False, "chat_id_conflict", {
+            "client_name": client_name,
+            "normalized_client_key": client_key,
+            "telegram_chat_id": chat_id,
+            "conflicting_clients": conflicting_clients,
+        }
+
     payload = {
         "type": "telegram_client_contact_mapping",
-        "version": "V51.2",
+        "version": "V51.2 SAFETY FIX",
         "client_name": client_name,
+        "normalized_client_key": client_key,
         "telegram_chat_id": chat_id,
         "mapping_state": "verified",
         "verified": True,
@@ -2262,11 +2317,61 @@ def save_telegram_client_contact_mapping_to_db(client_name, chat_id, verified=Fa
         conn.commit()
         cur.close()
         conn.close()
-        ensure_telegram_client_contact_mappings_loaded()
-        TELEGRAM_CLIENT_CONTACT_MAPPINGS[_normalize_client_key(client_name)] = payload
+        _reload_telegram_client_contact_mappings()
         return True, "mapping_saved", payload
     except Exception as e:
-        print("V51.2 save client contact mapping error:", repr(e))
+        print("V51.2 SAFETY save client contact mapping error:", repr(e))
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+        return False, str(e)[:200], payload
+
+
+def deactivate_telegram_client_contact_mapping_to_db(client_name, note=""):
+    """Write an inactive latest-state record for one normalized client."""
+    database_url = _db_url()
+    client_key = _normalize_client_key(client_name)
+    if not database_url:
+        return False, "missing_database_url", {}
+    if not client_key:
+        return False, "missing_client_name", {}
+    current = _reload_telegram_client_contact_mappings()
+    existing = current.get(client_key) or {}
+    if not existing:
+        return False, "mapping_not_found", {}
+    payload = {
+        "type": "telegram_client_contact_mapping",
+        "version": "V51.2 SAFETY FIX",
+        "client_name": existing.get("client_name") or str(client_name or "").strip(),
+        "normalized_client_key": client_key,
+        "telegram_chat_id": str(existing.get("telegram_chat_id") or ""),
+        "mapping_state": "inactive",
+        "verified": False,
+        "verification_method": "owner_manual_deactivation",
+        "note": str(note or "Owner deactivated mapping").strip()[:500],
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "db_write_scope": "client_contact_mapping_only",
+        "safe_mode": True,
+        "sent": False,
+    }
+    conn = None
+    try:
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO memory_backups (user_id, backup_text, source) VALUES (%s, %s, %s)",
+            ("__web__", _json_dumps_safe(payload), "web_telegram_client_contact_mapping"),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        _reload_telegram_client_contact_mappings()
+        return True, "mapping_deactivated", payload
+    except Exception as e:
+        print("V51.2 SAFETY deactivate mapping error:", repr(e))
         try:
             if conn:
                 conn.close()
@@ -2276,20 +2381,42 @@ def save_telegram_client_contact_mapping_to_db(client_name, chat_id, verified=Fa
 
 
 def telegram_contact_mapping_form_html():
-    mappings = []
     ensure_telegram_client_contact_mappings_loaded()
-    for payload in TELEGRAM_CLIENT_CONTACT_MAPPINGS.values():
-        mappings.append(payload)
-    mapping_rows = "".join(
-        f"<div class='row'><div><b>{html_escape(m.get('client_name'))}</b><span class='muted'>Telegram chat_id: {html_escape(m.get('telegram_chat_id'))}</span><span class='muted'>verified · owner manual confirmation</span></div><span class='pill'>verified</span></div>"
-        for m in sorted(mappings, key=lambda x: str(x.get('client_name') or '').lower())
-    ) or ("<div class='row'><div><b>No verified Telegram client mappings yet.</b>"
-          "<span class='muted'>—</span></div><span class='pill'>idle</span></div>")
+    conflicts = telegram_mapping_conflicts()
+    rows = []
+    for client_key, m in sorted(TELEGRAM_CLIENT_CONTACT_MAPPINGS.items()):
+        chat_id = str(m.get("telegram_chat_id") or "")
+        is_conflict = chat_id in conflicts
+        state_label = "CONFLICT — blocked" if is_conflict else "verified unique"
+        action = q('/outbox')
+        sep = '&' if '?' in action else '?'
+        deactivate_href = (
+            f"{action}{sep}contact_action=deactivate_mapping"
+            f"&client_name={quote_plus(str(m.get('client_name') or client_key))}"
+        )
+        rows.append(
+            f"<div class='row'><div><b>{html_escape(m.get('client_name') or client_key)}</b>"
+            f"<span class='muted'>Telegram chat_id: {html_escape(chat_id)}</span>"
+            f"<span class='muted'>{html_escape(state_label)} · normalized: {html_escape(client_key)}</span></div>"
+            f"<div><span class='pill'>{html_escape('blocked' if is_conflict else 'verified')}</span> "
+            f"<a class='pill' href='{deactivate_href}'>Deactivate</a></div></div>"
+        )
+    mapping_rows = "".join(rows) or (
+        "<div class='row'><div><b>No verified Telegram client mappings yet.</b>"
+        "<span class='muted'>—</span></div><span class='pill'>idle</span></div>"
+    )
+    conflict_note = ""
+    if conflicts:
+        items = "; ".join(f"{cid}: {', '.join(keys)}" for cid, keys in sorted(conflicts.items()))
+        conflict_note = (
+            "<div class='safe-note' style='margin-top:12px'><b>Safety conflict:</b> the same chat_id is assigned to multiple clients: "
+            + html_escape(items)
+            + ". These mappings are blocked until incorrect mappings are deactivated.</div>"
+        )
     action = q('/outbox')
-    sep = '&' if '?' in action else '?'
     return (
         "<section class='card card-pad'><div class='section-title'>Telegram Client Contact Mapping</div>"
-        "<div class='safe-note'>Add a client Telegram chat_id only after the owner has verified that it belongs to the intended client. This does not send a message.</div><br>"
+        "<div class='safe-note'>One Telegram chat_id may belong to only one normalized client. Andris / andris are treated as the same client. Saving a new id for the same client replaces the old mapping; conflicts are rejected. No message is sent.</div><br>"
         f"<form method='get' action='{action}'>"
         f"<input type='hidden' name='lang' value='{html_escape(current_language())}'>"
         "<input type='hidden' name='contact_action' value='save_mapping'>"
@@ -2301,22 +2428,35 @@ def telegram_contact_mapping_form_html():
         "<label style='display:block;margin-top:12px'><input type='checkbox' name='verified' value='yes' required> I confirm this Telegram chat_id belongs to this client.</label>"
         "<button class='pill' type='submit' style='margin-top:12px'>Save verified mapping</button>"
         "</form><br><div class='section-title'>Verified mappings</div><div class='list'>" + mapping_rows + "</div>"
-        "<div class='safe-note'>V51.2: mappings are stored separately from drafts, review states and send-prep states. Real sending remains disabled.</div></section><br>"
+        + conflict_note
+        + "<div class='safe-note'>V51.2 SAFETY FIX: unique mapping, normalized client identity, conflict blocking and manual deactivation are active. Real sending remains disabled.</div></section><br>"
     )
 
 
 def outbox_contact_mapping_banner_html():
     status = (request.args.get("mapping_status") or "").strip()
     client_name = (request.args.get("mapping_client") or "").strip()
+    conflict_owner = (request.args.get("mapping_conflict_owner") or "").strip()
     if not status:
         return ""
-    ok = status == "mapping_saved"
-    label = "Telegram client mapping saved" if ok else "Telegram client mapping not saved"
+    labels = {
+        "mapping_saved": "Telegram client mapping saved",
+        "mapping_deactivated": "Telegram client mapping deactivated",
+        "chat_id_conflict": "Mapping blocked: chat_id already belongs to another client",
+        "mapping_not_found": "Mapping not found",
+        "verification_required": "Owner verification is required",
+        "invalid_chat_id": "Invalid Telegram chat_id",
+    }
+    label = labels.get(status, "Telegram client mapping not saved")
+    detail = client_name
+    if conflict_owner:
+        detail += " · existing owner: " + conflict_owner
     return (
         "<section class='card card-pad'><div class='section-title'>Telegram contact mapping</div>"
-        f"<div class='row'><div><b>{html_escape(label)}</b><span class='muted'>{html_escape(client_name)}</span></div><span class='pill'>{html_escape(status)}</span></div>"
+        f"<div class='row'><div><b>{html_escape(label)}</b><span class='muted'>{html_escape(detail)}</span></div><span class='pill'>{html_escape(status)}</span></div>"
         "<div class='safe-note'>No Telegram message was sent.</div></section><br>"
     )
+
 
 def load_persistent_telegram_recipient_states_from_db(limit=500):
     """V51.2: load safe Telegram recipient resolution states.
@@ -2785,15 +2925,15 @@ def outbox_body(data=None):
             return global_outbox_rows(limit=len(items))
 
     return (
-        work_page_header("Outbox", "V51.2 FIX — Telegram Client Contact Mapping with safe empty-state rendering.")
+        work_page_header("Outbox", "V51.2 SAFETY FIX — unique Telegram contact mapping and conflict blocking.")
         + review_banner
         + send_prep_banner
         + contact_mapping_banner
         + recipient_banner
         + contact_mapping_surface
-        + f"<section class='card card-pad'>{outbox_channel_kpis()}<br><div class='safe-note'>V51.2: verified client contact mapping is added as a fourth independent safety layer. No client message is sent yet.</div></section><br>"
+        + f"<section class='card card-pad'>{outbox_channel_kpis()}<br><div class='safe-note'>V51.2 SAFETY FIX: verified client mapping is unique, normalized and conflict-blocked. No client message is sent yet.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Saved Drafts Review Queue</div><div class='list'>{global_outbox_rows(limit=40, empty_text=tx('no_items', lang))}</div><div class='safe-note'>Use Approve for send / Needs edit / Reject draft. Approved Telegram drafts can prepare a safe send action and resolve a verified recipient.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Approved To Send Queue</div><div class='list'>{global_outbox_rows_for_items(approved) if approved else rows_for([], 'No approved drafts yet.')}</div><div class='safe-note'>V51.2: approved, send-prep and recipient states remain intact while verified client contact mapping is added. Real sending is still disabled.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved To Send Queue</div><div class='list'>{global_outbox_rows_for_items(approved) if approved else rows_for([], 'No approved drafts yet.')}</div><div class='safe-note'>V51.2 SAFETY FIX: approved, send-prep and recipient states remain intact; ambiguous mappings are blocked. Real sending is still disabled.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Telegram Send Prep Queue</div><div class='list'>{global_outbox_rows_for_items(telegram_prepared) if telegram_prepared else rows_for([], 'No prepared Telegram send actions yet.')}</div><div class='safe-note'>Prepared means queued for future bridge review only. Recipient resolution is separate and no Telegram API call has been made.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Telegram Recipient Resolution Queue</div><div class='list'>{global_outbox_rows_for_items(recipient_resolved) if recipient_resolved else rows_for([], 'No resolved Telegram recipients yet.')}</div><div class='safe-note'>Only drafts with a verified Telegram chat_id can move toward a future real send bridge.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Unresolved Telegram Recipients</div><div class='list'>{global_outbox_rows_for_items(recipient_unresolved) if recipient_unresolved else rows_for([], 'No unresolved Telegram recipients.')}</div><div class='safe-note'>Unresolved drafts are blocked from real sending until a client contact mapping exists.</div></section><br>"
@@ -4298,6 +4438,18 @@ def outbox():
         mapping_note = (request.args.get("mapping_note") or "").strip()
         verified = (request.args.get("verified") or "").strip().lower() in ("yes", "true", "1", "on")
         ok, status, payload = save_telegram_client_contact_mapping_to_db(client_name, telegram_chat_id, verified=verified, note=mapping_note)
+        target = q("/outbox")
+        sep = "&" if "?" in target else "?"
+        conflict_owner = ", ".join(payload.get("conflicting_clients") or []) if isinstance(payload, dict) else ""
+        return redirect(
+            f"{target}{sep}mapping_status={quote_plus(status)}"
+            f"&mapping_client={quote_plus(client_name)}"
+            f"&mapping_conflict_owner={quote_plus(conflict_owner)}"
+        )
+
+    if contact_action == "deactivate_mapping":
+        client_name = (request.args.get("client_name") or "").strip()
+        ok, status, payload = deactivate_telegram_client_contact_mapping_to_db(client_name)
         target = q("/outbox")
         sep = "&" if "?" in target else "?"
         return redirect(f"{target}{sep}mapping_status={quote_plus(status)}&mapping_client={quote_plus(client_name)}")
