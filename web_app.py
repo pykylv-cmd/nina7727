@@ -7,14 +7,14 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V47.1 — Workspace Objects Surface Polish"
+WEB_APP_VERSION = "Web App V48.0 — Client Workspace Profile Surface"
 app = Flask(__name__)
 
 # V47.1 safe workspace-object surface polish.
 # This writes only safe web workspace-object snapshots into memory_backups and does NOT touch Telegram app.py.
 # Telegram remains its own runtime; web_app.py only reads/surfaces shared intake/work data.
 WORKSPACE_ACTION_PREVIEWS = []
-# V47.1: Telegram/client threads are still read from existing app.py memory.
+# V48.0: Telegram/client threads and approved workspace objects now surface inside client workspace profiles.
 # Owner approval decisions are saved safely into memory_backups with source='web_thread_approval_state'.
 # This avoids losing Approve/Hold/Reject after web reload/redeploy without touching app.py.
 THREAD_WORKFLOW_STATES = {}
@@ -221,7 +221,7 @@ def tx(key, lang=None):
         "source_channel": {"en": "Source channel", "lv": "Avota kanāls", "ru": "Канал источника"},
         "nina_prepare": {"en": "Nina, prepare work", "lv": "Nina, sagatavo darbu", "ru": "Nina, подготовь работу"},
         "voice_preview_created": {"en": "Voice intake preview created", "lv": "Balss ievades priekšskatījums izveidots", "ru": "Preview из голосового ввода создан"},
-        "voice_safe_note": {"en": "V47.1 safe mode: approved client threads are converted into NinaOS workspace objects. Web still reads existing Telegram memory; only safe workspace-object snapshots are written.", "lv": "V47.1 drošais režīms: apstiprinātie klienta darba objekti ir tīrāk redzami Panelī, Uzdevumos, Klientos un Office Manager. Web joprojām lasa esošo Telegram atmiņu; rakstīti tiek tikai droši workspace-object snapshoti.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
+        "voice_safe_note": {"en": "V48.0 safe mode: each client now gets a workspace profile surface with threads, workspace objects and send-back candidates. Web still reads existing Telegram memory; only safe workspace-object snapshots are written.", "lv": "V48.0 drošais režīms: katram klientam sāk veidoties sava darba profila virsma ar threadiem, darba objektiem un send-back kandidātiem. Web joprojām lasa esošo Telegram atmiņu; rakstīti tiek tikai droši workspace-object snapshoti.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
         "detected_intent": {"en": "Detected intent", "lv": "Atpazītais nodoms", "ru": "Распознанное намерение"},
         "twenty_second_century": {"en": "22nd-century work surface: clients speak, send photos and documents; Nina organizes the work.", "lv": "22. gadsimta darba virsma: klienti runā, sūta bildes un dokumentus; Nina sakārto darbu.", "ru": "Рабочая поверхность 22 века: клиенты говорят, отправляют фото и документы; Nina организует работу."},
     }
@@ -1641,6 +1641,150 @@ def client_workspace_surface_rows(empty_text=None):
     return rows
 
 
+def _client_profile_slug(name):
+    try:
+        from urllib.parse import quote_plus
+        return quote_plus(str(name or "Workspace"))
+    except Exception:
+        return str(name or "Workspace").replace(" ", "+")
+
+
+def _client_from_slug(slug):
+    try:
+        from urllib.parse import unquote_plus
+        return unquote_plus(str(slug or "Workspace"))
+    except Exception:
+        return str(slug or "Workspace").replace("+", " ")
+
+
+def client_workspace_profiles_map():
+    """V48.0: one profile per client, combining threads, approved objects and send-back candidates."""
+    profiles = {}
+
+    def profile(name):
+        clean = (str(name or "Workspace").strip() or "Workspace")
+        profiles.setdefault(clean, {
+            "name": clean,
+            "threads": [],
+            "workspace_objects": [],
+            "send_back": [],
+            "followups": 0,
+            "estimates": 0,
+            "documents": 0,
+            "tasks": 0,
+            "latest_titles": [],
+            "sources": set(),
+        })
+        return profiles[clean]
+
+    for thread in client_threads_by_state():
+        meta = thread.get("metadata", {}) if isinstance(thread.get("metadata"), dict) else {}
+        name = meta.get("thread_client") or thread.get("client_id") or "Workspace"
+        pr = profile(name)
+        pr["threads"].append(thread)
+        ttype = (meta.get("thread_type") or thread.get("object_type") or "").lower()
+        if "follow" in ttype:
+            pr["followups"] += 1
+        elif "estimate" in ttype or "offer" in ttype:
+            pr["estimates"] += 1
+        elif "document" in ttype or "photo" in ttype:
+            pr["documents"] += 1
+        else:
+            pr["tasks"] += 1
+        if thread.get("title"):
+            pr["latest_titles"].append(thread.get("title"))
+        for src in (meta.get("source_labels") or []):
+            pr["sources"].add(str(src))
+
+    for obj in approved_workspace_object_items():
+        meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
+        name = meta.get("client_name") or obj.get("client_id") or "Workspace"
+        pr = profile(name)
+        pr["workspace_objects"].append(obj)
+        otype = (obj.get("object_type") or "").lower()
+        if "follow" in otype:
+            pr["followups"] += 1
+        elif "estimate" in otype or "offer" in otype:
+            pr["estimates"] += 1
+        elif "document" in otype or "photo" in otype:
+            pr["documents"] += 1
+        else:
+            pr["tasks"] += 1
+        if obj.get("title"):
+            pr["latest_titles"].append(obj.get("title"))
+        for src in (meta.get("source_labels") or []):
+            pr["sources"].add(str(src))
+
+    for obj in send_back_candidate_items():
+        meta = obj.get("metadata", {}) if isinstance(obj.get("metadata"), dict) else {}
+        name = meta.get("client_name") or obj.get("client_id") or "Workspace"
+        profile(name)["send_back"].append(obj)
+
+    return profiles
+
+
+def client_profile_rows(empty_text=None):
+    lang = current_language()
+    profiles = client_workspace_profiles_map()
+    if not profiles:
+        label = empty_text or tx("no_items", lang)
+        return f"<div class='row'><div><b>{html_escape(label)}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
+    rows = ""
+    for name, pr in sorted(profiles.items(), key=lambda kv: kv[0].lower()):
+        summary = (
+            f"threads: {len(pr['threads'])} · work objects: {len(pr['workspace_objects'])} · "
+            f"send-back: {len(pr['send_back'])} · follow-ups: {pr['followups']} · estimates: {pr['estimates']} · docs: {pr['documents']}"
+        )
+        preview = " | ".join([x for x in pr.get("latest_titles", []) if x][:3])
+        sources = " + ".join(sorted(pr.get("sources") or [])) or "NinaOS memory"
+        rows += (
+            "<div class='row'><div>"
+            f"<b>{html_escape(name)}</b>"
+            f"<span class='muted'>{html_escape(summary)}</span>"
+            f"<span class='muted'>{html_escape(preview or sources)}</span>"
+            "</div>"
+            f"<a class='pill' href='{q('/clients/' + _client_profile_slug(name))}'>Open client profile</a></div>"
+        )
+    return rows
+
+
+def client_profile_detail_body(client_name):
+    lang = current_language()
+    profiles = client_workspace_profiles_map()
+    pr = profiles.get(client_name) or profiles.get(client_name.strip() if client_name else "")
+    if not pr:
+        # tolerant lookup: case-insensitive
+        for k, v in profiles.items():
+            if k.lower() == str(client_name or "").lower():
+                pr = v
+                client_name = k
+                break
+    if not pr:
+        client_name = client_name or "Workspace"
+        pr = {"name": client_name, "threads": [], "workspace_objects": [], "send_back": [], "sources": set(), "followups": 0, "estimates": 0, "documents": 0, "tasks": 0}
+
+    header = work_page_header(client_name, "Client Workspace Profile — threads, workspace objects, documents and send-back candidates in one place.")
+    kpis = (
+        "<div class='kpis'>"
+        f"<div class='kpi'><b>{len(pr['threads'])}</b><span>Threads</span></div>"
+        f"<div class='kpi'><b>{len(pr['workspace_objects'])}</b><span>Workspace objects</span></div>"
+        f"<div class='kpi'><b>{len(pr['send_back'])}</b><span>Send-back</span></div>"
+        f"<div class='kpi'><b>{pr['followups']}</b><span>Follow-ups</span></div>"
+        "</div>"
+    )
+    thread_rows = client_thread_rows(pr.get("threads") or [], empty_text=tx("no_items", lang), limit=12, show_controls=True)
+    object_rows = work_object_rows(pr.get("workspace_objects") or [], empty_text=tx("no_items", lang), limit=12, show_source=True, show_approval=True)
+    send_rows = work_object_rows(pr.get("send_back") or [], empty_text=tx("no_items", lang), limit=12, show_source=True, show_approval=True)
+    source_text = " + ".join(sorted(pr.get("sources") or [])) or "Telegram / NinaOS memory"
+    return (
+        header
+        + f"<section class='card card-pad'>{kpis}<br><div class='safe-note'>V48.0: this is the first client workspace profile surface. Source evidence: {html_escape(source_text)}.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Client Threads</div><div class='list'>{thread_rows}</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Objects</div><div class='list'>{object_rows}</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Send Back Candidates</div><div class='list'>{send_rows}</div><div class='safe-note'>Future layer: send prepared documents/answers back by WhatsApp, Telegram or email.</div></section>"
+    )
+
+
 def approved_workspace_work_count():
     try:
         return len(approved_workspace_object_items()) + len(approved_preview_items())
@@ -2081,7 +2225,7 @@ def dashboard_body(data):
         + kpi_card(tx("estimates", lang), c["estimates"], {"text": tx("in_progress", lang), "href": "/tasks"})
         + kpi_card(tx("invoices", lang), c["invoices"], {"text": tx("due_sent", lang), "href": "/clients"})
     )
-    return f"<div class='grid'><div class='hero-grid'><section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>AI WORKFORCE OPERATING SYSTEM</div></div></div><div class='bigline'>{tx('hero_line', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/inbox')}'>{tx('channel_hub', lang)}</a><a class='btn' href='{q('/tasks')}'>{tx('open_work', lang)}</a><a class='btn' href='{q('/exchange')}'>{tx('explore', lang)}</a></div><div class='trust'><span>GLOBAL</span><span>WORKFORCE</span><span>SECURE</span><span>SCALE</span></div></section><section class='card card-pad'><div class='page-title'><h1>{tx('good_morning', lang)}</h1><p>{tx('workspace_today', lang)}</p></div><br>{kpis}<br><div class='card card-pad' style='background:rgba(27,84,255,.16)'><div class='section-title'>{tx('global', lang)}</div><p class='muted'>{tx('connected', lang)}</p><a class='btn' href='{q('/exchange')}'>{tx('view_global', lang)}</a></div></section></div><section><div class='section-title'>{tx('your_workers', lang)}</div><div class='worker-grid'>{workers}</div></section><div class='two-col'><section class='card card-pad'><div class='section-title'>{tx('recent', lang)}</div><div class='list'>{activity}</div></section><section class='card card-pad'><div class='section-title'>{tx('snapshot', lang)}</div><div class='kpis'>{snapshot_kpis}</div><br><div class='btns'><a class='btn primary' href='{q('/tasks')}'>{tx('tasks', lang)}</a><a class='btn' href='{q('/clients')}'>{tx('clients', lang)}</a><a class='btn' href='{q('/projects')}'>{tx('projects', lang)}</a><a class='btn' href='{q('/workers')}'>{tx('workers', lang)}</a></div></section></div><div class='two-col'><section class='card card-pad'><div class='section-title'>Approved Workspace Queue</div><div class='list'>{approved_dashboard_rows}</div><div class='safe-note'>V47.1: approved workspace objects are the main active work queue.</div></section><section class='card card-pad'><div class='section-title'>Pending Send-back Objects</div><div class='list'>{send_back_candidate_rows(limit=4, empty_text=tx('no_items', lang))}</div><div class='safe-note'>Client-facing approved objects prepared for the future send-back layer.</div></section></div></div>"
+    return f"<div class='grid'><div class='hero-grid'><section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>AI WORKFORCE OPERATING SYSTEM</div></div></div><div class='bigline'>{tx('hero_line', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/inbox')}'>{tx('channel_hub', lang)}</a><a class='btn' href='{q('/tasks')}'>{tx('open_work', lang)}</a><a class='btn' href='{q('/exchange')}'>{tx('explore', lang)}</a></div><div class='trust'><span>GLOBAL</span><span>WORKFORCE</span><span>SECURE</span><span>SCALE</span></div></section><section class='card card-pad'><div class='page-title'><h1>{tx('good_morning', lang)}</h1><p>{tx('workspace_today', lang)}</p></div><br>{kpis}<br><div class='card card-pad' style='background:rgba(27,84,255,.16)'><div class='section-title'>{tx('global', lang)}</div><p class='muted'>{tx('connected', lang)}</p><a class='btn' href='{q('/exchange')}'>{tx('view_global', lang)}</a></div></section></div><section><div class='section-title'>{tx('your_workers', lang)}</div><div class='worker-grid'>{workers}</div></section><div class='two-col'><section class='card card-pad'><div class='section-title'>{tx('recent', lang)}</div><div class='list'>{activity}</div></section><section class='card card-pad'><div class='section-title'>{tx('snapshot', lang)}</div><div class='kpis'>{snapshot_kpis}</div><br><div class='btns'><a class='btn primary' href='{q('/tasks')}'>{tx('tasks', lang)}</a><a class='btn' href='{q('/clients')}'>{tx('clients', lang)}</a><a class='btn' href='{q('/projects')}'>{tx('projects', lang)}</a><a class='btn' href='{q('/workers')}'>{tx('workers', lang)}</a></div></section></div><div class='two-col'><section class='card card-pad'><div class='section-title'>Approved Workspace Queue</div><div class='list'>{approved_dashboard_rows}</div><div class='safe-note'>V48.0: approved workspace objects are linked to client profiles.</div></section><section class='card card-pad'><div class='section-title'>Pending Send-back Objects</div><div class='list'>{send_back_candidate_rows(limit=4, empty_text=tx('no_items', lang))}</div><div class='safe-note'>Client-facing approved objects prepared for the future send-back layer.</div></section></div></div>"
 
 
 def work_page_header(title, subtitle):
@@ -2159,9 +2303,9 @@ def tasks_body(data):
     approved_preview_rows = work_object_rows(approved_items, empty_text=tx("no_items", lang), show_source=True)
     return (
         work_page_header(tx("tasks"), tx("tasks_sub"))
-        + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Queue</div><div class='list'>{workspace_rows}</div><div class='safe-note'>V47.1: these are approved workspace-object snapshots, separated from raw thread previews.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Pending Send-back Objects</div><div class='list'>{send_rows}</div><div class='safe-note'>V47.1: client-facing approved objects are ready for the future WhatsApp / Telegram / Email send-back layer.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Client Work Thread Preview</div><div class='list'>{thread_preview_rows}</div><div class='safe-note'>V47.1: thread preview remains visible, but the active work queue is now the workspace object layer.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Queue</div><div class='list'>{workspace_rows}</div><div class='safe-note'>V48.0: these workspace-object snapshots are also grouped inside client profiles.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Pending Send-back Objects</div><div class='list'>{send_rows}</div><div class='safe-note'>V48.0: client-facing objects also appear inside client profiles.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Client Work Thread Preview</div><div class='list'>{thread_preview_rows}</div><div class='safe-note'>V48.0: thread preview remains visible; client profiles now connect the thread to workspace objects.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Approved Preview Objects</div><div class='list'>{approved_preview_rows}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('all_workspace_work', lang)}</div><div class='list'>{all_rows}</div></section><br>"
@@ -2170,6 +2314,7 @@ def tasks_body(data):
 
 def clients_body(data):
     lang = current_language()
+    profile_rows = client_profile_rows(empty_text=tx("no_items", lang))
     client_rows = client_workspace_surface_rows(empty_text=tx("no_items", lang))
     legacy_rows = ""
     for client in data["clients"]:
@@ -2177,8 +2322,9 @@ def clients_body(data):
     if not legacy_rows:
         legacy_rows = f"<div class='row'><div><b>{html_escape(tx('no_items', lang))}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
     return (
-        work_page_header(tx("clients"), tx("clients_sub"))
-        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Objects</div><div class='list'>{client_rows}</div><div class='safe-note'>V47.1: approved Telegram/Nina memory is now grouped by client as workspace objects.</div></section><br>"
+        work_page_header(tx("clients"), "Client workspace profiles from Telegram/Nina memory, approved workspace objects and send-back candidates.")
+        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Profiles</div><div class='list'>{profile_rows}</div><div class='safe-note'>V48.0: each client now has a dedicated work profile surface.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Objects</div><div class='list'>{client_rows}</div><div class='safe-note'>V48.0: approved workspace objects remain visible under each client.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>CRM Snapshot</div><div class='list'>{legacy_rows}</div></section>"
     )
 
@@ -2600,7 +2746,7 @@ def telegram_db_diagnostic_block_html():
     diag = telegram_bridge_db_diagnostics()
     return (
         "<section class='card card-pad'>"
-        "<div class='section-title'>🧪 V47.1 DB Diagnostic</div>"
+        "<div class='section-title'>🧪 V48.0 DB Diagnostic</div>"
         "<p class='muted'>Read-only check: does Web service see the same Postgres memory that Telegram app.py writes?</p>"
         "<div class='list'>" + diagnostic_rows_html(diag) + "</div>"
         "<div class='safe-note'>Open JSON: <a href='/diagnostics/telegram-sync'>/diagnostics/telegram-sync</a>. If counts are zero here but Telegram works, Railway services may not share the same DATABASE_URL or app.py writes to a different table/source.</div>"
@@ -2972,6 +3118,12 @@ def tasks():
 def clients():
     data = load_workspace_data()
     return Response(page(tx("clients"), clients_body(data), active="clients"), mimetype="text/html")
+
+
+@app.route("/clients/<client_key>")
+def client_profile(client_key):
+    name = _client_from_slug(client_key)
+    return Response(page(name, client_profile_detail_body(name), active="clients"), mimetype="text/html")
 
 
 @app.route("/projects")
