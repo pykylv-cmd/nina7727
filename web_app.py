@@ -7,14 +7,14 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V48.1 — Real Client Profile Render"
+WEB_APP_VERSION = "Web App V48.2 — Open Client Profile Detail"
 app = Flask(__name__)
 
 # V47.1 safe workspace-object surface polish.
 # This writes only safe web workspace-object snapshots into memory_backups and does NOT touch Telegram app.py.
 # Telegram remains its own runtime; web_app.py only reads/surfaces shared intake/work data.
 WORKSPACE_ACTION_PREVIEWS = []
-# V48.1: /clients renders real client profile cards and profile detail pages from workspace objects, threads and send-back candidates.
+# V48.2: /clients opens real client profile detail pages with timeline, work objects and send-back lanes.
 # Owner approval decisions are saved safely into memory_backups with source='web_thread_approval_state'.
 # This avoids losing Approve/Hold/Reject after web reload/redeploy without touching app.py.
 THREAD_WORKFLOW_STATES = {}
@@ -221,7 +221,7 @@ def tx(key, lang=None):
         "source_channel": {"en": "Source channel", "lv": "Avota kanāls", "ru": "Канал источника"},
         "nina_prepare": {"en": "Nina, prepare work", "lv": "Nina, sagatavo darbu", "ru": "Nina, подготовь работу"},
         "voice_preview_created": {"en": "Voice intake preview created", "lv": "Balss ievades priekšskatījums izveidots", "ru": "Preview из голосового ввода создан"},
-        "voice_safe_note": {"en": "V48.1 safe mode: Clients now renders real client profile cards with threads, workspace objects and send-back candidates. Web still reads existing Telegram memory; only safe workspace-object snapshots are written.", "lv": "V48.1 drošais režīms: Klienti lapā tagad ir īsts klienta profila renderis ar threadiem, darba objektiem un send-back kandidātiem. Web joprojām lasa esošo Telegram atmiņu; rakstīti tiek tikai droši workspace-object snapshoti.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
+        "voice_safe_note": {"en": "V48.2 safe mode: Client profile detail pages now open real client work surfaces with timeline, workspace objects and send-back lanes. Web still reads existing Telegram memory; only safe workspace-object snapshots are written.", "lv": "V48.2 drošais režīms: klienta profila detalizētās lapas tagad atver īstu klienta darba virsmu ar laika līniju, darba objektiem un nosūtīšanas rindām. Web joprojām lasa esošo Telegram atmiņu; rakstīti tiek tikai droši workspace-object snapshoti.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
         "detected_intent": {"en": "Detected intent", "lv": "Atpazītais nodoms", "ru": "Распознанное намерение"},
         "twenty_second_century": {"en": "22nd-century work surface: clients speak, send photos and documents; Nina organizes the work.", "lv": "22. gadsimta darba virsma: klienti runā, sūta bildes un dokumentus; Nina sakārto darbu.", "ru": "Рабочая поверхность 22 века: клиенты говорят, отправляют фото и документы; Nina организует работу."},
     }
@@ -1776,12 +1776,35 @@ def client_profile_detail_body(client_name):
     object_rows = work_object_rows(pr.get("workspace_objects") or [], empty_text=tx("no_items", lang), limit=12, show_source=True, show_approval=True)
     send_rows = work_object_rows(pr.get("send_back") or [], empty_text=tx("no_items", lang), limit=12, show_source=True, show_approval=True)
     source_text = " + ".join(sorted(pr.get("sources") or [])) or "Telegram / NinaOS memory"
+    timeline_rows = ""
+    combined = []
+    for item in (pr.get("threads") or []):
+        combined.append((item.get("updated_at") or item.get("created_at") or "", "Thread", item))
+    for item in (pr.get("workspace_objects") or []):
+        combined.append((item.get("updated_at") or item.get("created_at") or "", "Workspace object", item))
+    if combined:
+        for _, label, item in sorted(combined, key=lambda x: str(x[0]), reverse=True)[:10]:
+            meta = item.get("metadata", {}) if isinstance(item.get("metadata"), dict) else {}
+            title = item.get("title") or item.get("raw_text") or item.get("object_id") or label
+            detail = f"{item.get('object_type','work')} · {item.get('status','open')} · {item.get('priority','normal')}"
+            source = " + ".join(meta.get("source_labels") or []) or meta.get("source") or "NinaOS memory"
+            timeline_rows += f"<div class='row'><div><b>{html_escape(title)}</b><span class='muted'>{html_escape(detail)} · {html_escape(source)}</span></div><span class='pill'>{html_escape(label)}</span></div>"
+    else:
+        timeline_rows = f"<div class='row'><div><b>{html_escape(tx('no_items', lang))}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
+
+    action_rows = (
+        f"<div class='row'><div><b>Prepare reply / document pack</b><span class='muted'>Future send-back action for WhatsApp, Telegram or email.</span></div><span class='pill'>planned</span></div>"
+        f"<div class='row'><div><b>Client memory scope</b><span class='muted'>{html_escape(client_name)} threads, objects and evidence stay grouped in this profile.</span></div><span class='pill'>active</span></div>"
+    )
+
     return (
         header
-        + f"<section class='card card-pad'>{kpis}<br><div class='safe-note'>V48.1: real client profile detail page. Source evidence: {html_escape(source_text)}.</div></section><br>"
+        + f"<section class='card card-pad'>{kpis}<br><div class='safe-note'>V48.2: open client profile detail page. Source evidence: {html_escape(source_text)}.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Client Work Timeline</div><div class='list'>{timeline_rows}</div><div class='safe-note'>V48.2: profile detail combines Telegram memory, approved workspace objects and send-back candidates into one client timeline.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Client Threads</div><div class='list'>{thread_rows}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Objects</div><div class='list'>{object_rows}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Send Back Candidates</div><div class='list'>{send_rows}</div><div class='safe-note'>Future layer: send prepared documents/answers back by WhatsApp, Telegram or email.</div></section>"
+        + f"<section class='card card-pad'><div class='section-title'>Send Back Candidates</div><div class='list'>{send_rows}</div><div class='safe-note'>Future layer: send prepared documents/answers back by WhatsApp, Telegram or email.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Client Action Center</div><div class='list'>{action_rows}</div></section>"
     )
 
 
@@ -2322,9 +2345,9 @@ def clients_body(data):
     if not legacy_rows:
         legacy_rows = f"<div class='row'><div><b>{html_escape(tx('no_items', lang))}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
     return (
-        work_page_header(tx("clients"), "V48.1 Real Client Profile Render — client profiles from Telegram/Nina memory, approved workspace objects and send-back candidates.")
-        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Profiles</div><div class='list'>{profile_rows}</div><div class='safe-note'>V48.1: each client has a real profile card with direct open link.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Objects</div><div class='list'>{client_rows}</div><div class='safe-note'>V48.1: approved workspace objects are grouped by client.</div></section><br>"
+        work_page_header(tx("clients"), "V48.2 Open Client Profile Detail — open each client into a dedicated work profile with timeline, objects and send-back lanes.")
+        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Profiles</div><div class='list'>{profile_rows}</div><div class='safe-note'>V48.2: each client opens into a dedicated profile detail page.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Objects</div><div class='list'>{client_rows}</div><div class='safe-note'>V48.2: workspace objects are grouped by client and opened in profile detail.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>CRM Snapshot</div><div class='list'>{legacy_rows}</div></section>"
     )
 
@@ -2746,7 +2769,7 @@ def telegram_db_diagnostic_block_html():
     diag = telegram_bridge_db_diagnostics()
     return (
         "<section class='card card-pad'>"
-        "<div class='section-title'>🧪 V48.1 DB Diagnostic</div>"
+        "<div class='section-title'>🧪 V48.2 DB Diagnostic</div>"
         "<p class='muted'>Read-only check: does Web service see the same Postgres memory that Telegram app.py writes?</p>"
         "<div class='list'>" + diagnostic_rows_html(diag) + "</div>"
         "<div class='safe-note'>Open JSON: <a href='/diagnostics/telegram-sync'>/diagnostics/telegram-sync</a>. If counts are zero here but Telegram works, Railway services may not share the same DATABASE_URL or app.py writes to a different table/source.</div>"
@@ -2791,14 +2814,14 @@ def channel_hub_body(data):
         + voice_intake_form_html(created_voice_obj)
         + "<br>"
         + telegram_db_diagnostic_block_html()
-        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V48.1 keeps thread preview here, but client work now lives in real client profiles on the Clients page.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V47.1 safe mode: workspace-object snapshots are polished across Dashboard, Tasks, Clients and Office Manager. Dedicated work-object tables come later.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V48.2 keeps thread preview here, but client work now opens as dedicated client profile detail pages.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V47.1 safe mode: workspace-object snapshots are polished across Dashboard, Tasks, Clients and Office Manager. Dedicated work-object tables come later.</div></section><br>"
         + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V48.1 client profile render</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V48.2 client profile detail</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
         + "<div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
         + "</div><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Object Surface</div><div class='list'>{workspace_object_surface_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V48.1: approved workspace objects are now also grouped inside real client profiles.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Object Surface</div><div class='list'>{workspace_object_surface_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V48.2: approved workspace objects now open inside detailed client profiles.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('owner_send_back', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section>"
     )
 
