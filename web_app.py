@@ -1,20 +1,21 @@
 # web_app.py
-# NinaOS Web App V49.0 — Saved Drafts Inbox / Global Outbox
+# NinaOS Web App V50.0 — Send-back Review Workspace
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
 import os
 from datetime import datetime
+from urllib.parse import quote_plus, unquote_plus
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V49.0 — Saved Drafts Inbox / Global Outbox"
+WEB_APP_VERSION = "Web App V50.0 — Send-back Review Workspace"
 app = Flask(__name__)
 
 # V47.1 safe workspace-object surface polish.
 # This writes only safe web workspace-object snapshots into memory_backups and does NOT touch Telegram app.py.
 # Telegram remains its own runtime; web_app.py only reads/surfaces shared intake/work data.
 WORKSPACE_ACTION_PREVIEWS = []
-# V49.0: Client profile send-back actions render and persist safe draft previews for owner review.
+# V50.0: Global Outbox lets the owner review saved send-back drafts before any real send bridge.
 # Owner approval decisions are saved safely into memory_backups with source='web_thread_approval_state'.
 # This avoids losing Approve/Hold/Reject after web reload/redeploy without touching app.py.
 THREAD_WORKFLOW_STATES = {}
@@ -22,6 +23,8 @@ THREAD_WORKFLOW_STATES_LOADED = False
 WORKSPACE_OBJECT_CACHE = {}
 WORKSPACE_OBJECT_CACHE_LOADED = False
 LAST_VOICE_INTAKE_PREVIEW = None
+DRAFT_REVIEW_STATES = {}
+DRAFT_REVIEW_STATES_LOADED = False
 
 
 def safe_int(value, default=0):
@@ -221,7 +224,7 @@ def tx(key, lang=None):
         "source_channel": {"en": "Source channel", "lv": "Avota kanāls", "ru": "Канал источника"},
         "nina_prepare": {"en": "Nina, prepare work", "lv": "Nina, sagatavo darbu", "ru": "Nina, подготовь работу"},
         "voice_preview_created": {"en": "Voice intake preview created", "lv": "Balss ievades priekšskatījums izveidots", "ru": "Preview из голосового ввода создан"},
-        "voice_safe_note": {"en": "V49.0 safe mode: saved client send-back drafts now collect in a global Outbox / Send Center for owner review. Web still reads existing Telegram memory; only safe workspace-object snapshots are written.", "lv": "V49.0 drošais režīms: klienta profilos tagad tiek sagatavoti droši WhatsApp, Telegram un e-pasta melnrakstu priekšskatījumi. Web joprojām lasa esošo Telegram atmiņu; rakstīti tiek tikai droši workspace-object snapshoti.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
+        "voice_safe_note": {"en": "V50.0 safe mode: saved client send-back drafts now collect in a global Outbox / Send Center for owner review. Web still reads existing Telegram memory; only safe workspace-object snapshots are written.", "lv": "V50.0 drošais režīms: klienta profilos tagad tiek sagatavoti droši WhatsApp, Telegram un e-pasta melnrakstu priekšskatījumi. Web joprojām lasa esošo Telegram atmiņu; rakstīti tiek tikai droši workspace-object snapshoti.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
         "detected_intent": {"en": "Detected intent", "lv": "Atpazītais nodoms", "ru": "Распознанное намерение"},
         "twenty_second_century": {"en": "22nd-century work surface: clients speak, send photos and documents; Nina organizes the work.", "lv": "22. gadsimta darba virsma: klienti runā, sūta bildes un dokumentus; Nina sakārto darbu.", "ru": "Рабочая поверхность 22 века: клиенты говорят, отправляют фото и документы; Nina организует работу."},
     }
@@ -1817,7 +1820,7 @@ def sendback_draft_key(client_name, item, channel):
 
 
 def load_persistent_sendback_drafts_from_db(client_name=None, limit=500):
-    """V49.0: load saved send-back draft previews from memory_backups.
+    """V50.0: load saved send-back draft previews from memory_backups.
 
     This persists owner-prepared drafts without sending anything and without
     touching Telegram app.py. Latest draft wins per draft_key.
@@ -1861,7 +1864,7 @@ def load_persistent_sendback_drafts_from_db(client_name=None, limit=500):
             drafts.append(payload)
         return drafts
     except Exception as e:
-        print("V49.0 load sendback drafts error:", repr(e))
+        print("V50.0 load sendback drafts error:", repr(e))
         try:
             if conn:
                 conn.close()
@@ -1870,8 +1873,181 @@ def load_persistent_sendback_drafts_from_db(client_name=None, limit=500):
         return []
 
 
+# =========================
+# V50.0 Send-back Review Workspace
+# =========================
+
+def load_persistent_draft_review_states_from_db(limit=500):
+    """Load owner review decisions for send-back drafts.
+
+    Safe scope: reads memory_backups/source=web_sendback_review_state.
+    Latest decision wins per draft_key.
+    """
+    database_url = _db_url()
+    if not database_url:
+        return {}
+    conn = None
+    try:
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT backup_text, created_at, id
+            FROM memory_backups
+            WHERE source = %s
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            ("web_sendback_review_state", int(limit or 500)),
+        )
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        states = {}
+        for text, created_at, row_id in rows:
+            payload = _json_loads_safe(text)
+            if not isinstance(payload, dict):
+                continue
+            key = str(payload.get("draft_key") or "")
+            if not key or key in states:
+                continue
+            payload["created_at"] = str(payload.get("created_at") or created_at or "")
+            payload["db_id"] = row_id
+            states[key] = payload
+        return states
+    except Exception as e:
+        print("V50.0 load draft review states error:", repr(e))
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+        return {}
+
+
+def ensure_draft_review_states_loaded():
+    global DRAFT_REVIEW_STATES_LOADED, DRAFT_REVIEW_STATES
+    if DRAFT_REVIEW_STATES_LOADED:
+        return
+    DRAFT_REVIEW_STATES = load_persistent_draft_review_states_from_db(limit=800)
+    DRAFT_REVIEW_STATES_LOADED = True
+
+
+def draft_review_state(draft):
+    ensure_draft_review_states_loaded()
+    key = str((draft or {}).get("draft_key") or "")
+    saved_default = (draft or {}).get("approval_state") or "draft_saved"
+    state_payload = DRAFT_REVIEW_STATES.get(key) or {}
+    return state_payload.get("review_state") or state_payload.get("approval_state") or saved_default
+
+
+def save_draft_review_state_to_db(draft_key, review_state, decision=""):
+    database_url = _db_url()
+    if not database_url:
+        return False, "missing_database_url"
+    draft_key = str(draft_key or "").strip()
+    if not draft_key:
+        return False, "missing_draft_key"
+    review_state = str(review_state or "draft_saved")
+    payload = {
+        "type": "sendback_draft_review_state",
+        "version": "V50.0",
+        "draft_key": draft_key,
+        "review_state": review_state,
+        "approval_state": review_state,
+        "decision": decision or review_state,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "db_write_scope": "sendback_review_state_only",
+        "safe_mode": True,
+    }
+    conn = None
+    try:
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO memory_backups (user_id, backup_text, source)
+            VALUES (%s, %s, %s)
+            """,
+            ("__web__", _json_dumps_safe(payload), "web_sendback_review_state"),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        DRAFT_REVIEW_STATES[draft_key] = payload
+        return True, "saved"
+    except Exception as e:
+        print("V50.0 save draft review state error:", repr(e))
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+        return False, str(e)[:200]
+
+
+def apply_draft_review_decision(draft_key, decision):
+    ensure_draft_review_states_loaded()
+    decision = (decision or "").strip().lower()
+    state_map = {
+        "approve": "approved_for_send",
+        "edit": "needs_edit",
+        "reject": "rejected",
+        "reset": "draft_saved",
+    }
+    if decision not in state_map:
+        return None
+    review_state = state_map[decision]
+    ok, status = save_draft_review_state_to_db(draft_key, review_state, decision=decision)
+    return {
+        "draft_key": draft_key,
+        "review_state": review_state,
+        "decision": decision,
+        "persistent": bool(ok),
+        "save_status": status,
+    }
+
+
+def outbox_review_banner_html():
+    decision = (request.args.get("draft_decision") or "").strip().lower()
+    draft_key = unquote_plus((request.args.get("draft_key") or "").strip())
+    if not decision or not draft_key:
+        return ""
+    result = apply_draft_review_decision(draft_key, decision)
+    if not result:
+        return ""
+    label_map = {
+        "approved_for_send": "Approved for send",
+        "needs_edit": "Needs edit",
+        "rejected": "Rejected",
+        "draft_saved": "Draft saved",
+    }
+    state = result.get("review_state") or "draft_saved"
+    return (
+        "<section class='card card-pad'>"
+        "<div class='section-title'>Draft review saved</div>"
+        "<div class='list'>"
+        f"<div class='row'><div><b>{html_escape(label_map.get(state, state))}</b><span class='muted'>{html_escape(draft_key)}</span></div><span class='pill'>{html_escape(result.get('save_status') or '')}</span></div>"
+        "</div><div class='safe-note'>V50.0: owner review status is saved. No client message is sent yet.</div></section><br>"
+    )
+
+
+def reviewed_sendback_drafts(limit=500):
+    drafts = load_persistent_sendback_drafts_from_db(None, limit=limit)
+    ensure_draft_review_states_loaded()
+    for d in drafts:
+        key = str(d.get("draft_key") or "")
+        state_payload = DRAFT_REVIEW_STATES.get(key) or {}
+        d["review_state"] = state_payload.get("review_state") or state_payload.get("approval_state") or d.get("approval_state") or "draft_saved"
+        d["review_saved_at"] = state_payload.get("updated_at") or state_payload.get("created_at") or ""
+    return drafts
+
+
+
 def save_sendback_draft_to_db(client_name, item, channel, draft):
-    """V49.0: save draft preview to client profile memory.
+    """V50.0: save draft preview to client profile memory.
 
     Safe scope: stores draft text only in memory_backups/source=web_sendback_draft.
     Real sending bridges come later.
@@ -1883,7 +2059,7 @@ def save_sendback_draft_to_db(client_name, item, channel, draft):
     meta = (item or {}).get("metadata") if isinstance((item or {}).get("metadata"), dict) else {}
     payload = {
         "type": "sendback_draft",
-        "version": "V49.0",
+        "version": "V50.0",
         "draft_key": draft_key,
         "client_name": client_name or meta.get("client_name") or "Workspace",
         "client_slug": _client_profile_slug(client_name or meta.get("client_name") or "Workspace"),
@@ -1916,7 +2092,7 @@ def save_sendback_draft_to_db(client_name, item, channel, draft):
         conn.close()
         return True, "saved"
     except Exception as e:
-        print("V49.0 save sendback draft error:", repr(e))
+        print("V50.0 save sendback draft error:", repr(e))
         try:
             if conn:
                 conn.close()
@@ -1950,15 +2126,14 @@ def saved_sendback_drafts_html(client_name):
         "<section class='card card-pad'>"
         "<div class='section-title'>Saved Send-back Drafts</div>"
         f"<div class='list'>{rows}</div>"
-        "<div class='safe-note'>V49.0: prepared drafts are saved to this client profile for owner review. Nothing is sent yet.</div>"
+        "<div class='safe-note'>V50.0: prepared drafts are saved to this client profile for owner review. Nothing is sent yet.</div>"
         "</section><br>"
     )
 
 
 def global_outbox_draft_items(limit=500):
-    """V49.0: load all saved send-back drafts for the global Outbox / Send Center."""
-    drafts = load_persistent_sendback_drafts_from_db(None, limit=limit)
-    return drafts or []
+    """V50.0: load all saved send-back drafts with owner review state."""
+    return reviewed_sendback_drafts(limit=limit) or []
 
 
 def global_outbox_rows(limit=20, empty_text=None):
@@ -1968,20 +2143,38 @@ def global_outbox_rows(limit=20, empty_text=None):
         label = empty_text or tx("no_items", lang)
         return f"<div class='row'><div><b>{html_escape(label)}</b><span class='muted'>No saved send-back drafts yet.</span></div><span class='pill'>idle</span></div>"
     rows = ""
+    label_map = {
+        "draft_saved": "draft saved",
+        "approved_for_send": "approved for send",
+        "needs_edit": "needs edit",
+        "rejected": "rejected",
+    }
     for d in drafts[:limit]:
         client = d.get("client_name") or "Workspace"
         channel = d.get("channel") or "Draft"
         title = d.get("source_title") or "Saved draft"
         object_type = d.get("object_type") or "work"
+        state = d.get("review_state") or "draft_saved"
         body = str(d.get("body") or "")
         body_short = body[:220] + ("…" if len(body) > 220 else "")
         href = q('/clients/' + _client_profile_slug(client))
+        outbox_href = q('/outbox')
+        sep = '&' if '?' in outbox_href else '?'
+        key = quote_plus(str(d.get("draft_key") or ""))
+        actions = ""
+        if state not in ["approved_for_send", "rejected"]:
+            actions += f"<a class='pill' href='{outbox_href}{sep}draft_decision=approve&draft_key={key}'>Approve for send</a>"
+            actions += f"<a class='pill' href='{outbox_href}{sep}draft_decision=edit&draft_key={key}'>Needs edit</a>"
+            actions += f"<a class='pill' href='{outbox_href}{sep}draft_decision=reject&draft_key={key}'>Reject draft</a>"
+        else:
+            actions += f"<a class='pill' href='{outbox_href}{sep}draft_decision=reset&draft_key={key}'>Return to review</a>"
+        actions += f"<a class='pill' href='{href}'>Open client</a>"
         rows += (
             "<div class='row'><div>"
             f"<b>{html_escape(title)}</b>"
-            f"<span class='muted'>{html_escape(client)} · {html_escape(channel)} · {html_escape(object_type)} · owner review</span>"
+            f"<span class='muted'>{html_escape(client)} · {html_escape(channel)} · {html_escape(object_type)} · {html_escape(label_map.get(state, state))}</span>"
             f"<span class='muted'>{html_escape(body_short)}</span>"
-            f"</div><a class='pill' href='{href}'>Open client</a></div>"
+            f"</div>{actions}</div>"
         )
     return rows
 
@@ -1989,6 +2182,7 @@ def global_outbox_rows(limit=20, empty_text=None):
 def outbox_channel_kpis():
     drafts = global_outbox_draft_items(limit=500)
     counts = {"WhatsApp": 0, "Telegram": 0, "Email": 0, "Other": 0}
+    states = {"draft_saved": 0, "approved_for_send": 0, "needs_edit": 0, "rejected": 0}
     clients = set()
     for d in drafts:
         clients.add(d.get("client_name") or "Workspace")
@@ -2001,25 +2195,89 @@ def outbox_channel_kpis():
             counts["Email"] += 1
         else:
             counts["Other"] += 1
+        st = d.get("review_state") or "draft_saved"
+        states[st] = states.get(st, 0) + 1
     return (
         "<div class='kpis'>"
         f"<div class='kpi'><b>{len(drafts)}</b><span>Saved drafts</span></div>"
         f"<div class='kpi'><b>{len(clients)}</b><span>Clients</span></div>"
-        f"<div class='kpi'><b>{counts['WhatsApp']}</b><span>WhatsApp</span></div>"
         f"<div class='kpi'><b>{counts['Telegram']}</b><span>Telegram</span></div>"
-        f"<div class='kpi'><b>{counts['Email']}</b><span>Email</span></div>"
+        f"<div class='kpi'><b>{states.get('approved_for_send',0)}</b><span>Approved to send</span></div>"
+        f"<div class='kpi'><b>{states.get('needs_edit',0)}</b><span>Needs edit</span></div>"
         "</div>"
     )
 
 
+def global_outbox_rows_for_items(items):
+    """Render a supplied subset of draft payloads with the V50.0 review actions."""
+    if not items:
+        return ""
+    rows = ""
+    label_map = {
+        "draft_saved": "draft saved",
+        "approved_for_send": "approved for send",
+        "needs_edit": "needs edit",
+        "rejected": "rejected",
+    }
+    for d in items:
+        client = d.get("client_name") or "Workspace"
+        channel = d.get("channel") or "Draft"
+        title = d.get("source_title") or "Saved draft"
+        object_type = d.get("object_type") or "work"
+        state = d.get("review_state") or "draft_saved"
+        body = str(d.get("body") or "")
+        body_short = body[:220] + ("…" if len(body) > 220 else "")
+        href = q('/clients/' + _client_profile_slug(client))
+        outbox_href = q('/outbox')
+        sep = '&' if '?' in outbox_href else '?'
+        key = quote_plus(str(d.get("draft_key") or ""))
+        actions = ""
+        if state not in ["approved_for_send", "rejected"]:
+            actions += f"<a class='pill' href='{outbox_href}{sep}draft_decision=approve&draft_key={key}'>Approve for send</a>"
+            actions += f"<a class='pill' href='{outbox_href}{sep}draft_decision=edit&draft_key={key}'>Needs edit</a>"
+            actions += f"<a class='pill' href='{outbox_href}{sep}draft_decision=reject&draft_key={key}'>Reject draft</a>"
+        else:
+            actions += f"<a class='pill' href='{outbox_href}{sep}draft_decision=reset&draft_key={key}'>Return to review</a>"
+        actions += f"<a class='pill' href='{href}'>Open client</a>"
+        rows += (
+            "<div class='row'><div>"
+            f"<b>{html_escape(title)}</b>"
+            f"<span class='muted'>{html_escape(client)} · {html_escape(channel)} · {html_escape(object_type)} · {html_escape(label_map.get(state, state))}</span>"
+            f"<span class='muted'>{html_escape(body_short)}</span>"
+            f"</div>{actions}</div>"
+        )
+    return rows
+
+
 def outbox_body(data=None):
     lang = current_language()
+    drafts = global_outbox_draft_items(limit=500)
+    approved = [d for d in drafts if (d.get("review_state") or "") == "approved_for_send"]
+    needs_edit = [d for d in drafts if (d.get("review_state") or "") == "needs_edit"]
+    rejected = [d for d in drafts if (d.get("review_state") or "") == "rejected"]
+    draft_saved = [d for d in drafts if (d.get("review_state") or "draft_saved") == "draft_saved"]
+
+    def rows_for(items, empty="No drafts in this queue."):
+        if not items:
+            return f"<div class='row'><div><b>{html_escape(empty)}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
+        all_drafts = drafts
+        try:
+            # Temporarily render a subset through the same row logic.
+            return global_outbox_rows_for_items(items)
+        except Exception:
+            return global_outbox_rows(limit=len(items))
+
     return (
-        work_page_header("Outbox", "V49.0 Saved Drafts Inbox / Global Outbox — all client send-back drafts in one owner review queue.")
-        + f"<section class='card card-pad'>{outbox_channel_kpis()}<br><div class='safe-note'>V49.0: global outbox collects saved WhatsApp, Telegram and Email draft previews. Nothing is sent yet.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Saved Drafts Inbox</div><div class='list'>{global_outbox_rows(limit=30, empty_text=tx('no_items', lang))}</div><div class='safe-note'>Owner reviews drafts here before future real send bridges are enabled.</div></section><br>"
+        work_page_header("Outbox", "V50.0 Send-back Review Workspace — owner review, edit, approve or reject saved client drafts before any send bridge.")
+        + outbox_review_banner_html()
+        + f"<section class='card card-pad'>{outbox_channel_kpis()}<br><div class='safe-note'>V50.0: global outbox now has owner review states. Nothing is sent yet.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Saved Drafts Review Queue</div><div class='list'>{global_outbox_rows(limit=40, empty_text=tx('no_items', lang))}</div><div class='safe-note'>Use Approve for send / Needs edit / Reject draft. These actions only save review state.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved To Send Queue</div><div class='list'>{global_outbox_rows_for_items(approved) if approved else rows_for([], 'No approved drafts yet.')}</div><div class='safe-note'>Future V51 can connect this queue to a real Telegram send bridge.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Needs Edit Queue</div><div class='list'>{global_outbox_rows_for_items(needs_edit) if needs_edit else rows_for([], 'No drafts needing edit.')}</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Rejected Draft Log</div><div class='list'>{global_outbox_rows_for_items(rejected) if rejected else rows_for([], 'No rejected drafts.')}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Pending Send-back Objects</div><div class='list'>{send_back_candidate_rows(limit=12, empty_text=tx('no_items', lang))}</div><div class='safe-note'>These approved workspace objects can still generate more draft previews from client profiles.</div></section>"
     )
+
 
 def sendback_draft_preview_html(client_name, profile):
     prepare = (request.args.get("prepare") or "").strip().lower()
@@ -2044,7 +2302,7 @@ def sendback_draft_preview_html(client_name, profile):
         f"<div class='row'><div><b>Draft message</b><span class='muted'>{body}</span></div><span class='pill'>owner review</span></div>"
         f"<div class='row'><div><b>Save status</b><span class='muted'>{html_escape(saved_status)}</span></div><span class='pill'>{'saved' if saved_ok else 'not saved'}</span></div>"
         "<div class='row'><div><b>Next step</b><span class='muted'>Owner reviews this saved draft. Real WhatsApp / Telegram / email send bridge comes later.</span></div><span class='pill'>safe mode</span></div>"
-        "</div><div class='safe-note'>V49.0: Nina prepares draft previews and saves them to the client profile. Nothing is sent to the client yet; the draft is saved to this client profile.</div></section><br>"
+        "</div><div class='safe-note'>V50.0: Nina prepares draft previews and saves them to the client profile. Nothing is sent to the client yet; the draft is saved to this client profile.</div></section><br>"
     )
 
 
@@ -2124,11 +2382,11 @@ def client_profile_detail_body(client_name):
 
     return (
         header
-        + f"<section class='card card-pad'>{kpis}<br><div class='safe-note'>V49.0: client profile detail page with saved send-back draft preview. Source evidence: {html_escape(source_text)}.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Client Work Timeline</div><div class='list'>{timeline_rows}</div><div class='safe-note'>V49.0: profile detail combines Telegram memory, approved workspace objects, send-back candidates and safe draft previews into one client timeline.</div></section><br>"
+        + f"<section class='card card-pad'>{kpis}<br><div class='safe-note'>V50.0: client profile detail page with saved send-back draft preview. Source evidence: {html_escape(source_text)}.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Client Work Timeline</div><div class='list'>{timeline_rows}</div><div class='safe-note'>V50.0: profile detail combines Telegram memory, approved workspace objects, send-back candidates and safe draft previews into one client timeline.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Client Threads</div><div class='list'>{thread_rows}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Objects</div><div class='list'>{object_rows}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Send Back Candidates</div><div class='list'>{send_rows}</div><div class='safe-note'>V49.0: these objects can render WhatsApp, Telegram or email draft previews.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Send Back Candidates</div><div class='list'>{send_rows}</div><div class='safe-note'>V50.0: these objects can render WhatsApp, Telegram or email draft previews.</div></section><br>"
         + draft_preview
         + f"<section class='card card-pad'><div class='section-title'>Send-back Action Center</div><div class='list'>{send_action_rows}</div><div class='safe-note'>Safe mode: actions render draft previews and saves them to the client profile. Real sending bridge comes later.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Client Action Center</div><div class='list'>{action_rows}</div></section>"
@@ -2672,10 +2930,10 @@ def clients_body(data):
     if not legacy_rows:
         legacy_rows = f"<div class='row'><div><b>{html_escape(tx('no_items', lang))}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
     return (
-        work_page_header(tx("clients"), "V49.0 Saved Drafts Inbox / Global Outbox — client profiles now prepare WhatsApp, Telegram and email send-back actions.")
-        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Profiles</div><div class='list'>{profile_rows}</div><div class='safe-note'>V49.0: each client opens into a profile with safe saved send-back draft previews.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Objects</div><div class='list'>{client_rows}</div><div class='safe-note'>V49.0: workspace objects are grouped by client and can produce safe draft previews.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Global Outbox Preview</div><div class='list'>{global_outbox_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V49.0: saved client drafts also appear in the global Outbox / Send Center.</div></section><br>"
+        work_page_header(tx("clients"), "V50.0 Saved Drafts Inbox / Global Outbox — client profiles now prepare WhatsApp, Telegram and email send-back actions.")
+        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Profiles</div><div class='list'>{profile_rows}</div><div class='safe-note'>V50.0: each client opens into a profile with safe saved send-back draft previews.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Objects</div><div class='list'>{client_rows}</div><div class='safe-note'>V50.0: workspace objects are grouped by client and can produce safe draft previews.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Global Outbox Preview</div><div class='list'>{global_outbox_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V50.0: saved client drafts also appear in the global Outbox / Send Center.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>CRM Snapshot</div><div class='list'>{legacy_rows}</div></section>"
     )
 
@@ -2968,6 +3226,7 @@ def telegram_bridge_db_diagnostics():
             diag["counts"]["memory_backups_thread_approval_state"] = _diag_count(cur, "SELECT COUNT(*) FROM memory_backups WHERE source = %s", ("web_thread_approval_state",))
             diag["counts"]["memory_backups_workspace_object"] = _diag_count(cur, "SELECT COUNT(*) FROM memory_backups WHERE source = %s", ("web_workspace_object",))
             diag["counts"]["memory_backups_sendback_draft"] = _diag_count(cur, "SELECT COUNT(*) FROM memory_backups WHERE source = %s", ("web_sendback_draft",))
+            diag["counts"]["memory_backups_sendback_review_state"] = _diag_count(cur, "SELECT COUNT(*) FROM memory_backups WHERE source = %s", ("web_sendback_review_state",))
             diag["latest"]["memory_backups_task_engine"] = _diag_latest_rows(cur, """
                 SELECT id, user_id, source, backup_text, created_at
                 FROM memory_backups
@@ -3002,6 +3261,13 @@ def telegram_bridge_db_diagnostics():
                 ORDER BY id DESC
                 LIMIT 5
             """, ("web_sendback_draft",))
+            diag["latest"]["memory_backups_sendback_review_state"] = _diag_latest_rows(cur, """
+                SELECT id, user_id, source, backup_text, created_at
+                FROM memory_backups
+                WHERE source = %s
+                ORDER BY id DESC
+                LIMIT 5
+            """, ("web_sendback_review_state",))
         else:
             diag["counts"]["memory_backups_total"] = "table missing"
 
@@ -3055,6 +3321,8 @@ def telegram_bridge_db_diagnostics():
         diag["web_reader_counts"]["workspace_objects_loaded"] = len(WORKSPACE_OBJECT_CACHE)
         diag["web_reader_counts"]["approved_workspace_objects"] = approved_workspace_object_count()
         diag["web_reader_counts"]["saved_sendback_drafts"] = len(load_persistent_sendback_drafts_from_db(limit=200))
+        ensure_draft_review_states_loaded()
+        diag["web_reader_counts"]["draft_review_states_loaded"] = len(DRAFT_REVIEW_STATES)
     except Exception as e:
         diag["web_reader_counts"]["merged_telegram_intake_sync"] = "error: " + str(e)[:160]
 
@@ -3106,7 +3374,7 @@ def telegram_db_diagnostic_block_html():
     diag = telegram_bridge_db_diagnostics()
     return (
         "<section class='card card-pad'>"
-        "<div class='section-title'>🧪 V49.0 DB Diagnostic</div>"
+        "<div class='section-title'>🧪 V50.0 DB Diagnostic</div>"
         "<p class='muted'>Read-only check: does Web service see the same Postgres memory that Telegram app.py writes?</p>"
         "<div class='list'>" + diagnostic_rows_html(diag) + "</div>"
         "<div class='safe-note'>Open JSON: <a href='/diagnostics/telegram-sync'>/diagnostics/telegram-sync</a>. If counts are zero here but Telegram works, Railway services may not share the same DATABASE_URL or app.py writes to a different table/source.</div>"
@@ -3151,14 +3419,14 @@ def channel_hub_body(data):
         + voice_intake_form_html(created_voice_obj)
         + "<br>"
         + telegram_db_diagnostic_block_html()
-        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V49.0 keeps thread preview here, while client profiles can preview WhatsApp, Telegram and email drafts.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V49.0 safe mode: client profiles can preview send-back drafts. Dedicated send bridges and work-object tables come later.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V50.0 keeps thread preview here, while client profiles can preview WhatsApp, Telegram and email drafts.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V50.0 safe mode: client profiles can preview send-back drafts. Dedicated send bridges and work-object tables come later.</div></section><br>"
         + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V49.0 draft preview</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V50.0 draft preview</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
         + "<div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
         + "</div><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Object Surface</div><div class='list'>{workspace_object_surface_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V49.0: approved workspace objects can now render saved send-back draft previews inside client profiles.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Object Surface</div><div class='list'>{workspace_object_surface_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V50.0: approved workspace objects can now render saved send-back draft previews inside client profiles.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('owner_send_back', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section>"
     )
 
