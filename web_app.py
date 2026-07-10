@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V51.0 — Telegram Send Bridge Prep
+# NinaOS Web App V51.1 — Telegram Recipient Resolution Prep
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -8,14 +8,14 @@ from datetime import datetime
 from urllib.parse import quote_plus, unquote_plus
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V51.0 — Telegram Send Bridge Prep"
+WEB_APP_VERSION = "Web App V51.1 — Telegram Recipient Resolution Prep"
 app = Flask(__name__)
 
 # V47.1 safe workspace-object surface polish.
 # This writes only safe web workspace-object snapshots into memory_backups and does NOT touch Telegram app.py.
 # Telegram remains its own runtime; web_app.py only reads/surfaces shared intake/work data.
 WORKSPACE_ACTION_PREVIEWS = []
-# V51.0: prepares Telegram send actions from approved outbox drafts without sending.
+# V51.1: prepares Telegram send actions and resolves recipients safely before any sending.
 # Owner approval decisions are saved safely into memory_backups with source='web_thread_approval_state'.
 # This avoids losing Approve/Hold/Reject after web reload/redeploy without touching app.py.
 THREAD_WORKFLOW_STATES = {}
@@ -27,6 +27,8 @@ DRAFT_REVIEW_STATES = {}
 DRAFT_REVIEW_STATES_LOADED = False
 TELEGRAM_SEND_PREP_STATES = {}
 TELEGRAM_SEND_PREP_STATES_LOADED = False
+TELEGRAM_RECIPIENT_STATES = {}
+TELEGRAM_RECIPIENT_STATES_LOADED = False
 
 
 def safe_int(value, default=0):
@@ -2013,7 +2015,7 @@ def apply_draft_review_decision(draft_key, decision):
 
 
 def load_persistent_telegram_send_prep_states_from_db(limit=500):
-    """V51.0: load safe Telegram send preparation states.
+    """V51.1: load safe Telegram send preparation states.
 
     Safe scope: reads memory_backups/source=web_telegram_send_prep.
     Latest record wins per draft_key. This does not send anything.
@@ -2052,7 +2054,7 @@ def load_persistent_telegram_send_prep_states_from_db(limit=500):
             states[key] = payload
         return states
     except Exception as e:
-        print("V51.0 load telegram send prep states error:", repr(e))
+        print("V51.1 load telegram send prep states error:", repr(e))
         try:
             if conn:
                 conn.close()
@@ -2077,7 +2079,7 @@ def telegram_send_prep_state(draft):
 
 
 def save_telegram_send_prep_to_db(draft_key, action="prepare"):
-    """V51.0: create a safe Telegram send action preview.
+    """V51.1: create a safe Telegram send action preview.
 
     This only stores a send-prep record. It does not call Telegram APIs and it does not
     send any message to a client.
@@ -2092,7 +2094,7 @@ def save_telegram_send_prep_to_db(draft_key, action="prepare"):
     ensure_telegram_send_prep_states_loaded()
     payload = {
         "type": "telegram_send_prep",
-        "version": "V51.0",
+        "version": "V51.1",
         "draft_key": draft_key,
         "channel": "Telegram",
         "send_prep_state": "telegram_send_prepared",
@@ -2121,7 +2123,7 @@ def save_telegram_send_prep_to_db(draft_key, action="prepare"):
         TELEGRAM_SEND_PREP_STATES[draft_key] = payload
         return True, "prepared"
     except Exception as e:
-        print("V51.0 save telegram send prep error:", repr(e))
+        print("V51.1 save telegram send prep error:", repr(e))
         try:
             if conn:
                 conn.close()
@@ -2140,6 +2142,170 @@ def apply_telegram_send_prep(draft_key):
     }
 
 
+def load_persistent_telegram_recipient_states_from_db(limit=500):
+    """V51.1: load safe Telegram recipient resolution states.
+
+    Reads only memory_backups/source=web_telegram_recipient_resolution.
+    No Telegram API call is made. Latest record wins per draft_key.
+    """
+    database_url = _db_url()
+    if not database_url:
+        return {}
+    conn = None
+    try:
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT backup_text, created_at, id
+            FROM memory_backups
+            WHERE source = %s
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            ("web_telegram_recipient_resolution", int(limit or 500)),
+        )
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        states = {}
+        for text, created_at, row_id in rows:
+            payload = _json_loads_safe(text)
+            if not isinstance(payload, dict):
+                continue
+            key = str(payload.get("draft_key") or "")
+            if not key or key in states:
+                continue
+            payload["created_at"] = str(payload.get("created_at") or created_at or "")
+            payload["db_id"] = row_id
+            states[key] = payload
+        return states
+    except Exception as e:
+        print("V51.1 load telegram recipient states error:", repr(e))
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+        return {}
+
+
+def ensure_telegram_recipient_states_loaded():
+    global TELEGRAM_RECIPIENT_STATES_LOADED, TELEGRAM_RECIPIENT_STATES
+    if TELEGRAM_RECIPIENT_STATES_LOADED:
+        return
+    TELEGRAM_RECIPIENT_STATES = load_persistent_telegram_recipient_states_from_db(limit=800)
+    TELEGRAM_RECIPIENT_STATES_LOADED = True
+
+
+def telegram_recipient_state(draft):
+    ensure_telegram_recipient_states_loaded()
+    key = str((draft or {}).get("draft_key") or "")
+    payload = TELEGRAM_RECIPIENT_STATES.get(key) or {}
+    return payload.get("recipient_state") or "recipient_not_checked"
+
+
+def _recipient_candidate_from_draft(draft):
+    draft = draft or {}
+    for key in ("telegram_chat_id", "recipient_chat_id", "client_chat_id", "chat_id"):
+        value = draft.get(key)
+        if value not in (None, ""):
+            return str(value), key
+    return "", ""
+
+
+def save_telegram_recipient_resolution_to_db(draft):
+    """Create a safe recipient-resolution record; never sends a message."""
+    database_url = _db_url()
+    if not database_url:
+        return False, "missing_database_url", {}
+    draft = draft or {}
+    draft_key = str(draft.get("draft_key") or "").strip()
+    if not draft_key:
+        return False, "missing_draft_key", {}
+    ensure_telegram_recipient_states_loaded()
+    chat_id, chat_id_source = _recipient_candidate_from_draft(draft)
+    resolved = bool(chat_id)
+    payload = {
+        "type": "telegram_recipient_resolution",
+        "version": "V51.1",
+        "draft_key": draft_key,
+        "client_name": draft.get("client_name") or "Workspace",
+        "channel": "Telegram",
+        "recipient_state": "recipient_resolved" if resolved else "recipient_unresolved",
+        "telegram_chat_id": chat_id or None,
+        "chat_id_source": chat_id_source or None,
+        "resolution_note": "Recipient chat_id found in draft metadata." if resolved else "No Telegram chat_id is linked to this client yet.",
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "db_write_scope": "recipient_resolution_only",
+        "safe_mode": True,
+        "sent": False,
+    }
+    conn = None
+    try:
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO memory_backups (user_id, backup_text, source)
+            VALUES (%s, %s, %s)
+            """,
+            ("__web__", _json_dumps_safe(payload), "web_telegram_recipient_resolution"),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        TELEGRAM_RECIPIENT_STATES[draft_key] = payload
+        return True, payload["recipient_state"], payload
+    except Exception as e:
+        print("V51.1 save telegram recipient resolution error:", repr(e))
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+        return False, str(e)[:200], payload
+
+
+def apply_telegram_recipient_resolution(draft_key):
+    drafts = global_outbox_draft_items(limit=500)
+    draft = next((d for d in drafts if str(d.get("draft_key") or "") == str(draft_key or "")), None)
+    if not draft:
+        return {"draft_key": draft_key, "recipient_state": "draft_not_found", "persistent": False}
+    ok, status, payload = save_telegram_recipient_resolution_to_db(draft)
+    return {
+        "draft_key": draft_key,
+        "recipient_state": payload.get("recipient_state") or status,
+        "telegram_chat_id": payload.get("telegram_chat_id"),
+        "persistent": bool(ok),
+        "save_status": status,
+    }
+
+
+def outbox_recipient_banner_html():
+    action = (request.args.get("recipient_action") or "").strip().lower()
+    draft_key = unquote_plus((request.args.get("draft_key") or "").strip())
+    if action != "resolve_telegram" or not draft_key:
+        return ""
+    result = apply_telegram_recipient_resolution(draft_key)
+    state = result.get("recipient_state") or "recipient_unresolved"
+    label = "Recipient resolved" if state == "recipient_resolved" else "Recipient unresolved"
+    note = (
+        f"Telegram chat_id: {html_escape(result.get('telegram_chat_id'))}"
+        if result.get("telegram_chat_id")
+        else "No Telegram chat_id is linked to this client yet. Add a verified client contact mapping before real send is enabled."
+    )
+    return (
+        "<section class='card card-pad'>"
+        "<div class='section-title'>Telegram recipient resolution</div>"
+        "<div class='list'>"
+        f"<div class='row'><div><b>{html_escape(label)}</b><span class='muted'>{html_escape(draft_key)}</span><span class='muted'>{note}</span></div><span class='pill'>{html_escape(result.get('save_status') or '')}</span></div>"
+        "</div><div class='safe-note'>V51.1 safe mode: recipient resolution only. No Telegram message was sent.</div></section><br>"
+    )
+
+
 def outbox_send_prep_banner_html():
     send_prep = (request.args.get("send_prep") or "").strip().lower()
     draft_key = unquote_plus((request.args.get("draft_key") or "").strip())
@@ -2151,7 +2317,7 @@ def outbox_send_prep_banner_html():
         "<div class='section-title'>Telegram send action prepared</div>"
         "<div class='list'>"
         f"<div class='row'><div><b>Prepared, not sent</b><span class='muted'>{html_escape(draft_key)}</span></div><span class='pill'>{html_escape(result.get('save_status') or '')}</span></div>"
-        "</div><div class='safe-note'>V51.0 safe mode: NinaOS prepared a Telegram send action only. No Telegram message was sent.</div></section><br>"
+        "</div><div class='safe-note'>V51.1 safe mode: NinaOS prepared a Telegram send action only. No Telegram message was sent.</div></section><br>"
     )
 
 
@@ -2175,7 +2341,7 @@ def outbox_review_banner_html():
         "<div class='section-title'>Draft review saved</div>"
         "<div class='list'>"
         f"<div class='row'><div><b>{html_escape(label_map.get(state, state))}</b><span class='muted'>{html_escape(draft_key)}</span></div><span class='pill'>{html_escape(result.get('save_status') or '')}</span></div>"
-        "</div><div class='safe-note'>V51.0: owner review status is saved before queue counts render, so KPIs and queues stay aligned. No client message is sent yet.</div></section><br>"
+        "</div><div class='safe-note'>V51.1: owner review status is saved before queue counts render, so KPIs and queues stay aligned. No client message is sent yet.</div></section><br>"
     )
 
 
@@ -2193,6 +2359,10 @@ def reviewed_sendback_drafts(limit=500):
         prep_payload = TELEGRAM_SEND_PREP_STATES.get(key) or {}
         d["telegram_send_prep_state"] = prep_payload.get("send_prep_state") or prep_payload.get("status") or "not_prepared"
         d["telegram_send_prep_saved_at"] = prep_payload.get("updated_at") or prep_payload.get("created_at") or ""
+        ensure_telegram_recipient_states_loaded()
+        recipient_payload = TELEGRAM_RECIPIENT_STATES.get(key) or {}
+        d["telegram_recipient_state"] = recipient_payload.get("recipient_state") or "recipient_not_checked"
+        d["telegram_chat_id"] = recipient_payload.get("telegram_chat_id")
     return drafts
 
 
@@ -2321,11 +2491,12 @@ def global_outbox_rows(limit=20, empty_text=None):
             actions += f"<a class='pill' href='{outbox_href}{sep}draft_decision=reset&draft_key={key}'>Return to review</a>"
         if state == "approved_for_send" and "Telegram" in str(channel):
             actions += f"<a class='pill' href='{outbox_href}{sep}send_prep=telegram&draft_key={key}'>Prepare Telegram Send</a>"
+            actions += f"<a class='pill' href='{outbox_href}{sep}recipient_action=resolve_telegram&draft_key={key}'>Resolve Telegram Recipient</a>"
         actions += f"<a class='pill' href='{href}'>Open client</a>"
         rows += (
             "<div class='row'><div>"
             f"<b>{html_escape(title)}</b>"
-            f"<span class='muted'>{html_escape(client)} · {html_escape(channel)} · {html_escape(object_type)} · {html_escape(label_map.get(state, state))} · {html_escape(d.get('telegram_send_prep_state') or 'not_prepared')}</span>"
+            f"<span class='muted'>{html_escape(client)} · {html_escape(channel)} · {html_escape(object_type)} · {html_escape(label_map.get(state, state))} · {html_escape(d.get('telegram_send_prep_state') or 'not_prepared')} · {html_escape(d.get('telegram_recipient_state') or 'recipient_not_checked')}</span>"
             f"<span class='muted'>{html_escape(body_short)}</span>"
             f"</div>{actions}</div>"
         )
@@ -2393,11 +2564,12 @@ def global_outbox_rows_for_items(items):
             actions += f"<a class='pill' href='{outbox_href}{sep}draft_decision=reset&draft_key={key}'>Return to review</a>"
         if state == "approved_for_send" and "Telegram" in str(channel):
             actions += f"<a class='pill' href='{outbox_href}{sep}send_prep=telegram&draft_key={key}'>Prepare Telegram Send</a>"
+            actions += f"<a class='pill' href='{outbox_href}{sep}recipient_action=resolve_telegram&draft_key={key}'>Resolve Telegram Recipient</a>"
         actions += f"<a class='pill' href='{href}'>Open client</a>"
         rows += (
             "<div class='row'><div>"
             f"<b>{html_escape(title)}</b>"
-            f"<span class='muted'>{html_escape(client)} · {html_escape(channel)} · {html_escape(object_type)} · {html_escape(label_map.get(state, state))} · {html_escape(d.get('telegram_send_prep_state') or 'not_prepared')}</span>"
+            f"<span class='muted'>{html_escape(client)} · {html_escape(channel)} · {html_escape(object_type)} · {html_escape(label_map.get(state, state))} · {html_escape(d.get('telegram_send_prep_state') or 'not_prepared')} · {html_escape(d.get('telegram_recipient_state') or 'recipient_not_checked')}</span>"
             f"<span class='muted'>{html_escape(body_short)}</span>"
             f"</div>{actions}</div>"
         )
@@ -2411,11 +2583,14 @@ def outbox_body(data=None):
     # so the KPI could say 2 approved while the Approved To Send Queue showed 1.
     review_banner = outbox_review_banner_html()
     send_prep_banner = outbox_send_prep_banner_html()
+    recipient_banner = outbox_recipient_banner_html()
     drafts = global_outbox_draft_items(limit=500)
     approved = [d for d in drafts if (d.get("review_state") or "") == "approved_for_send"]
     needs_edit = [d for d in drafts if (d.get("review_state") or "") == "needs_edit"]
     rejected = [d for d in drafts if (d.get("review_state") or "") == "rejected"]
     telegram_prepared = [d for d in drafts if (d.get("telegram_send_prep_state") or "") == "telegram_send_prepared"]
+    recipient_resolved = [d for d in drafts if (d.get("telegram_recipient_state") or "") == "recipient_resolved"]
+    recipient_unresolved = [d for d in drafts if "Telegram" in str(d.get("channel") or "") and (d.get("telegram_recipient_state") or "recipient_not_checked") != "recipient_resolved"]
     draft_saved = [d for d in drafts if (d.get("review_state") or "draft_saved") == "draft_saved"]
 
     def rows_for(items, empty="No drafts in this queue."):
@@ -2429,13 +2604,16 @@ def outbox_body(data=None):
             return global_outbox_rows(limit=len(items))
 
     return (
-        work_page_header("Outbox", "V51.0 Telegram Send Bridge Prep — prepare approved Telegram drafts for safe send action review.")
+        work_page_header("Outbox", "V51.1 Telegram Recipient Resolution Prep — resolve the verified Telegram recipient before any real send bridge.")
         + review_banner
         + send_prep_banner
-        + f"<section class='card card-pad'>{outbox_channel_kpis()}<br><div class='safe-note'>V51.0: approved Telegram drafts can be prepared for sending, but no client message is sent yet.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Saved Drafts Review Queue</div><div class='list'>{global_outbox_rows(limit=40, empty_text=tx('no_items', lang))}</div><div class='safe-note'>Use Approve for send / Needs edit / Reject draft. Approved Telegram drafts can then prepare a safe Telegram send action.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Approved To Send Queue</div><div class='list'>{global_outbox_rows_for_items(approved) if approved else rows_for([], 'No approved drafts yet.')}</div><div class='safe-note'>V51.0: use Prepare Telegram Send for approved Telegram drafts. Real sending is still disabled.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Telegram Send Prep Queue</div><div class='list'>{global_outbox_rows_for_items(telegram_prepared) if telegram_prepared else rows_for([], 'No prepared Telegram send actions yet.')}</div><div class='safe-note'>Prepared means queued for future bridge review only. No Telegram API call has been made.</div></section><br>"
+        + recipient_banner
+        + f"<section class='card card-pad'>{outbox_channel_kpis()}<br><div class='safe-note'>V51.1: approved Telegram drafts can be prepared and recipient-checked, but no client message is sent yet.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Saved Drafts Review Queue</div><div class='list'>{global_outbox_rows(limit=40, empty_text=tx('no_items', lang))}</div><div class='safe-note'>Use Approve for send / Needs edit / Reject draft. Approved Telegram drafts can prepare a safe send action and resolve a verified recipient.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved To Send Queue</div><div class='list'>{global_outbox_rows_for_items(approved) if approved else rows_for([], 'No approved drafts yet.')}</div><div class='safe-note'>V51.1: prepare the send and resolve the Telegram recipient. Real sending is still disabled.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Telegram Send Prep Queue</div><div class='list'>{global_outbox_rows_for_items(telegram_prepared) if telegram_prepared else rows_for([], 'No prepared Telegram send actions yet.')}</div><div class='safe-note'>Prepared means queued for future bridge review only. Recipient resolution is separate and no Telegram API call has been made.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Telegram Recipient Resolution Queue</div><div class='list'>{global_outbox_rows_for_items(recipient_resolved) if recipient_resolved else rows_for([], 'No resolved Telegram recipients yet.')}</div><div class='safe-note'>Only drafts with a verified Telegram chat_id can move toward a future real send bridge.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Unresolved Telegram Recipients</div><div class='list'>{global_outbox_rows_for_items(recipient_unresolved) if recipient_unresolved else rows_for([], 'No unresolved Telegram recipients.')}</div><div class='safe-note'>Unresolved drafts are blocked from real sending until a client contact mapping exists.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Needs Edit Queue</div><div class='list'>{global_outbox_rows_for_items(needs_edit) if needs_edit else rows_for([], 'No drafts needing edit.')}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Rejected Draft Log</div><div class='list'>{global_outbox_rows_for_items(rejected) if rejected else rows_for([], 'No rejected drafts.')}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Pending Send-back Objects</div><div class='list'>{send_back_candidate_rows(limit=12, empty_text=tx('no_items', lang))}</div><div class='safe-note'>These approved workspace objects can still generate more draft previews from client profiles.</div></section>"
@@ -2465,7 +2643,7 @@ def sendback_draft_preview_html(client_name, profile):
         f"<div class='row'><div><b>Draft message</b><span class='muted'>{body}</span></div><span class='pill'>owner review</span></div>"
         f"<div class='row'><div><b>Save status</b><span class='muted'>{html_escape(saved_status)}</span></div><span class='pill'>{'saved' if saved_ok else 'not saved'}</span></div>"
         "<div class='row'><div><b>Next step</b><span class='muted'>Owner reviews this saved draft. Real WhatsApp / Telegram / email send bridge comes later.</span></div><span class='pill'>safe mode</span></div>"
-        "</div><div class='safe-note'>V51.0: Nina prepares draft previews and saves them to the client profile. Nothing is sent to the client yet; the draft is saved to this client profile.</div></section><br>"
+        "</div><div class='safe-note'>V51.1: Nina prepares draft previews and saves them to the client profile. Nothing is sent to the client yet; the draft is saved to this client profile.</div></section><br>"
     )
 
 
@@ -2545,11 +2723,11 @@ def client_profile_detail_body(client_name):
 
     return (
         header
-        + f"<section class='card card-pad'>{kpis}<br><div class='safe-note'>V51.0: client profile detail page with saved send-back draft preview. Source evidence: {html_escape(source_text)}.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Client Work Timeline</div><div class='list'>{timeline_rows}</div><div class='safe-note'>V51.0: profile detail combines Telegram memory, approved workspace objects, send-back candidates and safe draft previews into one client timeline.</div></section><br>"
+        + f"<section class='card card-pad'>{kpis}<br><div class='safe-note'>V51.1: client profile detail page with saved send-back draft preview. Source evidence: {html_escape(source_text)}.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Client Work Timeline</div><div class='list'>{timeline_rows}</div><div class='safe-note'>V51.1: profile detail combines Telegram memory, approved workspace objects, send-back candidates and safe draft previews into one client timeline.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Client Threads</div><div class='list'>{thread_rows}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Objects</div><div class='list'>{object_rows}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Send Back Candidates</div><div class='list'>{send_rows}</div><div class='safe-note'>V51.0: these objects can render WhatsApp, Telegram or email draft previews.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Send Back Candidates</div><div class='list'>{send_rows}</div><div class='safe-note'>V51.1: these objects can render WhatsApp, Telegram or email draft previews.</div></section><br>"
         + draft_preview
         + f"<section class='card card-pad'><div class='section-title'>Send-back Action Center</div><div class='list'>{send_action_rows}</div><div class='safe-note'>Safe mode: actions render draft previews and saves them to the client profile. Real sending bridge comes later.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Client Action Center</div><div class='list'>{action_rows}</div></section>"
@@ -3094,9 +3272,9 @@ def clients_body(data):
         legacy_rows = f"<div class='row'><div><b>{html_escape(tx('no_items', lang))}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
     return (
         work_page_header(tx("clients"), "V51.0 Saved Drafts Inbox / Global Outbox — client profiles now prepare WhatsApp, Telegram and email send-back actions.")
-        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Profiles</div><div class='list'>{profile_rows}</div><div class='safe-note'>V51.0: each client opens into a profile with safe saved send-back draft previews.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Objects</div><div class='list'>{client_rows}</div><div class='safe-note'>V51.0: workspace objects are grouped by client and can produce safe draft previews.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Global Outbox Preview</div><div class='list'>{global_outbox_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V51.0: saved client drafts also appear in the global Outbox / Send Center.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Profiles</div><div class='list'>{profile_rows}</div><div class='safe-note'>V51.1: each client opens into a profile with safe saved send-back draft previews.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Objects</div><div class='list'>{client_rows}</div><div class='safe-note'>V51.1: workspace objects are grouped by client and can produce safe draft previews.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Global Outbox Preview</div><div class='list'>{global_outbox_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V51.1: saved client drafts also appear in the global Outbox / Send Center.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>CRM Snapshot</div><div class='list'>{legacy_rows}</div></section>"
     )
 
@@ -3582,14 +3760,14 @@ def channel_hub_body(data):
         + voice_intake_form_html(created_voice_obj)
         + "<br>"
         + telegram_db_diagnostic_block_html()
-        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V51.0 keeps thread preview here, while client profiles can preview WhatsApp, Telegram and email drafts.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V51.0 safe mode: client profiles can preview send-back drafts. Dedicated send bridges and work-object tables come later.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V51.0 keeps thread preview here, while client profiles can preview WhatsApp, Telegram and email drafts.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V51.1 safe mode: client profiles can preview send-back drafts. Dedicated send bridges and work-object tables come later.</div></section><br>"
         + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V51.0 draft review</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
         + "<div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
         + "</div><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Object Surface</div><div class='list'>{workspace_object_surface_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V51.0: approved workspace objects can now render saved send-back draft previews inside client profiles.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Object Surface</div><div class='list'>{workspace_object_surface_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V51.1: approved workspace objects can now render saved send-back draft previews inside client profiles.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('owner_send_back', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section>"
     )
 
