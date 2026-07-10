@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V50.0 — Send-back Review Workspace
+# NinaOS Web App V50.1 — Approved Queue Count/Filter Fix
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -8,14 +8,14 @@ from datetime import datetime
 from urllib.parse import quote_plus, unquote_plus
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V50.0 — Send-back Review Workspace"
+WEB_APP_VERSION = "Web App V50.1 — Approved Queue Count/Filter Fix"
 app = Flask(__name__)
 
 # V47.1 safe workspace-object surface polish.
 # This writes only safe web workspace-object snapshots into memory_backups and does NOT touch Telegram app.py.
 # Telegram remains its own runtime; web_app.py only reads/surfaces shared intake/work data.
 WORKSPACE_ACTION_PREVIEWS = []
-# V50.0: Global Outbox lets the owner review saved send-back drafts before any real send bridge.
+# V50.1: fixes Outbox review-action ordering so KPIs and queue filters match immediately after decisions.
 # Owner approval decisions are saved safely into memory_backups with source='web_thread_approval_state'.
 # This avoids losing Approve/Hold/Reject after web reload/redeploy without touching app.py.
 THREAD_WORKFLOW_STATES = {}
@@ -1917,7 +1917,7 @@ def load_persistent_draft_review_states_from_db(limit=500):
             states[key] = payload
         return states
     except Exception as e:
-        print("V50.0 load draft review states error:", repr(e))
+        print("V50.1 load draft review states error:", repr(e))
         try:
             if conn:
                 conn.close()
@@ -1952,7 +1952,7 @@ def save_draft_review_state_to_db(draft_key, review_state, decision=""):
     review_state = str(review_state or "draft_saved")
     payload = {
         "type": "sendback_draft_review_state",
-        "version": "V50.0",
+        "version": "V50.1",
         "draft_key": draft_key,
         "review_state": review_state,
         "approval_state": review_state,
@@ -1979,7 +1979,7 @@ def save_draft_review_state_to_db(draft_key, review_state, decision=""):
         DRAFT_REVIEW_STATES[draft_key] = payload
         return True, "saved"
     except Exception as e:
-        print("V50.0 save draft review state error:", repr(e))
+        print("V50.1 save draft review state error:", repr(e))
         try:
             if conn:
                 conn.close()
@@ -2030,7 +2030,7 @@ def outbox_review_banner_html():
         "<div class='section-title'>Draft review saved</div>"
         "<div class='list'>"
         f"<div class='row'><div><b>{html_escape(label_map.get(state, state))}</b><span class='muted'>{html_escape(draft_key)}</span></div><span class='pill'>{html_escape(result.get('save_status') or '')}</span></div>"
-        "</div><div class='safe-note'>V50.0: owner review status is saved. No client message is sent yet.</div></section><br>"
+        "</div><div class='safe-note'>V50.1: owner review status is saved before queue counts render, so KPIs and queues stay aligned. No client message is sent yet.</div></section><br>"
     )
 
 
@@ -2059,7 +2059,7 @@ def save_sendback_draft_to_db(client_name, item, channel, draft):
     meta = (item or {}).get("metadata") if isinstance((item or {}).get("metadata"), dict) else {}
     payload = {
         "type": "sendback_draft",
-        "version": "V50.0",
+        "version": "V50.1",
         "draft_key": draft_key,
         "client_name": client_name or meta.get("client_name") or "Workspace",
         "client_slug": _client_profile_slug(client_name or meta.get("client_name") or "Workspace"),
@@ -2251,6 +2251,10 @@ def global_outbox_rows_for_items(items):
 
 def outbox_body(data=None):
     lang = current_language()
+    # V50.1 FIX: apply the requested decision before computing drafts, KPIs and queues.
+    # In V50.0 the banner saved the decision after the `approved` subset was already built,
+    # so the KPI could say 2 approved while the Approved To Send Queue showed 1.
+    review_banner = outbox_review_banner_html()
     drafts = global_outbox_draft_items(limit=500)
     approved = [d for d in drafts if (d.get("review_state") or "") == "approved_for_send"]
     needs_edit = [d for d in drafts if (d.get("review_state") or "") == "needs_edit"]
@@ -2268,9 +2272,9 @@ def outbox_body(data=None):
             return global_outbox_rows(limit=len(items))
 
     return (
-        work_page_header("Outbox", "V50.0 Send-back Review Workspace — owner review, edit, approve or reject saved client drafts before any send bridge.")
-        + outbox_review_banner_html()
-        + f"<section class='card card-pad'>{outbox_channel_kpis()}<br><div class='safe-note'>V50.0: global outbox now has owner review states. Nothing is sent yet.</div></section><br>"
+        work_page_header("Outbox", "V50.1 Approved Queue Count/Filter Fix — owner review, edit, approve or reject saved client drafts before any send bridge.")
+        + review_banner
+        + f"<section class='card card-pad'>{outbox_channel_kpis()}<br><div class='safe-note'>V50.1: global outbox review counts and filtered queues now use the same refreshed state. Nothing is sent yet.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Saved Drafts Review Queue</div><div class='list'>{global_outbox_rows(limit=40, empty_text=tx('no_items', lang))}</div><div class='safe-note'>Use Approve for send / Needs edit / Reject draft. These actions only save review state.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Approved To Send Queue</div><div class='list'>{global_outbox_rows_for_items(approved) if approved else rows_for([], 'No approved drafts yet.')}</div><div class='safe-note'>Future V51 can connect this queue to a real Telegram send bridge.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Needs Edit Queue</div><div class='list'>{global_outbox_rows_for_items(needs_edit) if needs_edit else rows_for([], 'No drafts needing edit.')}</div></section><br>"
@@ -2302,7 +2306,7 @@ def sendback_draft_preview_html(client_name, profile):
         f"<div class='row'><div><b>Draft message</b><span class='muted'>{body}</span></div><span class='pill'>owner review</span></div>"
         f"<div class='row'><div><b>Save status</b><span class='muted'>{html_escape(saved_status)}</span></div><span class='pill'>{'saved' if saved_ok else 'not saved'}</span></div>"
         "<div class='row'><div><b>Next step</b><span class='muted'>Owner reviews this saved draft. Real WhatsApp / Telegram / email send bridge comes later.</span></div><span class='pill'>safe mode</span></div>"
-        "</div><div class='safe-note'>V50.0: Nina prepares draft previews and saves them to the client profile. Nothing is sent to the client yet; the draft is saved to this client profile.</div></section><br>"
+        "</div><div class='safe-note'>V50.1: Nina prepares draft previews and saves them to the client profile. Nothing is sent to the client yet; the draft is saved to this client profile.</div></section><br>"
     )
 
 
@@ -2382,11 +2386,11 @@ def client_profile_detail_body(client_name):
 
     return (
         header
-        + f"<section class='card card-pad'>{kpis}<br><div class='safe-note'>V50.0: client profile detail page with saved send-back draft preview. Source evidence: {html_escape(source_text)}.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Client Work Timeline</div><div class='list'>{timeline_rows}</div><div class='safe-note'>V50.0: profile detail combines Telegram memory, approved workspace objects, send-back candidates and safe draft previews into one client timeline.</div></section><br>"
+        + f"<section class='card card-pad'>{kpis}<br><div class='safe-note'>V50.1: client profile detail page with saved send-back draft preview. Source evidence: {html_escape(source_text)}.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Client Work Timeline</div><div class='list'>{timeline_rows}</div><div class='safe-note'>V50.1: profile detail combines Telegram memory, approved workspace objects, send-back candidates and safe draft previews into one client timeline.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Client Threads</div><div class='list'>{thread_rows}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Objects</div><div class='list'>{object_rows}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Send Back Candidates</div><div class='list'>{send_rows}</div><div class='safe-note'>V50.0: these objects can render WhatsApp, Telegram or email draft previews.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Send Back Candidates</div><div class='list'>{send_rows}</div><div class='safe-note'>V50.1: these objects can render WhatsApp, Telegram or email draft previews.</div></section><br>"
         + draft_preview
         + f"<section class='card card-pad'><div class='section-title'>Send-back Action Center</div><div class='list'>{send_action_rows}</div><div class='safe-note'>Safe mode: actions render draft previews and saves them to the client profile. Real sending bridge comes later.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>Client Action Center</div><div class='list'>{action_rows}</div></section>"
@@ -2930,10 +2934,10 @@ def clients_body(data):
     if not legacy_rows:
         legacy_rows = f"<div class='row'><div><b>{html_escape(tx('no_items', lang))}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
     return (
-        work_page_header(tx("clients"), "V50.0 Saved Drafts Inbox / Global Outbox — client profiles now prepare WhatsApp, Telegram and email send-back actions.")
-        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Profiles</div><div class='list'>{profile_rows}</div><div class='safe-note'>V50.0: each client opens into a profile with safe saved send-back draft previews.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Objects</div><div class='list'>{client_rows}</div><div class='safe-note'>V50.0: workspace objects are grouped by client and can produce safe draft previews.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Global Outbox Preview</div><div class='list'>{global_outbox_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V50.0: saved client drafts also appear in the global Outbox / Send Center.</div></section><br>"
+        work_page_header(tx("clients"), "V50.1 Saved Drafts Inbox / Global Outbox — client profiles now prepare WhatsApp, Telegram and email send-back actions.")
+        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Profiles</div><div class='list'>{profile_rows}</div><div class='safe-note'>V50.1: each client opens into a profile with safe saved send-back draft previews.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Objects</div><div class='list'>{client_rows}</div><div class='safe-note'>V50.1: workspace objects are grouped by client and can produce safe draft previews.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Global Outbox Preview</div><div class='list'>{global_outbox_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V50.1: saved client drafts also appear in the global Outbox / Send Center.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>CRM Snapshot</div><div class='list'>{legacy_rows}</div></section>"
     )
 
@@ -3374,7 +3378,7 @@ def telegram_db_diagnostic_block_html():
     diag = telegram_bridge_db_diagnostics()
     return (
         "<section class='card card-pad'>"
-        "<div class='section-title'>🧪 V50.0 DB Diagnostic</div>"
+        "<div class='section-title'>🧪 V50.1 DB Diagnostic</div>"
         "<p class='muted'>Read-only check: does Web service see the same Postgres memory that Telegram app.py writes?</p>"
         "<div class='list'>" + diagnostic_rows_html(diag) + "</div>"
         "<div class='safe-note'>Open JSON: <a href='/diagnostics/telegram-sync'>/diagnostics/telegram-sync</a>. If counts are zero here but Telegram works, Railway services may not share the same DATABASE_URL or app.py writes to a different table/source.</div>"
@@ -3419,14 +3423,14 @@ def channel_hub_body(data):
         + voice_intake_form_html(created_voice_obj)
         + "<br>"
         + telegram_db_diagnostic_block_html()
-        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V50.0 keeps thread preview here, while client profiles can preview WhatsApp, Telegram and email drafts.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V50.0 safe mode: client profiles can preview send-back drafts. Dedicated send bridges and work-object tables come later.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V50.1 keeps thread preview here, while client profiles can preview WhatsApp, Telegram and email drafts.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V50.1 safe mode: client profiles can preview send-back drafts. Dedicated send bridges and work-object tables come later.</div></section><br>"
         + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V50.0 draft preview</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V50.1 draft review</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
         + "<div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
         + "</div><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Object Surface</div><div class='list'>{workspace_object_surface_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V50.0: approved workspace objects can now render saved send-back draft previews inside client profiles.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Object Surface</div><div class='list'>{workspace_object_surface_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V50.1: approved workspace objects can now render saved send-back draft previews inside client profiles.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('owner_send_back', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section>"
     )
 
