@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V46.2 — Persistent Approval State Prep
+# NinaOS Web App V47.0 — Approved Thread to Workspace Objects Bridge
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -7,18 +7,20 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V46.2 — Persistent Approval State Prep"
+WEB_APP_VERSION = "Web App V47.0 — Approved Thread → Workspace Objects Bridge"
 app = Flask(__name__)
 
-# V46.2 safe persistent approval state prep + client work thread workflow bridge.
-# This does NOT write to Postgres yet and does NOT touch Telegram app.py.
+# V47.0 safe approved-thread to workspace-object bridge.
+# This writes only safe web workspace-object snapshots into memory_backups and does NOT touch Telegram app.py.
 # Telegram remains its own runtime; web_app.py only reads/surfaces shared intake/work data.
 WORKSPACE_ACTION_PREVIEWS = []
-# V46.2: Telegram/client threads are still read from existing app.py memory.
+# V47.0: Telegram/client threads are still read from existing app.py memory.
 # Owner approval decisions are saved safely into memory_backups with source='web_thread_approval_state'.
 # This avoids losing Approve/Hold/Reject after web reload/redeploy without touching app.py.
 THREAD_WORKFLOW_STATES = {}
 THREAD_WORKFLOW_STATES_LOADED = False
+WORKSPACE_OBJECT_CACHE = {}
+WORKSPACE_OBJECT_CACHE_LOADED = False
 LAST_VOICE_INTAKE_PREVIEW = None
 
 
@@ -219,7 +221,7 @@ def tx(key, lang=None):
         "source_channel": {"en": "Source channel", "lv": "Avota kanāls", "ru": "Канал источника"},
         "nina_prepare": {"en": "Nina, prepare work", "lv": "Nina, sagatavo darbu", "ru": "Nina, подготовь работу"},
         "voice_preview_created": {"en": "Voice intake preview created", "lv": "Balss ievades priekšskatījums izveidots", "ru": "Preview из голосового ввода создан"},
-        "voice_safe_note": {"en": "V46.2 safe mode: owner approval decisions are persisted safely so approved client work threads survive reload/redeploy. Web still reads existing Telegram memory; only lightweight approval state is written.", "lv": "V46.2 drošais režīms: īpašnieka apstiprinājumi tiek droši saglabāti, lai apstiprinātie klienta darba pavedieni nepazūd pēc reload/redeploy. Web joprojām lasa esošo Telegram atmiņu; rakstīts tiek tikai viegls approval state.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
+        "voice_safe_note": {"en": "V47.0 safe mode: approved client threads are converted into NinaOS workspace objects. Web still reads existing Telegram memory; only safe workspace-object snapshots are written.", "lv": "V47.0 drošais režīms: apstiprinātie klienta darba pavedieni tiek pārvērsti NinaOS darba objektos. Web joprojām lasa esošo Telegram atmiņu; rakstīti tiek tikai droši workspace-object snapshoti.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
         "detected_intent": {"en": "Detected intent", "lv": "Atpazītais nodoms", "ru": "Распознанное намерение"},
         "twenty_second_century": {"en": "22nd-century work surface: clients speak, send photos and documents; Nina organizes the work.", "lv": "22. gadsimta darba virsma: klienti runā, sūta bildes un dokumentus; Nina sakārto darbu.", "ru": "Рабочая поверхность 22 века: клиенты говорят, отправляют фото и документы; Nina организует работу."},
     }
@@ -504,7 +506,7 @@ def _json_loads_safe(text, default=None):
 
 
 def load_persistent_thread_workflow_states_from_db(limit=500):
-    """V46.2: load owner approval decisions from existing memory_backups.
+    """V47.0: load owner approval decisions from existing memory_backups.
 
     This avoids a new migration while preserving state across web reload/redeploy.
     Records are append-only; latest record wins per object_id.
@@ -541,7 +543,7 @@ def load_persistent_thread_workflow_states_from_db(limit=500):
                 states[object_id] = state
         return states
     except Exception as e:
-        print("V46.2 load persistent thread states error:", repr(e))
+        print("V47.0 load persistent thread states error:", repr(e))
         try:
             if conn:
                 conn.close()
@@ -561,11 +563,11 @@ def ensure_thread_workflow_states_loaded():
         if persisted:
             THREAD_WORKFLOW_STATES.update(persisted)
     except Exception as e:
-        print("V46.2 ensure_thread_workflow_states_loaded error:", repr(e))
+        print("V47.0 ensure_thread_workflow_states_loaded error:", repr(e))
 
 
 def save_persistent_thread_workflow_state_to_db(object_id, approval_state, decision=""):
-    """V46.2: append owner approval decision into memory_backups.
+    """V47.0: append owner approval decision into memory_backups.
 
     This is the first safe persistence step for web owner decisions. It does not
     mutate Telegram task memory and does not create final work objects yet.
@@ -579,7 +581,7 @@ def save_persistent_thread_workflow_state_to_db(object_id, approval_state, decis
         return False, "missing_object_id_or_state"
     payload = {
         "type": "thread_approval_state",
-        "version": "V46.2",
+        "version": "V47.0",
         "object_id": object_id,
         "approval_state": approval_state,
         "decision": decision or approval_state,
@@ -603,13 +605,196 @@ def save_persistent_thread_workflow_state_to_db(object_id, approval_state, decis
         conn.close()
         return True, "saved"
     except Exception as e:
-        print("V46.2 save persistent thread state error:", repr(e))
+        print("V47.0 save persistent thread state error:", repr(e))
         try:
             if conn:
                 conn.close()
         except Exception:
             pass
         return False, str(e)[:200]
+
+
+def load_persistent_workspace_objects_from_db(limit=800):
+    """V47.0: load approved thread -> workspace object snapshots.
+
+    Still uses memory_backups to avoid a migration while creating a stable work-object
+    surface that survives reload/redeploy. Latest object per source_thread_id wins.
+    """
+    database_url = _db_url()
+    if not database_url:
+        return {}
+    conn = None
+    try:
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT backup_text, created_at, id
+            FROM memory_backups
+            WHERE source = %s
+            ORDER BY id DESC
+            LIMIT %s
+            """,
+            ("web_workspace_object", int(limit or 800)),
+        )
+        rows = cur.fetchall() or []
+        cur.close()
+        conn.close()
+        objects = {}
+        for row in rows:
+            payload = _json_loads_safe(row[0], {})
+            if not isinstance(payload, dict):
+                continue
+            source_thread_id = str(payload.get("source_thread_id") or payload.get("object_id") or "").strip()
+            obj = payload.get("workspace_object") if isinstance(payload.get("workspace_object"), dict) else payload
+            if source_thread_id and source_thread_id not in objects:
+                objects[source_thread_id] = obj
+        return objects
+    except Exception as e:
+        print("V47.0 load persistent workspace objects error:", repr(e))
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+        return {}
+
+
+def ensure_workspace_object_cache_loaded():
+    global WORKSPACE_OBJECT_CACHE_LOADED, WORKSPACE_OBJECT_CACHE
+    if WORKSPACE_OBJECT_CACHE_LOADED:
+        return
+    WORKSPACE_OBJECT_CACHE_LOADED = True
+    try:
+        WORKSPACE_OBJECT_CACHE.update(load_persistent_workspace_objects_from_db())
+    except Exception as e:
+        print("V47.0 ensure workspace object cache error:", repr(e))
+
+
+def workspace_object_type_from_thread(thread):
+    meta = (thread or {}).get("metadata", {}) if isinstance((thread or {}).get("metadata"), dict) else {}
+    family = str(meta.get("thread_family") or (thread or {}).get("object_type") or "task").lower()
+    title = str((thread or {}).get("title") or "").lower()
+    if "estimate" in family or "offer" in family or "tāme" in title or "piedāvāj" in title:
+        return "estimate"
+    if "invoice" in family or "rēķin" in title:
+        return "invoice"
+    if "document" in family or "photo" in family or "file" in family or "dok" in title:
+        return "document_intake"
+    if "follow" in family or "pajaut" in title or "zvan" in title or "atgādin" in title:
+        return "followup_task"
+    return "task"
+
+
+def build_workspace_object_from_thread(thread):
+    """V47.0: convert an approved client work thread into a stable workspace object."""
+    thread = _with_thread_state(thread or {})
+    meta = dict(thread.get("metadata", {}) if isinstance(thread.get("metadata"), dict) else {})
+    source_thread_id = str(thread.get("object_id") or meta.get("source_thread_id") or "thread")
+    object_type = workspace_object_type_from_thread(thread)
+    client_name = meta.get("thread_client") or thread.get("client_id") or "Workspace"
+    title = str(thread.get("title") or "Approved workspace work").strip()
+    workspace_object_id = "workspace_object_" + source_thread_id
+    source_badges = meta.get("source_badges") or []
+    if isinstance(source_badges, str):
+        source_badges = [source_badges]
+    evidence = meta.get("thread_evidence_titles") or []
+    if isinstance(evidence, str):
+        evidence = [evidence]
+    return {
+        "object_id": workspace_object_id,
+        "object_type": object_type,
+        "title": title,
+        "status": "open",
+        "priority": thread.get("priority") or "normal",
+        "client_id": client_name if client_name != "Workspace" else "",
+        "project_id": "",
+        "due_date": meta.get("deadline") or "",
+        "metadata": {
+            "client_name": client_name,
+            "source": "approved_thread_workspace_object",
+            "source_channel": "Telegram / NinaOS Web",
+            "source_thread_id": source_thread_id,
+            "source_thread_title": title,
+            "approval_state": "approved",
+            "created_from": "telegram_memory_bridge",
+            "workspace_object_state": "active",
+            "thread_items_count": meta.get("thread_items_count") or 1,
+            "source_badges": source_badges,
+            "evidence_titles": evidence[:8],
+            "storage_target": "NinaOS workspace objects",
+            "db_write_scope": "workspace_object_snapshot",
+            "created_at": datetime.utcnow().isoformat() + "Z",
+        },
+    }
+
+
+def save_workspace_object_to_db(source_thread_id, workspace_object):
+    database_url = _db_url()
+    if not database_url:
+        return False, "missing_database_url"
+    payload = {
+        "type": "workspace_object_snapshot",
+        "version": "V47.0",
+        "source_thread_id": source_thread_id,
+        "workspace_object": workspace_object,
+        "created_at": datetime.utcnow().isoformat() + "Z",
+        "db_write_scope": "workspace_object_snapshot",
+    }
+    conn = None
+    try:
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO memory_backups (user_id, backup_text, source)
+            VALUES (%s, %s, %s)
+            """,
+            ("__web__", _json_dumps_safe(payload), "web_workspace_object"),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True, "saved"
+    except Exception as e:
+        print("V47.0 save workspace object error:", repr(e))
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+        return False, str(e)[:200]
+
+
+def ensure_workspace_object_for_thread(thread):
+    ensure_workspace_object_cache_loaded()
+    source_thread_id = str((thread or {}).get("object_id") or "").strip()
+    if not source_thread_id:
+        return None
+    if source_thread_id in WORKSPACE_OBJECT_CACHE:
+        return WORKSPACE_OBJECT_CACHE[source_thread_id]
+    obj = build_workspace_object_from_thread(thread)
+    saved, _status = save_workspace_object_to_db(source_thread_id, obj)
+    if saved:
+        WORKSPACE_OBJECT_CACHE[source_thread_id] = obj
+    return obj
+
+
+def approved_workspace_object_items():
+    """Return real workspace-object surface items for approved threads.
+
+    Approved thread state is V46.2 persistence. V47.0 adds the next safe layer:
+    a stable workspace object snapshot for Tasks, Dashboard and Office Manager.
+    """
+    ensure_workspace_object_cache_loaded()
+    items = []
+    for thread in approved_client_thread_items():
+        obj = ensure_workspace_object_for_thread(thread)
+        if obj:
+            items.append(obj)
+    return items
 
 
 def load_real_intake_events_from_db(limit=50):
@@ -1314,7 +1499,7 @@ def load_client_work_threads():
 
 
 def thread_workflow_state(obj):
-    """V46.2: approval state for client work threads.
+    """V47.0: approval state for client work threads.
 
     Threads are read from existing app.py memory, while owner decisions are
     persisted in memory_backups with source='web_thread_approval_state'.
@@ -1376,29 +1561,31 @@ def approved_client_thread_items():
     return client_threads_by_state("approved")
 
 def active_workspace_work_rows(limit=8, empty_text=None, include_preview=True):
-    """V46.1: render approved client threads as active workspace work across web surfaces.
-
-    This is still a safe read-only bridge: it does not write approved thread state
-    into Postgres, but it makes owner-approved Telegram/client threads visible
-    where real work is operated.
-    """
+    """V47.0: render approved threads as workspace objects across web surfaces."""
     lang = current_language()
     empty_text = empty_text or tx("no_items", lang)
-    approved_threads = approved_client_thread_items()[:int(limit or 8)]
+    workspace_objects = approved_workspace_object_items()[:int(limit or 8)]
     approved_previews = approved_preview_items()[:int(limit or 8)] if include_preview else []
-    if not approved_threads and not approved_previews:
+    if not workspace_objects and not approved_previews:
         return f"<div class='row'><div><b>{html_escape(empty_text)}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
     rows = ""
-    if approved_threads:
-        rows += client_thread_rows(approved_threads, empty_text="", limit=limit, show_controls=False, show_state=True)
+    if workspace_objects:
+        rows += work_object_rows(workspace_objects, empty_text="", limit=limit, show_source=True, show_approval=True)
     if approved_previews:
         rows += work_object_rows(approved_previews, empty_text="", limit=limit, show_source=True, show_approval=True)
     return rows
 
 
+def approved_workspace_object_count():
+    try:
+        return len(approved_workspace_object_items())
+    except Exception:
+        return 0
+
+
 def approved_workspace_work_count():
     try:
-        return len(approved_client_thread_items()) + len(approved_preview_items())
+        return len(approved_workspace_object_items()) + len(approved_preview_items())
     except Exception:
         return 0
 
@@ -1738,7 +1925,7 @@ def load_workspace_data():
         ]
 
     activity = [
-        {"title": "V46.2 persistent approval state polish", "body": "Inbox now groups real app.py memory into client work threads with follow-up merge.", "kind": "sync"},
+        {"title": "V47.0 workspace object bridge polish", "body": "Inbox now groups real app.py memory into client work threads with follow-up merge.", "kind": "sync"},
         {"title": "V43.4 preview to real task surface", "body": "Approved preview objects now appear across Dashboard, Tasks and Office Manager surfaces in safe mode.", "kind": "work"},
         {"title": "Web service online", "body": "NinaOS web runtime is separated from Telegram runtime.", "kind": "info"},
         {"title": "Workspace loaded", "body": "V36 clean workspace data layer is active.", "kind": "info"},
@@ -1856,6 +2043,8 @@ def object_source_label(obj, lang=None):
         return "Existing voice/photo memory" if lang == "en" else ("Esošā balss/foto atmiņa" if lang == "lv" else "Память голоса/фото")
     if source == "real_intake_store":
         return "Real intake store" if lang == "en" else ("Intake store" if lang == "lv" else "Intake store")
+    if source == "approved_thread_workspace_object":
+        return "Workspace object" if lang == "en" else ("Darba objekts" if lang == "lv" else "Рабочий объект")
     if source == "database":
         return tx("source_database", lang)
     if source == "demo":
@@ -1902,17 +2091,18 @@ def tasks_body(data):
     pending_items = pending_or_held_preview_items()
     rejected_items = rejected_preview_items()
     approved_threads = approved_client_thread_items()
+    approved_workspace_objects = approved_workspace_object_items()
     pending_threads = pending_or_held_client_thread_items()
     rejected_threads = rejected_client_thread_items()
     all_rows = work_object_rows(data["tasks"], empty_text=tx("no_items", lang), show_source=True)
-    approved_rows = client_thread_rows(approved_threads, empty_text=tx("no_items", lang), limit=8, show_controls=False) + work_object_rows(approved_items, empty_text="", show_source=True) if approved_threads or approved_items else work_object_rows([], empty_text=tx("no_items", lang), show_source=True)
+    approved_rows = work_object_rows(approved_workspace_objects, empty_text=tx("no_items", lang), limit=8, show_source=True, show_approval=True) + work_object_rows(approved_items, empty_text="", show_source=True) if approved_workspace_objects or approved_items else work_object_rows([], empty_text=tx("no_items", lang), show_source=True)
     pending_rows = client_thread_rows(pending_threads, empty_text=tx("no_items", lang), limit=8, show_controls=True) + work_object_rows(pending_items, empty_text="", show_source=True) if pending_threads or pending_items else work_object_rows([], empty_text=tx("no_items", lang), show_source=True)
     rejected_rows = client_thread_rows(rejected_threads, empty_text=tx("no_items", lang), limit=8, show_controls=False) + work_object_rows(rejected_items, empty_text="", show_source=True) if rejected_threads or rejected_items else work_object_rows([], empty_text=tx("no_items", lang), show_source=True)
     telegram_sync_rows = client_thread_rows(client_threads_by_state(), empty_text=tx("no_items", lang), limit=8, show_controls=True)
     return (
         work_page_header(tx("tasks"), tx("tasks_sub"))
-        + "<section class='card card-pad'><div class='section-title'>Client Work Threads</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V46.1: approved client threads are now visible as active workspace work on Tasks, Dashboard and Office Manager. Hold keeps a thread pending; Reject moves it to the rejected log. DB writes are still disabled.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Approved Thread → Active Workspace Work</div><div class='list'>{approved_rows}</div><div class='safe-note'>V46.1: approved client threads are promoted as active workspace work on this Tasks surface. Postgres writes remain disabled.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>Client Work Threads</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V47.0: approved client threads become stable workspace-object snapshots. Hold keeps a thread pending; Reject moves it to the rejected log.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved Thread → Workspace Object Bridge</div><div class='list'>{approved_rows}</div><div class='safe-note'>V47.0: approved client threads are promoted as workspace objects on this Tasks surface. Dedicated work-object tables come later.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('all_workspace_work', lang)}</div><div class='list'>{all_rows}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('rejected_preview_log', lang)}</div><div class='list'>{rejected_rows}</div></section>"
@@ -2169,7 +2359,7 @@ def telegram_bridge_db_diagnostics():
         "counts": {},
         "latest": {},
         "web_reader_counts": {},
-        "note": "V46.2 diagnostic. Web reads Telegram memory and writes only lightweight owner approval state to memory_backups.",
+        "note": "V47.0 diagnostic. Web reads Telegram memory and writes safe workspace-object snapshots to memory_backups.",
     }
 
     try:
@@ -2212,6 +2402,7 @@ def telegram_bridge_db_diagnostics():
             diag["counts"]["memory_backups_total"] = _diag_count(cur, "SELECT COUNT(*) FROM memory_backups")
             diag["counts"]["memory_backups_task_engine"] = _diag_count(cur, "SELECT COUNT(*) FROM memory_backups WHERE source = %s", ("task_engine",))
             diag["counts"]["memory_backups_thread_approval_state"] = _diag_count(cur, "SELECT COUNT(*) FROM memory_backups WHERE source = %s", ("web_thread_approval_state",))
+            diag["counts"]["memory_backups_workspace_object"] = _diag_count(cur, "SELECT COUNT(*) FROM memory_backups WHERE source = %s", ("web_workspace_object",))
             diag["latest"]["memory_backups_task_engine"] = _diag_latest_rows(cur, """
                 SELECT id, user_id, source, backup_text, created_at
                 FROM memory_backups
@@ -2232,6 +2423,13 @@ def telegram_bridge_db_diagnostics():
                 ORDER BY id DESC
                 LIMIT 5
             """, ("web_thread_approval_state",))
+            diag["latest"]["memory_backups_workspace_object"] = _diag_latest_rows(cur, """
+                SELECT id, user_id, source, backup_text, created_at
+                FROM memory_backups
+                WHERE source = %s
+                ORDER BY id DESC
+                LIMIT 5
+            """, ("web_workspace_object",))
         else:
             diag["counts"]["memory_backups_total"] = "table missing"
 
@@ -2281,6 +2479,9 @@ def telegram_bridge_db_diagnostics():
         diag["web_reader_counts"]["client_work_threads"] = len(build_client_work_threads(unified_items, limit=50))
         ensure_thread_workflow_states_loaded()
         diag["web_reader_counts"]["persistent_thread_states_loaded"] = len(THREAD_WORKFLOW_STATES)
+        ensure_workspace_object_cache_loaded()
+        diag["web_reader_counts"]["workspace_objects_loaded"] = len(WORKSPACE_OBJECT_CACHE)
+        diag["web_reader_counts"]["approved_workspace_objects"] = approved_workspace_object_count()
     except Exception as e:
         diag["web_reader_counts"]["merged_telegram_intake_sync"] = "error: " + str(e)[:160]
 
@@ -2332,7 +2533,7 @@ def telegram_db_diagnostic_block_html():
     diag = telegram_bridge_db_diagnostics()
     return (
         "<section class='card card-pad'>"
-        "<div class='section-title'>🧪 V46.1 DB Diagnostic</div>"
+        "<div class='section-title'>🧪 V47.0 DB Diagnostic</div>"
         "<p class='muted'>Read-only check: does Web service see the same Postgres memory that Telegram app.py writes?</p>"
         "<div class='list'>" + diagnostic_rows_html(diag) + "</div>"
         "<div class='safe-note'>Open JSON: <a href='/diagnostics/telegram-sync'>/diagnostics/telegram-sync</a>. If counts are zero here but Telegram works, Railway services may not share the same DATABASE_URL or app.py writes to a different table/source.</div>"
@@ -2347,7 +2548,7 @@ def channel_hub_body(data):
     telegram_sync_items = load_existing_telegram_intake_sync()
     client_threads = build_client_work_threads(telegram_sync_items, limit=20)
     telegram_sync_rows = client_thread_rows(client_threads_by_state(), empty_text=tx("no_items", lang), limit=8, show_controls=True)
-    approved_rows = client_thread_rows(approved_client_thread_items(), empty_text=tx("no_items", lang), limit=8, show_controls=False)
+    approved_rows = work_object_rows(approved_workspace_object_items(), empty_text=tx("no_items", lang), limit=8, show_source=True, show_approval=True)
     if approved_preview_items():
         approved_rows += work_object_rows(approved_preview_items(), empty_text="", limit=5, show_source=True)
     pending_thread_items = pending_or_held_client_thread_items()
@@ -2377,13 +2578,14 @@ def channel_hub_body(data):
         + voice_intake_form_html(created_voice_obj)
         + "<br>"
         + telegram_db_diagnostic_block_html()
-        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V46.2 groups existing app.py memory into client work threads and persists owner approval decisions so approved threads stay active after reload/redeploy.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V46.2 safe mode: approved client thread decisions are persisted in memory_backups and promoted into Dashboard, Tasks and Office Manager active work queues. Full DB work-object writes still come later.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V47.0 converts approved app.py memory threads into stable NinaOS workspace objects for Tasks, Dashboard and Office Manager.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V47.0 safe mode: approved client threads are written as workspace-object snapshots in memory_backups and promoted into Dashboard, Tasks and Office Manager. Dedicated work-object tables come later.</div></section><br>"
         + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V46.2 persistent approval state</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V47.0 workspace object bridge</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
         + "<div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
         + "</div><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved Thread → Workspace Object Bridge</div><div class='list'>{approved_rows}</div><div class='safe-note'>V47.0: approved threads now exist as stable NinaOS workspace object snapshots.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('owner_send_back', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section>"
     )
 
@@ -2622,7 +2824,7 @@ def office_manager_body(data):
         + "</div><br>"
         + office_manager_action_panels(data)
         + "<br>"
-        + f"<section class='card card-pad'><div class='section-title'>Approved Thread → Active Workspace Work</div><div class='list'>{active_workspace_work_rows(limit=6, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V46.1: approved client threads are now visible here as active Office Manager work, while DB writes remain disabled.</div></section>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved Thread → Workspace Object Bridge</div><div class='list'>{active_workspace_work_rows(limit=6, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V47.0: approved client threads are visible here as workspace objects for Office Manager work. Dedicated work-object tables come later.</div></section>"
         + "<br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{work_object_rows(pending_or_held_preview_items(), empty_text=tx('no_items', lang), limit=5, show_source=True)}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
         + "<br>"
