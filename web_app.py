@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V46.0 — Approval Actions to Real Workspace Queue
+# NinaOS Web App V46.1 — Approved Thread to Active Workspace Work Bridge
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -7,14 +7,14 @@ import os
 from datetime import datetime
 from flask import Flask, Response, redirect, request
 
-WEB_APP_VERSION = "Web App V46.0 — Approval Actions to Real Workspace Queue"
+WEB_APP_VERSION = "Web App V46.1 — Approved Thread → Active Workspace Work Bridge"
 app = Flask(__name__)
 
-# V46.0 safe in-memory workspace preview store + client work thread workflow bridge.
+# V46.1 safe in-memory workspace preview store + client work thread workflow bridge.
 # This does NOT write to Postgres yet and does NOT touch Telegram app.py.
 # Telegram remains its own runtime; web_app.py only reads/surfaces shared intake/work data.
 WORKSPACE_ACTION_PREVIEWS = []
-# V46.0: read-only Telegram/client threads cannot yet be written back to app.py DB.
+# V46.1: read-only Telegram/client threads cannot yet be written back to app.py DB.
 # Their owner decisions are tracked safely in web runtime memory so the UI can promote
 # approved threads into the active workspace surfaces without mutating Postgres.
 THREAD_WORKFLOW_STATES = {}
@@ -218,7 +218,7 @@ def tx(key, lang=None):
         "source_channel": {"en": "Source channel", "lv": "Avota kanāls", "ru": "Канал источника"},
         "nina_prepare": {"en": "Nina, prepare work", "lv": "Nina, sagatavo darbu", "ru": "Nina, подготовь работу"},
         "voice_preview_created": {"en": "Voice intake preview created", "lv": "Balss ievades priekšskatījums izveidots", "ru": "Preview из голосового ввода создан"},
-        "voice_safe_note": {"en": "V46.0 safe mode: owner approval decisions now route client work threads into active workspace queues. Web still reads existing Telegram memory and does not write to Postgres yet.", "lv": "V46.0 drošais režīms: īpašnieka apstiprinājumi tagad pārvieto klienta darba pavedienus aktīvajās darba rindās. Web joprojām tikai lasa esošo Telegram atmiņu un vēl neraksta Postgres.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
+        "voice_safe_note": {"en": "V46.1 safe mode: approved client work threads are promoted into active workspace work across Dashboard, Tasks and Office Manager. Web still reads existing Telegram memory and does not write to Postgres yet.", "lv": "V46.1 drošais režīms: apstiprinātie klienta darba pavedieni tagad parādās aktīvajā darba vidē Dashboard, Uzdevumos un Office Manager. Web joprojām tikai lasa esošo Telegram atmiņu un vēl neraksta Postgres.", "ru": "Безопасный режим V45.2: web читает существующую память Telegram и task backups. Новая запись в DB — позже."},
         "detected_intent": {"en": "Detected intent", "lv": "Atpazītais nodoms", "ru": "Распознанное намерение"},
         "twenty_second_century": {"en": "22nd-century work surface: clients speak, send photos and documents; Nina organizes the work.", "lv": "22. gadsimta darba virsma: klienti runā, sūta bildes un dokumentus; Nina sakārto darbu.", "ru": "Рабочая поверхность 22 века: клиенты говорят, отправляют фото и документы; Nina организует работу."},
     }
@@ -1239,6 +1239,33 @@ def client_threads_by_state(state=None):
 def approved_client_thread_items():
     return client_threads_by_state("approved")
 
+def active_workspace_work_rows(limit=8, empty_text=None, include_preview=True):
+    """V46.1: render approved client threads as active workspace work across web surfaces.
+
+    This is still a safe read-only bridge: it does not write approved thread state
+    into Postgres, but it makes owner-approved Telegram/client threads visible
+    where real work is operated.
+    """
+    lang = current_language()
+    empty_text = empty_text or tx("no_items", lang)
+    approved_threads = approved_client_thread_items()[:int(limit or 8)]
+    approved_previews = approved_preview_items()[:int(limit or 8)] if include_preview else []
+    if not approved_threads and not approved_previews:
+        return f"<div class='row'><div><b>{html_escape(empty_text)}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
+    rows = ""
+    if approved_threads:
+        rows += client_thread_rows(approved_threads, empty_text="", limit=limit, show_controls=False, show_state=True)
+    if approved_previews:
+        rows += work_object_rows(approved_previews, empty_text="", limit=limit, show_source=True, show_approval=True)
+    return rows
+
+
+def approved_workspace_work_count():
+    try:
+        return len(approved_client_thread_items()) + len(approved_preview_items())
+    except Exception:
+        return 0
+
 
 def pending_or_held_client_thread_items():
     return client_threads_by_state(["pending_approval", "hold"])
@@ -1575,7 +1602,7 @@ def load_workspace_data():
         ]
 
     activity = [
-        {"title": "V46.0 approval workflow polish", "body": "Inbox now groups real app.py memory into client work threads with follow-up merge.", "kind": "sync"},
+        {"title": "V46.1 active work bridge polish", "body": "Inbox now groups real app.py memory into client work threads with follow-up merge.", "kind": "sync"},
         {"title": "V43.4 preview to real task surface", "body": "Approved preview objects now appear across Dashboard, Tasks and Office Manager surfaces in safe mode.", "kind": "work"},
         {"title": "Web service online", "body": "NinaOS web runtime is separated from Telegram runtime.", "kind": "info"},
         {"title": "Workspace loaded", "body": "V36 clean workspace data layer is active.", "kind": "info"},
@@ -1666,7 +1693,7 @@ def dashboard_body(data):
     )
     workers = "".join(worker_card(w) for w in data["workers"])
     activity = "".join(activity_row(a) for a in data["activity"][:6])
-    approved_dashboard_rows = work_object_rows(approved_preview_items(), empty_text=tx("no_items", lang), limit=4, show_source=True)
+    approved_dashboard_rows = active_workspace_work_rows(limit=4, empty_text=tx("no_items", lang))
     snapshot_kpis = (
         kpi_card(tx("clients", lang), c["clients"], {"text": tx("crm", lang), "href": "/clients"})
         + kpi_card(tx("workers", lang), c["workers"], {"text": tx("ai_workforce", lang), "href": "/workers"})
@@ -1748,8 +1775,8 @@ def tasks_body(data):
     telegram_sync_rows = client_thread_rows(client_threads_by_state(), empty_text=tx("no_items", lang), limit=8, show_controls=True)
     return (
         work_page_header(tx("tasks"), tx("tasks_sub"))
-        + "<section class='card card-pad'><div class='section-title'>Client Work Threads</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V46.0: owner decisions now route client work threads. Approve promotes a thread into the active workspace queue; Hold keeps it pending; Reject moves it to the rejected log. DB writes are still disabled.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Approved Client Work Queue</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>Client Work Threads</div><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V46.1: approved client threads are now visible as active workspace work on Tasks, Dashboard and Office Manager. Hold keeps a thread pending; Reject moves it to the rejected log. DB writes are still disabled.</div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved Thread → Active Workspace Work</div><div class='list'>{approved_rows}</div><div class='safe-note'>V46.1: approved client threads are promoted as active workspace work on this Tasks surface. Postgres writes remain disabled.</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('all_workspace_work', lang)}</div><div class='list'>{all_rows}</div></section><br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('rejected_preview_log', lang)}</div><div class='list'>{rejected_rows}</div></section>"
@@ -2159,7 +2186,7 @@ def telegram_db_diagnostic_block_html():
     diag = telegram_bridge_db_diagnostics()
     return (
         "<section class='card card-pad'>"
-        "<div class='section-title'>🧪 V46.0 DB Diagnostic</div>"
+        "<div class='section-title'>🧪 V46.1 DB Diagnostic</div>"
         "<p class='muted'>Read-only check: does Web service see the same Postgres memory that Telegram app.py writes?</p>"
         "<div class='list'>" + diagnostic_rows_html(diag) + "</div>"
         "<div class='safe-note'>Open JSON: <a href='/diagnostics/telegram-sync'>/diagnostics/telegram-sync</a>. If counts are zero here but Telegram works, Railway services may not share the same DATABASE_URL or app.py writes to a different table/source.</div>"
@@ -2204,9 +2231,9 @@ def channel_hub_body(data):
         + voice_intake_form_html(created_voice_obj)
         + "<br>"
         + telegram_db_diagnostic_block_html()
-        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V46.0 groups existing app.py memory into client work threads and lets the owner approve, hold or reject each thread before it becomes active workspace work.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V46.0 safe mode: approved client threads are promoted into workspace queues. Web reads existing Telegram memory and tracks decisions safely; DB writes still come later.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V46.1 groups existing app.py memory into client work threads and promotes approved threads into active workspace work surfaces.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V46.1 safe mode: approved client threads are promoted into Dashboard, Tasks and Office Manager active work queues. Web reads existing Telegram memory and tracks decisions safely; DB writes still come later.</div></section><br>"
         + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V46.0 approval workflow</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
+        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V46.1 active work bridge</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
         + "<div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
@@ -2449,11 +2476,11 @@ def office_manager_body(data):
         + "</div><br>"
         + office_manager_action_panels(data)
         + "<br>"
-        + f"<section class='card card-pad'><div class='section-title'>{tx('real_task_surface_bridge', lang)}</div><div class='list'>{work_object_rows(approved_preview_items(), empty_text=tx('no_items', lang), limit=5, show_source=True)}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section>"
+        + f"<section class='card card-pad'><div class='section-title'>Approved Thread → Active Workspace Work</div><div class='list'>{active_workspace_work_rows(limit=6, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V46.1: approved client threads are now visible here as active Office Manager work, while DB writes remain disabled.</div></section>"
         + "<br>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{work_object_rows(pending_or_held_preview_items(), empty_text=tx('no_items', lang), limit=5, show_source=True)}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
         + "<br>"
-        + f"<section class='card card-pad'><div class='section-title'>{tx('approved_workspace_queue', lang)}</div><div class='list'>{work_object_rows(approved_preview_items(), empty_text=tx('no_items', lang), limit=5, show_source=True)}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section>"
+        + f"<section class='card card-pad'><div class='section-title'>{tx('approved_workspace_queue', lang)}</div><div class='list'>{active_workspace_work_rows(limit=6, empty_text=tx('no_items', lang))}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section>"
         + "<br><div class='two-col'>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('linked_work', lang)}</div><div class='list'>{mini_list(tasks, 'No task queue yet')}</div></section>"
         + f"<section class='card card-pad'><div class='section-title'>{tx('estimates', lang)} / {tx('invoices', lang)}</div><div class='list'>{mini_list(estimates + invoices, 'No finance admin queue yet')}</div></section>"
@@ -2587,6 +2614,8 @@ def health():
         "language": current_language(),
         "preview_objects": len(WORKSPACE_ACTION_PREVIEWS),
         "approved_preview_objects": len(approved_preview_items()),
+        "approved_client_threads": len(approved_client_thread_items()),
+        "active_workspace_work_count": approved_workspace_work_count(),
         "pending_or_held_preview_objects": len(pending_or_held_preview_items()),
         "rejected_preview_objects": len(rejected_preview_items()),
         "telegram_intake_sync_items": len(load_existing_telegram_intake_sync()),
