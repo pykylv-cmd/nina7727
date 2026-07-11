@@ -19,7 +19,7 @@ try:
     )
     ONE_NINA_WORK_READ_READY = True
 except Exception as e:
-    print("V51.3 ONE NINA work_objects read import error:", repr(e))
+    print("V51.8.1 ONE NINA work_objects base import error:", repr(e))
     ONE_NINA_WORK_OBJECTS_VERSION = "Persistent Work Objects nav pieslēgts"
     ONE_NINA_WORK_READ_READY = False
 
@@ -29,7 +29,40 @@ except Exception as e:
     def one_nina_work_persistence_health():
         return {"ok": False, "error": "Persistent Work Objects nav pieslēgts"}
 
-WEB_APP_VERSION = "Web App V51.6.2 — ONE NINA UI SPACING FIX"
+try:
+    from work_objects import canonical_action_result as one_nina_canonical_action_result
+except Exception as e:
+    print("V51.8.1 canonical action reader compatibility mode:", repr(e))
+
+    def one_nina_canonical_action_result(obj, action_key):
+        metadata = obj.metadata if isinstance(getattr(obj, "metadata", None), dict) else {}
+        actions = metadata.get("canonical_actions")
+        if not isinstance(actions, dict):
+            return {}
+        result = actions.get(str(action_key or "").strip())
+        return dict(result) if isinstance(result, dict) else {}
+
+try:
+    from work_engine import (
+        prepare_canonical_estimate_draft as one_nina_prepare_estimate_draft,
+        decide_canonical_estimate_draft as one_nina_decide_estimate_draft,
+        ESTIMATE_ACTION_KEY as ONE_NINA_ESTIMATE_ACTION_KEY,
+        WORK_ENGINE_VERSION as ONE_NINA_WORK_ENGINE_VERSION,
+    )
+    ONE_NINA_ESTIMATE_ACTION_READY = True
+except Exception as e:
+    print("V51.8.1 ONE NINA estimate action import error:", repr(e))
+    ONE_NINA_ESTIMATE_ACTION_KEY = "estimate_draft_v1"
+    ONE_NINA_WORK_ENGINE_VERSION = "Work Engine nav pieslēgts"
+    ONE_NINA_ESTIMATE_ACTION_READY = False
+
+    def one_nina_prepare_estimate_draft(*args, **kwargs):
+        return {"ok": False, "error": "estimate_action_unavailable"}
+
+    def one_nina_decide_estimate_draft(*args, **kwargs):
+        return {"ok": False, "error": "estimate_approval_unavailable"}
+
+WEB_APP_VERSION = "Web App V51.8.1 — ONE NINA Estimate Approval V1 Release-Safe"
 app = Flask(__name__)
 
 # V47.1 safe workspace-object surface polish.
@@ -87,6 +120,53 @@ def one_nina_canonical_work_objects(limit=200):
         return []
 
 
+def one_nina_estimate_action_html(obj):
+    """Web renders and triggers the canonical estimate action; it owns no work truth."""
+    if str(getattr(obj, "object_type", "") or "").strip().lower() != "estimate":
+        return ""
+
+    result = one_nina_canonical_action_result(obj, ONE_NINA_ESTIMATE_ACTION_KEY)
+    draft_text = str((result or {}).get("draft_text") or "").strip()
+    approval_state = str((result or {}).get("approval_state") or "").strip().lower()
+    object_id = str(getattr(obj, "object_id", "") or "").strip()
+
+    if not draft_text:
+        if not ONE_NINA_ESTIMATE_ACTION_READY or not object_id:
+            return "<div class='safe-note'>Estimate action is unavailable.</div>"
+        return (
+            f"<form method='post' action='{q('/work-objects/' + quote_plus(object_id) + '/estimate-draft')}' style='margin-top:12px'>"
+            "<button class='btn primary' type='submit'>Prepare estimate draft</button>"
+            "</form>"
+        )
+
+    state_label = {
+        "pending": "PENDING APPROVAL",
+        "approved": "APPROVED",
+        "hold": "HOLD",
+        "rejected": "REJECTED",
+    }.get(approval_state, approval_state.upper() or "PREPARED")
+
+    controls = ""
+    if object_id and approval_state != "approved":
+        controls = (
+            "<div style='display:flex;gap:8px;flex-wrap:wrap;margin-top:10px'>"
+            f"<form method='post' action='{q('/work-objects/' + quote_plus(object_id) + '/estimate-approval/approve')}'><button class='btn primary' type='submit'>Approve</button></form>"
+            f"<form method='post' action='{q('/work-objects/' + quote_plus(object_id) + '/estimate-approval/hold')}'><button class='btn' type='submit'>Hold</button></form>"
+            f"<form method='post' action='{q('/work-objects/' + quote_plus(object_id) + '/estimate-approval/reject')}'><button class='btn' type='submit'>Reject</button></form>"
+            "</div>"
+        )
+
+    return (
+        "<div class='preview-box' style='margin-top:12px'>"
+        "<b>Estimate draft — prepared by ONE NINA</b>"
+        f"<span class='muted'>{html_escape(state_label)}</span>"
+        f"<div class='muted' style='white-space:pre-wrap;margin-top:8px'>{html_escape(draft_text)}</div>"
+        f"{controls}"
+        "<div class='safe-note'>Draft and approval state are saved on this same canonical estimate Work Object.</div>"
+        "</div>"
+    )
+
+
 def one_nina_work_object_rows(limit=20, empty_text="No canonical work objects yet."):
     objects = one_nina_canonical_work_objects(limit=limit)
     if not objects:
@@ -118,11 +198,13 @@ def one_nina_work_object_rows(limit=20, empty_text="No canonical work objects ye
         evidence = raw_text or source_key or str(getattr(obj, "object_id", "") or "")
         if len(evidence) > 220:
             evidence = evidence[:217] + "..."
+        action_html = one_nina_estimate_action_html(obj)
         rows.append(
-            "<div class='row'><div>"
+            "<div class='row'><div style='flex:1'>"
             f"<b>{html_escape(getattr(obj, 'title', '') or 'Canonical Work Object')}</b>"
             f"<span class='muted'>{html_escape(' · '.join(details))}</span>"
             f"<span class='muted'>{html_escape(evidence)}</span>"
+            f"{action_html}"
             "</div><span class='pill'>ONE NINA</span></div>"
         )
     return "".join(rows)
@@ -381,6 +463,7 @@ def one_nina_client_business_detail_cards(profile):
             "</div><span class='pill'>ONE NINA</span></div>"
             "</div><br>"
             f"{one_nina_business_detail_rows_for_object(obj)}"
+            f"{one_nina_estimate_action_html(obj)}"
             "<div class='safe-note'>"
             "V51.6 renders metadata.business_details already extracted by shared work_objects.py V2.2. "
             "Web does not parse or re-extract Telegram text."
@@ -4919,6 +5002,24 @@ def office_manager_actions():
 def office_manager():
     data = load_workspace_data()
     return Response(page(tx("office_manager"), office_manager_body(data), active="workers"), mimetype="text/html")
+
+
+@app.route("/work-objects/<object_id>/estimate-draft", methods=["POST"])
+def prepare_estimate_draft(object_id):
+    result = one_nina_prepare_estimate_draft(unquote_plus(object_id))
+    return_to = (request.args.get("return_to") or request.referrer or q("/tasks")).strip()
+    if not result.get("ok"):
+        print("V51.8.1 estimate action error:", result)
+    return redirect(return_to)
+
+
+@app.route("/work-objects/<object_id>/estimate-approval/<decision>", methods=["POST"])
+def decide_estimate_draft(object_id, decision):
+    result = one_nina_decide_estimate_draft(unquote_plus(object_id), decision)
+    return_to = (request.args.get("return_to") or request.referrer or q("/tasks")).strip()
+    if not result.get("ok"):
+        print("V51.8.1 estimate approval error:", result)
+    return redirect(return_to)
 
 
 @app.route("/tasks")
