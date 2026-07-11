@@ -1,6 +1,6 @@
 """
 reply_builder.py
-NinaOS Reply Builder V1.1.1 — ONE NINA Canonical Estimate Draft
+NinaOS Reply Builder V1.2 — ONE NINA Client Deliverable Privacy
 
 Central communication layer for NinaOS.
 Business actions pass structured canonical context into this module.
@@ -12,8 +12,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict
 
-REPLY_BUILDER_VERSION = "Reply Builder V1.1.1 — ONE NINA Canonical Estimate Draft"
-APP_VERSION = "V116.4 + ONE NINA Canonical Estimate Action V1"
+REPLY_BUILDER_VERSION = "Reply Builder V1.2 — ONE NINA Client Deliverable Privacy"
+APP_VERSION = "V116.6 + ONE NINA Forwarded Work Intake V1.1"
 
 _VERSION_PATTERNS = [
     r"\n{0,2}Versija:\s*V[0-9.]+\s*$",
@@ -195,3 +195,52 @@ def reply_builder_status_answer():
         "Canonical estimate actions var nodot strukturētus business_details un saņemt klientam gatavu draftu.",
         source="reply_builder_status",
     )
+
+
+def clean_client_deliverable_text(value: Any) -> str:
+    """Return text safe to hand directly to a client: no NinaOS/AI/version markers."""
+    text = rb_clean_text(value)
+    blocked_prefixes = ("versija:", "one nina", "ninaos", "reply builder", "work engine")
+    lines = []
+    for line in text.splitlines():
+        if line.strip().lower().startswith(blocked_prefixes):
+            continue
+        lines.append(line)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def build_client_reply_prompt(client_name: str, incoming_text: str, related_work_context: str = "") -> str:
+    """Central ONE NINA communication prompt for a client-ready reply draft."""
+    return f"""
+Tu esi Nina, neredzams darba palīgs uzņēmuma īpašniekam.
+Sagatavo TIKAI gatavu ziņu, ko īpašnieks var pārsūtīt klientam kā savu atbildi.
+Klients nedrīkst redzēt vai nojaust Ninu, AI, NinaOS, versiju vai tehnisko sistēmu.
+Neraksti ievadu, paskaidrojumu, analīzi vai frāzi 'te ir atbilde'.
+Neizdomā datumus, cenas, solījumus vai faktus, kuru nav dotajā kontekstā.
+Raksti dabiski, īsi un profesionāli latviski.
+
+Klients: {client_name or 'nav droši zināms'}
+Klienta ziņa:
+{incoming_text}
+
+Saistītais canonical darba konteksts:
+{related_work_context or 'nav'}
+
+Atdod tikai klientam sūtāmo ziņu.
+""".strip()
+
+
+def build_client_reply_draft(client_name: str, incoming_text: str, related_work_context: str, generator) -> Dict[str, Any]:
+    """Build a client-ready reply using the central communication layer and a supplied ONE NINA generator."""
+    incoming = rb_clean_text(incoming_text)
+    if not incoming:
+        return {"ok": False, "error": "missing_incoming_text", "text": ""}
+    prompt = build_client_reply_prompt(client_name, incoming, related_work_context)
+    try:
+        raw = generator(prompt)
+    except Exception as exc:
+        return {"ok": False, "error": "client_reply_generation_failed", "detail": repr(exc), "text": ""}
+    text = clean_client_deliverable_text(raw)
+    if not text:
+        return {"ok": False, "error": "empty_client_reply", "text": ""}
+    return {"ok": True, "text": text, "builder": REPLY_BUILDER_VERSION}
