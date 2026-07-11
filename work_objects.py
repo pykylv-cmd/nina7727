@@ -1,20 +1,48 @@
 # work_objects.py
-# NinaOS Work Objects V1.0
-# Build target: NinaOS Constitution V4.2
+# NinaOS Persistent Work Objects V2.0
+# ONE NINA CORE V1 — Persistent Work Objects
+# Build target: NinaOS Constitution V4 / V4.2
 #
 # Purpose:
-# - Universal Work Object layer for NinaOS
-# - First object model for Nina Office Manager SMB dashboard
-# - Supports tasks, clients, projects, estimates, invoices, follow-ups, documents
+# - one canonical Work Object language for NinaOS
+# - Postgres-backed persistent truth in Railway
+# - SQLite-backed persistent truth for local development
+# - shared by Telegram runtime, Web runtime and future channels
+# - source_key deduplication so one intake event creates one canonical object
 #
-# Safe standalone import. No database required.
+# IMPORTANT:
+# - WORK_OBJECT_STORE remains only as a compatibility cache.
+# - It is NOT the source of truth.
+# - nina_work_objects database table is the source of truth.
+# - Existing memory_backups / conversation_state data is not deleted or modified.
 
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import uuid
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    import psycopg2
+except Exception:
+    psycopg2 = None
 
 
-WORK_OBJECTS_VERSION = "Work Objects V1.0"
+WORK_OBJECTS_VERSION = "Persistent Work Objects V2.0 — ONE NINA CORE"
+DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
+DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
+USE_POSTGRES = bool(DATABASE_URL and psycopg2)
+
+_TABLE_NAME = "nina_work_objects"
+_SCHEMA_READY = False
+
+
+class WorkObjectPersistenceError(RuntimeError):
+    """Raised when NinaOS cannot safely reach persistent Work Object storage."""
 
 
 @dataclass(frozen=True)
@@ -43,8 +71,11 @@ class WorkObject:
     due_date: str = ""
     linked_files: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
-    updated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    origin_channel: str = ""
+    origin_user_id: str = ""
+    source_key: str = ""
+    created_at: str = field(default_factory=lambda: _utc_now())
+    updated_at: str = field(default_factory=lambda: _utc_now())
 
 
 # =========================================================
@@ -235,36 +266,274 @@ WORK_OBJECT_TYPES: Dict[str, WorkObjectType] = {
 
 
 # =========================================================
-# Demo object store
+# Compatibility cache — NOT source of truth
 # =========================================================
 
 WORK_OBJECT_STORE: Dict[str, WorkObject] = {}
 
 
 # =========================================================
-# Core helpers
+# Persistence helpers
 # =========================================================
 
-def work_objects_status() -> str:
-    return (
-        "🧱 NinaOS Work Objects\n\n"
-        f"Version: {WORK_OBJECTS_VERSION}\n"
-        f"Registered object types: {len(WORK_OBJECT_TYPES)}\n"
-        f"Stored demo objects: {len(WORK_OBJECT_STORE)}\n\n"
-        "Core objects:\n"
-        "• task\n"
-        "• client\n"
-        "• project\n"
-        "• estimate\n"
-        "• invoice\n"
-        "• followup_task\n"
-        "• document_case\n\n"
-        "Status: active ✅"
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _clean(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _json_dumps(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    except Exception:
+        return json.dumps({"raw": str(value)}, ensure_ascii=False)
+
+
+def _json_loads(value: Any, fallback: Any) -> Any:
+    if value in (None, ""):
+        return fallback
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(str(value))
+    except Exception:
+        return fallback
+
+
+def _sql(sql: str) -> str:
+    return sql if USE_POSTGRES else sql.replace("%s", "?")
+
+
+def _connect():
+    if USE_POSTGRES:
+        return psycopg2.connect(DATABASE_URL)
+    return sqlite3.connect(DB_FILE)
+
+
+def _execute(cursor, sql: str, params: Tuple[Any, ...] = ()):
+    return cursor.execute(_sql(sql), params)
+
+
+def _table_columns(conn) -> List[str]:
+    cur = conn.cursor()
+    try:
+        if USE_POSTGRES:
+            _execute(
+                cur,
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = %s
+                """,
+                (_TABLE_NAME,),
+            )
+            return [str(row[0]) for row in cur.fetchall()]
+        _execute(cur, f"PRAGMA table_info({_TABLE_NAME})")
+        return [str(row[1]) for row in cur.fetchall()]
+    finally:
+        cur.close()
+
+
+def _add_missing_columns(conn) -> None:
+    columns = set(_table_columns(conn))
+    additions = {
+        "origin_channel": "TEXT DEFAULT ''",
+        "origin_user_id": "TEXT DEFAULT ''",
+        "source_key": "TEXT NULL",
+        "linked_files_json": "TEXT DEFAULT '[]'",
+        "metadata_json": "TEXT DEFAULT '{}'",
+        "created_at": "TEXT",
+        "updated_at": "TEXT",
+    }
+    cur = conn.cursor()
+    try:
+        for name, sql_type in additions.items():
+            if name not in columns:
+                cur.execute(f"ALTER TABLE {_TABLE_NAME} ADD COLUMN {name} {sql_type}")
+        conn.commit()
+    finally:
+        cur.close()
+
+
+def ensure_work_objects_schema() -> bool:
+    """Create the canonical Work Object table safely.
+
+    The operation is additive only. Existing NinaOS memory tables are untouched.
+    """
+    global _SCHEMA_READY
+    if _SCHEMA_READY:
+        return True
+
+    conn = None
+    try:
+        conn = _connect()
+        cur = conn.cursor()
+        try:
+            id_type = "BIGSERIAL" if USE_POSTGRES else "INTEGER"
+            id_pk = "PRIMARY KEY" if USE_POSTGRES else "PRIMARY KEY AUTOINCREMENT"
+            cur.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {_TABLE_NAME} (
+                    id {id_type} {id_pk},
+                    object_id TEXT NOT NULL UNIQUE,
+                    workspace_id TEXT NOT NULL,
+                    object_type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    assigned_agent_id TEXT DEFAULT '',
+                    client_id TEXT DEFAULT '',
+                    project_id TEXT DEFAULT '',
+                    priority TEXT DEFAULT 'normal',
+                    due_date TEXT DEFAULT '',
+                    linked_files_json TEXT DEFAULT '[]',
+                    metadata_json TEXT DEFAULT '{{}}',
+                    origin_channel TEXT DEFAULT '',
+                    origin_user_id TEXT DEFAULT '',
+                    source_key TEXT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.commit()
+        finally:
+            cur.close()
+
+        _add_missing_columns(conn)
+
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                f"""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_nina_work_objects_workspace_source_key
+                ON {_TABLE_NAME} (workspace_id, source_key)
+                """
+            )
+            cur.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_nina_work_objects_workspace_type
+                ON {_TABLE_NAME} (workspace_id, object_type)
+                """
+            )
+            cur.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_nina_work_objects_client
+                ON {_TABLE_NAME} (workspace_id, client_id)
+                """
+            )
+            cur.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_nina_work_objects_updated
+                ON {_TABLE_NAME} (updated_at)
+                """
+            )
+            conn.commit()
+        finally:
+            cur.close()
+
+        _SCHEMA_READY = True
+        return True
+    except Exception as exc:
+        raise WorkObjectPersistenceError(
+            f"NinaOS Work Object persistence nav pieejams: {exc}"
+        ) from exc
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _row_to_work_object(row: Any) -> WorkObject:
+    return WorkObject(
+        object_id=_clean(row[0]),
+        workspace_id=_clean(row[1]),
+        object_type=_clean(row[2]),
+        title=_clean(row[3]),
+        status=_clean(row[4]) or "open",
+        assigned_agent_id=_clean(row[5]),
+        client_id=_clean(row[6]),
+        project_id=_clean(row[7]),
+        priority=_clean(row[8]) or "normal",
+        due_date=_clean(row[9]),
+        linked_files=list(_json_loads(row[10], [])),
+        metadata=dict(_json_loads(row[11], {})),
+        origin_channel=_clean(row[12]),
+        origin_user_id=_clean(row[13]),
+        source_key=_clean(row[14]),
+        created_at=_clean(row[15]),
+        updated_at=_clean(row[16]),
     )
 
 
+_SELECT_FIELDS = """
+    object_id,
+    workspace_id,
+    object_type,
+    title,
+    status,
+    assigned_agent_id,
+    client_id,
+    project_id,
+    priority,
+    due_date,
+    linked_files_json,
+    metadata_json,
+    origin_channel,
+    origin_user_id,
+    source_key,
+    created_at,
+    updated_at
+"""
+
+
+def _cache(obj: Optional[WorkObject]) -> Optional[WorkObject]:
+    if obj is not None:
+        WORK_OBJECT_STORE[obj.object_id] = obj
+    return obj
+
+
+def persistence_backend() -> str:
+    return "postgres" if USE_POSTGRES else f"sqlite:{DB_FILE}"
+
+
+def persistence_health() -> Dict[str, Any]:
+    try:
+        ensure_work_objects_schema()
+        conn = _connect()
+        cur = conn.cursor()
+        try:
+            _execute(cur, f"SELECT COUNT(*) FROM {_TABLE_NAME}")
+            count = int((cur.fetchone() or [0])[0] or 0)
+        finally:
+            cur.close()
+            conn.close()
+        return {
+            "ok": True,
+            "backend": persistence_backend(),
+            "table": _TABLE_NAME,
+            "objects": count,
+            "version": WORK_OBJECTS_VERSION,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "backend": persistence_backend(),
+            "table": _TABLE_NAME,
+            "error": str(exc)[:300],
+            "version": WORK_OBJECTS_VERSION,
+        }
+
+
+# =========================================================
+# Registry helpers
+# =========================================================
+
 def get_work_object_type(type_id: str) -> Optional[WorkObjectType]:
-    return WORK_OBJECT_TYPES.get(type_id)
+    return WORK_OBJECT_TYPES.get(_clean(type_id))
 
 
 def list_work_object_types() -> List[WorkObjectType]:
@@ -273,6 +542,89 @@ def list_work_object_types() -> List[WorkObjectType]:
 
 def list_work_object_type_ids() -> List[str]:
     return sorted(WORK_OBJECT_TYPES.keys())
+
+
+def _validate_object_type(object_type: str) -> WorkObjectType:
+    obj_type = get_work_object_type(object_type)
+    if not obj_type:
+        raise ValueError(f"Unknown work object type: {object_type}")
+    return obj_type
+
+
+def _default_status(object_type: str) -> str:
+    obj_type = _validate_object_type(object_type)
+    return obj_type.default_statuses[0] if obj_type.default_statuses else "open"
+
+
+def _validate_status(object_type: str, status: str) -> str:
+    value = _clean(status) or _default_status(object_type)
+    obj_type = _validate_object_type(object_type)
+    if obj_type.default_statuses and value not in obj_type.default_statuses:
+        raise ValueError(
+            f"Invalid status '{value}' for work object type '{object_type}'. "
+            f"Allowed: {', '.join(obj_type.default_statuses)}"
+        )
+    return value
+
+
+# =========================================================
+# Canonical Work Object API
+# =========================================================
+
+def get_work_object_by_source_key(
+    source_key: str,
+    workspace_id: str = "demo_small_business",
+) -> Optional[WorkObject]:
+    source_key = _clean(source_key)
+    workspace_id = _clean(workspace_id) or "demo_small_business"
+    if not source_key:
+        return None
+
+    ensure_work_objects_schema()
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        _execute(
+            cur,
+            f"""
+            SELECT {_SELECT_FIELDS}
+            FROM {_TABLE_NAME}
+            WHERE workspace_id = %s AND source_key = %s
+            LIMIT 1
+            """,
+            (workspace_id, source_key),
+        )
+        row = cur.fetchone()
+        return _cache(_row_to_work_object(row)) if row else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_work_object(object_id: str) -> Optional[WorkObject]:
+    object_id = _clean(object_id)
+    if not object_id:
+        return None
+
+    ensure_work_objects_schema()
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        _execute(
+            cur,
+            f"""
+            SELECT {_SELECT_FIELDS}
+            FROM {_TABLE_NAME}
+            WHERE object_id = %s
+            LIMIT 1
+            """,
+            (object_id,),
+        )
+        row = cur.fetchone()
+        return _cache(_row_to_work_object(row)) if row else None
+    finally:
+        cur.close()
+        conn.close()
 
 
 def create_work_object(
@@ -287,66 +639,289 @@ def create_work_object(
     status: Optional[str] = None,
     linked_files: Optional[List[str]] = None,
     metadata: Optional[Dict[str, Any]] = None,
+    origin_channel: str = "",
+    origin_user_id: str = "",
+    source_key: str = "",
 ) -> WorkObject:
-    object_type_def = get_work_object_type(object_type)
-    if not object_type_def:
-        raise ValueError(f"Unknown work object type: {object_type}")
+    """Create one canonical persistent Work Object.
 
-    if status is None:
-        status = object_type_def.default_statuses[0] if object_type_def.default_statuses else "open"
+    Backward-compatible with the V1 signature. New fields are optional.
+    When source_key is present, an existing object with the same
+    (workspace_id, source_key) is returned instead of creating a duplicate.
+    """
+    object_type = _clean(object_type)
+    title = _clean(title)
+    workspace_id = _clean(workspace_id) or "demo_small_business"
+    source_key = _clean(source_key)
 
-    object_id = f"{object_type}_{len(WORK_OBJECT_STORE) + 1}"
+    _validate_object_type(object_type)
+    if not title:
+        raise ValueError("Work object title is required.")
 
+    if source_key:
+        existing = get_work_object_by_source_key(source_key, workspace_id)
+        if existing:
+            return existing
+
+    status_value = _validate_status(object_type, status or _default_status(object_type))
+    now = _utc_now()
     obj = WorkObject(
-        object_id=object_id,
+        object_id=f"wo_{uuid.uuid4().hex}",
         object_type=object_type,
-        title=title.strip(),
-        status=status,
+        title=title,
+        status=status_value,
+        workspace_id=workspace_id,
+        assigned_agent_id=_clean(assigned_agent_id),
+        client_id=_clean(client_id),
+        project_id=_clean(project_id),
+        priority=_clean(priority) or "normal",
+        due_date=_clean(due_date),
+        linked_files=list(linked_files or []),
+        metadata=dict(metadata or {}),
+        origin_channel=_clean(origin_channel),
+        origin_user_id=_clean(origin_user_id),
+        source_key=source_key,
+        created_at=now,
+        updated_at=now,
+    )
+
+    ensure_work_objects_schema()
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        _execute(
+            cur,
+            f"""
+            INSERT INTO {_TABLE_NAME} (
+                object_id,
+                workspace_id,
+                object_type,
+                title,
+                status,
+                assigned_agent_id,
+                client_id,
+                project_id,
+                priority,
+                due_date,
+                linked_files_json,
+                metadata_json,
+                origin_channel,
+                origin_user_id,
+                source_key,
+                created_at,
+                updated_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                obj.object_id,
+                obj.workspace_id,
+                obj.object_type,
+                obj.title,
+                obj.status,
+                obj.assigned_agent_id,
+                obj.client_id,
+                obj.project_id,
+                obj.priority,
+                obj.due_date,
+                _json_dumps(obj.linked_files),
+                _json_dumps(obj.metadata),
+                obj.origin_channel,
+                obj.origin_user_id,
+                obj.source_key or None,
+                obj.created_at,
+                obj.updated_at,
+            ),
+        )
+        conn.commit()
+        return _cache(obj)
+    except Exception:
+        conn.rollback()
+        if source_key:
+            existing = get_work_object_by_source_key(source_key, workspace_id)
+            if existing:
+                return existing
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+
+def save_or_get_work_object(
+    *,
+    object_type: str,
+    title: str,
+    source_key: str,
+    workspace_id: str = "demo_small_business",
+    assigned_agent_id: str = "nina_office_manager_smb",
+    client_id: str = "",
+    project_id: str = "",
+    priority: str = "normal",
+    due_date: str = "",
+    status: Optional[str] = None,
+    linked_files: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    origin_channel: str = "",
+    origin_user_id: str = "",
+) -> Tuple[WorkObject, bool]:
+    """Idempotent canonical save.
+
+    Returns (object, created).
+    The source_key is mandatory because this API is intended for channel bridges.
+    """
+    source_key = _clean(source_key)
+    if not source_key:
+        raise ValueError("source_key is required for save_or_get_work_object().")
+
+    existing = get_work_object_by_source_key(source_key, workspace_id)
+    if existing:
+        return existing, False
+
+    obj = create_work_object(
+        object_type=object_type,
+        title=title,
         workspace_id=workspace_id,
         assigned_agent_id=assigned_agent_id,
         client_id=client_id,
         project_id=project_id,
         priority=priority,
         due_date=due_date,
-        linked_files=linked_files or [],
-        metadata=metadata or {},
+        status=status,
+        linked_files=linked_files,
+        metadata=metadata,
+        origin_channel=origin_channel,
+        origin_user_id=origin_user_id,
+        source_key=source_key,
     )
-
-    WORK_OBJECT_STORE[object_id] = obj
-    return obj
-
-
-def get_work_object(object_id: str) -> Optional[WorkObject]:
-    return WORK_OBJECT_STORE.get(object_id)
+    return obj, True
 
 
 def list_work_objects(
     workspace_id: Optional[str] = None,
     object_type: Optional[str] = None,
     status: Optional[str] = None,
+    client_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+    limit: int = 500,
 ) -> List[WorkObject]:
-    objects = list(WORK_OBJECT_STORE.values())
+    ensure_work_objects_schema()
+
+    where: List[str] = []
+    params: List[Any] = []
 
     if workspace_id:
-        objects = [o for o in objects if o.workspace_id == workspace_id]
-
+        where.append("workspace_id = %s")
+        params.append(_clean(workspace_id))
     if object_type:
-        objects = [o for o in objects if o.object_type == object_type]
-
+        where.append("object_type = %s")
+        params.append(_clean(object_type))
     if status:
-        objects = [o for o in objects if o.status == status]
+        where.append("status = %s")
+        params.append(_clean(status))
+    if client_id:
+        where.append("client_id = %s")
+        params.append(_clean(client_id))
+    if project_id:
+        where.append("project_id = %s")
+        params.append(_clean(project_id))
 
-    return objects
+    where_sql = " WHERE " + " AND ".join(where) if where else ""
+    safe_limit = max(1, min(int(limit or 500), 5000))
+
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        _execute(
+            cur,
+            f"""
+            SELECT {_SELECT_FIELDS}
+            FROM {_TABLE_NAME}
+            {where_sql}
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT %s
+            """,
+            tuple(params + [safe_limit]),
+        )
+        objects = [_row_to_work_object(row) for row in cur.fetchall()]
+        for obj in objects:
+            _cache(obj)
+        return objects
+    finally:
+        cur.close()
+        conn.close()
 
 
-def update_work_object_status(object_id: str, status: str) -> Optional[WorkObject]:
+def update_work_object(
+    object_id: str,
+    *,
+    title: Optional[str] = None,
+    status: Optional[str] = None,
+    assigned_agent_id: Optional[str] = None,
+    client_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+    priority: Optional[str] = None,
+    due_date: Optional[str] = None,
+    linked_files: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[WorkObject]:
     obj = get_work_object(object_id)
     if not obj:
         return None
 
-    obj.status = status
-    obj.updated_at = datetime.utcnow().isoformat()
-    return obj
+    next_title = obj.title if title is None else _clean(title)
+    if not next_title:
+        raise ValueError("Work object title cannot be empty.")
+
+    next_status = obj.status if status is None else _validate_status(obj.object_type, status)
+    next_metadata = obj.metadata if metadata is None else dict(metadata)
+    next_files = obj.linked_files if linked_files is None else list(linked_files)
+    updated_at = _utc_now()
+
+    ensure_work_objects_schema()
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        _execute(
+            cur,
+            f"""
+            UPDATE {_TABLE_NAME}
+            SET
+                title = %s,
+                status = %s,
+                assigned_agent_id = %s,
+                client_id = %s,
+                project_id = %s,
+                priority = %s,
+                due_date = %s,
+                linked_files_json = %s,
+                metadata_json = %s,
+                updated_at = %s
+            WHERE object_id = %s
+            """,
+            (
+                next_title,
+                next_status,
+                obj.assigned_agent_id if assigned_agent_id is None else _clean(assigned_agent_id),
+                obj.client_id if client_id is None else _clean(client_id),
+                obj.project_id if project_id is None else _clean(project_id),
+                obj.priority if priority is None else (_clean(priority) or "normal"),
+                obj.due_date if due_date is None else _clean(due_date),
+                _json_dumps(next_files),
+                _json_dumps(next_metadata),
+                updated_at,
+                obj.object_id,
+            ),
+        )
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+    return get_work_object(obj.object_id)
+
+
+def update_work_object_status(object_id: str, status: str) -> Optional[WorkObject]:
+    return update_work_object(object_id, status=status)
 
 
 def count_work_objects(
@@ -354,12 +929,34 @@ def count_work_objects(
     object_type: Optional[str] = None,
     statuses: Optional[List[str]] = None,
 ) -> int:
-    objects = list_work_objects(workspace_id=workspace_id, object_type=object_type)
+    ensure_work_objects_schema()
+
+    where = ["workspace_id = %s"]
+    params: List[Any] = [_clean(workspace_id) or "demo_small_business"]
+
+    if object_type:
+        where.append("object_type = %s")
+        params.append(_clean(object_type))
 
     if statuses:
-        objects = [o for o in objects if o.status in statuses]
+        cleaned = [_clean(value) for value in statuses if _clean(value)]
+        if cleaned:
+            placeholders = ", ".join(["%s"] * len(cleaned))
+            where.append(f"status IN ({placeholders})")
+            params.extend(cleaned)
 
-    return len(objects)
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        _execute(
+            cur,
+            f"SELECT COUNT(*) FROM {_TABLE_NAME} WHERE {' AND '.join(where)}",
+            tuple(params),
+        )
+        return int((cur.fetchone() or [0])[0] or 0)
+    finally:
+        cur.close()
+        conn.close()
 
 
 def dashboard_counts(workspace_id: str = "demo_small_business") -> Dict[str, int]:
@@ -393,87 +990,151 @@ def dashboard_counts(workspace_id: str = "demo_small_business") -> Dict[str, int
 
 
 # =========================================================
-# Demo seed
+# Demo seed — persistent and isolated
 # =========================================================
 
+def _demo_objects() -> List[Dict[str, Any]]:
+    return [
+        {
+            "object_type": "client",
+            "title": "Demo Client",
+            "status": "active",
+            "source_key": "demo:client:1",
+        },
+        {
+            "object_type": "task",
+            "title": "Prepare today workspace priorities",
+            "priority": "high",
+            "status": "open",
+            "source_key": "demo:task:1",
+        },
+        {
+            "object_type": "followup_task",
+            "title": "Follow up with Demo Client about offer",
+            "priority": "normal",
+            "status": "scheduled",
+            "source_key": "demo:followup:1",
+        },
+        {
+            "object_type": "estimate",
+            "title": "Demo estimate draft",
+            "status": "draft",
+            "source_key": "demo:estimate:1",
+        },
+        {
+            "object_type": "invoice",
+            "title": "Demo invoice follow-up",
+            "status": "sent",
+            "source_key": "demo:invoice:1",
+        },
+        {
+            "object_type": "project",
+            "title": "Demo active project",
+            "status": "active",
+            "source_key": "demo:project:1",
+        },
+        {
+            "object_type": "document_case",
+            "title": "Demo client document package",
+            "status": "open",
+            "source_key": "demo:document:1",
+        },
+    ]
+
+
 def seed_demo_work_objects() -> Dict[str, Any]:
-    if WORK_OBJECT_STORE:
-        return {
-            "ok": True,
-            "message": "Demo work objects already exist.",
-            "count": len(WORK_OBJECT_STORE),
-        }
+    created = 0
+    for item in _demo_objects():
+        metadata = {"source": "demo_seed", "demo": True}
+        _obj, was_created = save_or_get_work_object(
+            workspace_id="demo_small_business",
+            assigned_agent_id="nina_office_manager_smb",
+            metadata=metadata,
+            origin_channel="demo",
+            origin_user_id="__demo__",
+            **item,
+        )
+        if was_created:
+            created += 1
 
-    create_work_object(
-        object_type="client",
-        title="Demo Client",
-        status="active",
-        metadata={"source": "demo_seed"},
+    count = len(
+        [
+            obj
+            for obj in list_work_objects(workspace_id="demo_small_business", limit=5000)
+            if obj.metadata.get("source") == "demo_seed"
+        ]
     )
-
-    create_work_object(
-        object_type="task",
-        title="Prepare today workspace priorities",
-        priority="high",
-        status="open",
-        metadata={"source": "demo_seed"},
-    )
-
-    create_work_object(
-        object_type="followup_task",
-        title="Follow up with Demo Client about offer",
-        priority="normal",
-        status="scheduled",
-        metadata={"source": "demo_seed"},
-    )
-
-    create_work_object(
-        object_type="estimate",
-        title="Demo estimate draft",
-        status="draft",
-        metadata={"source": "demo_seed"},
-    )
-
-    create_work_object(
-        object_type="invoice",
-        title="Demo invoice follow-up",
-        status="sent",
-        metadata={"source": "demo_seed"},
-    )
-
-    create_work_object(
-        object_type="project",
-        title="Demo active project",
-        status="active",
-        metadata={"source": "demo_seed"},
-    )
-
-    create_work_object(
-        object_type="document_case",
-        title="Demo client document package",
-        status="open",
-        metadata={"source": "demo_seed"},
-    )
-
     return {
         "ok": True,
-        "message": "Demo work objects created.",
-        "count": len(WORK_OBJECT_STORE),
+        "message": "Demo work objects created." if created else "Demo work objects already exist.",
+        "created": created,
+        "count": count,
     }
 
 
 def clear_demo_work_objects() -> Dict[str, Any]:
-    WORK_OBJECT_STORE.clear()
+    ensure_work_objects_schema()
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        if USE_POSTGRES:
+            _execute(
+                cur,
+                f"DELETE FROM {_TABLE_NAME} WHERE metadata_json LIKE %s",
+                ('%"source": "demo_seed"%',),
+            )
+        else:
+            _execute(
+                cur,
+                f"DELETE FROM {_TABLE_NAME} WHERE metadata_json LIKE %s",
+                ('%"source": "demo_seed"%',),
+            )
+        deleted = int(cur.rowcount or 0)
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+    for object_id, obj in list(WORK_OBJECT_STORE.items()):
+        if obj.metadata.get("source") == "demo_seed":
+            WORK_OBJECT_STORE.pop(object_id, None)
+
     return {
         "ok": True,
         "message": "Demo work objects cleared.",
         "count": 0,
+        "deleted": deleted,
     }
 
 
 # =========================================================
 # Human-readable answers
 # =========================================================
+
+def work_objects_status() -> str:
+    health = persistence_health()
+    if health.get("ok"):
+        persistence_line = (
+            f"Persistence: OK — {health.get('backend')}\n"
+            f"Canonical objects: {health.get('objects')}"
+        )
+        status_line = "Status: active ✅"
+    else:
+        persistence_line = f"Persistence: ERROR — {health.get('error', 'unknown error')}"
+        status_line = "Status: persistence error ⚠️"
+
+    return (
+        "🧱 NinaOS Persistent Work Objects\n\n"
+        f"Version: {WORK_OBJECTS_VERSION}\n"
+        f"Registered object types: {len(WORK_OBJECT_TYPES)}\n"
+        f"{persistence_line}\n\n"
+        "Source of truth:\n"
+        f"• {_TABLE_NAME}\n"
+        "• one source_key = one canonical channel work item\n"
+        "• Telegram / Web / future channels share the same object layer\n\n"
+        f"{status_line}"
+    )
+
 
 def build_work_object_types_answer() -> str:
     lines = [
@@ -482,28 +1143,24 @@ def build_work_object_types_answer() -> str:
         f"Version: {WORK_OBJECTS_VERSION}",
         "",
     ]
-
     for obj_type in list_work_object_types():
         lines.append(f"• {obj_type.type_id}")
         lines.append(f"  Name: {obj_type.name}")
         lines.append(f"  Category: {obj_type.category}")
         lines.append(f"  Risk: {obj_type.risk_level}")
         lines.append("")
-
     return "\n".join(lines).strip()
 
 
 def build_work_objects_answer(workspace_id: str = "demo_small_business") -> str:
     objects = list_work_objects(workspace_id=workspace_id)
-
     lines = [
-        "🧱 NinaOS Work Objects",
+        "🧱 NinaOS Canonical Work Objects",
         "",
         f"Workspace: {workspace_id}",
         f"Objects: {len(objects)}",
         "",
     ]
-
     if not objects:
         lines.append("No work objects yet.")
     else:
@@ -513,15 +1170,17 @@ def build_work_objects_answer(workspace_id: str = "demo_small_business") -> str:
             lines.append(f"  Title: {obj.title}")
             lines.append(f"  Status: {obj.status}")
             lines.append(f"  Priority: {obj.priority}")
+            if obj.client_id:
+                lines.append(f"  Client: {obj.client_id}")
+            if obj.source_key:
+                lines.append(f"  Source key: {obj.source_key}")
             lines.append("")
-
     lines.append(f"Version: {WORK_OBJECTS_VERSION}")
     return "\n".join(lines).strip()
 
 
 def build_work_object_counts_answer(workspace_id: str = "demo_small_business") -> str:
     counts = dashboard_counts(workspace_id)
-
     return (
         "📊 NinaOS Work Object Counts\n\n"
         f"Workspace: {workspace_id}\n\n"
@@ -536,44 +1195,38 @@ def build_work_object_counts_answer(workspace_id: str = "demo_small_business") -
 
 def build_demo_seed_answer() -> str:
     result = seed_demo_work_objects()
-
     return (
         "🧪 NinaOS Demo Work Objects\n\n"
         f"{result.get('message')}\n"
-        f"Objects: {result.get('count')}\n\n"
+        f"Objects: {result.get('count')}\n"
+        f"Created now: {result.get('created', 0)}\n\n"
         f"Version: {WORK_OBJECTS_VERSION}"
     )
 
 
 def build_demo_clear_answer() -> str:
     result = clear_demo_work_objects()
-
     return (
         "🧹 NinaOS Demo Work Objects\n\n"
         f"{result.get('message')}\n"
-        f"Objects: {result.get('count')}\n\n"
+        f"Deleted: {result.get('deleted', 0)}\n\n"
         f"Version: {WORK_OBJECTS_VERSION}"
     )
 
 
 def route_work_objects_command(text: str) -> Optional[str]:
-    lower = (text or "").strip().lower()
+    lower = _clean(text).lower()
 
     if lower in ["work objects", "objects", "object types"]:
         return build_work_object_types_answer()
-
     if lower in ["work object list", "objects list", "my objects"]:
         return build_work_objects_answer()
-
     if lower in ["object counts", "work object counts", "dashboard counts"]:
         return build_work_object_counts_answer()
-
     if lower in ["seed demo objects", "demo objects", "create demo objects"]:
         return build_demo_seed_answer()
-
     if lower in ["clear demo objects", "delete demo objects"]:
         return build_demo_clear_answer()
-
     if lower in ["work objects status", "objects status"]:
         return work_objects_status()
 
@@ -581,15 +1234,17 @@ def route_work_objects_command(text: str) -> Optional[str]:
 
 
 def work_objects_schema() -> Dict[str, Any]:
+    objects = list_work_objects(limit=5000)
     return {
         "version": WORK_OBJECTS_VERSION,
+        "persistence": persistence_health(),
         "object_types": {
             type_id: obj_type.__dict__
             for type_id, obj_type in WORK_OBJECT_TYPES.items()
         },
         "stored_objects": {
-            object_id: obj.__dict__
-            for object_id, obj in WORK_OBJECT_STORE.items()
+            obj.object_id: obj.__dict__
+            for obj in objects
         },
     }
 
