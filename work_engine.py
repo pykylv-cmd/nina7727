@@ -24,7 +24,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from reply_builder import build_client_estimate_draft
+from reply_builder import build_client_estimate_draft, build_client_reply_draft
 from work_objects import get_work_object, list_work_objects, update_work_object
 
 try:
@@ -42,10 +42,12 @@ try:
 except ImportError:
     _save_canonical_action_result = None
 
-WORK_ENGINE_VERSION = "Work Engine V1.3 — ONE NINA Natural Channel Work Execution V1"
+WORK_ENGINE_VERSION = "Work Engine V1.4 — ONE NINA Forwarded Client Reply Action V1"
 ESTIMATE_ACTION_KEY = "estimate_draft_v1"
 ESTIMATE_ACTION_VERSION = "ONE_NINA_CANONICAL_ESTIMATE_ACTION_V1"
 ESTIMATE_APPROVAL_VERSION = "ONE_NINA_ESTIMATE_APPROVAL_V1"
+CLIENT_REPLY_ACTION_KEY = "client_reply_draft_v1"
+CLIENT_REPLY_ACTION_VERSION = "ONE_NINA_FORWARDED_CLIENT_REPLY_ACTION_V1"
 _ALLOWED_APPROVAL_DECISIONS = {"approve", "hold", "reject"}
 
 
@@ -436,7 +438,7 @@ def execute_natural_work_request(
         "object_id": obj.object_id,
         "client_name": client_name,
         "channel": _clean(channel) or "unknown",
-        "text": f"Protams. Te ir gatavs teksts klientam:\n\n{draft_text}",
+        "text": draft_text,
         "action_result": result,
     }
 
@@ -447,3 +449,64 @@ def work_engine_status():
         "Approve / Hold / Reject vārtus tajā pašā Work Object.\n\n"
         f"Versija: {WORK_ENGINE_VERSION}"
     )
+
+
+def _related_client_work_context(obj, workspace_id: str = "demo_small_business") -> str:
+    client_name = _clean(getattr(obj, "client_id", ""))
+    if not client_name:
+        return ""
+    lines = []
+    for item in list_work_objects(workspace_id=workspace_id, limit=500) or []:
+        if getattr(item, "object_id", "") == getattr(obj, "object_id", ""):
+            continue
+        details = _read_business_details(item)
+        item_client = _clean(details.get("client_name") or getattr(item, "client_id", ""))
+        if _fold_text(item_client) != _fold_text(client_name):
+            continue
+        subject = _clean(details.get("subject"))
+        amount = _clean(details.get("amount"))
+        currency = _clean(details.get("currency"))
+        start_context = _clean(details.get("start_context"))
+        parts = [_clean(getattr(item, "object_type", "work"))]
+        if subject:
+            parts.append(subject)
+        if amount:
+            parts.append(f"{amount} {currency or 'EUR'}")
+        if start_context:
+            parts.append(f"darbu sākums: {start_context}")
+        lines.append(" · ".join(parts))
+    return "\n".join(lines[:8])
+
+
+def prepare_canonical_client_reply(object_id: str, generator, workspace_id: str = "demo_small_business", force: bool = False) -> Dict[str, Any]:
+    """Prepare a send-ready owner reply from one canonical forwarded client_request."""
+    obj = get_work_object(object_id)
+    if not obj:
+        return {"ok": False, "error": "work_object_not_found", "object_id": object_id}
+    if _clean(getattr(obj, "object_type", "")).lower() != "client_request":
+        return {"ok": False, "error": "work_object_is_not_client_request", "object_id": object_id}
+    existing = _read_action_result(obj, CLIENT_REPLY_ACTION_KEY)
+    if existing.get("ok") and existing.get("draft_text") and not force:
+        return {**existing, "reused": True}
+    metadata = obj.metadata if isinstance(getattr(obj, "metadata", None), dict) else {}
+    incoming_text = _clean(metadata.get("raw_text") or getattr(obj, "title", ""))
+    client_name = _clean(getattr(obj, "client_id", "") or metadata.get("forward_sender_name"))
+    related_context = _related_client_work_context(obj, workspace_id=workspace_id)
+    built = build_client_reply_draft(client_name, incoming_text, related_context, generator)
+    if not built.get("ok"):
+        return {"ok": False, "error": built.get("error", "client_reply_build_failed"), "object_id": object_id}
+    result = {
+        "ok": True,
+        "action": "prepare_client_reply_draft",
+        "action_version": CLIENT_REPLY_ACTION_VERSION,
+        "object_id": obj.object_id,
+        "draft_text": built.get("text", ""),
+        "status": "prepared",
+        "prepared_at": _utc_now(),
+        "source": "canonical_client_request",
+        "client_name": client_name,
+    }
+    saved = _save_action_result(obj.object_id, CLIENT_REPLY_ACTION_KEY, result)
+    if not saved:
+        return {"ok": False, "error": "client_reply_action_persistence_failed", "object_id": object_id}
+    return result
