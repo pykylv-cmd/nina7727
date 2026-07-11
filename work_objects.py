@@ -32,7 +32,7 @@ except Exception:
     psycopg2 = None
 
 
-WORK_OBJECTS_VERSION = "Persistent Work Objects V2.0 — ONE NINA CORE"
+WORK_OBJECTS_VERSION = "Persistent Work Objects V2.1 — ONE NINA Canonical Work Mapping V2"
 DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
 DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
 USE_POSTGRES = bool(DATABASE_URL and psycopg2)
@@ -568,6 +568,62 @@ def _validate_status(object_type: str, status: str) -> str:
 
 
 # =========================================================
+# ONE NINA Canonical Work Mapping V2
+# =========================================================
+
+def classify_canonical_work_object_type(raw_text="", title="", metadata=None, default_type="task"):
+    """One shared semantic mapper for Telegram, Web and future channels."""
+    metadata = metadata if isinstance(metadata, dict) else {}
+    legacy = metadata.get("legacy_task")
+    legacy_text = " " .join(str(v) for v in legacy.values() if v not in (None, "")) if isinstance(legacy, dict) else str(legacy or "")
+    text = " ".join([str(raw_text or ""), str(title or ""), str(metadata.get("raw_text") or ""), legacy_text]).lower()
+    if any(x in text for x in ("rēķin", "rekin", "invoice", "apmaks")):
+        return "invoice"
+    if any(x in text for x in ("piedāvājum", "piedavajum", "tāme", "tame", "estimate", "quote", "quotation")):
+        return "estimate"
+    if any(x in text for x in ("follow-up", "follow up", "followup", "jāpajaut", "japajaut", "atgādin", "atgadin")):
+        return "followup_task"
+    if any(x in text for x in ("dokuments", "dokumentu", "līgums", "ligums", "pdf", "pielikums", "attachment")):
+        return "document_case"
+    if any(x in text for x in ("projekts", "projektu", "projekta", "būvobjekts", "buvobjekts")):
+        return "project"
+    return _clean(default_type) or "task"
+
+
+def migrate_canonical_work_mapping_v2():
+    """Correct old ONE NINA bridge rows in place and preserve object_id/source_key."""
+    ensure_work_objects_schema()
+    conn = _connect()
+    cur = conn.cursor()
+    updated = 0
+    try:
+        _execute(cur, f"SELECT {_SELECT_FIELDS} FROM {_TABLE_NAME} ORDER BY created_at ASC")
+        for row in cur.fetchall() or []:
+            obj = _row_to_work_object(row)
+            meta = obj.metadata if isinstance(obj.metadata, dict) else {}
+            if str(meta.get("source") or "") != "telegram_task_engine":
+                continue
+            mapped = classify_canonical_work_object_type(meta.get("raw_text", ""), obj.title, meta, obj.object_type)
+            if mapped == obj.object_type:
+                continue
+            _validate_object_type(mapped)
+            meta = dict(meta)
+            meta["canonical_mapping_version"] = "ONE_NINA_CANONICAL_WORK_MAPPING_V2"
+            meta["previous_object_type"] = obj.object_type
+            meta["mapped_object_type"] = mapped
+            _execute(cur, f"UPDATE {_TABLE_NAME} SET object_type=%s, status=%s, metadata_json=%s, updated_at=%s WHERE object_id=%s", (mapped, _default_status(mapped), _json_dumps(meta), _utc_now(), obj.object_id))
+            updated += 1
+        conn.commit()
+        return {"ok": True, "updated": updated}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+
+# =========================================================
 # Canonical Work Object API
 # =========================================================
 
@@ -777,6 +833,12 @@ def save_or_get_work_object(
     if existing:
         return existing, False
 
+    metadata = dict(metadata or {})
+    object_type = classify_canonical_work_object_type(
+        metadata.get("raw_text", ""), title, metadata, object_type
+    )
+    metadata["canonical_mapping_version"] = "ONE_NINA_CANONICAL_WORK_MAPPING_V2"
+
     obj = create_work_object(
         object_type=object_type,
         title=title,
@@ -805,6 +867,7 @@ def list_work_objects(
     limit: int = 500,
 ) -> List[WorkObject]:
     ensure_work_objects_schema()
+    migrate_canonical_work_mapping_v2()
 
     where: List[str] = []
     params: List[Any] = []
