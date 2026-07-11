@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V51.6 — ONE NINA CANONICAL BUSINESS DETAIL RENDER
+# NinaOS Web App V51.6.1 — ONE NINA INBOX RECOVERY FIX
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -29,7 +29,7 @@ except Exception as e:
     def one_nina_work_persistence_health():
         return {"ok": False, "error": "Persistent Work Objects nav pieslēgts"}
 
-WEB_APP_VERSION = "Web App V51.6 — ONE NINA CANONICAL BUSINESS DETAIL RENDER"
+WEB_APP_VERSION = "Web App V51.6.1 — ONE NINA INBOX RECOVERY FIX"
 app = Flask(__name__)
 
 # V47.1 safe workspace-object surface polish.
@@ -4571,52 +4571,50 @@ def telegram_db_diagnostic_block_html():
     )
 
 def channel_hub_body(data):
+    """V51.6.1: Inbox reads the same canonical ONE NINA work truth."""
     lang = current_language()
-    created_voice_obj = get_voice_intake_preview()
-    telegram_sync_items = load_existing_telegram_intake_sync()
-    client_threads = build_client_work_threads(telegram_sync_items, limit=20)
-    telegram_sync_rows = client_thread_rows(client_threads_by_state(), empty_text=tx("no_items", lang), limit=8, show_controls=True)
-    approved_rows = work_object_rows(approved_workspace_object_items(), empty_text=tx("no_items", lang), limit=8, show_source=True, show_approval=True)
-    if approved_preview_items():
-        approved_rows += work_object_rows(approved_preview_items(), empty_text="", limit=5, show_source=True)
-    pending_thread_items = pending_or_held_client_thread_items()
-    pending_items = pending_thread_items + pending_or_held_preview_items()
-    if created_voice_obj and all(o.get("object_id") != created_voice_obj.get("object_id") for o in pending_items):
-        pending_items = [created_voice_obj] + pending_items
-    pending_rows = client_thread_rows(pending_thread_items, empty_text=tx("no_items", lang), limit=8, show_controls=True)
-    if created_voice_obj or pending_or_held_preview_items():
-        pending_rows += work_object_rows(([created_voice_obj] if created_voice_obj else []) + pending_or_held_preview_items(), empty_text="", limit=5, show_source=True)
-    intake_cards = (
-        channel_card(tx("voice_command", lang), tx("voice_command_hint", lang), "ready · voice first", "🎙")
-        + channel_card(tx("whatsapp_business", lang), "Client messages, photos, object images, documents and estimate requests flow into NinaOS work intake.", "connector foundation", "🟢")
-        + channel_card(tx("telegram_channel", lang), "Telegram remains the fast owner/work-intake channel and stays separate from web runtime.", "active runtime", "✈")
-        + channel_card(tx("email_channel", lang), "Offers, invoices and formal files can later be received and sent back through email.", "planned bridge", "✉")
-        + channel_card(tx("files_channel", lang), "Scanned documents, phone photos, PDFs and object images become client work material.", "document intake", "▤")
-        + channel_card(tx("owner_approval_gate", lang), "Nina prepares the work; owner approves sensitive sending, finance and client-facing actions.", "safe mode", "✓")
-    )
-    timeline = "".join([
-        "<div class='row'><div><b>1. Client sends voice/photo/document</b><span class='muted'>WhatsApp / Telegram / web upload / email</span></div><span class='pill'>intake</span></div>",
-        "<div class='row'><div><b>2. Nina understands and structures it</b><span class='muted'>client · task · estimate · invoice · files · notes</span></div><span class='pill'>AI prepare</span></div>",
-        "<div class='row'><div><b>3. Owner approves</b><span class='muted'>Approve / Hold / Reject before sending or saving permanently</span></div><span class='pill'>control</span></div>",
-        "<div class='row'><div><b>4. Nina sends back</b><span class='muted'>WhatsApp / Telegram / email with prepared documents or answer</span></div><span class='pill'>send back</span></div>",
-    ])
-    return (
-        work_page_header(tx("channel_hub", lang), tx("channel_hub_sub", lang))
-        + f"<section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>{tx('modern_intake', lang).upper()}</div></div></div><div class='bigline'>{tx('twenty_second_century', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/office-manager/actions')}'>{tx('voice_command', lang)}</a><a class='btn' href='{q('/tasks')}'>{tx('tasks', lang)}</a><a class='btn' href='{q('/clients')}'>{tx('clients', lang)}</a></div></section><br>"
-        + voice_intake_form_html(created_voice_obj)
-        + "<br>"
-        + telegram_db_diagnostic_block_html()
-        + "<section class='card card-pad'><div class='section-title'>✈ Telegram → Client Work Threads</div><p class='muted'>V51.0 keeps thread preview here, while client profiles can preview WhatsApp, Telegram and email drafts.</p><div class='list'>" + telegram_sync_rows + "</div><div class='safe-note'>V51.1 safe mode: client profiles can preview send-back drafts. Dedicated send bridges and work-object tables come later.</div></section><br>"
-        + f"<section><div class='section-title'>{tx('connected_channels', lang)}</div><div class='worker-grid'>{intake_cards}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>🧠 Omnichannel Client Memory</div><div class='list'><div class='row'><div><b>WhatsApp / Telegram / voice / files</b><span class='muted'>Every client message, audio transcript, photo, scan and document is designed to land in NinaOS, attach to the client workspace, and wait for owner approval.</span></div><span class='pill'>V51.0 draft review</span></div><div class='row'><div><b>Nina organizes, owner controls</b><span class='muted'>Nina prepares tasks, estimates, invoices, document packs and send-back actions; the owner approves before sensitive client-facing actions.</span></div><span class='pill'>safe mode</span></div></div></section><br>"
-        + "<div class='two-col'>"
-        + f"<section class='card card-pad'><div class='section-title'>{tx('client_timeline', lang)}</div><div class='list'>{timeline}</div></section>"
-        + f"<section class='card card-pad'><div class='section-title'>{tx('ai_auto_prepare', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section>"
-        + "</div><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Object Surface</div><div class='list'>{workspace_object_surface_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V51.2: approved workspace objects can now render saved send-back draft previews inside client profiles.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>{tx('owner_send_back', lang)}</div><div class='list'>{approved_rows}</div><div class='safe-note'>{tx('approved_work_note', lang)}</div></section>"
-    )
+    objects = one_nina_canonical_work_objects(limit=500)
+    telegram_objects = [
+        obj for obj in objects
+        if str(getattr(obj, "origin_channel", "") or "").strip().lower() == "telegram"
+    ]
 
+    if telegram_objects:
+        rows = ""
+        for obj in telegram_objects[:50]:
+            details = one_nina_business_details(obj)
+            metadata = obj.metadata if isinstance(getattr(obj, "metadata", None), dict) else {}
+            subject = str(details.get("subject") or "").strip()
+            raw_text = str(metadata.get("raw_text") or "").strip()
+            amount = one_nina_business_amount_label(details)
+            client_name = str(getattr(obj, "client_id", "") or details.get("client_name") or "").strip()
+            due_context = str(details.get("due_context") or getattr(obj, "due_date", "") or "").strip()
+            info = [str(getattr(obj, "object_type", "") or "work"), str(getattr(obj, "status", "") or "open")]
+            if client_name: info.append(client_name)
+            if amount: info.append(amount)
+            if due_context: info.append(due_context)
+            evidence = subject or raw_text or str(getattr(obj, "source_key", "") or "")
+            if len(evidence) > 320: evidence = evidence[:317] + "..."
+            rows += ("<div class='row'><div>" f"<b>{html_escape(getattr(obj, 'title', '') or 'Telegram intake')}</b>" f"<span class='muted'>{html_escape(' · '.join(info))}</span>" f"<span class='muted'>{html_escape(evidence)}</span>" "</div><span class='pill'>ONE NINA</span></div>")
+    else:
+        rows = "<div class='row'><div><b>No canonical Telegram intake yet.</b><span class='muted'>New Telegram work appears after Nina saves it to nina_work_objects.</span></div><span class='pill'>idle</span></div>"
+
+    channel_counts = {}
+    for obj in objects:
+        channel = str(getattr(obj, "origin_channel", "") or "").strip().lower() or "ninaos"
+        channel_counts[channel] = channel_counts.get(channel, 0) + 1
+    channel_rows = "".join("<div class='row'><div>" f"<b>{html_escape(channel.title())}</b>" "<span class='muted'>Canonical channel-linked Work Objects</span></div>" f"<span class='pill'>{count}</span></div>" for channel, count in sorted(channel_counts.items()))
+    if not channel_rows:
+        channel_rows = "<div class='row'><div><b>No active channel work yet.</b><span class='muted'>nina_work_objects</span></div><span class='pill'>idle</span></div>"
+
+    return (
+        work_page_header(tx("channel_hub", lang), "V51.6.1 ONE NINA INBOX RECOVERY FIX — channel intake from the same canonical persistent Work Objects.")
+        + "<section class='card card-pad'><div class='section-title'>ONE NINA Inbox</div>"
+        + one_nina_work_kpis_html() + "<br><div class='list'>" + rows + "</div>"
+        + "<div class='safe-note'>V51.6.1: Inbox reads the same nina_work_objects used by Tasks and Clients. Legacy Telegram thread-preview inference is not executed as a parallel Inbox work system.</div></section><br>"
+        + "<section class='card card-pad'><div class='section-title'>Canonical Channel Intake</div><div class='list'>" + channel_rows + "</div>"
+        + "<div class='safe-note'>One Nina, one persistent work truth. Channels are intake and delivery surfaces, not separate brains.</div></section>"
+    )
 
 def simple_module_body(title, subtitle, blocks):
     rows = "".join(f"<div class='row'><div><b>{html_escape(b[0])}</b><span class='muted'>{html_escape(b[1])}</span></div><span class='pill'>{html_escape(b[2])}</span></div>" for b in blocks)
