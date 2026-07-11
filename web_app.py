@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V51.4 LABEL FIX — ONE NINA
+# NinaOS Web App V51.5 — ONE NINA CLIENT LINK V1
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -29,7 +29,7 @@ except Exception as e:
     def one_nina_work_persistence_health():
         return {"ok": False, "error": "Persistent Work Objects nav pieslēgts"}
 
-WEB_APP_VERSION = "Web App V51.4 LABEL FIX — ONE NINA"
+WEB_APP_VERSION = "Web App V51.5 — ONE NINA CLIENT LINK V1"
 app = Flask(__name__)
 
 # V47.1 safe workspace-object surface polish.
@@ -164,6 +164,165 @@ def one_nina_work_surface_html(limit=20):
         "The web surface does not infer task type, client or meaning from Telegram text in this section. "
         f"Status: {html_escape(status)} · {html_escape(ONE_NINA_WORK_OBJECTS_VERSION)}."
         "</div></section><br>"
+    )
+
+
+# =========================================================
+# V51.5 — ONE NINA CLIENT LINK V1
+# =========================================================
+
+def one_nina_normalize_client_name(value):
+    return " ".join(str(value or "").strip().split())
+
+
+def one_nina_client_work_map(limit=2000):
+    """Group the SAME canonical Work Objects by client_id.
+
+    This is a view only. It creates no client work copy, thread snapshot or
+    second work object.
+    """
+    grouped = {}
+    for obj in one_nina_canonical_work_objects(limit=limit):
+        client_name = one_nina_normalize_client_name(
+            getattr(obj, "client_id", "") or ""
+        )
+        if not client_name:
+            continue
+
+        key = client_name.casefold()
+        if key not in grouped:
+            grouped[key] = {
+                "name": client_name,
+                "objects": [],
+                "types": {},
+                "channels": set(),
+            }
+
+        entry = grouped[key]
+        entry["objects"].append(obj)
+
+        object_type = str(getattr(obj, "object_type", "") or "work")
+        entry["types"][object_type] = entry["types"].get(object_type, 0) + 1
+
+        channel = str(getattr(obj, "origin_channel", "") or "").strip()
+        if channel:
+            entry["channels"].add(channel)
+
+    for entry in grouped.values():
+        entry["objects"].sort(
+            key=lambda obj: (
+                str(getattr(obj, "updated_at", "") or ""),
+                str(getattr(obj, "created_at", "") or ""),
+            ),
+            reverse=True,
+        )
+
+    return grouped
+
+
+def one_nina_find_client_profile(client_name):
+    wanted = one_nina_normalize_client_name(client_name).casefold()
+    return one_nina_client_work_map().get(wanted)
+
+
+def one_nina_client_rows(empty_text="No canonical clients yet."):
+    profiles = one_nina_client_work_map()
+    if not profiles:
+        return (
+            "<div class='row'><div>"
+            f"<b>{html_escape(empty_text)}</b>"
+            "<span class='muted'>No client-linked canonical work objects.</span>"
+            "</div><span class='pill'>idle</span></div>"
+        )
+
+    rows = ""
+    for _, profile in sorted(
+        profiles.items(),
+        key=lambda item: item[1]["name"].casefold(),
+    ):
+        objects = profile["objects"]
+        type_summary = " · ".join(
+            f"{object_type}: {count}"
+            for object_type, count in sorted(profile["types"].items())
+        )
+        channel_summary = " + ".join(sorted(profile["channels"])) or "NinaOS"
+        latest_titles = " | ".join(
+            str(getattr(obj, "title", "") or "")
+            for obj in objects[:3]
+            if str(getattr(obj, "title", "") or "").strip()
+        )
+        rows += (
+            "<div class='row'><div>"
+            f"<b>{html_escape(profile['name'])}</b>"
+            f"<span class='muted'>canonical work: {len(objects)} · {html_escape(type_summary)}</span>"
+            f"<span class='muted'>{html_escape(latest_titles or channel_summary)}</span>"
+            "</div>"
+            f"<a class='pill' href='{q('/clients/' + _client_profile_slug(profile['name']))}'>Open client profile</a>"
+            "</div>"
+        )
+    return rows
+
+
+def one_nina_client_object_rows(profile, empty_text="No canonical client work yet."):
+    objects = (profile or {}).get("objects") or []
+    if not objects:
+        return (
+            "<div class='row'><div>"
+            f"<b>{html_escape(empty_text)}</b>"
+            "<span class='muted'>nina_work_objects</span>"
+            "</div><span class='pill'>idle</span></div>"
+        )
+
+    rows = ""
+    for obj in objects:
+        metadata = (
+            obj.metadata
+            if isinstance(getattr(obj, "metadata", None), dict)
+            else {}
+        )
+        raw_text = str(metadata.get("raw_text") or "").strip()
+        object_type = str(getattr(obj, "object_type", "") or "work")
+        status = str(getattr(obj, "status", "") or "open")
+        priority = str(getattr(obj, "priority", "") or "normal")
+        due_date = str(getattr(obj, "due_date", "") or "")
+        channel = str(getattr(obj, "origin_channel", "") or "")
+        source_key = str(getattr(obj, "source_key", "") or "")
+
+        details = [object_type, status, priority]
+        if due_date:
+            details.append(due_date)
+        if channel:
+            details.append(channel)
+
+        evidence = raw_text or source_key or str(
+            getattr(obj, "object_id", "") or ""
+        )
+        if len(evidence) > 320:
+            evidence = evidence[:317] + "..."
+
+        rows += (
+            "<div class='row'><div>"
+            f"<b>{html_escape(getattr(obj, 'title', '') or 'Canonical Work Object')}</b>"
+            f"<span class='muted'>{html_escape(' · '.join(details))}</span>"
+            f"<span class='muted'>{html_escape(evidence)}</span>"
+            "</div>"
+            "<span class='pill'>ONE NINA</span>"
+            "</div>"
+        )
+    return rows
+
+
+def one_nina_client_kpis_html(profile):
+    objects = (profile or {}).get("objects") or []
+    types = (profile or {}).get("types") or {}
+    channels = (profile or {}).get("channels") or set()
+    return (
+        "<div class='kpis'>"
+        + kpi_card("Canonical work", len(objects), {"text": "same objects", "href": "/tasks"})
+        + kpi_card("Estimates", types.get("estimate", 0), {"text": "client-linked", "href": "/tasks"})
+        + kpi_card("Follow-ups", types.get("followup_task", 0), {"text": "client-linked", "href": "/tasks"})
+        + kpi_card("Channels", len(channels), {"text": "shared Nina context", "href": "/clients"})
+        + "</div>"
     )
 
 def safe_int(value, default=0):
@@ -3213,125 +3372,68 @@ def sendback_draft_preview_html(client_name, profile):
 
 
 def client_profile_detail_body(client_name):
-    lang = current_language()
-    profiles = client_workspace_profiles_map()
-    pr = profiles.get(client_name) or profiles.get(client_name.strip() if client_name else "")
-    if not pr:
-        # tolerant lookup: case-insensitive
-        for k, v in profiles.items():
-            if k.lower() == str(client_name or "").lower():
-                pr = v
-                client_name = k
-                break
-    if not pr:
-        client_name = client_name or "Workspace"
-        pr = {"name": client_name, "threads": [], "workspace_objects": [], "send_back": [], "sources": set(), "followups": 0, "estimates": 0, "documents": 0, "tasks": 0}
+    client_name = one_nina_normalize_client_name(client_name) or "Workspace"
+    profile = one_nina_find_client_profile(client_name)
 
-    header = work_page_header(client_name, "Client Workspace Profile — threads, workspace objects, documents and send-back candidates in one place.")
-    kpis = (
-        "<div class='kpis'>"
-        f"<div class='kpi'><b>{len(pr['threads'])}</b><span>Threads</span></div>"
-        f"<div class='kpi'><b>{len(pr['workspace_objects'])}</b><span>Workspace objects</span></div>"
-        f"<div class='kpi'><b>{len(pr['send_back'])}</b><span>Send-back</span></div>"
-        f"<div class='kpi'><b>{pr['followups']}</b><span>Follow-ups</span></div>"
-        "</div>"
+    if profile:
+        client_name = profile["name"]
+
+    header = work_page_header(
+        client_name,
+        "V51.5 ONE NINA Client Profile — the same canonical Work Objects shown in Tasks.",
     )
-    thread_rows = client_thread_rows(pr.get("threads") or [], empty_text=tx("no_items", lang), limit=12, show_controls=True)
-    object_rows = work_object_rows(pr.get("workspace_objects") or [], empty_text=tx("no_items", lang), limit=12, show_source=True, show_approval=True)
-    send_rows = work_object_rows(pr.get("send_back") or [], empty_text=tx("no_items", lang), limit=12, show_source=True, show_approval=True)
-    source_text = " + ".join(sorted(pr.get("sources") or [])) or "Telegram / NinaOS memory"
-    timeline_rows = ""
-    combined = []
-    for item in (pr.get("threads") or []):
-        combined.append((item.get("updated_at") or item.get("created_at") or "", "Thread", item))
-    for item in (pr.get("workspace_objects") or []):
-        combined.append((item.get("updated_at") or item.get("created_at") or "", "Workspace object", item))
-    if combined:
-        for _, label, item in sorted(combined, key=lambda x: str(x[0]), reverse=True)[:10]:
-            meta = item.get("metadata", {}) if isinstance(item.get("metadata"), dict) else {}
-            title = item.get("title") or item.get("raw_text") or item.get("object_id") or label
-            detail = f"{item.get('object_type','work')} · {item.get('status','open')} · {item.get('priority','normal')}"
-            source = " + ".join(meta.get("source_labels") or []) or meta.get("source") or "NinaOS memory"
-            timeline_rows += f"<div class='row'><div><b>{html_escape(title)}</b><span class='muted'>{html_escape(detail)} · {html_escape(source)}</span></div><span class='pill'>{html_escape(label)}</span></div>"
-    else:
-        timeline_rows = f"<div class='row'><div><b>{html_escape(tx('no_items', lang))}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
 
-    send_action_rows = ""
-    send_candidates = pr.get("send_back") or []
-    if send_candidates:
-        for item in send_candidates[:8]:
-            title = item.get("title") or item.get("object_id") or "Send-back item"
-            object_type = item.get("object_type") or "work"
-            evidence = " + ".join(((item.get("metadata") or {}).get("source_labels") or [])) or "NinaOS memory"
-            obj_key = _safe_sendback_object_id(item)
-            base = q('/clients/' + _client_profile_slug(client_name))
-            sep = '&' if '?' in base else '?'
-            send_action_rows += (
-                "<div class='row'><div>"
-                f"<b>{html_escape(title)}</b>"
-                f"<span class='muted'>{html_escape(object_type)} · {html_escape(evidence)}</span>"
-                "</div>"
-                f"<a class='pill' href='{base}{sep}prepare=whatsapp&object={html_escape(obj_key)}'>Prepare WhatsApp Reply</a>"
-                f"<a class='pill' href='{base}{sep}prepare=telegram&object={html_escape(obj_key)}'>Prepare Telegram Reply</a>"
-                f"<a class='pill' href='{base}{sep}prepare=email&object={html_escape(obj_key)}'>Prepare Email Pack</a>"
-                "</div>"
-            )
-    else:
-        send_action_rows = f"<div class='row'><div><b>{html_escape(tx('no_items', lang))}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
-    draft_preview = sendback_draft_preview_html(client_name, pr)
-    saved_drafts = saved_sendback_drafts_html(client_name)
+    if not profile:
+        return (
+            header
+            + "<section class='card card-pad'>"
+              "<div class='section-title'>ONE NINA Canonical Client Work</div>"
+              "<div class='list'>"
+              "<div class='row'><div><b>No canonical client work yet.</b>"
+              "<span class='muted'>This profile will populate when Nina links a canonical Work Object to this client_id.</span>"
+              "</div><span class='pill'>idle</span></div>"
+              "</div>"
+              "<div class='safe-note'>"
+              "Legacy client memory is preserved, but V51.5 does not render it as a second active client-work truth."
+              "</div>"
+              "</section>"
+        )
 
-    action_rows = (
-        f"<div class='row'><div><b>Prepare reply / document pack</b><span class='muted'>Nina prepares client-facing draft previews and document pack text, but does not send yet.</span></div><span class='pill'>safe prep</span></div>"
-        f"<div class='row'><div><b>Client memory scope</b><span class='muted'>{html_escape(client_name)} threads, objects and evidence stay grouped in this profile.</span></div><span class='pill'>active</span></div>"
-    )
+    object_rows = one_nina_client_object_rows(profile)
+    channels = " + ".join(sorted(profile["channels"])) or "NinaOS"
+    type_summary = " · ".join(
+        f"{object_type}: {count}"
+        for object_type, count in sorted(profile["types"].items())
+    ) or "work"
 
     return (
         header
-        + f"<section class='card card-pad'>{kpis}<br><div class='safe-note'>V51.2: client profile detail page with saved send-back draft preview. Source evidence: {html_escape(source_text)}.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Client Work Timeline</div><div class='list'>{timeline_rows}</div><div class='safe-note'>V51.2: profile detail combines Telegram memory, approved workspace objects, send-back candidates and safe draft previews into one client timeline.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Client Threads</div><div class='list'>{thread_rows}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Objects</div><div class='list'>{object_rows}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Send Back Candidates</div><div class='list'>{send_rows}</div><div class='safe-note'>V51.2: these objects can render WhatsApp, Telegram or email draft previews.</div></section><br>"
-        + draft_preview
-        + f"<section class='card card-pad'><div class='section-title'>Send-back Action Center</div><div class='list'>{send_action_rows}</div><div class='safe-note'>Safe mode: actions render draft previews and saves them to the client profile. Real sending bridge comes later.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Client Action Center</div><div class='list'>{action_rows}</div></section>"
-    )
-
-
-def approved_workspace_work_count():
-    try:
-        return len(approved_workspace_object_items()) + len(approved_preview_items())
-    except Exception:
-        return 0
-
-
-def pending_or_held_client_thread_items():
-    return client_threads_by_state(["pending_approval", "hold"])
-
-
-def rejected_client_thread_items():
-    return client_threads_by_state("rejected")
-
-
-def thread_approval_controls(obj):
-    state = thread_workflow_state(obj)
-    if state not in ["pending_approval", "hold"]:
-        return ""
-    lang = current_language()
-    try:
-        from urllib.parse import quote_plus
-        object_id = quote_plus(str(obj.get("object_id") or ""))
-    except Exception:
-        object_id = html_escape(obj.get("object_id"))
-    path = request.path or "/inbox"
-    base = f"{path}?lang={lang}&thread_object_id={object_id}"
-    return (
-        "<div class='btns' style='justify-content:flex-start;margin-top:10px'>"
-        f"<a class='btn primary' href='{base}&thread_decision=approve'>{tx('approve', lang)}</a>"
-        f"<a class='btn' href='{base}&thread_decision=hold'>{tx('hold', lang)}</a>"
-        f"<a class='btn' href='{base}&thread_decision=reject'>{tx('reject', lang)}</a>"
-        "</div>"
+        + "<section class='card card-pad'>"
+          f"{one_nina_client_kpis_html(profile)}"
+          "<br><div class='safe-note'>"
+          f"V51.5: {html_escape(client_name)} is linked directly by client_id to canonical nina_work_objects. "
+          f"Types: {html_escape(type_summary)} · channels: {html_escape(channels)}."
+          "</div>"
+          "</section><br>"
+        + "<section class='card card-pad'>"
+          "<div class='section-title'>ONE NINA Canonical Client Work</div>"
+          f"<div class='list'>{object_rows}</div>"
+          "<div class='safe-note'>"
+          "These are the same persistent objects shown in Tasks. "
+          "The client profile does not create copies or reinterpret Telegram text."
+          "</div>"
+          "</section><br>"
+        + "<section class='card card-pad'>"
+          "<div class='section-title'>Client Context Rule</div>"
+          "<div class='list'>"
+          "<div class='row'><div><b>One Nina</b>"
+          "<span class='muted'>Telegram, Web and future channels use the same client-linked work truth.</span>"
+          "</div><span class='pill'>ONE NINA</span></div>"
+          "<div class='row'><div><b>Persistent client work</b>"
+          "<span class='muted'>Code can be upgraded while canonical client work remains in PostgreSQL.</span>"
+          "</div><span class='pill'>persistent</span></div>"
+          "</div>"
+          "</section>"
     )
 
 def client_thread_rows(items, empty_text=None, limit=None, show_controls=True, show_state=True):
@@ -3830,19 +3932,51 @@ def tasks_body(data):
 
 def clients_body(data):
     lang = current_language()
-    profile_rows = client_profile_rows(empty_text=tx("no_items", lang))
-    client_rows = client_workspace_surface_rows(empty_text=tx("no_items", lang))
-    legacy_rows = ""
-    for client in data["clients"]:
-        legacy_rows += f"<div class='row'><div><b>{html_escape(client.get('name'))}</b><span class='muted'>follow-ups: {client.get('followups',0)} · estimates: {client.get('estimates',0)} · invoices: {client.get('invoices',0)} · projects: {client.get('projects',0)}</span></div><a class='pill' href='{q('/tasks')}'>{tx('open_work_action')}</a></div>"
-    if not legacy_rows:
-        legacy_rows = f"<div class='row'><div><b>{html_escape(tx('no_items', lang))}</b><span class='muted'>—</span></div><span class='pill'>idle</span></div>"
+    canonical_rows = one_nina_client_rows(
+        empty_text=tx("no_items", lang)
+    )
+    profiles = one_nina_client_work_map()
+    total_objects = sum(len(profile["objects"]) for profile in profiles.values())
+    telegram_clients = sum(
+        1 for profile in profiles.values()
+        if "telegram" in {str(ch).lower() for ch in profile["channels"]}
+    )
+
+    kpis = (
+        "<div class='kpis'>"
+        + kpi_card("Canonical clients", len(profiles), {"text": "ONE NINA", "href": "/clients"})
+        + kpi_card("Linked work", total_objects, {"text": "same work objects", "href": "/tasks"})
+        + kpi_card("Telegram-linked", telegram_clients, {"text": "shared context", "href": "/clients"})
+        + kpi_card("Work truth", "1", {"text": "nina_work_objects", "href": "/tasks"})
+        + "</div>"
+    )
+
     return (
-        work_page_header(tx("clients"), "V51.0 Saved Drafts Inbox / Global Outbox — client profiles now prepare WhatsApp, Telegram and email send-back actions.")
-        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Profiles</div><div class='list'>{profile_rows}</div><div class='safe-note'>V51.2: each client opens into a profile with safe saved send-back draft previews.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Client Workspace Objects</div><div class='list'>{client_rows}</div><div class='safe-note'>V51.2: workspace objects are grouped by client and can produce safe draft previews.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Global Outbox Preview</div><div class='list'>{global_outbox_rows(limit=8, empty_text=tx('no_items', lang))}</div><div class='safe-note'>V51.2: saved client drafts also appear in the global Outbox / Send Center.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>CRM Snapshot</div><div class='list'>{legacy_rows}</div></section>"
+        work_page_header(
+            tx("clients"),
+            "V51.5 ONE NINA CLIENT LINK V1 — clients are views over the same canonical Work Objects.",
+        )
+        + "<section class='card card-pad'>"
+          "<div class='section-title'>ONE NINA Canonical Clients</div>"
+          f"{kpis}<br>"
+          f"<div class='list'>{canonical_rows}</div>"
+          "<div class='safe-note'>"
+          "V51.5: client profiles are grouped directly from client_id on nina_work_objects. "
+          "No web client-work copy, preview object or second work truth is created. "
+          "Legacy memory remains preserved for migration/history."
+          "</div>"
+          "</section><br>"
+        + "<section class='card card-pad'>"
+          "<div class='section-title'>ONE NINA Client Rule</div>"
+          "<div class='list'>"
+          "<div class='row'><div><b>One client context</b>"
+          "<span class='muted'>The same canonical work object appears in Tasks and in the linked client profile.</span>"
+          "</div><span class='pill'>active</span></div>"
+          "<div class='row'><div><b>No duplicated client work</b>"
+          "<span class='muted'>Clients does not rebuild Telegram memory into a second workspace object.</span>"
+          "</div><span class='pill'>ONE NINA</span></div>"
+          "</div>"
+          "</section>"
     )
 
 def projects_body(data):
