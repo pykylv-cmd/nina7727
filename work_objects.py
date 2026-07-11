@@ -33,7 +33,7 @@ except Exception:
     psycopg2 = None
 
 
-WORK_OBJECTS_VERSION = "Persistent Work Objects V2.2 — ONE NINA Canonical Business Detail Extraction"
+WORK_OBJECTS_VERSION = "Persistent Work Objects V2.2.1 — ONE NINA Canonical Business Detail Cleanup"
 DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
 DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
 USE_POSTGRES = bool(DATABASE_URL and psycopg2)
@@ -650,9 +650,27 @@ def _extract_due_context(text: str) -> Dict[str, str]:
 
 def _clean_subject_candidate(value: str) -> str:
     value = _normalize_business_text(value)
-    value = re.split(r"\b(?:darbus?|darbi|sākt|sakt|termiņ|termin|summa|cena)\b", value, maxsplit=1, flags=re.IGNORECASE)[0]
-    value = re.sub(r"\s+\d{1,3}(?:[ .]\d{3})*(?:[,.]\d{1,2})?\s*(?:€|eur|eiro)\b.*$", "", value, flags=re.IGNORECASE)
-    value = re.sub(r"[,.!?;:]+$", "", value).strip(" -–—")
+
+    # Remove the amount/currency segment before any other subject cleanup.
+    # Example: "jumta remontu 3600 eiro, darbus varam sākt..."
+    # becomes: "jumta remontu".
+    value = re.sub(
+        r"(?<!\d)\d{1,3}(?:[ .]\d{3})*(?:[,.]\d{1,2})?\s*(?:€|eur|eiro)\b",
+        " ",
+        value,
+        flags=re.IGNORECASE,
+    )
+
+    # Stop the subject before operational timing / amount clauses.
+    value = re.split(
+        r"\b(?:darbus?|darbi|sākt|sakt|uzsākt|uzsakt|termiņ|termin|summa|cena)\b",
+        value,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+
+    value = re.sub(r"\s+", " ", value)
+    value = re.sub(r"[,.!?;:]+$", "", value).strip(" -–—,.;:")
     return value.strip()
 
 
@@ -717,18 +735,20 @@ def extract_canonical_business_details(
     metadata = metadata if isinstance(metadata, dict) else {}
     text = _normalize_business_text(raw_text or metadata.get("raw_text") or title)
     details: Dict[str, Any] = {
-        "extraction_version": "ONE_NINA_CANONICAL_BUSINESS_DETAIL_V1",
+        "extraction_version": "ONE_NINA_CANONICAL_BUSINESS_DETAIL_V1_1",
         "object_type": _clean(object_type) or "task",
     }
 
     if _clean(client_id):
         details["client_name"] = _clean(client_id)
 
+    amount_details = _extract_amount_currency(text)
+    details.update(amount_details)
+
     subject = _extract_work_subject(text, object_type=object_type)
     if subject:
         details["subject"] = subject
 
-    details.update(_extract_amount_currency(text))
     details.update(_extract_due_context(text))
     details.update(_extract_start_context(text))
 
@@ -761,7 +781,7 @@ def enrich_canonical_business_metadata(
     return enriched
 
 
-def migrate_canonical_business_details_v1() -> Dict[str, Any]:
+def migrate_canonical_business_details_v1_1() -> Dict[str, Any]:
     """Backfill business details into existing canonical bridge rows in place."""
     ensure_work_objects_schema()
     conn = _connect()
@@ -1091,7 +1111,7 @@ def list_work_objects(
 ) -> List[WorkObject]:
     ensure_work_objects_schema()
     migrate_canonical_work_mapping_v2()
-    migrate_canonical_business_details_v1()
+    migrate_canonical_business_details_v1_1()
 
     where: List[str] = []
     params: List[Any] = []
