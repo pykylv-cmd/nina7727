@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V51.3 — ONE NINA Work Object Read Bridge
+# NinaOS Web App V51.4 — ONE NINA CLEAN CUT
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -29,7 +29,7 @@ except Exception as e:
     def one_nina_work_persistence_health():
         return {"ok": False, "error": "Persistent Work Objects nav pieslēgts"}
 
-WEB_APP_VERSION = "Web App V51.3 — ONE NINA Work Object Read Bridge"
+WEB_APP_VERSION = "Web App V51.4 — ONE NINA CLEAN CUT"
 app = Flask(__name__)
 
 # V47.1 safe workspace-object surface polish.
@@ -55,7 +55,7 @@ TELEGRAM_CLIENT_CONTACT_MAPPINGS_LOADED = False
 
 
 # =========================================================
-# V51.3 — ONE NINA canonical Work Object read surface
+# V51.4 — ONE NINA canonical Work Object product surface
 # =========================================================
 
 def one_nina_canonical_work_objects(limit=200):
@@ -68,7 +68,7 @@ def one_nina_canonical_work_objects(limit=200):
             limit=max(1, min(int(limit or 200), 1000)),
         )
     except Exception as e:
-        print("V51.3 ONE NINA canonical work read error:", repr(e))
+        print("V51.4 ONE NINA canonical work read error:", repr(e))
         return []
 
 
@@ -3718,14 +3718,13 @@ def dashboard_body(data):
     )
     workers = "".join(worker_card(w) for w in data["workers"])
     activity = "".join(activity_row(a) for a in data["activity"][:6])
-    approved_dashboard_rows = active_workspace_work_rows(limit=4, empty_text=tx("no_items", lang))
     snapshot_kpis = (
         kpi_card(tx("clients", lang), c["clients"], {"text": tx("crm", lang), "href": "/clients"})
         + kpi_card(tx("workers", lang), c["workers"], {"text": tx("ai_workforce", lang), "href": "/workers"})
         + kpi_card(tx("estimates", lang), c["estimates"], {"text": tx("in_progress", lang), "href": "/tasks"})
         + kpi_card(tx("invoices", lang), c["invoices"], {"text": tx("due_sent", lang), "href": "/clients"})
     )
-    return one_nina_surface + f"<div class='grid'><div class='hero-grid'><section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>AI WORKFORCE OPERATING SYSTEM</div></div></div><div class='bigline'>{tx('hero_line', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/inbox')}'>{tx('channel_hub', lang)}</a><a class='btn' href='{q('/tasks')}'>{tx('open_work', lang)}</a><a class='btn' href='{q('/exchange')}'>{tx('explore', lang)}</a></div><div class='trust'><span>GLOBAL</span><span>WORKFORCE</span><span>SECURE</span><span>SCALE</span></div></section><section class='card card-pad'><div class='page-title'><h1>{tx('good_morning', lang)}</h1><p>{tx('workspace_today', lang)}</p></div><br>{kpis}<br><div class='card card-pad' style='background:rgba(27,84,255,.16)'><div class='section-title'>{tx('global', lang)}</div><p class='muted'>{tx('connected', lang)}</p><a class='btn' href='{q('/exchange')}'>{tx('view_global', lang)}</a></div></section></div><section><div class='section-title'>{tx('your_workers', lang)}</div><div class='worker-grid'>{workers}</div></section><div class='two-col'><section class='card card-pad'><div class='section-title'>{tx('recent', lang)}</div><div class='list'>{activity}</div></section><section class='card card-pad'><div class='section-title'>{tx('snapshot', lang)}</div><div class='kpis'>{snapshot_kpis}</div><br><div class='btns'><a class='btn primary' href='{q('/tasks')}'>{tx('tasks', lang)}</a><a class='btn' href='{q('/clients')}'>{tx('clients', lang)}</a><a class='btn' href='{q('/projects')}'>{tx('projects', lang)}</a><a class='btn' href='{q('/workers')}'>{tx('workers', lang)}</a></div></section></div><div class='two-col'><section class='card card-pad'><div class='section-title'>Approved Workspace Queue</div><div class='list'>{approved_dashboard_rows}</div><div class='safe-note'>V48.0: approved workspace objects are linked to client profiles.</div></section><section class='card card-pad'><div class='section-title'>Pending Send-back Objects</div><div class='list'>{send_back_candidate_rows(limit=4, empty_text=tx('no_items', lang))}</div><div class='safe-note'>Client-facing approved objects prepared for the future send-back layer.</div></section></div></div>"
+    return one_nina_surface + f"<div class='grid'><div class='hero-grid'><section class='card card-pad hero-card'><div class='hero-lockup'>{nina_logo_html('hero')}<div><div class='hero-title'>Nina<span>OS</span></div><div class='subtitle'>AI WORKFORCE OPERATING SYSTEM</div></div></div><div class='bigline'>{tx('hero_line', lang)}</div><br><div class='btns'><a class='btn primary' href='{q('/inbox')}'>{tx('channel_hub', lang)}</a><a class='btn' href='{q('/tasks')}'>{tx('open_work', lang)}</a><a class='btn' href='{q('/exchange')}'>{tx('explore', lang)}</a></div><div class='trust'><span>GLOBAL</span><span>WORKFORCE</span><span>SECURE</span><span>SCALE</span></div></section><section class='card card-pad'><div class='page-title'><h1>{tx('good_morning', lang)}</h1><p>{tx('workspace_today', lang)}</p></div><br>{kpis}<br><div class='card card-pad' style='background:rgba(27,84,255,.16)'><div class='section-title'>{tx('global', lang)}</div><p class='muted'>{tx('connected', lang)}</p><a class='btn' href='{q('/exchange')}'>{tx('view_global', lang)}</a></div></section></div><section><div class='section-title'>{tx('your_workers', lang)}</div><div class='worker-grid'>{workers}</div></section><div class='two-col'><section class='card card-pad'><div class='section-title'>{tx('recent', lang)}</div><div class='list'>{activity}</div></section><section class='card card-pad'><div class='section-title'>{tx('snapshot', lang)}</div><div class='kpis'>{snapshot_kpis}</div><br><div class='btns'><a class='btn primary' href='{q('/tasks')}'>{tx('tasks', lang)}</a><a class='btn' href='{q('/clients')}'>{tx('clients', lang)}</a><a class='btn' href='{q('/projects')}'>{tx('projects', lang)}</a><a class='btn' href='{q('/workers')}'>{tx('workers', lang)}</a></div></section></div></div>"
 
 
 def work_page_header(title, subtitle):
@@ -3789,29 +3788,26 @@ def work_object_rows(items, empty_text=None, limit=None, show_source=True, show_
 
 def tasks_body(data):
     lang = current_language()
-    one_nina_surface = one_nina_work_surface_html(limit=50)
-    approved_items = approved_preview_items()
-    pending_items = pending_or_held_preview_items()
-    rejected_items = rejected_preview_items()
-    pending_threads = pending_or_held_client_thread_items()
-    rejected_threads = rejected_client_thread_items()
-    thread_preview_rows = client_thread_rows(client_threads_by_state(), empty_text=tx("no_items", lang), limit=8, show_controls=True)
-    workspace_rows = workspace_object_surface_rows(limit=10, empty_text=tx("no_items", lang))
-    send_rows = send_back_candidate_rows(limit=10, empty_text=tx("no_items", lang))
-    pending_rows = client_thread_rows(pending_threads, empty_text=tx("no_items", lang), limit=8, show_controls=True) + work_object_rows(pending_items, empty_text="", show_source=True) if pending_threads or pending_items else work_object_rows([], empty_text=tx("no_items", lang), show_source=True)
-    rejected_rows = client_thread_rows(rejected_threads, empty_text=tx("no_items", lang), limit=8, show_controls=False) + work_object_rows(rejected_items, empty_text="", show_source=True) if rejected_threads or rejected_items else work_object_rows([], empty_text=tx("no_items", lang), show_source=True)
-    all_rows = work_object_rows(data["tasks"], empty_text=tx("no_items", lang), show_source=True)
-    approved_preview_rows = work_object_rows(approved_items, empty_text=tx("no_items", lang), show_source=True)
     return (
-        work_page_header(tx("tasks"), "V51.3 ONE NINA — canonical work from the shared persistent Work Object layer.")
-        + one_nina_surface
-        + f"<section class='card card-pad'><div class='section-title'>Approved Workspace Queue</div><div class='list'>{workspace_rows}</div><div class='safe-note'>V48.1: these workspace-object snapshots are grouped into real client profiles.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Pending Send-back Objects</div><div class='list'>{send_rows}</div><div class='safe-note'>V48.1: client-facing objects are also visible inside each client profile.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Client Work Thread Preview</div><div class='list'>{thread_preview_rows}</div><div class='safe-note'>V48.1: thread preview remains visible, but /clients is now the real client work surface.</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>{tx('approval_workspace_bridge', lang)}</div><div class='list'>{pending_rows}</div><div class='safe-note'>{tx('safe_note', lang)}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>Approved Preview Objects</div><div class='list'>{approved_preview_rows}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>{tx('all_workspace_work', lang)}</div><div class='list'>{all_rows}</div></section><br>"
-        + f"<section class='card card-pad'><div class='section-title'>{tx('rejected_preview_log', lang)}</div><div class='list'>{rejected_rows}</div></section>"
+        work_page_header(
+            tx("tasks"),
+            "V51.4 ONE NINA CLEAN CUT — one canonical persistent work truth for every channel.",
+        )
+        + one_nina_work_surface_html(limit=100)
+        + "<section class='card card-pad'>"
+          "<div class='section-title'>ONE NINA Work Rule</div>"
+          "<div class='list'>"
+          "<div class='row'><div><b>One work object</b>"
+          "<span class='muted'>Telegram, Web and future channels read the same nina_work_objects record.</span>"
+          "</div><span class='pill'>active</span></div>"
+          "<div class='row'><div><b>Legacy data preserved</b>"
+          "<span class='muted'>memory_backups and conversation_state remain available for migration and history; they are not deleted.</span>"
+          "</div><span class='pill'>safe</span></div>"
+          "<div class='row'><div><b>No second work brain in Web</b>"
+          "<span class='muted'>Tasks no longer renders legacy thread inference, preview queues or workspace snapshots as parallel work truth.</span>"
+          "</div><span class='pill'>ONE NINA</span></div>"
+          "</div>"
+          "</section>"
     )
 
 def clients_body(data):
