@@ -12534,7 +12534,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V116.1 + Core 2.5.2 — ONE NINA Persistent Work Bridge V1"
+APP_VERSION = "V116.2 + Core 2.5.2 — ONE NINA Runtime Conflict Fix V1"
 
 
 def rb_remove_version_lines(text):
@@ -16932,7 +16932,7 @@ def payment_cancel_page():
 
 @app.route("/")
 def home():
-    return "NinaOS Telegram Runtime V116.0 darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    return "NinaOS Runtime V116.2 — ONE NINA darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
 init_db()
@@ -16957,15 +16957,122 @@ def run_flask_server():
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 
+# ONE NINA Runtime Conflict Fix V1
+# PostgreSQL advisory lock is session-scoped. The DB connection is deliberately
+# kept open for the full lifetime of the polling owner. If that process dies,
+# PostgreSQL releases the lock automatically and another runtime may take over.
+ONE_NINA_TELEGRAM_LOCK_KEY = 7727001162
+ONE_NINA_TELEGRAM_LOCK_CONN = None
+
+
+def acquire_one_nina_telegram_runtime_lock():
+    global ONE_NINA_TELEGRAM_LOCK_CONN
+
+    if not USE_POSTGRES:
+        print("ONE NINA Runtime Lock: SQLite/local mode — single-process responsibility.")
+        return True
+
+    conn = None
+    cur = None
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        db_execute(
+            cur,
+            "SELECT pg_try_advisory_lock(%s)",
+            (ONE_NINA_TELEGRAM_LOCK_KEY,),
+        )
+        row = cur.fetchone()
+        acquired = bool(row and row[0])
+
+        if acquired:
+            ONE_NINA_TELEGRAM_LOCK_CONN = conn
+            conn = None
+            print(
+                "ONE NINA Runtime Lock: ACQUIRED",
+                f"key={ONE_NINA_TELEGRAM_LOCK_KEY}",
+                "role=telegram_polling_owner",
+            )
+            return True
+
+        print(
+            "ONE NINA Runtime Lock: STANDBY",
+            f"key={ONE_NINA_TELEGRAM_LOCK_KEY}",
+            "reason=another Nina runtime owns Telegram polling",
+        )
+        return False
+    except Exception as e:
+        print("ONE NINA Runtime Lock ERROR:", repr(e))
+        # Fail closed in production. Starting polling without the lock could
+        # recreate Telegram getUpdates conflicts.
+        return False
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def release_one_nina_telegram_runtime_lock():
+    global ONE_NINA_TELEGRAM_LOCK_CONN
+
+    conn = ONE_NINA_TELEGRAM_LOCK_CONN
+    ONE_NINA_TELEGRAM_LOCK_CONN = None
+    if conn is None:
+        return
+
+    cur = None
+    try:
+        cur = conn.cursor()
+        db_execute(
+            cur,
+            "SELECT pg_advisory_unlock(%s)",
+            (ONE_NINA_TELEGRAM_LOCK_KEY,),
+        )
+        print("ONE NINA Runtime Lock: RELEASED")
+    except Exception as e:
+        print("ONE NINA Runtime Lock release error:", repr(e))
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
-    print("NinaOS Telegram Runtime V116.0 starting...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
+    print(
+        "NinaOS Telegram Runtime V116.2 starting...",
+        "PostgreSQL" if USE_POSTGRES else "SQLite fallback",
+    )
 
-    # Stripe webhook vajag HTTP serveri. Telegram botam vienlaikus vajag polling.
-    # Tāpēc Flask palaižam background threadā, bet Telegram polling atstājam galvenajā procesā.
-    flask_thread = threading.Thread(target=run_flask_server, daemon=True)
-    flask_thread.start()
+    polling_owner = acquire_one_nina_telegram_runtime_lock()
 
-    telegram_app.run_polling()
+    if polling_owner:
+        # The ONE NINA polling owner runs Telegram and the existing HTTP surface.
+        flask_thread = threading.Thread(target=run_flask_server, daemon=True)
+        flask_thread.start()
+
+        try:
+            telegram_app.run_polling()
+        finally:
+            release_one_nina_telegram_runtime_lock()
+    else:
+        # A duplicate runtime must never call Telegram getUpdates.
+        # Keep its HTTP process alive so Railway can remain healthy and logs
+        # clearly show STANDBY instead of creating a second polling Nina.
+        print("ONE NINA Runtime: Telegram polling DISABLED on this duplicate runtime.")
+        run_flask_server()
 
 def stripe_production_checklist_answer(user_id=None):
     checks = [
