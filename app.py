@@ -98,7 +98,7 @@ except Exception as e:
 
 # NinaOS Work Engine Import
 try:
-    from work_engine import work_plan, work_engine_status, execute_natural_work_request, resolve_canonical_client_name, WORK_ENGINE_VERSION
+    from work_engine import work_plan, work_engine_status, execute_natural_work_request, resolve_canonical_client_name, prepare_canonical_client_reply, WORK_ENGINE_VERSION
 except Exception as e:
     print("work_engine.py imports nav pieejams:", e)
     WORK_ENGINE_VERSION = "Work Engine nav pieslēgts"
@@ -111,6 +111,9 @@ except Exception as e:
 
     def execute_natural_work_request(*args, **kwargs):
         return None
+
+    def prepare_canonical_client_reply(*args, **kwargs):
+        return {"ok": False, "error": "client_reply_action_unavailable"}
 
     def resolve_canonical_client_name(candidate_name, workspace_id="demo_small_business"):
         return str(candidate_name or "").strip()
@@ -12558,7 +12561,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V116.5 + ONE NINA Natural Channel Work Execution V1"
+APP_VERSION = "V116.6 + ONE NINA Forwarded Work Intake V1.1"
 
 
 def rb_remove_version_lines(text):
@@ -12656,9 +12659,10 @@ def reply_builder_build(reply_object):
     if channel == "telegram" and len(text) > 3800:
         text = text[:3700].rstrip() + "\n\n…"
 
-    # Core 2.5.2: vienmēr tikai viena gala versijas rinda.
+    # Client deliverables must never expose Nina, AI, NinaOS or technical version markers.
     text = rb_remove_version_lines(text).rstrip()
-    text = text + f"\n\nVersija: {APP_VERSION}"
+    if not reply_object.get("client_deliverable"):
+        text = text + f"\n\nVersija: {APP_VERSION}"
 
     return {
         "text": text,
@@ -12702,7 +12706,7 @@ def reply_builder_status_answer():
     )
 
 
-async def safe_reply_text(update, text, disable_web_page_preview=True):
+async def safe_reply_text(update, text, disable_web_page_preview=True, client_deliverable=False):
     """Core 2.5.2: vienīgā drošā izeja gala tekstam uz Telegram."""
     try:
         if update and update.message:
@@ -12711,12 +12715,22 @@ async def safe_reply_text(update, text, disable_web_page_preview=True):
             except Exception:
                 user_text = ""
 
-            final_text = reply_builder_text(
-                text,
-                user_text=user_text,
-                source="safe_reply_text",
-                channel="telegram",
-            )
+            if client_deliverable:
+                reply_object = build_reply_object(
+                    main_message=text,
+                    user_text=user_text,
+                    source="client_deliverable",
+                    channel="client_deliverable",
+                )
+                reply_object["client_deliverable"] = True
+                final_text = reply_builder_build(reply_object).get("text", "")
+            else:
+                final_text = reply_builder_text(
+                    text,
+                    user_text=user_text,
+                    source="safe_reply_text",
+                    channel="telegram",
+                )
 
             await update.message.reply_text(
                 final_text,
@@ -15194,6 +15208,19 @@ def nina_daily_brief_answer(user_id):
 
 
 # =========================
+# ONE NINA Client Deliverable Generator V1
+# =========================
+
+def nina_generate_client_deliverable(prompt):
+    """Use the existing ONE NINA model runtime; channel code does not invent business truth."""
+    response = client.responses.create(
+        model="gpt-4.1-mini",
+        input=str(prompt or "").strip(),
+    )
+    return (response.output_text or "").strip()
+
+
+# =========================
 # ONE NINA Channel Work Intake V1 — forwarded text
 # =========================
 
@@ -15290,18 +15317,26 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             forwarded_intake = None
 
         if forwarded_intake:
-            client_name = str(forwarded_intake.get("client_name") or forwarded_intake.get("sender_name") or "").strip()
-            if client_name:
-                forwarded_answer = (
-                    f"Saņēmu pārsūtīto ziņu no {client_name} un piesaistīju to klienta darbam. "
-                    "Pasaki, ko gribi izdarīt ar šo ziņu — piemēram: sagatavo atbildi, izvelc darbus vai pārbaudi pret piedāvājumu."
-                )
+            forwarded_obj = forwarded_intake.get("object")
+            reply_result = None
+            if forwarded_obj is not None:
+                try:
+                    reply_result = prepare_canonical_client_reply(
+                        forwarded_obj.object_id,
+                        generator=nina_generate_client_deliverable,
+                        workspace_id="demo_small_business",
+                    )
+                except Exception as e:
+                    print("ONE NINA forwarded client reply action error:", repr(e))
+            if reply_result and reply_result.get("ok") and reply_result.get("draft_text"):
+                await safe_reply_text(update, reply_result.get("draft_text"), client_deliverable=True)
             else:
+                client_name = str(forwarded_intake.get("client_name") or forwarded_intake.get("sender_name") or "").strip()
                 forwarded_answer = (
-                    "Saņēmu pārsūtīto ziņu un saglabāju to kā canonical klienta pieprasījumu. "
-                    "Pasaki klienta vārdu vai ko gribi ar šo ziņu izdarīt."
+                    f"Saņēmu ziņu{(' no ' + client_name) if client_name else ''} un piesaistīju to darbam. "
+                    "Šoreiz gatavu atbildi droši nesagatavoju, jo pietrūka konteksta."
                 )
-            await safe_reply_text(update, forwarded_answer)
+                await safe_reply_text(update, forwarded_answer)
             return
 
         # NinaOS Platform Visibility V1.1 — Global-first product surface
@@ -15886,7 +15921,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 except Exception:
                     pass
-                await safe_reply_text(update, natural_work_answer)
+                await safe_reply_text(update, natural_work_answer, client_deliverable=True)
                 return
 
         telegram_message_id = getattr(update.message, "message_id", None)
