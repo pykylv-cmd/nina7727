@@ -33,7 +33,7 @@ except Exception:
     psycopg2 = None
 
 
-WORK_OBJECTS_VERSION = "Persistent Work Objects V2.3 — ONE NINA Canonical Estimate Action Metadata"
+WORK_OBJECTS_VERSION = "Persistent Work Objects V2.3.1 — ONE NINA Release-Safe Canonical Action Metadata"
 DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
 DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
 USE_POSTGRES = bool(DATABASE_URL and psycopg2)
