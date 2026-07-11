@@ -4,6 +4,7 @@ import json
 import sqlite3
 import asyncio
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from io import BytesIO
@@ -12534,7 +12535,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V116.2 + Core 2.5.2 — ONE NINA Runtime Conflict Fix V1"
+APP_VERSION = "V116.2 + Core 2.5.2 — ONE NINA Runtime Lock Retry Fix V1"
 
 
 def rb_remove_version_lines(text):
@@ -17052,27 +17053,47 @@ def release_one_nina_telegram_runtime_lock():
 
 if __name__ == "__main__":
     print(
-        "NinaOS Telegram Runtime V116.2 starting...",
+        "NinaOS Telegram Runtime V116.2 RETRY FIX starting...",
         "PostgreSQL" if USE_POSTGRES else "SQLite fallback",
     )
 
-    polling_owner = acquire_one_nina_telegram_runtime_lock()
+    # HTTP starts once and stays healthy during Railway rolling deploy overlap.
+    flask_thread = threading.Thread(target=run_flask_server, daemon=True)
+    flask_thread.start()
 
-    if polling_owner:
-        # The ONE NINA polling owner runs Telegram and the existing HTTP surface.
-        flask_thread = threading.Thread(target=run_flask_server, daemon=True)
-        flask_thread.start()
+    # ONE NINA Runtime Lock Retry Fix:
+    # A new Railway deployment may overlap briefly with the old deployment.
+    # If the old process still owns the advisory lock, this runtime waits and
+    # retries. It must not remain muted forever in permanent STANDBY.
+    retry_seconds = max(
+        2,
+        int(os.environ.get("ONE_NINA_LOCK_RETRY_SECONDS", "5") or "5"),
+    )
+    standby_attempt = 0
 
-        try:
-            telegram_app.run_polling()
-        finally:
-            release_one_nina_telegram_runtime_lock()
-    else:
-        # A duplicate runtime must never call Telegram getUpdates.
-        # Keep its HTTP process alive so Railway can remain healthy and logs
-        # clearly show STANDBY instead of creating a second polling Nina.
-        print("ONE NINA Runtime: Telegram polling DISABLED on this duplicate runtime.")
-        run_flask_server()
+    while True:
+        polling_owner = acquire_one_nina_telegram_runtime_lock()
+        if polling_owner:
+            if standby_attempt:
+                print(
+                    "ONE NINA Runtime Lock: PROMOTED_FROM_STANDBY",
+                    f"attempts={standby_attempt}",
+                    "role=telegram_polling_owner",
+                )
+            break
+
+        standby_attempt += 1
+        print(
+            "ONE NINA Runtime: STANDBY RETRY",
+            f"attempt={standby_attempt}",
+            f"retry_in={retry_seconds}s",
+        )
+        time.sleep(retry_seconds)
+
+    try:
+        telegram_app.run_polling()
+    finally:
+        release_one_nina_telegram_runtime_lock()
 
 def stripe_production_checklist_answer(user_id=None):
     checks = [
