@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V51.4 PRODUCTION CLEANUP — ONE NINA
+# NinaOS Web App V51.4 LABEL FIX — ONE NINA
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -29,7 +29,7 @@ except Exception as e:
     def one_nina_work_persistence_health():
         return {"ok": False, "error": "Persistent Work Objects nav pieslēgts"}
 
-WEB_APP_VERSION = "Web App V51.4 PRODUCTION CLEANUP — ONE NINA"
+WEB_APP_VERSION = "Web App V51.4 LABEL FIX — ONE NINA"
 app = Flask(__name__)
 
 # V47.1 safe workspace-object surface polish.
@@ -160,7 +160,7 @@ def one_nina_work_surface_html(limit=20):
         f"{one_nina_work_kpis_html()}<br>"
         f"<div class='list'>{one_nina_work_object_rows(limit=limit)}</div>"
         "<div class='safe-note'>"
-        "V51.3: Web reads nina_work_objects through the shared work_objects.py service. "
+        "V51.4 LABEL FIX: Web reads nina_work_objects through the shared work_objects.py service. "
         "The web surface does not infer task type, client or meaning from Telegram text in this section. "
         f"Status: {html_escape(status)} · {html_escape(ONE_NINA_WORK_OBJECTS_VERSION)}."
         "</div></section><br>"
