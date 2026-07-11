@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
@@ -32,7 +33,7 @@ except Exception:
     psycopg2 = None
 
 
-WORK_OBJECTS_VERSION = "Persistent Work Objects V2.1 — ONE NINA Canonical Work Mapping V2"
+WORK_OBJECTS_VERSION = "Persistent Work Objects V2.2 — ONE NINA Canonical Business Detail Extraction"
 DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
 DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
 USE_POSTGRES = bool(DATABASE_URL and psycopg2)
@@ -590,6 +591,220 @@ def classify_canonical_work_object_type(raw_text="", title="", metadata=None, de
     return _clean(default_type) or "task"
 
 
+
+def _normalize_business_text(value: Any) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+def _extract_amount_currency(text: str) -> Dict[str, Any]:
+    value = _normalize_business_text(text)
+    patterns = [
+        r"(?<!\d)(\d{1,3}(?:[ .]\d{3})*(?:[,.]\d{1,2})?)\s*(€|eur|eiro)\b",
+        r"\b(?:summa|cena|kopā|kopa)\s*[:=-]?\s*(\d{1,3}(?:[ .]\d{3})*(?:[,.]\d{1,2})?)\s*(€|eur|eiro)?\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_amount = match.group(1)
+        normalized = raw_amount.replace(" ", "").replace(".", "").replace(",", ".")
+        try:
+            amount = float(normalized)
+            if amount.is_integer():
+                amount = int(amount)
+        except Exception:
+            continue
+        currency_raw = (match.group(2) if match.lastindex and match.lastindex >= 2 else "") or "EUR"
+        currency = "EUR" if str(currency_raw).lower() in {"€", "eur", "eiro"} else str(currency_raw).upper()
+        return {
+            "amount": amount,
+            "currency": currency,
+            "amount_text": f"{raw_amount} {currency_raw or 'EUR'}".strip(),
+        }
+    return {}
+
+
+def _extract_due_context(text: str) -> Dict[str, str]:
+    value = _normalize_business_text(text)
+    lower = value.lower()
+    mapping = [
+        ("today", ("šodien", "sodien", "today")),
+        ("tomorrow", ("rīt", "rit", "tomorrow")),
+        ("monday", ("pirmdien", "monday")),
+        ("tuesday", ("otrdien", "tuesday")),
+        ("wednesday", ("trešdien", "tresdien", "wednesday")),
+        ("thursday", ("ceturtdien", "thursday")),
+        ("friday", ("piektdien", "friday")),
+        ("saturday", ("sestdien", "saturday")),
+        ("sunday", ("svētdien", "svetdien", "sunday")),
+        ("next_week", ("nākamnedēļ", "nakamnedel", "next week")),
+    ]
+    for normalized, tokens in mapping:
+        for token in tokens:
+            if token in lower:
+                return {"due_context": normalized, "due_text": token}
+    return {}
+
+
+def _clean_subject_candidate(value: str) -> str:
+    value = _normalize_business_text(value)
+    value = re.split(r"\b(?:darbus?|darbi|sākt|sakt|termiņ|termin|summa|cena)\b", value, maxsplit=1, flags=re.IGNORECASE)[0]
+    value = re.sub(r"\s+\d{1,3}(?:[ .]\d{3})*(?:[,.]\d{1,2})?\s*(?:€|eur|eiro)\b.*$", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"[,.!?;:]+$", "", value).strip(" -–—")
+    return value.strip()
+
+
+def _extract_work_subject(text: str, object_type: str = "task") -> str:
+    value = _normalize_business_text(text)
+    if not value:
+        return ""
+
+    patterns = []
+    if object_type == "estimate":
+        patterns.extend([
+            r"\bpiedāvājum\w*\s+(?:\w+\s+){0,3}?par\s+(.+)$",
+            r"\bpiedavajum\w*\s+(?:\w+\s+){0,3}?par\s+(.+)$",
+            r"\btām\w*\s+(?:\w+\s+){0,3}?par\s+(.+)$",
+            r"\bestimate\s+(?:\w+\s+){0,3}?for\s+(.+)$",
+            r"\bquote\s+(?:\w+\s+){0,3}?for\s+(.+)$",
+        ])
+    patterns.extend([
+        r"\bpar\s+(.+)$",
+        r"\bfor\s+(.+)$",
+    ])
+
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        candidate = _clean_subject_candidate(match.group(1))
+        if candidate:
+            return candidate
+    return ""
+
+
+def _extract_start_context(text: str) -> Dict[str, str]:
+    value = _normalize_business_text(text)
+    match = re.search(
+        r"\b(?:darbus?|darbi)\s+(?:varam\s+)?(?:sākt|sakt|uzsākt|uzsakt)\s+(.+?)(?:[,.!?;]|$)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return {}
+    start_text = _normalize_business_text(match.group(1))
+    if not start_text:
+        return {}
+    return {"start_context": start_text}
+
+
+def extract_canonical_business_details(
+    *,
+    raw_text: str = "",
+    title: str = "",
+    object_type: str = "task",
+    client_id: str = "",
+    due_date: str = "",
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Extract durable business fields once in the shared Work Object layer.
+
+    The output is stored inside canonical metadata['business_details'] and is
+    reused by Telegram, Web and future channels. Web must not re-extract it.
+    """
+    metadata = metadata if isinstance(metadata, dict) else {}
+    text = _normalize_business_text(raw_text or metadata.get("raw_text") or title)
+    details: Dict[str, Any] = {
+        "extraction_version": "ONE_NINA_CANONICAL_BUSINESS_DETAIL_V1",
+        "object_type": _clean(object_type) or "task",
+    }
+
+    if _clean(client_id):
+        details["client_name"] = _clean(client_id)
+
+    subject = _extract_work_subject(text, object_type=object_type)
+    if subject:
+        details["subject"] = subject
+
+    details.update(_extract_amount_currency(text))
+    details.update(_extract_due_context(text))
+    details.update(_extract_start_context(text))
+
+    if _clean(due_date):
+        details["due_date"] = _clean(due_date)
+
+    return details
+
+
+def enrich_canonical_business_metadata(
+    *,
+    raw_text: str = "",
+    title: str = "",
+    object_type: str = "task",
+    client_id: str = "",
+    due_date: str = "",
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    enriched = dict(metadata or {})
+    details = extract_canonical_business_details(
+        raw_text=raw_text,
+        title=title,
+        object_type=object_type,
+        client_id=client_id,
+        due_date=due_date,
+        metadata=enriched,
+    )
+    enriched["business_details"] = details
+    enriched["business_detail_extraction_version"] = details["extraction_version"]
+    return enriched
+
+
+def migrate_canonical_business_details_v1() -> Dict[str, Any]:
+    """Backfill business details into existing canonical bridge rows in place."""
+    ensure_work_objects_schema()
+    conn = _connect()
+    cur = conn.cursor()
+    updated = 0
+    try:
+        _execute(cur, f"SELECT {_SELECT_FIELDS} FROM {_TABLE_NAME} ORDER BY created_at ASC")
+        for row in cur.fetchall() or []:
+            obj = _row_to_work_object(row)
+            meta = obj.metadata if isinstance(obj.metadata, dict) else {}
+            if str(meta.get("source") or "") != "telegram_task_engine":
+                continue
+
+            enriched = enrich_canonical_business_metadata(
+                raw_text=str(meta.get("raw_text") or ""),
+                title=obj.title,
+                object_type=obj.object_type,
+                client_id=obj.client_id,
+                due_date=obj.due_date,
+                metadata=meta,
+            )
+            if enriched == meta:
+                continue
+
+            _execute(
+                cur,
+                f"UPDATE {_TABLE_NAME} SET metadata_json=%s, updated_at=%s WHERE object_id=%s",
+                (_json_dumps(enriched), _utc_now(), obj.object_id),
+            )
+            updated += 1
+        conn.commit()
+        return {
+            "ok": True,
+            "updated": updated,
+            "extraction_version": "ONE_NINA_CANONICAL_BUSINESS_DETAIL_V1",
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
 def migrate_canonical_work_mapping_v2():
     """Correct old ONE NINA bridge rows in place and preserve object_id/source_key."""
     ensure_work_objects_schema()
@@ -838,6 +1053,14 @@ def save_or_get_work_object(
         metadata.get("raw_text", ""), title, metadata, object_type
     )
     metadata["canonical_mapping_version"] = "ONE_NINA_CANONICAL_WORK_MAPPING_V2"
+    metadata = enrich_canonical_business_metadata(
+        raw_text=str(metadata.get("raw_text") or ""),
+        title=title,
+        object_type=object_type,
+        client_id=client_id,
+        due_date=due_date,
+        metadata=metadata,
+    )
 
     obj = create_work_object(
         object_type=object_type,
@@ -868,6 +1091,7 @@ def list_work_objects(
 ) -> List[WorkObject]:
     ensure_work_objects_schema()
     migrate_canonical_work_mapping_v2()
+    migrate_canonical_business_details_v1()
 
     where: List[str] = []
     params: List[Any] = []
