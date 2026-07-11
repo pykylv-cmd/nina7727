@@ -33,7 +33,7 @@ except Exception:
     psycopg2 = None
 
 
-WORK_OBJECTS_VERSION = "Persistent Work Objects V2.2.1 — ONE NINA Canonical Business Detail Cleanup"
+WORK_OBJECTS_VERSION = "Persistent Work Objects V2.2.2 — ONE NINA Amount Regex Fix"
 DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
 DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
 USE_POSTGRES = bool(DATABASE_URL and psycopg2)
@@ -601,8 +601,8 @@ def _normalize_business_text(value: Any) -> str:
 def _extract_amount_currency(text: str) -> Dict[str, Any]:
     value = _normalize_business_text(text)
     patterns = [
-        r"(?<!\d)(\d{1,3}(?:[ .]\d{3})*(?:[,.]\d{1,2})?)\s*(€|eur|eiro)\b",
-        r"\b(?:summa|cena|kopā|kopa)\s*[:=-]?\s*(\d{1,3}(?:[ .]\d{3})*(?:[,.]\d{1,2})?)\s*(€|eur|eiro)?\b",
+        r"(?<!\d)(\d+(?:[ .]\d{3})*(?:[,.]\d{1,2})?)\s*(€|eur|eiro)\b",
+        r"\b(?:summa|cena|kopā|kopa)\s*[:=-]?\s*(\d+(?:[ .]\d{3})*(?:[,.]\d{1,2})?)\s*(€|eur|eiro)?\b",
     ]
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
@@ -655,7 +655,7 @@ def _clean_subject_candidate(value: str) -> str:
     # Example: "jumta remontu 3600 eiro, darbus varam sākt..."
     # becomes: "jumta remontu".
     value = re.sub(
-        r"(?<!\d)\d{1,3}(?:[ .]\d{3})*(?:[,.]\d{1,2})?\s*(?:€|eur|eiro)\b",
+        r"(?<!\d)\d+(?:[ .]\d{3})*(?:[,.]\d{1,2})?\s*(?:€|eur|eiro)\b",
         " ",
         value,
         flags=re.IGNORECASE,
@@ -735,7 +735,7 @@ def extract_canonical_business_details(
     metadata = metadata if isinstance(metadata, dict) else {}
     text = _normalize_business_text(raw_text or metadata.get("raw_text") or title)
     details: Dict[str, Any] = {
-        "extraction_version": "ONE_NINA_CANONICAL_BUSINESS_DETAIL_V1_1",
+        "extraction_version": "ONE_NINA_CANONICAL_BUSINESS_DETAIL_V1_2",
         "object_type": _clean(object_type) or "task",
     }
 
@@ -816,7 +816,7 @@ def migrate_canonical_business_details_v1_1() -> Dict[str, Any]:
         return {
             "ok": True,
             "updated": updated,
-            "extraction_version": "ONE_NINA_CANONICAL_BUSINESS_DETAIL_V1",
+            "extraction_version": "ONE_NINA_CANONICAL_BUSINESS_DETAIL_V1_2",
         }
     except Exception:
         conn.rollback()
