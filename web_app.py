@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V51.4 — ONE NINA CLEAN CUT
+# NinaOS Web App V51.4 PRODUCTION CLEANUP — ONE NINA
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -29,7 +29,7 @@ except Exception as e:
     def one_nina_work_persistence_health():
         return {"ok": False, "error": "Persistent Work Objects nav pieslēgts"}
 
-WEB_APP_VERSION = "Web App V51.4 — ONE NINA CLEAN CUT"
+WEB_APP_VERSION = "Web App V51.4 PRODUCTION CLEANUP — ONE NINA"
 app = Flask(__name__)
 
 # V47.1 safe workspace-object surface polish.
@@ -59,16 +59,31 @@ TELEGRAM_CLIENT_CONTACT_MAPPINGS_LOADED = False
 # =========================================================
 
 def one_nina_canonical_work_objects(limit=200):
-    """Read canonical NinaOS work truth from work_objects.py only."""
+    """Read active production Work Objects from the shared ONE NINA layer."""
     if not ONE_NINA_WORK_READ_READY:
         return []
     try:
-        return one_nina_list_work_objects(
+        raw_objects = one_nina_list_work_objects(
             workspace_id="demo_small_business",
-            limit=max(1, min(int(limit or 200), 1000)),
+            limit=max(1, min(int(limit or 200) * 4, 4000)),
         )
+        production_objects = []
+        for obj in raw_objects:
+            metadata = obj.metadata if isinstance(getattr(obj, "metadata", None), dict) else {}
+            source_key = str(getattr(obj, "source_key", "") or "")
+            is_demo = (
+                metadata.get("demo") is True
+                or str(metadata.get("source") or "") == "demo_seed"
+                or source_key.startswith("demo:")
+            )
+            if is_demo:
+                continue
+            production_objects.append(obj)
+            if len(production_objects) >= max(1, min(int(limit or 200), 1000)):
+                break
+        return production_objects
     except Exception as e:
-        print("V51.4 ONE NINA canonical work read error:", repr(e))
+        print("V51.4 PRODUCTION CLEANUP canonical work read error:", repr(e))
         return []
 
 
@@ -3791,7 +3806,7 @@ def tasks_body(data):
     return (
         work_page_header(
             tx("tasks"),
-            "V51.4 ONE NINA CLEAN CUT — one canonical persistent work truth for every channel.",
+            "V51.4 PRODUCTION CLEANUP — one canonical persistent work truth; demo seed objects hidden from active product work.",
         )
         + one_nina_work_surface_html(limit=100)
         + "<section class='card card-pad'>"
@@ -3806,6 +3821,9 @@ def tasks_body(data):
           "<div class='row'><div><b>No second work brain in Web</b>"
           "<span class='muted'>Tasks no longer renders legacy thread inference, preview queues or workspace snapshots as parallel work truth.</span>"
           "</div><span class='pill'>ONE NINA</span></div>"
+          "<div class='row'><div><b>Production work only</b>"
+          "<span class='muted'>Demo seed objects stay preserved in persistence but are hidden from active Dashboard and Tasks work surfaces.</span>"
+          "</div><span class='pill'>clean</span></div>"
           "</div>"
           "</section>"
     )
