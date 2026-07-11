@@ -33,7 +33,7 @@ except Exception:
     psycopg2 = None
 
 
-WORK_OBJECTS_VERSION = "Persistent Work Objects V2.2.2 — ONE NINA Amount Regex Fix"
+WORK_OBJECTS_VERSION = "Persistent Work Objects V2.3 — ONE NINA Canonical Estimate Action Metadata"
 DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
 DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
 USE_POSTGRES = bool(DATABASE_URL and psycopg2)
@@ -1226,6 +1226,57 @@ def update_work_object(
 
     return get_work_object(obj.object_id)
 
+
+
+def canonical_business_details(obj: Optional[WorkObject]) -> Dict[str, Any]:
+    """Return canonical business details already stored on one Work Object.
+
+    Action layers consume this data as-is. They must not re-parse channel text.
+    """
+    if not obj:
+        return {}
+    metadata = obj.metadata if isinstance(obj.metadata, dict) else {}
+    details = metadata.get("business_details")
+    return dict(details) if isinstance(details, dict) else {}
+
+
+def canonical_action_result(obj: Optional[WorkObject], action_key: str) -> Dict[str, Any]:
+    """Read one persisted action result from the same canonical Work Object."""
+    if not obj:
+        return {}
+    metadata = obj.metadata if isinstance(obj.metadata, dict) else {}
+    actions = metadata.get("canonical_actions")
+    if not isinstance(actions, dict):
+        return {}
+    result = actions.get(_clean(action_key))
+    return dict(result) if isinstance(result, dict) else {}
+
+
+def save_canonical_action_result(
+    object_id: str,
+    action_key: str,
+    result: Dict[str, Any],
+) -> Optional[WorkObject]:
+    """Persist an action result on the same canonical Work Object.
+
+    ONE NINA rule: an estimate draft is work performed on the estimate object,
+    not a second estimate record and not a web-only truth.
+    """
+    obj = get_work_object(object_id)
+    if not obj:
+        return None
+
+    key = _clean(action_key)
+    if not key:
+        raise ValueError("action_key is required.")
+
+    next_metadata = dict(obj.metadata or {})
+    actions = next_metadata.get("canonical_actions")
+    actions = dict(actions) if isinstance(actions, dict) else {}
+    actions[key] = dict(result or {})
+    next_metadata["canonical_actions"] = actions
+    next_metadata["canonical_action_version"] = "ONE_NINA_CANONICAL_ACTION_V1"
+    return update_work_object(obj.object_id, metadata=next_metadata)
 
 def update_work_object_status(object_id: str, status: str) -> Optional[WorkObject]:
     return update_work_object(object_id, status=status)
