@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V51.5 — ONE NINA CLIENT LINK V1
+# NinaOS Web App V51.6 — ONE NINA CANONICAL BUSINESS DETAIL RENDER
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -29,7 +29,7 @@ except Exception as e:
     def one_nina_work_persistence_health():
         return {"ok": False, "error": "Persistent Work Objects nav pieslēgts"}
 
-WEB_APP_VERSION = "Web App V51.5 — ONE NINA CLIENT LINK V1"
+WEB_APP_VERSION = "Web App V51.6 — ONE NINA CANONICAL BUSINESS DETAIL RENDER"
 app = Flask(__name__)
 
 # V47.1 safe workspace-object surface polish.
@@ -263,6 +263,134 @@ def one_nina_client_rows(empty_text="No canonical clients yet."):
     return rows
 
 
+def one_nina_business_details(obj):
+    """Read already-extracted canonical business_details.
+
+    V51.6 must not parse raw Telegram text. Extraction belongs to the shared
+    work_objects.py V2.2 layer.
+    """
+    metadata = (
+        obj.metadata
+        if isinstance(getattr(obj, "metadata", None), dict)
+        else {}
+    )
+    details = metadata.get("business_details")
+    return dict(details) if isinstance(details, dict) else {}
+
+
+def one_nina_business_detail_value(details, key, fallback=""):
+    value = (details or {}).get(key)
+    if value in (None, ""):
+        return fallback
+    return str(value).strip()
+
+
+def one_nina_business_amount_label(details):
+    amount = (details or {}).get("amount")
+    currency = one_nina_business_detail_value(details, "currency")
+    if amount in (None, ""):
+        return ""
+
+    amount_text = str(amount).strip()
+    if amount_text.endswith(".0"):
+        amount_text = amount_text[:-2]
+
+    return f"{amount_text} {currency}".strip()
+
+
+def one_nina_business_detail_rows_for_object(obj):
+    """Render canonical business fields only from metadata.business_details."""
+    details = one_nina_business_details(obj)
+    if not details:
+        return ""
+
+    fields = []
+    subject = one_nina_business_detail_value(details, "subject")
+    amount = one_nina_business_amount_label(details)
+    due_context = one_nina_business_detail_value(details, "due_context")
+    start_context = one_nina_business_detail_value(details, "start_context")
+    client_name = one_nina_business_detail_value(details, "client_name")
+
+    if subject:
+        fields.append(("Work subject", subject))
+    if amount:
+        fields.append(("Amount", amount))
+    if due_context:
+        fields.append(("Offer / due context", due_context))
+    if start_context:
+        fields.append(("Work start", start_context))
+    if client_name:
+        fields.append(("Client", client_name))
+
+    if not fields:
+        return ""
+
+    return (
+        "<div class='list'>"
+        + "".join(
+            "<div class='row'><div>"
+            f"<b>{html_escape(label)}</b>"
+            f"<span class='muted'>{html_escape(value)}</span>"
+            "</div><span class='pill'>canonical</span></div>"
+            for label, value in fields
+        )
+        + "</div>"
+    )
+
+
+def one_nina_client_business_detail_cards(profile):
+    objects = (profile or {}).get("objects") or []
+    if not objects:
+        return ""
+
+    cards = []
+    for obj in objects:
+        details = one_nina_business_details(obj)
+        if not details:
+            continue
+
+        subject = one_nina_business_detail_value(
+            details,
+            "subject",
+            str(getattr(obj, "title", "") or "Canonical Work Object"),
+        )
+        amount = one_nina_business_amount_label(details)
+        object_type = str(getattr(obj, "object_type", "") or "work")
+        status = str(getattr(obj, "status", "") or "open")
+        due_context = one_nina_business_detail_value(details, "due_context")
+        start_context = one_nina_business_detail_value(details, "start_context")
+        channel = str(getattr(obj, "origin_channel", "") or "NinaOS")
+
+        summary_parts = [object_type, status]
+        if amount:
+            summary_parts.append(amount)
+        if due_context:
+            summary_parts.append(f"due: {due_context}")
+        if start_context:
+            summary_parts.append(f"start: {start_context}")
+        if channel:
+            summary_parts.append(channel)
+
+        cards.append(
+            "<section class='card card-pad'>"
+            "<div class='section-title'>Canonical Business Details</div>"
+            "<div class='list'>"
+            "<div class='row'><div>"
+            f"<b>{html_escape(subject)}</b>"
+            f"<span class='muted'>{html_escape(' · '.join(summary_parts))}</span>"
+            "</div><span class='pill'>ONE NINA</span></div>"
+            "</div><br>"
+            f"{one_nina_business_detail_rows_for_object(obj)}"
+            "<div class='safe-note'>"
+            "V51.6 renders metadata.business_details already extracted by shared work_objects.py V2.2. "
+            "Web does not parse or re-extract Telegram text."
+            "</div>"
+            "</section><br>"
+        )
+
+    return "".join(cards)
+
+
 def one_nina_client_object_rows(profile, empty_text="No canonical client work yet."):
     objects = (profile or {}).get("objects") or []
     if not objects:
@@ -281,6 +409,11 @@ def one_nina_client_object_rows(profile, empty_text="No canonical client work ye
             else {}
         )
         raw_text = str(metadata.get("raw_text") or "").strip()
+        business_details = one_nina_business_details(obj)
+        business_subject = one_nina_business_detail_value(business_details, "subject")
+        business_amount = one_nina_business_amount_label(business_details)
+        business_due = one_nina_business_detail_value(business_details, "due_context")
+        business_start = one_nina_business_detail_value(business_details, "start_context")
         object_type = str(getattr(obj, "object_type", "") or "work")
         status = str(getattr(obj, "status", "") or "open")
         priority = str(getattr(obj, "priority", "") or "normal")
@@ -294,7 +427,17 @@ def one_nina_client_object_rows(profile, empty_text="No canonical client work ye
         if channel:
             details.append(channel)
 
-        evidence = raw_text or source_key or str(
+        canonical_business_summary = " · ".join(
+            value
+            for value in [
+                business_subject,
+                business_amount,
+                f"due: {business_due}" if business_due else "",
+                f"start: {business_start}" if business_start else "",
+            ]
+            if value
+        )
+        evidence = canonical_business_summary or raw_text or source_key or str(
             getattr(obj, "object_id", "") or ""
         )
         if len(evidence) > 320:
@@ -3380,7 +3523,7 @@ def client_profile_detail_body(client_name):
 
     header = work_page_header(
         client_name,
-        "V51.5 ONE NINA Client Profile — the same canonical Work Objects shown in Tasks.",
+        "V51.6 ONE NINA Client Profile — canonical business details from the same persistent Work Objects.",
     )
 
     if not profile:
@@ -3400,6 +3543,7 @@ def client_profile_detail_body(client_name):
         )
 
     object_rows = one_nina_client_object_rows(profile)
+    business_detail_cards = one_nina_client_business_detail_cards(profile)
     channels = " + ".join(sorted(profile["channels"])) or "NinaOS"
     type_summary = " · ".join(
         f"{object_type}: {count}"
@@ -3411,10 +3555,11 @@ def client_profile_detail_body(client_name):
         + "<section class='card card-pad'>"
           f"{one_nina_client_kpis_html(profile)}"
           "<br><div class='safe-note'>"
-          f"V51.5: {html_escape(client_name)} is linked directly by client_id to canonical nina_work_objects. "
+          f"V51.6: {html_escape(client_name)} is linked directly by client_id to canonical nina_work_objects. "
           f"Types: {html_escape(type_summary)} · channels: {html_escape(channels)}."
           "</div>"
           "</section><br>"
+        + business_detail_cards
         + "<section class='card card-pad'>"
           "<div class='section-title'>ONE NINA Canonical Client Work</div>"
           f"<div class='list'>{object_rows}</div>"
@@ -3954,14 +4099,14 @@ def clients_body(data):
     return (
         work_page_header(
             tx("clients"),
-            "V51.5 ONE NINA CLIENT LINK V1 — clients are views over the same canonical Work Objects.",
+            "V51.6 ONE NINA — clients render canonical business details from the same persistent Work Objects.",
         )
         + "<section class='card card-pad'>"
           "<div class='section-title'>ONE NINA Canonical Clients</div>"
           f"{kpis}<br>"
           f"<div class='list'>{canonical_rows}</div>"
           "<div class='safe-note'>"
-          "V51.5: client profiles are grouped directly from client_id on nina_work_objects. "
+          "V51.6: client profiles are grouped directly from client_id on nina_work_objects and render shared metadata.business_details. "
           "No web client-work copy, preview object or second work truth is created. "
           "Legacy memory remains preserved for migration/history."
           "</div>"
