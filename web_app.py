@@ -1,5 +1,5 @@
 # web_app.py
-# NinaOS Web App V51.6.1 — ONE NINA INBOX RECOVERY FIX
+# NinaOS Web App V51.6.2 — ONE NINA UI SPACING FIX
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
@@ -29,7 +29,7 @@ except Exception as e:
     def one_nina_work_persistence_health():
         return {"ok": False, "error": "Persistent Work Objects nav pieslēgts"}
 
-WEB_APP_VERSION = "Web App V51.6.1 — ONE NINA INBOX RECOVERY FIX"
+WEB_APP_VERSION = "Web App V51.6.2 — ONE NINA UI SPACING FIX"
 app = Flask(__name__)
 
 # V47.1 safe workspace-object surface polish.
@@ -4595,7 +4595,7 @@ def channel_hub_body(data):
             if due_context: info.append(due_context)
             evidence = subject or raw_text or str(getattr(obj, "source_key", "") or "")
             if len(evidence) > 320: evidence = evidence[:317] + "..."
-            rows += ("<div class='row'><div>" f"<b>{html_escape(getattr(obj, 'title', '') or 'Telegram intake')}</b>" f"<span class='muted'>{html_escape(' · '.join(info))}</span>" f"<span class='muted'>{html_escape(evidence)}</span>" "</div><span class='pill'>ONE NINA</span></div>")
+            rows += ("<div class='row'><div>" f"<b>{html_escape(getattr(obj, 'title', '') or 'Telegram intake')}</b>" f"<span class='muted'>{html_escape(' · '.join(info))}</span>" f"<span class='muted'> · {html_escape(evidence)}</span>" "</div><span class='pill'>ONE NINA</span></div>")
     else:
         rows = "<div class='row'><div><b>No canonical Telegram intake yet.</b><span class='muted'>New Telegram work appears after Nina saves it to nina_work_objects.</span></div><span class='pill'>idle</span></div>"
 
@@ -4608,10 +4608,10 @@ def channel_hub_body(data):
         channel_rows = "<div class='row'><div><b>No active channel work yet.</b><span class='muted'>nina_work_objects</span></div><span class='pill'>idle</span></div>"
 
     return (
-        work_page_header(tx("channel_hub", lang), "V51.6.1 ONE NINA INBOX RECOVERY FIX — channel intake from the same canonical persistent Work Objects.")
+        work_page_header(tx("channel_hub", lang), "V51.6.2 ONE NINA UI SPACING FIX — canonical Inbox detail rows render with a visible separator.")
         + "<section class='card card-pad'><div class='section-title'>ONE NINA Inbox</div>"
         + one_nina_work_kpis_html() + "<br><div class='list'>" + rows + "</div>"
-        + "<div class='safe-note'>V51.6.1: Inbox reads the same nina_work_objects used by Tasks and Clients. Legacy Telegram thread-preview inference is not executed as a parallel Inbox work system.</div></section><br>"
+        + "<div class='safe-note'>V51.6.2: Inbox reads the same nina_work_objects used by Tasks and Clients. Legacy Telegram thread-preview inference is not executed as a parallel Inbox work system.</div></section><br>"
         + "<section class='card card-pad'><div class='section-title'>Canonical Channel Intake</div><div class='list'>" + channel_rows + "</div>"
         + "<div class='safe-note'>One Nina, one persistent work truth. Channels are intake and delivery surfaces, not separate brains.</div></section>"
     )
