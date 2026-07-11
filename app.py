@@ -98,7 +98,7 @@ except Exception as e:
 
 # NinaOS Work Engine Import
 try:
-    from work_engine import work_plan, work_engine_status, WORK_ENGINE_VERSION
+    from work_engine import work_plan, work_engine_status, execute_natural_work_request, resolve_canonical_client_name, WORK_ENGINE_VERSION
 except Exception as e:
     print("work_engine.py imports nav pieejams:", e)
     WORK_ENGINE_VERSION = "Work Engine nav pieslēgts"
@@ -108,6 +108,12 @@ except Exception as e:
 
     def work_engine_status():
         return "Work Engine nav pieslēgts."
+
+    def execute_natural_work_request(*args, **kwargs):
+        return None
+
+    def resolve_canonical_client_name(candidate_name, workspace_id="demo_small_business"):
+        return str(candidate_name or "").strip()
 
 
 
@@ -12552,7 +12558,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V116.4 + Core 2.5.2 — ONE NINA Canonical Business Detail Extraction"
+APP_VERSION = "V116.5 + ONE NINA Natural Channel Work Execution V1"
 
 
 def rb_remove_version_lines(text):
@@ -15186,12 +15192,117 @@ def nina_daily_brief_answer(user_id):
     tasks = nina_clean_real_tasks(user_id, limit=200)
     return build_daily_brief_answer(tasks)
 
+
+# =========================
+# ONE NINA Channel Work Intake V1 — forwarded text
+# =========================
+
+def nina_forward_origin_name(message):
+    origin = getattr(message, "forward_origin", None) if message else None
+    if not origin:
+        return ""
+
+    sender_user = getattr(origin, "sender_user", None)
+    if sender_user:
+        full_name = str(getattr(sender_user, "full_name", "") or "").strip()
+        if full_name:
+            return full_name
+
+    sender_name = str(getattr(origin, "sender_user_name", "") or "").strip()
+    if sender_name:
+        return sender_name
+
+    chat = getattr(origin, "chat", None)
+    if chat:
+        title = str(getattr(chat, "title", "") or "").strip()
+        if title:
+            return title
+
+    return ""
+
+
+def nina_forward_origin_kind(message):
+    origin = getattr(message, "forward_origin", None) if message else None
+    if not origin:
+        return ""
+    return origin.__class__.__name__
+
+
+def nina_save_forwarded_text_to_one_nina(update, user_id, user_text):
+    """Persist one forwarded business message as one canonical client_request.
+
+    The forwarded message is a new business intake fact, not a copy of an estimate.
+    Telegram only supplies channel metadata; canonical work remains in work_objects.py.
+    """
+    message = getattr(update, "message", None)
+    if not message or not getattr(message, "forward_origin", None):
+        return None
+    if not ONE_NINA_WORK_OBJECTS_READY:
+        return None
+
+    message_id = getattr(message, "message_id", None)
+    source_key = nina_task_source_key(user_id, message_id=message_id, user_text=user_text)
+    sender_name = nina_forward_origin_name(message)
+    canonical_client = resolve_canonical_client_name(sender_name) if sender_name else ""
+
+    metadata = {
+        "source": "telegram_forwarded_text",
+        "raw_text": str(user_text or "").strip(),
+        "forwarded": True,
+        "forward_origin_kind": nina_forward_origin_kind(message),
+        "forward_sender_name": sender_name,
+        "one_nina_bridge": "channel_work_intake_v1",
+    }
+
+    obj, created = save_or_get_work_object(
+        object_type="client_request",
+        title=str(user_text or "Forwarded client message").strip(),
+        workspace_id="demo_small_business",
+        assigned_agent_id="nina_office_manager_smb",
+        client_id=canonical_client,
+        priority="normal",
+        metadata=metadata,
+        origin_channel="telegram",
+        origin_user_id=str(user_id),
+        source_key=source_key,
+    )
+    return {
+        "object": obj,
+        "created": bool(created),
+        "sender_name": sender_name,
+        "client_name": canonical_client,
+    }
+
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V114.0 public reply wrapper
     try:
         user_text = update.message.text
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
+
+        # ONE NINA Channel Work Intake V1 — forwarded text is business intake.
+        # It becomes one canonical client_request and is never stored as a Web copy.
+        try:
+            forwarded_intake = nina_save_forwarded_text_to_one_nina(update, user_id, user_text)
+        except Exception as e:
+            print("ONE NINA forwarded text intake error:", repr(e))
+            forwarded_intake = None
+
+        if forwarded_intake:
+            client_name = str(forwarded_intake.get("client_name") or forwarded_intake.get("sender_name") or "").strip()
+            if client_name:
+                forwarded_answer = (
+                    f"Saņēmu pārsūtīto ziņu no {client_name} un piesaistīju to klienta darbam. "
+                    "Pasaki, ko gribi izdarīt ar šo ziņu — piemēram: sagatavo atbildi, izvelc darbus vai pārbaudi pret piedāvājumu."
+                )
+            else:
+                forwarded_answer = (
+                    "Saņēmu pārsūtīto ziņu un saglabāju to kā canonical klienta pieprasījumu. "
+                    "Pasaki klienta vārdu vai ko gribi ar šo ziņu izdarīt."
+                )
+            await safe_reply_text(update, forwarded_answer)
+            return
 
         # NinaOS Platform Visibility V1.1 — Global-first product surface
         # IMPORTANT: platform answers are sent raw, without nina_public_answer(),
@@ -15751,6 +15862,32 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if lower in ["mani uzdevumi", "uzdevumi", "task list", "tasks"]:
             await safe_reply_text(update, nina_public_append_hint(nina_task_list_answer(user_id), "task_list"))
             return
+
+        # ONE NINA Natural Channel Work Execution V1
+        # Telegram is only the current work surface. The same Work Engine action
+        # resolves and executes against the same canonical nina_work_objects truth.
+        try:
+            natural_work_result = execute_natural_work_request(
+                user_text=user_text,
+                workspace_id="demo_small_business",
+                channel="telegram",
+            )
+        except Exception as e:
+            print("ONE NINA natural work execution error:", repr(e))
+            natural_work_result = None
+
+        if natural_work_result and natural_work_result.get("handled"):
+            natural_work_answer = str(natural_work_result.get("text") or "").strip()
+            if natural_work_answer:
+                try:
+                    save_conversation_state(
+                        user_id, user_text, natural_work_answer,
+                        "one_nina_natural_work_execution_v1", v80_mood(user_text), "work_execution"
+                    )
+                except Exception:
+                    pass
+                await safe_reply_text(update, natural_work_answer)
+                return
 
         telegram_message_id = getattr(update.message, "message_id", None)
         task_answer = nina_task_answer(
@@ -17100,7 +17237,7 @@ if __name__ == "__main__":
         print("ONE NINA Canonical Business Detail migration error:", repr(e))
 
     print(
-        "NinaOS Telegram Runtime V116.4 starting...",
+        "NinaOS Telegram Runtime V116.5 starting...",
         "PostgreSQL" if USE_POSTGRES else "SQLite fallback",
     )
 
