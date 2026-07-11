@@ -61,6 +61,8 @@ try:
         get_work_object_by_source_key,
         persistence_health as work_objects_persistence_health,
         WORK_OBJECTS_VERSION,
+        classify_canonical_work_object_type,
+        migrate_canonical_work_mapping_v2,
     )
     ONE_NINA_WORK_OBJECTS_READY = True
 except Exception as e:
@@ -76,6 +78,12 @@ except Exception as e:
 
     def work_objects_persistence_health():
         return {"ok": False, "error": "Persistent Work Objects nav pieslēgts"}
+
+    def classify_canonical_work_object_type(raw_text="", title="", metadata=None, default_type="task"):
+        return default_type or "task"
+
+    def migrate_canonical_work_mapping_v2():
+        return {"ok": False, "updated": 0}
 
 
 
@@ -12535,7 +12543,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V116.2 + Core 2.5.2 — ONE NINA Runtime Lock Retry Fix V1"
+APP_VERSION = "V116.3 + Core 2.5.2 — ONE NINA Canonical Work Mapping V2"
 
 
 def rb_remove_version_lines(text):
@@ -13926,15 +13934,21 @@ def nina_save_task_to_one_nina(
     }
 
     try:
+        title = nina_task_work_object_title(task, user_text=user_text)
+        canonical_type = classify_canonical_work_object_type(
+            raw_text=str(user_text or ""),
+            title=title,
+            metadata=metadata,
+            default_type="task",
+        )
         obj, created = save_or_get_work_object(
-            object_type="task",
-            title=nina_task_work_object_title(task, user_text=user_text),
+            object_type=canonical_type,
+            title=title,
             workspace_id=workspace_id,
             assigned_agent_id="nina_office_manager_smb",
             client_id=nina_task_client_id(task),
             priority=nina_task_priority(task),
             due_date=nina_task_due_date(task),
-            status="open",
             metadata=metadata,
             origin_channel="telegram",
             origin_user_id=str(user_id),
@@ -17052,8 +17066,14 @@ def release_one_nina_telegram_runtime_lock():
 
 
 if __name__ == "__main__":
+    try:
+        mapping_result = migrate_canonical_work_mapping_v2()
+        print("ONE NINA Canonical Work Mapping V2:", "updated=" + str(mapping_result.get("updated", 0)))
+    except Exception as e:
+        print("ONE NINA Canonical Work Mapping V2 migration error:", repr(e))
+
     print(
-        "NinaOS Telegram Runtime V116.2 RETRY FIX starting...",
+        "NinaOS Telegram Runtime V116.3 starting...",
         "PostgreSQL" if USE_POSTGRES else "SQLite fallback",
     )
 
