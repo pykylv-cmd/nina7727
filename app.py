@@ -52,6 +52,31 @@ except Exception as e:
         return "Task Engine nav pieslēgts."
 
 
+# ONE NINA CORE V1 — Canonical Persistent Work Objects Bridge
+# One Nina, one shared persistent work layer across Telegram, Web and future channels.
+try:
+    from work_objects import (
+        save_or_get_work_object,
+        get_work_object_by_source_key,
+        persistence_health as work_objects_persistence_health,
+        WORK_OBJECTS_VERSION,
+    )
+    ONE_NINA_WORK_OBJECTS_READY = True
+except Exception as e:
+    print("work_objects.py ONE NINA imports nav pieejams:", e)
+    WORK_OBJECTS_VERSION = "Persistent Work Objects nav pieslēgts"
+    ONE_NINA_WORK_OBJECTS_READY = False
+
+    def save_or_get_work_object(**kwargs):
+        raise RuntimeError("Persistent Work Objects nav pieslēgts")
+
+    def get_work_object_by_source_key(source_key, workspace_id="demo_small_business"):
+        return None
+
+    def work_objects_persistence_health():
+        return {"ok": False, "error": "Persistent Work Objects nav pieslēgts"}
+
+
 
 # NinaOS Work Engine Import
 try:
@@ -12509,7 +12534,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V116.0 + Core 2.5.2 — Sprint B.2 Safe Reconnect"
+APP_VERSION = "V116.1 + Core 2.5.2 — ONE NINA Persistent Work Bridge V1"
 
 
 def rb_remove_version_lines(text):
@@ -13816,12 +13841,133 @@ def nina_latest_tasks(user_id, limit=10):
     return tasks
 
 
-def nina_task_answer(user_id, user_text):
+def nina_task_source_key(user_id, message_id=None, user_text=""):
+    """Build one stable Telegram intake identity for ONE NINA."""
+    user_id = str(user_id or "").strip()
+    if message_id not in (None, ""):
+        return f"telegram:{user_id}:message:{message_id}"
+
+    import hashlib
+    normalized = re.sub(r"\s+", " ", str(user_text or "").strip().lower())
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
+    return f"telegram:{user_id}:text:{digest}"
+
+
+def nina_task_work_object_title(task, user_text=""):
+    if isinstance(task, dict):
+        return str(
+            task.get("title")
+            or task.get("text")
+            or task.get("task")
+            or task.get("raw_text")
+            or user_text
+            or "Telegram task"
+        ).strip()
+    return str(task or user_text or "Telegram task").strip()
+
+
+def nina_task_client_id(task):
+    if not isinstance(task, dict):
+        return ""
+    return str(
+        task.get("client_id")
+        or task.get("client")
+        or task.get("customer")
+        or ""
+    ).strip()
+
+
+def nina_task_priority(task):
+    if not isinstance(task, dict):
+        return "normal"
+    value = str(task.get("priority") or "normal").strip().lower()
+    return value if value in {"low", "normal", "high"} else "normal"
+
+
+def nina_task_due_date(task):
+    if not isinstance(task, dict):
+        return ""
+    return str(
+        task.get("due_date")
+        or task.get("deadline")
+        or task.get("date")
+        or ""
+    ).strip()
+
+
+def nina_save_task_to_one_nina(
+    user_id,
+    task,
+    user_text,
+    message_id=None,
+    workspace_id="demo_small_business",
+):
+    """
+    Telegram detect_task() -> canonical persistent Work Object.
+
+    nina_work_objects is the shared work truth.
+    Legacy task memory remains as a migration safety copy.
+    """
+    if not task or not ONE_NINA_WORK_OBJECTS_READY:
+        return None, False
+
+    source_key = nina_task_source_key(
+        user_id=user_id,
+        message_id=message_id,
+        user_text=user_text,
+    )
+
+    metadata = {
+        "source": "telegram_task_engine",
+        "legacy_task": task if isinstance(task, dict) else {"raw": str(task)},
+        "raw_text": str(user_text or "").strip(),
+        "one_nina_bridge": "telegram_detect_task_v1",
+    }
+
+    try:
+        obj, created = save_or_get_work_object(
+            object_type="task",
+            title=nina_task_work_object_title(task, user_text=user_text),
+            workspace_id=workspace_id,
+            assigned_agent_id="nina_office_manager_smb",
+            client_id=nina_task_client_id(task),
+            priority=nina_task_priority(task),
+            due_date=nina_task_due_date(task),
+            status="open",
+            metadata=metadata,
+            origin_channel="telegram",
+            origin_user_id=str(user_id),
+            source_key=source_key,
+        )
+        return obj, created
+    except Exception as e:
+        print("ONE NINA task -> Work Object bridge kļūda:", repr(e))
+        return None, False
+
+
+def nina_task_answer(user_id, user_text, message_id=None):
     task = detect_task(user_text)
     if not task:
         return None
 
+    work_object, work_object_created = nina_save_task_to_one_nina(
+        user_id=user_id,
+        task=task,
+        user_text=user_text,
+        message_id=message_id,
+    )
+
+    # Preserve old memory during migration. No client information is deleted.
     nina_save_task_to_memory(user_id, task)
+
+    if work_object is not None:
+        print(
+            "ONE NINA Work Object:",
+            work_object.object_id,
+            "created=" + str(bool(work_object_created)),
+            "source_key=" + str(work_object.source_key),
+        )
+
     name = nina_task_owner_name(user_id)
     return build_task_saved_answer(task, user_name=name)
 
@@ -15573,7 +15719,12 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, nina_public_append_hint(nina_task_list_answer(user_id), "task_list"))
             return
 
-        task_answer = nina_task_answer(user_id, user_text)
+        telegram_message_id = getattr(update.message, "message_id", None)
+        task_answer = nina_task_answer(
+            user_id,
+            user_text,
+            message_id=telegram_message_id,
+        )
         if task_answer:
             try:
                 v40_log_usage(user_id, "task_engine", user_text)
