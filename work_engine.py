@@ -22,10 +22,10 @@ Release safety:
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from reply_builder import build_client_estimate_draft
-from work_objects import get_work_object, update_work_object
+from work_objects import get_work_object, list_work_objects, update_work_object
 
 try:
     from work_objects import canonical_action_result as _canonical_action_result
@@ -42,7 +42,7 @@ try:
 except ImportError:
     _save_canonical_action_result = None
 
-WORK_ENGINE_VERSION = "Work Engine V1.2.1 — ONE NINA Estimate Approval V1 Release-Safe"
+WORK_ENGINE_VERSION = "Work Engine V1.3 — ONE NINA Natural Channel Work Execution V1"
 ESTIMATE_ACTION_KEY = "estimate_draft_v1"
 ESTIMATE_ACTION_VERSION = "ONE_NINA_CANONICAL_ESTIMATE_ACTION_V1"
 ESTIMATE_APPROVAL_VERSION = "ONE_NINA_ESTIMATE_APPROVAL_V1"
@@ -287,6 +287,158 @@ def decide_canonical_estimate_draft(object_id: str, decision: str) -> Dict[str, 
         return {"ok": False, "error": "estimate_approval_persistence_failed", "object_id": obj.object_id}
     return result
 
+
+
+# =========================================================
+# ONE NINA Natural Channel Work Execution V1
+# =========================================================
+
+def _fold_text(value: Any) -> str:
+    text = _clean(value).lower()
+    table = str.maketrans({
+        "ā": "a", "č": "c", "ē": "e", "ģ": "g", "ī": "i",
+        "ķ": "k", "ļ": "l", "ņ": "n", "š": "s", "ū": "u", "ž": "z",
+    })
+    return " ".join(text.translate(table).split())
+
+
+def _is_estimate_prepare_request(user_text: str) -> bool:
+    text = _fold_text(user_text)
+    if not text:
+        return False
+    action_terms = ("sagatavo", "uztaisi", "uzraksti", "sastadi", "izveido", "iedod")
+    estimate_terms = ("piedavaj", "tame", "estimate", "quote")
+    return any(term in text for term in action_terms) and any(term in text for term in estimate_terms)
+
+
+def _client_matches_text(client_name: str, user_text: str) -> bool:
+    client = _fold_text(client_name)
+    text = _fold_text(user_text)
+    if not client or not text:
+        return False
+    if client in text:
+        return True
+    first = client.split()[0]
+    stem = first[:-1] if len(first) >= 5 else first
+    return len(stem) >= 4 and stem in text
+
+
+def _production_estimates(workspace_id: str = "demo_small_business") -> List[Any]:
+    objects = list_work_objects(workspace_id=workspace_id, object_type="estimate", limit=500)
+    result = []
+    for obj in objects or []:
+        metadata = obj.metadata if isinstance(getattr(obj, "metadata", None), dict) else {}
+        source_key = _clean(getattr(obj, "source_key", ""))
+        if metadata.get("demo") is True or _clean(metadata.get("source")) == "demo_seed" or source_key.startswith("demo:"):
+            continue
+        result.append(obj)
+    return result
+
+
+def resolve_canonical_estimate_for_request(
+    user_text: str,
+    workspace_id: str = "demo_small_business",
+) -> Dict[str, Any]:
+    """Resolve a natural work command against existing canonical estimates.
+
+    This does not extract a new business truth from channel text. It only resolves
+    an action request to an already-persistent canonical Work Object.
+    """
+    if not _is_estimate_prepare_request(user_text):
+        return {"matched": False}
+
+    estimates = _production_estimates(workspace_id=workspace_id)
+    matches = []
+    for obj in estimates:
+        details = _read_business_details(obj)
+        client_name = _clean(details.get("client_name") or getattr(obj, "client_id", ""))
+        if _client_matches_text(client_name, user_text):
+            matches.append(obj)
+
+    if len(matches) == 1:
+        return {"matched": True, "ok": True, "object": matches[0]}
+
+    if len(matches) > 1:
+        matches.sort(key=lambda obj: _clean(getattr(obj, "updated_at", "")), reverse=True)
+        return {"matched": True, "ok": True, "object": matches[0], "resolved_by": "latest_client_estimate"}
+
+    clients = []
+    for obj in estimates:
+        details = _read_business_details(obj)
+        name = _clean(details.get("client_name") or getattr(obj, "client_id", ""))
+        if name and name not in clients:
+            clients.append(name)
+
+    return {
+        "matched": True,
+        "ok": False,
+        "error": "estimate_not_resolved",
+        "clients": clients[:8],
+    }
+
+
+def resolve_canonical_client_name(
+    candidate_name: str,
+    workspace_id: str = "demo_small_business",
+) -> str:
+    """Map a channel-visible person name to an existing canonical client name."""
+    candidate = _clean(candidate_name)
+    if not candidate:
+        return ""
+    for obj in list_work_objects(workspace_id=workspace_id, limit=500) or []:
+        details = _read_business_details(obj)
+        client_name = _clean(details.get("client_name") or getattr(obj, "client_id", ""))
+        if client_name and (_client_matches_text(client_name, candidate) or _client_matches_text(candidate, client_name)):
+            return client_name
+    return candidate
+
+
+def execute_natural_work_request(
+    user_text: str,
+    workspace_id: str = "demo_small_business",
+    channel: str = "telegram",
+) -> Optional[Dict[str, Any]]:
+    """Execute a natural work command through the same ONE NINA Work Engine.
+
+    Channel is context only. Telegram, WhatsApp and future surfaces must call the
+    same function instead of building channel-specific business brains.
+    """
+    resolved = resolve_canonical_estimate_for_request(user_text, workspace_id=workspace_id)
+    if not resolved.get("matched"):
+        return None
+
+    if not resolved.get("ok"):
+        clients = resolved.get("clients") or []
+        if clients:
+            message = "Atradu vairākus piedāvājumu darbus, bet nesapratu, kuru klientu domā. Pasaki klienta vārdu: " + ", ".join(clients) + "."
+        else:
+            message = "Neatradu esošu canonical piedāvājumu, ko sagatavot. Pasaki klientu un piedāvājuma darbu."
+        return {"ok": False, "handled": True, "text": message, "error": resolved.get("error", "not_resolved")}
+
+    obj = resolved["object"]
+    result = prepare_canonical_estimate_draft(obj.object_id, force=False)
+    if not result.get("ok"):
+        return {
+            "ok": False,
+            "handled": True,
+            "text": "Atradu piedāvājumu, bet man pietrūkst canonical biznesa detaļu, lai droši sagatavotu tekstu.",
+            "object_id": obj.object_id,
+            "error": result.get("error", "prepare_failed"),
+        }
+
+    details = _read_business_details(obj)
+    client_name = _clean(details.get("client_name") or getattr(obj, "client_id", "")) or "klientam"
+    draft_text = _clean(result.get("draft_text") or result.get("text"))
+    return {
+        "ok": True,
+        "handled": True,
+        "action": ESTIMATE_ACTION_KEY,
+        "object_id": obj.object_id,
+        "client_name": client_name,
+        "channel": _clean(channel) or "unknown",
+        "text": f"Protams. Te ir gatavs teksts klientam:\n\n{draft_text}",
+        "action_result": result,
+    }
 
 def work_engine_status():
     return (
