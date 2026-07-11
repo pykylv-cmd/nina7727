@@ -63,6 +63,8 @@ try:
         WORK_OBJECTS_VERSION,
         classify_canonical_work_object_type,
         migrate_canonical_work_mapping_v2,
+        enrich_canonical_business_metadata,
+        migrate_canonical_business_details_v1,
     )
     ONE_NINA_WORK_OBJECTS_READY = True
 except Exception as e:
@@ -84,6 +86,13 @@ except Exception as e:
 
     def migrate_canonical_work_mapping_v2():
         return {"ok": False, "updated": 0}
+
+
+    def enrich_canonical_business_metadata(*, raw_text="", title="", object_type="task", client_id="", due_date="", metadata=None):
+        return dict(metadata or {})
+
+    def migrate_canonical_business_details_v1():
+        return {"ok": False, "updated": 0, "error": "Persistent Work Objects nav pieslēgts"}
 
 
 
@@ -12543,7 +12552,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V116.3 + Core 2.5.2 — ONE NINA Canonical Work Mapping V2"
+APP_VERSION = "V116.4 + Core 2.5.2 — ONE NINA Canonical Business Detail Extraction"
 
 
 def rb_remove_version_lines(text):
@@ -13941,6 +13950,15 @@ def nina_save_task_to_one_nina(
             metadata=metadata,
             default_type="task",
         )
+        metadata = enrich_canonical_business_metadata(
+            raw_text=str(user_text or ""),
+            title=title,
+            object_type=canonical_type,
+            client_id=nina_task_client_id(task),
+            due_date=nina_task_due_date(task),
+            metadata=metadata,
+        )
+
         obj, created = save_or_get_work_object(
             object_type=canonical_type,
             title=title,
@@ -17072,8 +17090,17 @@ if __name__ == "__main__":
     except Exception as e:
         print("ONE NINA Canonical Work Mapping V2 migration error:", repr(e))
 
+    try:
+        detail_migration = migrate_canonical_business_details_v1()
+        print(
+            "ONE NINA Canonical Business Detail Extraction:",
+            "updated=" + str(detail_migration.get("updated", 0)),
+        )
+    except Exception as e:
+        print("ONE NINA Canonical Business Detail migration error:", repr(e))
+
     print(
-        "NinaOS Telegram Runtime V116.3 starting...",
+        "NinaOS Telegram Runtime V116.4 starting...",
         "PostgreSQL" if USE_POSTGRES else "SQLite fallback",
     )
 
