@@ -32,7 +32,7 @@ try:
         normalize_channel_content,
     )
     from document_intake import (
-        DOCUMENT_INTAKE_VERSION, DOCUMENT_WORK_ACTIONS_VERSION, prepare_document_intake,
+        DOCUMENT_INTAKE_VERSION, DOCUMENT_WORK_ACTIONS_VERSION, DOCUMENT_TO_CLIENT_ACTION_VERSION, prepare_document_intake,
         answer_document_followup, classify_document_work_action, execute_document_work_action,
         compare_canonical_documents,
     )
@@ -42,6 +42,7 @@ except Exception as e:
     CHANNEL_CONTENT_VERSION = "Canonical Channel Content nav pieslēgts"
     DOCUMENT_INTAKE_VERSION = "Document Work Intake nav pieslēgts"
     DOCUMENT_WORK_ACTIONS_VERSION = "Document Work Actions nav pieslēgts"
+    DOCUMENT_TO_CLIENT_ACTION_VERSION = "Document-to-Client Action nav pieslēgts"
     ONE_NINA_DOCUMENT_INTAKE_READY = False
 
     def normalize_channel_content(**kwargs):
@@ -12643,7 +12644,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V117.6 + ONE NINA Document Work Actions V1"
+APP_VERSION = "V117.7 + ONE NINA Document-to-Client Action V1"
 
 
 def rb_remove_version_lines(text):
@@ -13829,6 +13830,8 @@ def nina_save_document_action_result(obj, instruction, action, result):
         "answer": str(result.get("answer") or "").strip()[:4000],
         "evidence": list(result.get("evidence") or [])[:10],
         "action_version": str(result.get("action_version") or DOCUMENT_WORK_ACTIONS_VERSION),
+        "deliverable_type": str(result.get("deliverable_type") or "").strip(),
+        "owner_forward_ready": bool(result.get("owner_forward_ready")),
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
     metadata["document_actions"] = actions[-30:]
