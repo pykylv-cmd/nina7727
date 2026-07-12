@@ -98,7 +98,7 @@ except Exception as e:
 
 # NinaOS Work Engine Import
 try:
-    from work_engine import work_plan, work_engine_status, execute_natural_work_request, resolve_canonical_client_name, prepare_canonical_client_reply, WORK_ENGINE_VERSION
+    from work_engine import work_plan, work_engine_status, execute_natural_work_request, resolve_canonical_client_name, prepare_canonical_client_reply, classify_channel_business_intake, WORK_ENGINE_VERSION
 except Exception as e:
     print("work_engine.py imports nav pieejams:", e)
     WORK_ENGINE_VERSION = "Work Engine nav pieslēgts"
@@ -114,6 +114,9 @@ except Exception as e:
 
     def prepare_canonical_client_reply(*args, **kwargs):
         return {"ok": False, "error": "client_reply_action_unavailable"}
+
+    def classify_channel_business_intake(*args, **kwargs):
+        return {"matched": False, "kind": "unknown", "reason": "semantic_intake_unavailable"}
 
     def resolve_canonical_client_name(candidate_name, workspace_id="demo_small_business"):
         return str(candidate_name or "").strip()
@@ -12561,7 +12564,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V116.7 + ONE NINA Forwarded Work Intake V1.2"
+APP_VERSION = "V116.8 + ONE NINA Semantic Channel Work Intake V1"
 
 
 def rb_remove_version_lines(text):
@@ -15331,14 +15334,15 @@ def nina_forward_origin_kind(message):
     return ""
 
 
-def nina_save_forwarded_text_to_one_nina(update, user_id, user_text):
+def nina_save_forwarded_text_to_one_nina(update, user_id, user_text, force_business_intake=False, intake_kind=""):
     """Persist one forwarded business message as one canonical client_request.
 
     The forwarded message is a new business intake fact, not a copy of an estimate.
     Telegram only supplies channel metadata; canonical work remains in work_objects.py.
     """
     message = getattr(update, "message", None)
-    if not nina_is_forwarded_message(message):
+    is_forwarded = nina_is_forwarded_message(message)
+    if not is_forwarded and not force_business_intake:
         return None
     if not ONE_NINA_WORK_OBJECTS_READY:
         return None
@@ -15349,12 +15353,13 @@ def nina_save_forwarded_text_to_one_nina(update, user_id, user_text):
     canonical_client = resolve_canonical_client_name(sender_name) if sender_name else ""
 
     metadata = {
-        "source": "telegram_forwarded_text",
+        "source": "telegram_forwarded_text" if is_forwarded else "semantic_channel_business_intake",
         "raw_text": str(user_text or "").strip(),
-        "forwarded": True,
+        "forwarded": bool(is_forwarded),
+        "intake_kind": str(intake_kind or "forwarded_message" if is_forwarded else "work_info").strip(),
         "forward_origin_kind": nina_forward_origin_kind(message),
         "forward_sender_name": sender_name,
-        "one_nina_bridge": "channel_work_intake_v1",
+        "one_nina_bridge": "semantic_channel_work_intake_v1",
     }
 
     obj, created = save_or_get_work_object(
@@ -15391,6 +15396,31 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print("ONE NINA forwarded text intake error:", repr(e))
             forwarded_intake = None
+
+        # Some real-world channel flows strip Telegram forward metadata.
+        # ONE NINA therefore has a shared semantic Work Engine fallback BEFORE legacy fact capture.
+        if not forwarded_intake:
+            try:
+                semantic_intake = classify_channel_business_intake(
+                    user_text,
+                    classifier=nina_generate_client_deliverable,
+                )
+            except Exception as e:
+                print("ONE NINA semantic channel intake classify error:", repr(e))
+                semantic_intake = {"matched": False}
+
+            if semantic_intake.get("matched"):
+                try:
+                    forwarded_intake = nina_save_forwarded_text_to_one_nina(
+                        update,
+                        user_id,
+                        user_text,
+                        force_business_intake=True,
+                        intake_kind=semantic_intake.get("kind", "work_info"),
+                    )
+                except Exception as e:
+                    print("ONE NINA semantic channel intake save error:", repr(e))
+                    forwarded_intake = None
 
         if forwarded_intake:
             forwarded_obj = forwarded_intake.get("object")
