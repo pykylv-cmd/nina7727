@@ -14,7 +14,7 @@ try:
 except Exception:
     PdfReader = None
 
-DOCUMENT_INTAKE_VERSION = "Document Work Intake V1.5 — ONE NINA Deterministic Estimate Table Parser V1"
+DOCUMENT_INTAKE_VERSION = "Document Work Intake V1.6 — ONE NINA Estimate Row Schema Parser V1"
 MAX_EXTRACTED_CHARS = 50000
 MAX_FACTS = 12
 
@@ -59,8 +59,19 @@ def _extract_pdf(data: bytes) -> str:
     reader = PdfReader(BytesIO(data))
     pages: List[str] = []
     for page in reader.pages[:120]:
-        pages.append(_clean(page.extract_text()))
-    return "\n\n".join(x for x in pages if x)
+        page_text = ""
+        try:
+            # Preserve visual rows/columns whenever pypdf supports layout mode.
+            # Deterministic estimate parsing depends on row shape, not prose order.
+            page_text = page.extract_text(extraction_mode="layout") or ""
+        except TypeError:
+            page_text = page.extract_text() or ""
+        except Exception:
+            page_text = page.extract_text() or ""
+        page_text = str(page_text or "").strip()
+        if page_text:
+            pages.append(page_text)
+    return "\n\n".join(pages)
 
 
 def _extract_csv(data: bytes) -> str:
@@ -415,11 +426,10 @@ def _validated_action_payload(raw: str, source_text: str) -> Dict[str, Any]:
 
 
 # =========================
-# ONE NINA Deterministic Estimate Table Parser V1
+# ONE NINA Estimate Row Schema Parser V1
 # =========================
 
-DETERMINISTIC_DOCUMENT_CALCULATIONS_VERSION = "ONE NINA Deterministic Estimate Table Parser V1"
-
+DETERMINISTIC_DOCUMENT_CALCULATIONS_VERSION = "ONE NINA Estimate Row Schema Parser V1"
 
 _AMOUNT_CELL_RE = re.compile(
     r"(?<![\w])(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d+)(?:[\.,]\d{1,2})?(?:\s*(?:EUR|euro|€))?(?![\w])",
@@ -430,6 +440,7 @@ _TABLE_HEADER_MARKERS = {
     "nr", "n.p.k", "pozīcija", "pozicija", "darba nosaukums", "nosaukums",
     "mērvienība", "mervieniba", "apjoms", "daudzums", "vienības cena",
     "vienibas cena", "cena", "kopā", "kopa", "summa", "izmaksas",
+    "materiāli", "materiali", "mehānismi", "mehanismi", "darba alga",
 }
 
 _SUMMARY_ROW_MARKERS = (
@@ -438,14 +449,17 @@ _SUMMARY_ROW_MARKERS = (
     "peļņa", "pelna", "atlaide",
 )
 
+_UNIT_TOKEN_RE = re.compile(
+    r"(?i)(?<![\w])(m2|m²|m3|m³|gab\.?|kompl\.?|k-?ta|kg|dienas?|reizes?|st\.?|h|t|m)(?=(?:\s|$|[|;,:]))"
+)
 _UNIT_ONLY_RE = re.compile(
     r"^(?:m2|m²|m3|m³|m|gab\.?|kompl\.?|k-?ta|kg|t|h|st\.?|diena|dienas|reize|reizes|%|eur|€)$",
     flags=re.IGNORECASE,
 )
+_ROW_NUMBER_RE = re.compile(r"^\s*(\d{1,3})[\.)]?\s+")
 
 
 def _parse_business_amount(value: Any) -> float | None:
-    """Parse EU/Latvian business amounts deterministically."""
     raw = _clean(value)
     if not raw:
         return None
@@ -455,7 +469,6 @@ def _parse_business_amount(value: Any) -> float | None:
     text = text.replace("'", "").replace(" ", "")
     if not text or not re.search(r"\d", text):
         return None
-
     if "," in text and "." in text:
         if text.rfind(",") > text.rfind("."):
             text = text.replace(".", "").replace(",", ".")
@@ -463,22 +476,16 @@ def _parse_business_amount(value: Any) -> float | None:
             text = text.replace(",", "")
     elif "," in text:
         parts = text.split(",")
-        if len(parts) == 2 and 1 <= len(parts[1]) <= 2:
-            text = parts[0] + "." + parts[1]
-        else:
-            text = "".join(parts)
+        text = parts[0] + "." + parts[1] if len(parts) == 2 and 1 <= len(parts[1]) <= 2 else "".join(parts)
     elif "." in text:
         parts = text.split(".")
         if not (len(parts) == 2 and 1 <= len(parts[1]) <= 2):
             text = "".join(parts)
-
     try:
         amount = float(text)
     except Exception:
         return None
-    if amount < 0 or amount > 1_000_000_000:
-        return None
-    return amount
+    return amount if 0 <= amount <= 1_000_000_000 else None
 
 
 def _format_business_amount(amount: float, amount_text: str = "") -> str:
@@ -488,12 +495,7 @@ def _format_business_amount(amount: float, amount_text: str = "") -> str:
 
 
 def _source_lines(source_text: str) -> List[str]:
-    lines: List[str] = []
-    for raw in _clean(source_text).replace("\r", "\n").split("\n"):
-        line = _collapse(raw)
-        if line:
-            lines.append(line)
-    return lines
+    return [raw.strip() for raw in _clean(source_text).replace("\r", "\n").split("\n") if raw.strip()]
 
 
 def _amount_cells(line: str) -> List[Dict[str, Any]]:
@@ -501,25 +503,25 @@ def _amount_cells(line: str) -> List[Dict[str, Any]]:
     for match in _AMOUNT_CELL_RE.finditer(_clean(line)):
         token = _collapse(match.group(0))
         amount = _parse_business_amount(token)
-        if amount is None:
-            continue
-        cells.append({"text": token, "amount": amount, "start": match.start(), "end": match.end()})
+        if amount is not None:
+            cells.append({"text": token, "amount": amount, "start": match.start(), "end": match.end()})
     return cells
 
 
 def _strip_row_number(label: str) -> str:
     value = _collapse(label)
-    value = re.sub(r"^\s*\d+[\.)]?\s+", "", value)
+    value = re.sub(r"^\s*\d{1,3}[\.)]?\s+", "", value)
     return value.strip(" -–—|;:")
+
+
+def _header_marker_count(value: str) -> int:
+    folded = _collapse(value).casefold()
+    return sum(1 for marker in _TABLE_HEADER_MARKERS if marker in folded)
 
 
 def _is_table_header(line: str) -> bool:
     value = _collapse(line).casefold().strip(" .:;|-–—")
-    if not value:
-        return True
-    if value in _TABLE_HEADER_MARKERS:
-        return True
-    return sum(1 for marker in _TABLE_HEADER_MARKERS if marker in value) >= 3
+    return not value or value in _TABLE_HEADER_MARKERS or _header_marker_count(value) >= 2
 
 
 def _is_summary_row(label: str) -> bool:
@@ -535,149 +537,114 @@ def _looks_like_label(line: str) -> bool:
     value = _strip_row_number(line)
     if not value or _is_table_header(value) or _is_unit_only(value) or _is_summary_row(value):
         return False
+    if _header_marker_count(value) >= 2:
+        return False
     letters = re.findall(r"[^\W\d_]", value, flags=re.UNICODE)
-    if len(letters) < 3:
-        return False
-    # A pure numeric/currency cell is never a label.
-    if _AMOUNT_CELL_RE.fullmatch(value):
-        return False
-    return True
+    return len(letters) >= 3 and not bool(_AMOUNT_CELL_RE.fullmatch(value))
 
 
-def _candidate_from_inline_row(line: str, line_index: int) -> Dict[str, Any] | None:
-    # Prefer a visible unit boundary. It separates a text label (which may itself
-    # contain dimensions/model numbers such as 50-100mm or EPS150) from numeric
-    # quantity, unit-price and total columns.
-    unit_match = re.search(
-        r"(?i)(?:^|\s)(m2|m²|m3|m³|m|gab\.?|kompl\.?|k-?ta|kg|t|h|st\.?|diena|dienas|reize|reizes)(?=\s|$)",
-        _clean(line),
-    )
+def _schema_row_from_inline(line: str, line_index: int) -> Dict[str, Any] | None:
+    raw = _clean(line)
+    unit_match = _UNIT_TOKEN_RE.search(raw)
     if not unit_match:
         return None
-    prefix = _strip_row_number(line[: unit_match.start()])
+    prefix = _strip_row_number(raw[:unit_match.start()])
     if not _looks_like_label(prefix):
         return None
-    tail = line[unit_match.end():]
-    cells = _amount_cells(tail)
-    if len(cells) < 2:
+    tail = raw[unit_match.end():]
+    numeric = _amount_cells(tail)
+    # Valid estimate row schema requires quantity plus at least one price/total column.
+    if len(numeric) < 2:
         return None
-    total = cells[-1]
+    total = numeric[-1]
     if total["amount"] <= 0:
         return None
     return {
-        "label": prefix,
-        "amount": float(total["amount"]),
-        "amount_text": total["text"],
-        "evidence": line,
-        "label_evidence": prefix,
-        "amount_evidence": total["text"],
-        "source_line_start": line_index,
-        "source_line_end": line_index,
-        "parser_path": "inline_row_unit_boundary_last_numeric_cell",
+        "label": prefix, "unit": unit_match.group(1),
+        "quantity_text": numeric[0]["text"],
+        "numeric_columns": [cell["text"] for cell in numeric],
+        "amount": float(total["amount"]), "amount_text": total["text"],
+        "evidence": raw, "source_line_start": line_index, "source_line_end": line_index,
+        "parser_path": "estimate_row_schema_inline",
     }
 
 
-def _candidate_from_flattened_block(lines: List[str], start_index: int) -> Dict[str, Any] | None:
+def _schema_row_from_flattened(lines: List[str], start_index: int) -> Dict[str, Any] | None:
     label_line = lines[start_index]
-    if not _looks_like_label(label_line):
+    # Flattened fallback must have a visible row number. This prevents column/header
+    # fragments such as 'EUR Materiāli, EUR Mehānismi' from becoming fake positions.
+    if not _ROW_NUMBER_RE.match(label_line) or not _looks_like_label(label_line):
         return None
-
     label = _strip_row_number(label_line)
-    numeric_cells: List[Dict[str, Any]] = []
-    evidence_lines = [label_line]
+    unit = ""
+    numeric: List[Dict[str, Any]] = []
+    evidence = [label_line]
     end_index = start_index
-
-    # PDF text extraction often emits one cell per line. A new text-rich row label
-    # closes the current block; units are allowed between label and numeric cells.
-    for idx in range(start_index + 1, min(len(lines), start_index + 10)):
+    for idx in range(start_index + 1, min(len(lines), start_index + 12)):
         line = lines[idx]
+        if idx > start_index + 1 and _ROW_NUMBER_RE.match(line) and _looks_like_label(line):
+            break
         if _is_summary_row(line):
             break
-        if _looks_like_label(line) and not _is_unit_only(line):
-            break
-        evidence_lines.append(line)
+        if not unit and _is_unit_only(line):
+            unit = _collapse(line)
+        evidence.append(line)
         end_index = idx
-        numeric_cells.extend(_amount_cells(line))
-
-    if len(numeric_cells) < 2:
+        numeric.extend(_amount_cells(line))
+    if not unit or len(numeric) < 2:
         return None
-    total = numeric_cells[-1]
+    total = numeric[-1]
     if total["amount"] <= 0:
         return None
     return {
-        "label": label,
-        "amount": float(total["amount"]),
-        "amount_text": total["text"],
-        "evidence": " | ".join(evidence_lines),
-        "label_evidence": label_line,
-        "amount_evidence": total["text"],
-        "source_line_start": start_index,
-        "source_line_end": end_index,
-        "parser_path": "flattened_row_last_numeric_cell",
+        "label": label, "unit": unit, "quantity_text": numeric[0]["text"],
+        "numeric_columns": [cell["text"] for cell in numeric],
+        "amount": float(total["amount"]), "amount_text": total["text"],
+        "evidence": " | ".join(evidence), "source_line_start": start_index,
+        "source_line_end": end_index, "parser_path": "estimate_row_schema_flattened",
     }
 
 
 def parse_deterministic_estimate_cost_items(source_text: str) -> List[Dict[str, Any]]:
-    """Parse all visible estimate line items without LLM candidate discovery.
-
-    The parser supports both common pypdf layouts:
-    1) one visual table row extracted as one text line;
-    2) one table cell extracted per line, preserving row order.
-
-    For each row, the final numeric table cell is treated as the row total. Rows
-    that look like headers or document-level summary totals are excluded.
-    """
     lines = _source_lines(source_text)
     candidates: List[Dict[str, Any]] = []
-
     for idx, line in enumerate(lines):
-        inline = _candidate_from_inline_row(line, idx)
-        if inline:
-            candidates.append(inline)
-
-    for idx, _line in enumerate(lines):
-        flattened = _candidate_from_flattened_block(lines, idx)
-        if flattened:
-            candidates.append(flattened)
+        row = _schema_row_from_inline(line, idx)
+        if row:
+            candidates.append(row)
+    for idx in range(len(lines)):
+        row = _schema_row_from_flattened(lines, idx)
+        if row:
+            candidates.append(row)
 
     deduped: Dict[str, Dict[str, Any]] = {}
     for item in candidates:
-        label_key = re.sub(r"\s+", " ", _clean(item.get("label")).casefold()).strip()
-        if not label_key or _is_summary_row(label_key):
+        key = re.sub(r"\s+", " ", _clean(item.get("label")).casefold()).strip()
+        if not key or _is_summary_row(key) or _is_table_header(key):
             continue
-        current = deduped.get(label_key)
-        # Prefer the candidate with the larger validated row total when two parser
-        # paths see the same row; in estimate tables this avoids mistaking quantity
-        # or unit price for the total column.
-        if current is None or float(item["amount"]) > float(current["amount"]):
-            deduped[label_key] = item
+        current = deduped.get(key)
+        # Prefer inline layout-preserved schema over flattened fallback; then larger total.
+        if current is None:
+            deduped[key] = item
+        elif item.get("parser_path") == "estimate_row_schema_inline" and current.get("parser_path") != "estimate_row_schema_inline":
+            deduped[key] = item
+        elif item.get("parser_path") == current.get("parser_path") and float(item["amount"]) > float(current["amount"]):
+            deduped[key] = item
 
     items = list(deduped.values())
     items.sort(key=lambda row: (-float(row["amount"]), _clean(row["label"]).casefold()))
     return items
 
 
-def extract_deterministic_cost_items(
-    *,
-    source_text: str,
-    generator: Callable[[str], str] | None = None,
-) -> Dict[str, Any]:
-    """Return deterministically discovered and numerically sorted estimate rows.
-
-    `generator` is accepted only for API compatibility. It is intentionally not
-    used: line-item discovery and ordering are core calculations, not model work.
-    """
+def extract_deterministic_cost_items(*, source_text: str, generator: Callable[[str], str] | None = None) -> Dict[str, Any]:
     source = _clean(source_text)
     if not source:
         return {"ok": False, "items": [], "error": "missing_source"}
-
     items = parse_deterministic_estimate_cost_items(source)
     return {
-        "ok": bool(items),
-        "items": items,
-        "validated_count": len(items),
+        "ok": bool(items), "items": items, "validated_count": len(items),
         "calculation_version": DETERMINISTIC_DOCUMENT_CALCULATIONS_VERSION,
-        "candidate_discovery": "deterministic_python",
+        "candidate_discovery": "deterministic_estimate_row_schema",
     }
 
 
