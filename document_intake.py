@@ -254,3 +254,93 @@ def prepare_document_intake(
         "grounded_fact_count": len(facts),
         "acknowledgement": build_document_acknowledgement(filename, kind, facts),
     }
+
+
+def answer_document_followup(
+    *,
+    question: str,
+    source_text: str,
+    document_kind: str,
+    grounded_facts: List[Dict[str, str]] | None,
+    generator: Callable[[str], str] | None,
+) -> Dict[str, Any]:
+    """Answer one question from the already-persisted canonical document source.
+
+    The model may select or explain source facts, but every answer must carry at
+    least one exact source evidence fragment. Evidence is validated before the
+    answer is accepted. This keeps document follow-up inside the same ONE NINA
+    canonical document truth instead of falling back to generic chat memory.
+    """
+    question = _clean(question)
+    source = _clean(source_text)
+    facts = list(grounded_facts or [])
+    if not question or not source or generator is None:
+        return {"ok": False, "error": "missing_question_source_or_generator", "answer": ""}
+
+    fact_context = "\n".join(
+        f"- { _clean(item.get('label')) }: { _clean(item.get('value')) } | evidence: { _clean(item.get('evidence')) }"
+        for item in facts[:MAX_FACTS]
+        if isinstance(item, dict)
+    )
+    prompt = f"""
+Tu esi ONE NINA dokumentu darba jautājumu dzinējs.
+Atbildi TIKAI no zemāk dotā kanoniskā dokumenta teksta.
+Dokumenta veids: {document_kind}.
+
+LIETOTĀJA JAUTĀJUMS:
+{question}
+
+JAU VALIDĒTIE FAKTI:
+{fact_context or '(nav)'}
+
+LIKUMI:
+- neatbildi no vispārīgām zināšanām;
+- neizdomā trūkstošu summu, datumu, personu vai nosacījumu;
+- ja dokumentā ir tieša atbilde, atbildi īsi un konkrēti;
+- ja atbildi nevar droši noteikt no dokumenta, answer laukā pasaki tieši to;
+- evidence masīvā dod 1 līdz 4 ĪSUS PRECĪZUS CITĀTUS no dokumenta teksta, kas tieši pamato atbildi;
+- ja drošas evidence nav, dod tukšu evidence masīvu un confident=false.
+
+Atbildi TIKAI ar JSON:
+{{"answer":"īsa atbilde lietotājam","evidence":["precīzs citāts"],"confident":true}}
+
+KANONISKAIS DOKUMENTA TEKSTS:
+{source[:MAX_EXTRACTED_CHARS]}
+""".strip()
+
+    try:
+        data = _extract_json_object(generator(prompt))
+    except Exception as exc:
+        return {"ok": False, "error": repr(exc), "answer": ""}
+
+    answer = _clean(data.get("answer"))[:2000]
+    evidence_items = data.get("evidence") or []
+    if not isinstance(evidence_items, list):
+        evidence_items = []
+    normalized_source = _normalize_for_match(source)
+    validated_evidence: List[str] = []
+    seen = set()
+    for raw in evidence_items[:4]:
+        evidence = _clean(raw)[:1500]
+        evidence_norm = _normalize_for_match(evidence)
+        if len(evidence_norm) < 3 or evidence_norm not in normalized_source:
+            continue
+        if evidence_norm in seen:
+            continue
+        seen.add(evidence_norm)
+        validated_evidence.append(evidence)
+
+    confident = bool(data.get("confident")) and bool(validated_evidence) and bool(answer)
+    if not confident:
+        return {
+            "ok": False,
+            "error": "no_validated_document_evidence",
+            "answer": "No šī dokumenta saglabātā teksta to nevaru droši noteikt.",
+            "evidence": validated_evidence,
+        }
+    return {
+        "ok": True,
+        "answer": answer,
+        "evidence": validated_evidence,
+        "validated_evidence_count": len(validated_evidence),
+    }
