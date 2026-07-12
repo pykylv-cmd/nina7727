@@ -22,6 +22,8 @@ Release safety:
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
+import re
 from typing import Any, Dict, List, Optional
 
 from reply_builder import build_client_estimate_draft, build_client_reply_draft
@@ -42,7 +44,7 @@ try:
 except ImportError:
     _save_canonical_action_result = None
 
-WORK_ENGINE_VERSION = "Work Engine V1.4 — ONE NINA Forwarded Client Reply Action V1"
+WORK_ENGINE_VERSION = "Work Engine V1.5 — ONE NINA Semantic Channel Work Intake V1"
 ESTIMATE_ACTION_KEY = "estimate_draft_v1"
 ESTIMATE_ACTION_VERSION = "ONE_NINA_CANONICAL_ESTIMATE_ACTION_V1"
 ESTIMATE_APPROVAL_VERSION = "ONE_NINA_ESTIMATE_APPROVAL_V1"
@@ -441,6 +443,47 @@ def execute_natural_work_request(
         "text": draft_text,
         "action_result": result,
     }
+
+
+def classify_channel_business_intake(user_text: str, classifier) -> Dict[str, Any]:
+    """Classify channel text in the shared Work Engine, not in a channel-specific brain.
+
+    This is the semantic fallback for channels that do not preserve forward metadata.
+    It distinguishes incoming business content from the owner's instruction/question to Nina.
+    """
+    text = _clean(user_text)
+    if not text or classifier is None:
+        return {"matched": False, "kind": "unknown", "reason": "empty_or_no_classifier"}
+
+    prompt = f"""
+Tu esi ONE NINA centrālais Work Engine intake klasifikators.
+Nosaki, vai zemāk dotais teksts izskatās pēc IENĀKOŠAS DARBA INFORMĀCIJAS no klienta, piegādātāja, kolēģa vai cita sadarbības partnera, ko vajag piesaistīt biznesa darbam.
+
+Svarīgi:
+- business_intake = true, ja teksts izskatās pēc pasūtījuma, cenas, adreses, piegādes/gatavības laika, objekta informācijas, klienta problēmas, dokumenta satura vai citas ienākošas darba informācijas.
+- business_intake = false, ja īpašnieks jautā Ninai, dod Ninai komandu, vienkārši sarunājas, stāsta faktu par sevi vai prasa vispārīgu informāciju.
+- Neizdomā trūkstošu klienta vārdu.
+
+Atbildi TIKAI ar JSON vienā rindā:
+{{"business_intake":true|false,"kind":"client_request|supplier_message|work_info|owner_instruction|conversation","reason":"īsi"}}
+
+TEKSTS:
+{text}
+""".strip()
+    try:
+        raw = _clean(classifier(prompt))
+        match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+        if not match:
+            return {"matched": False, "kind": "unknown", "reason": "classifier_no_json"}
+        data = json.loads(match.group(0))
+        matched = bool(data.get("business_intake"))
+        return {
+            "matched": matched,
+            "kind": _clean(data.get("kind")) or ("work_info" if matched else "conversation"),
+            "reason": _clean(data.get("reason")),
+        }
+    except Exception as exc:
+        return {"matched": False, "kind": "unknown", "reason": "classifier_failed", "detail": repr(exc)}
 
 def work_engine_status():
     return (
