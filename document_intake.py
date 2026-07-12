@@ -14,7 +14,7 @@ try:
 except Exception:
     PdfReader = None
 
-DOCUMENT_INTAKE_VERSION = "Document Work Intake V1.6 — ONE NINA Estimate Row Schema Parser V1"
+DOCUMENT_INTAKE_VERSION = "Document Work Intake V1.7 — ONE NINA Document Intake Structured Facts V1"
 MAX_EXTRACTED_CHARS = 50000
 MAX_FACTS = 12
 
@@ -248,8 +248,32 @@ def prepare_document_intake(
         }
     text = _clean(extracted.get("text"))
     kind = classify_document_kind(filename, mime_type, text)
-    grounded = extract_grounded_document_facts(text, kind, generator)
-    facts = grounded.get("facts") if grounded.get("ok") else []
+
+    structured_rows: List[Dict[str, Any]] = []
+    fact_source = "grounded_llm_facts"
+    if kind == "estimate":
+        # ONE NINA Document Intake Structured Facts V1:
+        # the SAME deterministic estimate row parser feeds both intake summary
+        # and later document calculations/actions. No second estimate truth.
+        structured_rows = parse_deterministic_estimate_cost_items(text)
+        facts: List[Dict[str, str]] = []
+        for row in structured_rows[:8]:
+            label = _clean(row.get("label"))
+            amount = float(row.get("amount") or 0)
+            amount_text = _clean(row.get("amount_text"))
+            evidence = _clean(row.get("evidence"))[:1000]
+            if not label or amount <= 0 or not evidence:
+                continue
+            facts.append({
+                "label": f"{label} kopējās izmaksas",
+                "value": _format_business_amount(amount, amount_text),
+                "evidence": evidence,
+            })
+        fact_source = "deterministic_estimate_row_schema"
+    else:
+        grounded = extract_grounded_document_facts(text, kind, generator)
+        facts = grounded.get("facts") if grounded.get("ok") else []
+
     return {
         "ok": True,
         "fingerprint": fingerprint,
@@ -263,6 +287,9 @@ def prepare_document_intake(
         "truncated": bool(extracted.get("truncated")),
         "facts": facts,
         "grounded_fact_count": len(facts),
+        "fact_source": fact_source,
+        "structured_estimate_rows": structured_rows,
+        "structured_estimate_row_count": len(structured_rows),
         "acknowledgement": build_document_acknowledgement(filename, kind, facts),
     }
 
