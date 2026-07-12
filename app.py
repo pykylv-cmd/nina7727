@@ -12575,7 +12575,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V116.9 + ONE NINA Channel Work Context V1"
+APP_VERSION = "V117.1 + ONE NINA Forwarded Photo Series Context V1"
 
 
 def rb_remove_version_lines(text):
@@ -13560,7 +13560,7 @@ def nina_latest_channel_work_context(user_id, max_age_minutes=30):
     return None
 
 
-def nina_append_photo_evidence(obj, vision_text, caption="", telegram_file_id=""):
+def nina_append_photo_evidence(obj, vision_text, caption="", telegram_file_id="", media_group_id=""):
     """Append photo evidence to the same canonical work context; never create a parallel photo truth."""
     if obj is None:
         return None
@@ -13575,11 +13575,14 @@ def nina_append_photo_evidence(obj, vision_text, caption="", telegram_file_id=""
         "caption": str(caption or "").strip(),
         "summary": str(vision_text or "").strip()[:2000],
         "source_key": key,
+        "media_group_id": str(media_group_id or "").strip(),
         "received_at": datetime.now(timezone.utc).isoformat(),
     })
     metadata["channel_evidence"] = evidence[-50:]
     metadata["one_nina_bridge"] = "channel_work_context_v1"
     metadata["evidence_count"] = len(metadata["channel_evidence"])
+    if media_group_id:
+        metadata["latest_media_group_id"] = str(media_group_id)
     return update_work_object(obj.object_id, metadata=metadata)
 
 
@@ -13610,15 +13613,79 @@ VISION ANALĪZE:
         return "Foto saņēmu un piesaistīju tam pašam darba materiālam."
 
 
+def nina_is_recent_photo_series_continuation(obj, caption="", max_age_seconds=120):
+    """Treat captionless photos arriving right after a captioned work photo as one human photo series.
+
+    Telegram forwards do not always preserve one media_group_id. The canonical evidence
+    timeline is therefore the reliable ONE NINA signal for a continuing work-photo burst.
+    """
+    if obj is None or str(caption or "").strip():
+        return False
+    metadata = obj.metadata if isinstance(getattr(obj, "metadata", None), dict) else {}
+    evidence = metadata.get("channel_evidence")
+    evidence = list(evidence) if isinstance(evidence, list) else []
+    if not evidence:
+        return False
+    now = datetime.now(timezone.utc)
+    for item in reversed(evidence[-12:]):
+        if not isinstance(item, dict) or str(item.get("kind") or "") != "photo":
+            continue
+        if not str(item.get("caption") or "").strip():
+            continue
+        received_raw = str(item.get("received_at") or "")
+        try:
+            received = datetime.fromisoformat(received_raw.replace("Z", "+00:00"))
+            if received.tzinfo is None:
+                received = received.replace(tzinfo=timezone.utc)
+            return 0 <= (now - received).total_seconds() <= int(max_age_seconds)
+        except Exception:
+            return False
+    return False
+
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ONE NINA Channel Work Context V1 — photo becomes evidence for the current canonical work context."""
+    """ONE NINA Forwarded Photo Series Context V1.
+
+    A captioned work photo creates/resolves canonical context. Photos arriving immediately
+    after it are attached silently to the same Work Object even when Telegram forwards strip
+    media_group_id. One human photo series should not produce one Nina monologue per photo.
+    """
     try:
         user_id = str(update.effective_user.id)
-        caption = (update.message.caption or "").strip() if update.message else ""
-        if not update.message or not update.message.photo:
+        message = update.message
+        caption = (message.caption or "").strip() if message else ""
+        media_group_id = str(getattr(message, "media_group_id", "") or "").strip() if message else ""
+
+        if not message or not message.photo:
             return
 
-        photo = update.message.photo[-1]
+        caption_context = None
+        if caption:
+            try:
+                semantic_intake = classify_channel_business_intake(
+                    caption,
+                    classifier=nina_generate_client_deliverable,
+                )
+            except Exception as e:
+                print("ONE NINA album caption classify error:", repr(e))
+                semantic_intake = {"matched": False}
+
+            if semantic_intake.get("matched"):
+                caption_kind = str(semantic_intake.get("kind") or "work_material").strip()
+                try:
+                    saved_intake = nina_save_forwarded_text_to_one_nina(
+                        update,
+                        user_id,
+                        caption,
+                        force_business_intake=True,
+                        intake_kind=caption_kind,
+                    )
+                    caption_context = saved_intake.get("object") if saved_intake else None
+                except Exception as e:
+                    print("ONE NINA album caption save error:", repr(e))
+                    caption_context = None
+
+        photo = message.photo[-1]
         tg_file = await context.bot.get_file(photo.file_id)
         buffer = BytesIO()
         await tg_file.download_to_memory(out=buffer)
@@ -13632,24 +13699,69 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         vision_clean = rb_remove_version_lines(str(vision_raw or "")).strip()
 
-        active_obj = nina_latest_channel_work_context(user_id, max_age_minutes=30)
+        active_obj = caption_context or nina_latest_channel_work_context(user_id, max_age_minutes=30)
+        silent_series_continuation = False
         if active_obj is not None:
+            # Evaluate continuation BEFORE appending this photo. The previous canonical evidence
+            # tells us whether a captionless forwarded photo belongs to the same human photo burst.
+            silent_series_continuation = bool(
+                media_group_id
+                or nina_is_recent_photo_series_continuation(
+                    active_obj,
+                    caption=caption,
+                    max_age_seconds=120,
+                )
+            )
             saved_obj = nina_append_photo_evidence(
                 active_obj,
                 vision_clean,
                 caption=caption,
                 telegram_file_id=getattr(photo, "file_unique_id", "") or photo.file_id,
+                media_group_id=media_group_id,
             )
-            answer = nina_photo_context_answer(saved_obj or active_obj, vision_clean, caption)
+
             try:
                 v40_log_usage(user_id, "vision", caption)
-                save_conversation_state(user_id, "[PHOTO] " + caption, answer, "one_nina_channel_photo", "neutral", "work")
+                save_conversation_state(
+                    user_id,
+                    "[PHOTO] " + caption,
+                    vision_clean,
+                    "one_nina_channel_photo",
+                    "neutral",
+                    "work",
+                )
             except Exception as e:
                 print("ONE NINA photo conversation save error:", e)
+
+            if silent_series_continuation and not caption:
+                # Same real-world photo burst: evidence is persisted, but Nina stays quiet.
+                return
+
+            if media_group_id:
+                if caption:
+                    material_ack = build_channel_material_acknowledgement(
+                        caption,
+                        generator=nina_generate_client_deliverable,
+                    )
+                    ack_text = material_ack.get("text") if material_ack.get("ok") else "Sapratu darba materiālu."
+                    album_answer = (
+                        f"{ack_text.rstrip()}\n\n"
+                        "Foto sēriju piesaistu tam pašam darba materiālam."
+                    )
+                    await safe_reply_text(update, album_answer, client_deliverable=True)
+                return
+
+            answer = nina_photo_context_answer(saved_obj or active_obj, vision_clean, caption)
             await safe_reply_text(update, answer, client_deliverable=True)
             return
 
-        # No active work context: keep normal Vision behavior, but do not leak technical version text.
+        if media_group_id:
+            if caption:
+                answer = v1151_vision_smart_reply(user_id, vision_clean, caption)
+                answer = rb_remove_version_lines(answer).strip()
+                await safe_reply_text(update, answer, client_deliverable=True)
+            return
+
         answer = v1151_vision_smart_reply(user_id, vision_clean, caption)
         answer = rb_remove_version_lines(answer).strip()
         try:
@@ -13660,8 +13772,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_reply_text(update, answer, client_deliverable=True)
 
     except Exception as e:
-        print("handle_photo kļūda:", repr(e))
-        await safe_reply_text(update, "Bildīti saņēmu, bet šoreiz neizdevās to droši apstrādāt. Pamēģini atsūtīt vēlreiz.", client_deliverable=True)
+        print("handle_photo V117.1 kļūda:", repr(e))
+        await safe_reply_text(
+            update,
+            "Bildīti saņēmu, bet šoreiz neizdevās to droši apstrādāt. Pamēģini atsūtīt vēlreiz.",
+            client_deliverable=True,
+        )
 
 
 
