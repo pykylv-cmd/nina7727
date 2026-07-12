@@ -387,7 +387,8 @@ KANONISKAIS DOKUMENTA TEKSTS:
 # ONE NINA Document Work Actions V1
 # =========================
 
-DOCUMENT_WORK_ACTIONS_VERSION = "ONE NINA Document Work Actions V1.1 — Deterministic Document Calculations V1"
+DOCUMENT_WORK_ACTIONS_VERSION = "ONE NINA Document Work Actions V1.2 — Document-to-Client Action V1"
+DOCUMENT_TO_CLIENT_ACTION_VERSION = "ONE NINA Document-to-Client Action V1.1 — Safe Neutral Fallback"
 _DOCUMENT_ACTIONS = {"client_message", "top_cost_items", "risk_review", "summary", "compare"}
 
 
@@ -407,8 +408,10 @@ def classify_document_work_action(text: str) -> Dict[str, Any]:
 
     client_markers = (
         "uztaisi klientam", "sagatavo klientam", "uzraksti klientam", "īsu ziņu klientam",
-        "isu zinu klientam", "ziņu par šo tāmi", "zinu par so tami", "client message",
-        "message to client", "сообщение клиенту",
+        "isu zinu klientam", "ziņu par šo tāmi", "zinu par so tami", "par šo tāmi klientam",
+        "par so tami klientam", "ko sūtīt klientam", "ko sutit klientam", "atbildi klientam",
+        "pārsūtīt klientam", "parsutit klientam", "client message", "message to client",
+        "send to client", "сообщение клиенту", "написать клиенту", "ответ клиенту",
     )
     if any(x in value for x in client_markers):
         return {"matched": True, "action": "client_message"}
@@ -684,6 +687,197 @@ def build_deterministic_top_cost_answer(items: List[Dict[str, Any]], limit: int 
         lines.append(f"{index}. {_clean(item.get('label'))} — {_format_business_amount(float(item.get('amount') or 0), _clean(item.get('amount_text')))}")
     return "\n".join(lines)
 
+def _extract_deterministic_estimate_grand_total(source_text: str) -> Dict[str, Any]:
+    """Resolve an explicitly labelled estimate grand total from canonical source text.
+
+    Only labelled summary rows are eligible. Work-row totals are never summed here,
+    because estimate summary rows may contain overhead, tax, discounts or other totals.
+    """
+    lines = _source_lines(source_text)
+    strong_markers = (
+        "pavisam apmaksai", "gala summa", "kopsumma", "grand total",
+        "kopā apmaksai", "kopa apmaksai", "pavisam", "kopā ar pvn", "kopa ar pvn",
+    )
+    candidates: List[Dict[str, Any]] = []
+    for index, line in enumerate(lines):
+        folded = _collapse(line).casefold()
+        marker_rank = next((rank for rank, marker in enumerate(strong_markers) if marker in folded), None)
+        if marker_rank is None:
+            continue
+        cells = _amount_cells(line)
+        evidence_lines = [line]
+        if not cells:
+            for next_index in range(index + 1, min(len(lines), index + 4)):
+                next_line = lines[next_index]
+                if _looks_like_label(next_line) and _ROW_NUMBER_RE.match(next_line):
+                    break
+                evidence_lines.append(next_line)
+                cells.extend(_amount_cells(next_line))
+                if cells:
+                    break
+        if not cells:
+            continue
+        total = cells[-1]
+        if float(total["amount"]) <= 0:
+            continue
+        candidates.append({
+            "amount": float(total["amount"]),
+            "amount_text": total["text"],
+            "evidence": " | ".join(evidence_lines),
+            "marker_rank": marker_rank,
+            "source_line": index,
+        })
+    if not candidates:
+        return {"ok": False, "error": "no_explicit_grand_total"}
+    candidates.sort(key=lambda item: (int(item["marker_rank"]), -int(item["source_line"])))
+    chosen = candidates[0]
+    return {
+        "ok": True,
+        "amount": chosen["amount"],
+        "amount_text": chosen["amount_text"],
+        "formatted_amount": _format_business_amount(chosen["amount"], chosen["amount_text"]),
+        "evidence": chosen["evidence"],
+        "grounding_mode": "deterministic_explicit_grand_total",
+    }
+
+
+def _join_client_work_labels(labels: List[str]) -> str:
+    clean_labels = [_clean(label) for label in labels if _clean(label)]
+    if not clean_labels:
+        return ""
+    if len(clean_labels) == 1:
+        return clean_labels[0]
+    if len(clean_labels) == 2:
+        return f"{clean_labels[0]} un {clean_labels[1]}"
+    return ", ".join(clean_labels[:-1]) + f" un {clean_labels[-1]}"
+
+
+def build_deterministic_estimate_client_message(source_text: str) -> Dict[str, Any]:
+    """Build owner-forward-ready client text from the same deterministic estimate truth."""
+    source = _clean(source_text)
+    rows = parse_deterministic_estimate_cost_items(source)
+    grand_total = _extract_deterministic_estimate_grand_total(source)
+    if not rows and not grand_total.get("ok"):
+        return {"ok": False, "error": "no_deterministic_estimate_client_facts"}
+
+    parts = ["Labdien! Nosūtu sagatavoto tāmi par paredzētajiem darbiem."]
+    evidence: List[str] = []
+    if grand_total.get("ok"):
+        parts.append(f"Tāmes kopējā summa ir {grand_total['formatted_amount']}.")
+        evidence.append(_clean(grand_total.get("evidence")))
+    labels = [_clean(item.get("label")) for item in rows[:3] if _clean(item.get("label"))]
+    if labels:
+        parts.append(f"Tāmē cita starpā iekļauti šādi darbi: {_join_client_work_labels(labels)}.")
+        evidence.extend(_clean(item.get("evidence")) for item in rows[:3] if _clean(item.get("evidence")))
+    parts.append("Lūdzu, apskatiet tāmi un dodiet ziņu, ja ir jautājumi vai vēlaties ko precizēt.")
+    return {
+        "ok": True,
+        "answer": " ".join(parts),
+        "evidence": evidence[:8],
+        "validated_evidence_count": len(evidence[:8]),
+        "grounding_mode": "deterministic_estimate_client_message",
+        "grand_total": grand_total if grand_total.get("ok") else None,
+        "estimate_rows_used": rows[:3],
+    }
+
+
+def execute_document_to_client_action(
+    *,
+    instruction: str,
+    source_text: str,
+    document_kind: str,
+    grounded_facts: List[Dict[str, str]] | None,
+    generator: Callable[[str], str] | None,
+) -> Dict[str, Any]:
+    """Prepare one owner-ready client message from the SAME canonical document source.
+
+    The result is a deliverable for the owner to forward in the current channel.
+    It does not send, create a second Work Object, or expose NinaOS/AI wording.
+    """
+    instruction = _clean(instruction)
+    source = _clean(source_text)
+    facts = list(grounded_facts or [])
+    if not instruction or not source or generator is None:
+        return {"ok": False, "error": "missing_document_to_client_source", "answer": ""}
+
+    # Estimate client facts come from the SAME deterministic row schema used by
+    # intake and top-cost actions. Do not ask the model to rediscover estimate facts.
+    kind_value = _clean(document_kind).casefold()
+    estimate_rows = parse_deterministic_estimate_cost_items(source)
+    if estimate_rows or any(marker in kind_value for marker in ("estimate", "tāme", "tame", "смет")):
+        deterministic_message = build_deterministic_estimate_client_message(source)
+        if deterministic_message.get("ok"):
+            deterministic_message["action"] = "client_message"
+            deterministic_message["action_version"] = DOCUMENT_TO_CLIENT_ACTION_VERSION
+            deterministic_message["deliverable_type"] = "client_message"
+            deterministic_message["owner_forward_ready"] = True
+            return deterministic_message
+
+    fact_context = "\n".join(
+        f"- {_clean(item.get('label'))}: {_clean(item.get('value'))} | evidence: {_clean(item.get('evidence'))}"
+        for item in facts[:MAX_FACTS] if isinstance(item, dict)
+    )
+    prompt = f"""
+Tu esi ONE NINA dokumenta-to-client darba darbība.
+Tu strādā īpašnieka aizkulisēs. Gala tekstu īpašnieks var uzreiz pārsūtīt savam klientam Telegram, WhatsApp vai citā saziņas kanālā.
+Dokumenta veids: {document_kind}.
+Īpašnieka instrukcija: {instruction}
+
+JAU VALIDĒTIE FAKTI:
+{fact_context or '(nav)'}
+
+UZDEVUMS:
+Sagatavo īsu, dabisku un profesionālu ziņu klientam par šo dokumentu.
+
+STINGRIE LIKUMI:
+- raksti tikai gala ziņu klientam;
+- neraksti ievadu "Te ir gatavs teksts";
+- neraksti "Versija", "ONE NINA", "NinaOS", "AI" vai tehnisku tekstu;
+- neraksti, ka ziņu sagatavoja palīgs, robots vai Nina;
+- neizdomā klienta vārdu, ja tas nav dokumentā;
+- neizdomā summas, termiņus, PVN, garantijas, apmaksas vai citus nosacījumus;
+- konkrētus dokumenta faktus izmanto tikai tad, ja tos pamato avots;
+- ja dokumentā ir skaidra gala summa un tā ir būtiska instrukcijai, drīksti to iekļaut;
+- neraksti garu visu pozīciju sarakstu, ja īpašnieks to nav prasījis;
+- saglabā cilvēka dabisku saziņas stilu;
+- evidence masīvā dod 1 līdz 8 ĪSUS PRECĪZUS citātus no avota, kas pamato gala ziņas konkrētos faktus;
+- ja drošu klienta ziņu no dokumenta nevar sagatavot, confident=false.
+
+Atbildi TIKAI ar JSON:
+{{"answer":"tikai gatava klienta ziņa","evidence":["precīzs citāts"],"confident":true}}
+
+KANONISKAIS DOKUMENTA TEKSTS:
+{source[:MAX_EXTRACTED_CHARS]}
+""".strip()
+    try:
+        result = _validated_action_payload(generator(prompt), source)
+    except Exception as exc:
+        return {"ok": False, "error": repr(exc), "answer": ""}
+    if not result.get("ok"):
+        # V1.1: a client deliverable does not need to fail merely because the model
+        # did not return a byte-exact evidence quote. When no document fact can be
+        # safely validated, return a deterministic neutral message with ZERO
+        # document claims. This is still grounded-safe: no amount, date, person,
+        # tax, warranty, payment term or other source fact is invented.
+        result = {
+            "ok": True,
+            "answer": (
+                "Labdien! Nosūtu sagatavoto tāmi. "
+                "Lūdzu, apskatiet to un dodiet ziņu, ja ir jautājumi vai vēlaties ko precizēt."
+            ),
+            "evidence": [],
+            "validated_evidence_count": 0,
+            "grounding_mode": "safe_neutral_no_document_claims",
+        }
+    else:
+        result["grounding_mode"] = "validated_document_evidence"
+    result["action"] = "client_message"
+    result["action_version"] = DOCUMENT_TO_CLIENT_ACTION_VERSION
+    result["deliverable_type"] = "client_message"
+    result["owner_forward_ready"] = True
+    return result
+
+
 def execute_document_work_action(
     *,
     action: str,
@@ -700,6 +894,15 @@ def execute_document_work_action(
     facts = list(grounded_facts or [])
     if action not in _DOCUMENT_ACTIONS - {"compare"} or not instruction or not source or generator is None:
         return {"ok": False, "error": "invalid_action_or_missing_source", "answer": ""}
+
+    if action == "client_message":
+        return execute_document_to_client_action(
+            instruction=instruction,
+            source_text=source,
+            document_kind=document_kind,
+            grounded_facts=facts,
+            generator=generator,
+        )
 
     if action == "top_cost_items":
         deterministic = extract_deterministic_cost_items(source_text=source, generator=generator)
