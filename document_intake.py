@@ -388,7 +388,7 @@ KANONISKAIS DOKUMENTA TEKSTS:
 # =========================
 
 DOCUMENT_WORK_ACTIONS_VERSION = "ONE NINA Document Work Actions V1.2 — Document-to-Client Action V1"
-DOCUMENT_TO_CLIENT_ACTION_VERSION = "ONE NINA Document-to-Client Action V1.1 — Safe Neutral Fallback"
+DOCUMENT_TO_CLIENT_ACTION_VERSION = "ONE NINA Document-to-Client Action V1.4 — Same Canonical Follow-up Total Reuse V1"
 _DOCUMENT_ACTIONS = {"client_message", "top_cost_items", "risk_review", "summary", "compare"}
 
 
@@ -752,28 +752,69 @@ def _join_client_work_labels(labels: List[str]) -> str:
     return ", ".join(clean_labels[:-1]) + f" un {clean_labels[-1]}"
 
 
-def build_deterministic_estimate_client_message(source_text: str) -> Dict[str, Any]:
-    """Build owner-forward-ready client text from the same deterministic estimate truth."""
+def _extract_validated_total_from_followup(
+    *,
+    source_text: str,
+    document_kind: str,
+    grounded_facts: List[Dict[str, str]] | None,
+    generator: Callable[[str], str] | None,
+) -> Dict[str, Any]:
+    if generator is None:
+        return {"ok": False, "error": "missing_generator_for_total_followup"}
+    followup = answer_document_followup(
+        question="Cik šajā tāmē kopā ir summa? Atbildi ar dokumentā norādīto gala kopējo summu.",
+        source_text=source_text,
+        document_kind=document_kind,
+        grounded_facts=list(grounded_facts or []),
+        generator=generator,
+    )
+    if not followup.get("ok"):
+        return {"ok": False, "error": "canonical_total_followup_not_grounded"}
+    answer = _clean(followup.get("answer"))
+    cells = _amount_cells(answer)
+    if not cells:
+        return {"ok": False, "error": "canonical_total_followup_has_no_amount"}
+    total = cells[-1]
+    amount = float(total["amount"])
+    if amount <= 0:
+        return {"ok": False, "error": "canonical_total_followup_non_positive"}
+    evidence = list(followup.get("evidence") or [])
+    return {
+        "ok": True, "amount": amount, "amount_text": total["text"],
+        "formatted_amount": _format_business_amount(amount, total["text"]),
+        "evidence": " | ".join(_clean(item) for item in evidence if _clean(item)),
+        "grounding_mode": "canonical_validated_document_followup_total",
+    }
+
+
+def build_deterministic_estimate_client_message(
+    source_text: str, *, document_kind: str = "estimate",
+    grounded_facts: List[Dict[str, str]] | None = None,
+    generator: Callable[[str], str] | None = None,
+) -> Dict[str, Any]:
     source = _clean(source_text)
     rows = parse_deterministic_estimate_cost_items(source)
     grand_total = _extract_deterministic_estimate_grand_total(source)
+    if not grand_total.get("ok"):
+        grand_total = _extract_validated_total_from_followup(
+            source_text=source, document_kind=document_kind,
+            grounded_facts=grounded_facts, generator=generator,
+        )
     if not rows and not grand_total.get("ok"):
         return {"ok": False, "error": "no_deterministic_estimate_client_facts"}
-
     parts = ["Labdien! Nosūtu sagatavoto tāmi par paredzētajiem darbiem."]
     evidence: List[str] = []
     if grand_total.get("ok"):
         parts.append(f"Tāmes kopējā summa ir {grand_total['formatted_amount']}.")
-        evidence.append(_clean(grand_total.get("evidence")))
+        if _clean(grand_total.get("evidence")):
+            evidence.append(_clean(grand_total.get("evidence")))
     labels = [_clean(item.get("label")) for item in rows[:3] if _clean(item.get("label"))]
     if labels:
         parts.append(f"Tāmē cita starpā iekļauti šādi darbi: {_join_client_work_labels(labels)}.")
         evidence.extend(_clean(item.get("evidence")) for item in rows[:3] if _clean(item.get("evidence")))
     parts.append("Lūdzu, apskatiet tāmi un dodiet ziņu, ja ir jautājumi vai vēlaties ko precizēt.")
     return {
-        "ok": True,
-        "answer": " ".join(parts),
-        "evidence": evidence[:8],
+        "ok": True, "answer": " ".join(parts), "evidence": evidence[:8],
         "validated_evidence_count": len(evidence[:8]),
         "grounding_mode": "deterministic_estimate_client_message",
         "grand_total": grand_total if grand_total.get("ok") else None,
@@ -805,7 +846,12 @@ def execute_document_to_client_action(
     kind_value = _clean(document_kind).casefold()
     estimate_rows = parse_deterministic_estimate_cost_items(source)
     if estimate_rows or any(marker in kind_value for marker in ("estimate", "tāme", "tame", "смет")):
-        deterministic_message = build_deterministic_estimate_client_message(source)
+        deterministic_message = build_deterministic_estimate_client_message(
+            source,
+            document_kind=document_kind,
+            grounded_facts=facts,
+            generator=generator,
+        )
         if deterministic_message.get("ok"):
             deterministic_message["action"] = "client_message"
             deterministic_message["action_version"] = DOCUMENT_TO_CLIENT_ACTION_VERSION
