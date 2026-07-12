@@ -65,6 +65,8 @@ try:
         migrate_canonical_work_mapping_v2,
         enrich_canonical_business_metadata,
         migrate_canonical_business_details_v1,
+        list_work_objects,
+        update_work_object,
     )
     ONE_NINA_WORK_OBJECTS_READY = True
 except Exception as e:
@@ -94,11 +96,17 @@ except Exception as e:
     def migrate_canonical_business_details_v1():
         return {"ok": False, "updated": 0, "error": "Persistent Work Objects nav pieslēgts"}
 
+    def list_work_objects(*args, **kwargs):
+        return []
+
+    def update_work_object(*args, **kwargs):
+        return None
+
 
 
 # NinaOS Work Engine Import
 try:
-    from work_engine import work_plan, work_engine_status, execute_natural_work_request, resolve_canonical_client_name, prepare_canonical_client_reply, classify_channel_business_intake, WORK_ENGINE_VERSION
+    from work_engine import work_plan, work_engine_status, execute_natural_work_request, resolve_canonical_client_name, prepare_canonical_client_reply, classify_channel_business_intake, build_channel_material_acknowledgement, WORK_ENGINE_VERSION
 except Exception as e:
     print("work_engine.py imports nav pieejams:", e)
     WORK_ENGINE_VERSION = "Work Engine nav pieslēgts"
@@ -117,6 +125,9 @@ except Exception as e:
 
     def classify_channel_business_intake(*args, **kwargs):
         return {"matched": False, "kind": "unknown", "reason": "semantic_intake_unavailable"}
+
+    def build_channel_material_acknowledgement(*args, **kwargs):
+        return {"ok": False, "text": ""}
 
     def resolve_canonical_client_name(candidate_name, workspace_id="demo_small_business"):
         return str(candidate_name or "").strip()
@@ -12564,7 +12575,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V116.8 + ONE NINA Semantic Channel Work Intake V1"
+APP_VERSION = "V116.9 + ONE NINA Channel Work Context V1"
 
 
 def rb_remove_version_lines(text):
@@ -13516,45 +13527,141 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
+
+# =========================
+# ONE NINA Channel Work Context V1
+# =========================
+
+def nina_latest_channel_work_context(user_id, max_age_minutes=30):
+    """Return the latest canonical channel work context for this owner/channel."""
+    try:
+        now = datetime.now(timezone.utc)
+        candidates = list_work_objects(workspace_id="demo_small_business", limit=300) or []
+        for obj in candidates:
+            if str(getattr(obj, "origin_channel", "") or "") != "telegram":
+                continue
+            if str(getattr(obj, "origin_user_id", "") or "") != str(user_id):
+                continue
+            metadata = obj.metadata if isinstance(getattr(obj, "metadata", None), dict) else {}
+            if metadata.get("one_nina_bridge") not in {"semantic_channel_work_intake_v1", "channel_work_context_v1"}:
+                continue
+            created_raw = str(getattr(obj, "updated_at", "") or getattr(obj, "created_at", "") or "")
+            try:
+                created = datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+                if (now - created).total_seconds() > max_age_minutes * 60:
+                    continue
+            except Exception:
+                pass
+            return obj
+    except Exception as e:
+        print("ONE NINA latest channel context error:", repr(e))
+    return None
+
+
+def nina_append_photo_evidence(obj, vision_text, caption="", telegram_file_id=""):
+    """Append photo evidence to the same canonical work context; never create a parallel photo truth."""
+    if obj is None:
+        return None
+    metadata = dict(obj.metadata or {})
+    evidence = metadata.get("channel_evidence")
+    evidence = list(evidence) if isinstance(evidence, list) else []
+    key = "telegram_photo:" + str(telegram_file_id or "")
+    if key and any(str(item.get("source_key") or "") == key for item in evidence if isinstance(item, dict)):
+        return obj
+    evidence.append({
+        "kind": "photo",
+        "caption": str(caption or "").strip(),
+        "summary": str(vision_text or "").strip()[:2000],
+        "source_key": key,
+        "received_at": datetime.now(timezone.utc).isoformat(),
+    })
+    metadata["channel_evidence"] = evidence[-50:]
+    metadata["one_nina_bridge"] = "channel_work_context_v1"
+    metadata["evidence_count"] = len(metadata["channel_evidence"])
+    return update_work_object(obj.object_id, metadata=metadata)
+
+
+def nina_photo_context_answer(obj, vision_text, caption=""):
+    """Use one Nina to explain a photo inside the active work context, not as isolated Vision chat."""
+    metadata = obj.metadata if obj is not None and isinstance(getattr(obj, "metadata", None), dict) else {}
+    raw_text = str(metadata.get("raw_text") or getattr(obj, "title", "") or "").strip() if obj is not None else ""
+    prompt = f"""
+Tu esi Nina — uzņēmuma īpašnieka neredzamais darba palīgs.
+Foto ir saņemts kā daļa no viena darba konteksta. Neapraksti foto atrauti un neuzdod vispārīgu 'ko vēlies darīt ar bildi?' jautājumu.
+Īsi pasaki, ko šis foto papildina vai apstiprina saistībā ar darba materiālu.
+Neizdomā neredzamus faktus. Neraksti NinaOS, AI, versiju vai tehniskus terminus.
+Atbilde latviski, 2-4 teikumi.
+
+DARBA MATERIĀLS:
+{raw_text[:4000]}
+
+FOTO PARAKSTS:
+{str(caption or '').strip() or 'nav'}
+
+VISION ANALĪZE:
+{str(vision_text or '').strip()[:3000]}
+""".strip()
+    try:
+        return (nina_generate_client_deliverable(prompt) or "").strip()
+    except Exception as e:
+        print("ONE NINA contextual photo answer error:", repr(e))
+        return "Foto saņēmu un piesaistīju tam pašam darba materiālam."
+
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """V114.0: Telegram foto apstrāde ar Vision Engine."""
+    """ONE NINA Channel Work Context V1 — photo becomes evidence for the current canonical work context."""
     try:
         user_id = str(update.effective_user.id)
         caption = (update.message.caption or "").strip() if update.message else ""
-
         if not update.message or not update.message.photo:
             return
 
         photo = update.message.photo[-1]
         tg_file = await context.bot.get_file(photo.file_id)
-
         buffer = BytesIO()
         await tg_file.download_to_memory(out=buffer)
         image_bytes = buffer.getvalue()
 
-        answer = build_vision_answer_from_openai(
+        vision_raw = build_vision_answer_from_openai(
             client=client,
             image_bytes=image_bytes,
             caption=caption,
-            version="V115.2"
+            version="V115.2",
         )
+        vision_clean = rb_remove_version_lines(str(vision_raw or "")).strip()
 
-        # V115.2: Vision Smart Reply — no random generic advice
-        answer = v1151_vision_smart_reply(user_id, answer, caption)
+        active_obj = nina_latest_channel_work_context(user_id, max_age_minutes=30)
+        if active_obj is not None:
+            saved_obj = nina_append_photo_evidence(
+                active_obj,
+                vision_clean,
+                caption=caption,
+                telegram_file_id=getattr(photo, "file_unique_id", "") or photo.file_id,
+            )
+            answer = nina_photo_context_answer(saved_obj or active_obj, vision_clean, caption)
+            try:
+                v40_log_usage(user_id, "vision", caption)
+                save_conversation_state(user_id, "[PHOTO] " + caption, answer, "one_nina_channel_photo", "neutral", "work")
+            except Exception as e:
+                print("ONE NINA photo conversation save error:", e)
+            await safe_reply_text(update, answer, client_deliverable=True)
+            return
+
+        # No active work context: keep normal Vision behavior, but do not leak technical version text.
+        answer = v1151_vision_smart_reply(user_id, vision_clean, caption)
+        answer = rb_remove_version_lines(answer).strip()
         try:
             v40_log_usage(user_id, "vision", caption)
             save_conversation_state(user_id, "[PHOTO] " + caption, answer, "photo", "neutral", "vision")
         except Exception as e:
             print("Vision conversation save kļūda:", e)
-
-        await safe_reply_text(update, answer)
+        await safe_reply_text(update, answer, client_deliverable=True)
 
     except Exception as e:
         print("handle_photo kļūda:", repr(e))
-        await safe_reply_text(
-            update,
-            "Bildīti saņēmu, bet šoreiz neizdevās to apstrādāt. Pamēģini atsūtīt vēlreiz. 😊\n\nVersija: V114.0"
-        )
+        await safe_reply_text(update, "Bildīti saņēmu, bet šoreiz neizdevās to droši apstrādāt. Pamēģini atsūtīt vēlreiz.", client_deliverable=True)
 
 
 
@@ -15379,6 +15486,7 @@ def nina_save_forwarded_text_to_one_nina(update, user_id, user_text, force_busin
         "created": bool(created),
         "sender_name": sender_name,
         "client_name": canonical_client,
+        "is_forwarded": bool(is_forwarded),
     }
 
 
@@ -15424,25 +15532,34 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if forwarded_intake:
             forwarded_obj = forwarded_intake.get("object")
-            reply_result = None
-            if forwarded_obj is not None:
-                try:
-                    reply_result = prepare_canonical_client_reply(
-                        forwarded_obj.object_id,
-                        generator=nina_generate_client_deliverable,
-                        workspace_id="demo_small_business",
-                    )
-                except Exception as e:
-                    print("ONE NINA forwarded client reply action error:", repr(e))
-            if reply_result and reply_result.get("ok") and reply_result.get("draft_text"):
-                await safe_reply_text(update, reply_result.get("draft_text"), client_deliverable=True)
-            else:
-                client_name = str(forwarded_intake.get("client_name") or forwarded_intake.get("sender_name") or "").strip()
-                forwarded_answer = (
-                    f"Saņēmu ziņu{(' no ' + client_name) if client_name else ''} un piesaistīju to darbam. "
-                    "Šoreiz gatavu atbildi droši nesagatavoju, jo pietrūka konteksta."
-                )
-                await safe_reply_text(update, forwarded_answer)
+            intake_action = str((semantic_intake if 'semantic_intake' in locals() else {}).get("action") or "").strip()
+            is_real_forward = bool(forwarded_intake.get("is_forwarded"))
+
+            # Real incoming message or semantic incoming_message: prepare a send-ready reply.
+            if is_real_forward or intake_action == "prepare_reply":
+                reply_result = None
+                if forwarded_obj is not None:
+                    try:
+                        reply_result = prepare_canonical_client_reply(
+                            forwarded_obj.object_id,
+                            generator=nina_generate_client_deliverable,
+                            workspace_id="demo_small_business",
+                        )
+                    except Exception as e:
+                        print("ONE NINA client reply action error:", repr(e))
+                if reply_result and reply_result.get("ok") and reply_result.get("draft_text"):
+                    await safe_reply_text(update, reply_result.get("draft_text"), client_deliverable=True)
+                else:
+                    await safe_reply_text(update, "Saņēmu ziņu un piesaistīju to darbam. Šoreiz gatavu atbildi droši nesagatavoju, jo pietrūka konteksta.", client_deliverable=True)
+                return
+
+            # Work material is context/evidence, not automatically a client reply.
+            material_ack = build_channel_material_acknowledgement(
+                user_text,
+                generator=nina_generate_client_deliverable,
+            )
+            material_text = material_ack.get("text") if material_ack.get("ok") else "Sapratu darba materiālu un piefiksēju to kontekstā."
+            await safe_reply_text(update, material_text, client_deliverable=True)
             return
 
         # NinaOS Platform Visibility V1.1 — Global-first product surface
