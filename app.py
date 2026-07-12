@@ -31,7 +31,7 @@ try:
         canonical_channel_source_key,
         normalize_channel_content,
     )
-    from document_intake import DOCUMENT_INTAKE_VERSION, prepare_document_intake
+    from document_intake import DOCUMENT_INTAKE_VERSION, prepare_document_intake, answer_document_followup
     ONE_NINA_DOCUMENT_INTAKE_READY = True
 except Exception as e:
     print("ONE NINA document intake imports nav pieejams:", repr(e))
@@ -47,6 +47,9 @@ except Exception as e:
 
     def prepare_document_intake(**kwargs):
         return {"ok": False, "error": "document_intake_unavailable"}
+
+    def answer_document_followup(**kwargs):
+        return {"ok": False, "error": "document_followup_unavailable", "answer": ""}
 
 # Core Evolution 2.0 — Employee Brain Import
 try:
@@ -12626,7 +12629,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V117.4 + ONE NINA Canonical Channel Content + Document Work Intake V1"
+APP_VERSION = "V117.5 + ONE NINA Canonical Document Follow-up V1"
 
 
 def rb_remove_version_lines(text):
@@ -13687,6 +13690,79 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, "Dokumentu saņēmu, bet šoreiz droši apstrādāt neizdevās. Neko neizdomāju un neizveidoju paralēlu darba kopiju.", client_deliverable=True)
         except Exception:
             pass
+
+
+# =========================
+# ONE NINA Canonical Document Follow-up V1
+# =========================
+
+def nina_latest_canonical_document(user_id, max_age_minutes=240):
+    """Return the latest canonical document Work Object for this owner.
+
+    Reads the same nina_work_objects truth created by handle_document. No chat
+    memory copy and no Telegram-only document state.
+    """
+    if not ONE_NINA_WORK_OBJECTS_READY:
+        return None
+    try:
+        now = datetime.now(timezone.utc)
+        candidates = list_work_objects(workspace_id="demo_small_business", limit=500) or []
+        ranked = []
+        for obj in candidates:
+            if str(getattr(obj, "origin_user_id", "") or "") != str(user_id):
+                continue
+            metadata = obj.metadata if isinstance(getattr(obj, "metadata", None), dict) else {}
+            if metadata.get("source") != "canonical_channel_document_intake_v1":
+                continue
+            doc = metadata.get("document_content") if isinstance(metadata.get("document_content"), dict) else {}
+            if not str(doc.get("source_text") or "").strip():
+                continue
+            raw_time = str(getattr(obj, "updated_at", "") or getattr(obj, "created_at", "") or "")
+            try:
+                dt = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                dt = datetime.min.replace(tzinfo=timezone.utc)
+            if dt != datetime.min.replace(tzinfo=timezone.utc) and (now - dt).total_seconds() > max_age_minutes * 60:
+                continue
+            ranked.append((dt, obj))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        return ranked[0][1] if ranked else None
+    except Exception as e:
+        print("ONE NINA latest canonical document error:", repr(e))
+        return None
+
+
+def nina_is_document_followup_question(user_text):
+    text = str(user_text or "").strip().lower()
+    if not text or "?" not in text and not any(text.startswith(x) for x in ("cik ", "kas ", "kāda ", "kads ", "kad ", "kur ", "kam ", "vai ")):
+        return False
+    document_refs = (
+        "šajā tāmē", "saja tame", "tāmē", "tame", "šajā dokumentā", "dokumentā",
+        "šajā rēķinā", "rēķinā", "rekina", "šajā līgumā", "līgumā", "liguma",
+        "šajā pdf", "pdf", "failā", "faila", "dokumente", "смет", "документ", "счет", "счёт", "договор",
+    )
+    return any(ref in text for ref in document_refs)
+
+
+def nina_answer_latest_document_question(user_id, user_text):
+    obj = nina_latest_canonical_document(user_id)
+    if obj is None:
+        return None
+    metadata = obj.metadata if isinstance(getattr(obj, "metadata", None), dict) else {}
+    doc = metadata.get("document_content") if isinstance(metadata.get("document_content"), dict) else {}
+    result = answer_document_followup(
+        question=user_text,
+        source_text=str(doc.get("source_text") or ""),
+        document_kind=str(doc.get("document_kind") or "document"),
+        grounded_facts=list(doc.get("grounded_facts") or []),
+        generator=nina_generate_client_deliverable,
+    )
+    answer = str(result.get("answer") or "").strip()
+    if not answer:
+        return None
+    return {"object": obj, "result": result, "answer": answer}
 
 
 # =========================
@@ -15761,6 +15837,24 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_text = update.message.text
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
+
+        # ONE NINA Canonical Document Follow-up V1 — questions about the latest
+        # document are answered from the same persisted Work Object source_text.
+        # This must run before semantic business intake and before legacy chat.
+        if ONE_NINA_DOCUMENT_INTAKE_READY and nina_is_document_followup_question(user_text):
+            try:
+                document_followup = nina_answer_latest_document_question(user_id, user_text)
+            except Exception as e:
+                print("ONE NINA canonical document follow-up error:", repr(e))
+                document_followup = None
+            if document_followup:
+                answer = document_followup.get("answer")
+                try:
+                    save_conversation_state(user_id, user_text, answer, "one_nina_document_followup_v1", "neutral", "work")
+                except Exception:
+                    pass
+                await safe_reply_text(update, answer, client_deliverable=True)
+                return
 
         # ONE NINA Channel Work Intake V1 — forwarded text is business intake.
         # It becomes one canonical client_request and is never stored as a Web copy.
