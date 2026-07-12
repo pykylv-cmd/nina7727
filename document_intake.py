@@ -1,0 +1,256 @@
+from __future__ import annotations
+
+from io import BytesIO
+import csv
+import hashlib
+import json
+import re
+import zipfile
+from typing import Any, Callable, Dict, List
+from xml.etree import ElementTree
+
+try:
+    from pypdf import PdfReader
+except Exception:
+    PdfReader = None
+
+DOCUMENT_INTAKE_VERSION = "Document Work Intake V1"
+MAX_EXTRACTED_CHARS = 50000
+MAX_FACTS = 12
+
+
+def _clean(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _collapse(text: str) -> str:
+    return re.sub(r"\s+", " ", _clean(text)).strip()
+
+
+def document_fingerprint(data: bytes) -> str:
+    return hashlib.sha256(data or b"").hexdigest()
+
+
+def _decode_text(data: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-8", "cp1257", "cp1251", "latin-1"):
+        try:
+            return data.decode(encoding)
+        except Exception:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
+def _extract_docx(data: bytes) -> str:
+    with zipfile.ZipFile(BytesIO(data)) as archive:
+        xml_data = archive.read("word/document.xml")
+    root = ElementTree.fromstring(xml_data)
+    parts: List[str] = []
+    for node in root.iter():
+        if node.tag.endswith("}t") and node.text:
+            parts.append(node.text)
+        elif node.tag.endswith("}p"):
+            parts.append("\n")
+    return " ".join(parts).replace(" \n ", "\n")
+
+
+def _extract_pdf(data: bytes) -> str:
+    if PdfReader is None:
+        raise RuntimeError("pypdf dependency is not available")
+    reader = PdfReader(BytesIO(data))
+    pages: List[str] = []
+    for page in reader.pages[:120]:
+        pages.append(_clean(page.extract_text()))
+    return "\n\n".join(x for x in pages if x)
+
+
+def _extract_csv(data: bytes) -> str:
+    text = _decode_text(data)
+    rows = []
+    for row in csv.reader(text.splitlines()):
+        rows.append(" | ".join(_clean(cell) for cell in row))
+        if len(rows) >= 1000:
+            break
+    return "\n".join(rows)
+
+
+def extract_document_text(data: bytes, filename: str = "", mime_type: str = "") -> Dict[str, Any]:
+    filename = _clean(filename)
+    mime = _clean(mime_type).lower()
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    method = ""
+    try:
+        if extension == "pdf" or mime == "application/pdf":
+            text = _extract_pdf(data)
+            method = "pypdf"
+        elif extension == "docx" or mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            text = _extract_docx(data)
+            method = "docx_xml"
+        elif extension == "csv" or mime in {"text/csv", "application/csv"}:
+            text = _extract_csv(data)
+            method = "csv"
+        elif extension in {"txt", "md", "json", "xml", "html", "htm", "rtf", "log"} or mime.startswith("text/") or mime in {"application/json", "application/xml"}:
+            text = _decode_text(data)
+            method = "text_decode"
+        else:
+            return {"ok": False, "text": "", "method": "unsupported", "error": "unsupported_document_type"}
+    except Exception as exc:
+        return {"ok": False, "text": "", "method": method or "extract", "error": repr(exc)}
+
+    text = _clean(text)
+    if not text:
+        return {"ok": False, "text": "", "method": method, "error": "no_extractable_text"}
+    return {
+        "ok": True,
+        "text": text[:MAX_EXTRACTED_CHARS],
+        "text_chars": len(text),
+        "truncated": len(text) > MAX_EXTRACTED_CHARS,
+        "method": method,
+    }
+
+
+def classify_document_kind(filename: str, mime_type: str, text: str) -> str:
+    haystack = " ".join([_clean(filename), _clean(mime_type), _clean(text[:10000])]).lower()
+    if any(x in haystack for x in ["līgums", "ligums", "contract", "договор", "vienošanās", "vienosanas"]):
+        return "contract"
+    if any(x in haystack for x in ["rēķins", "rekins", "invoice", "счет", "счёт"]):
+        return "invoice"
+    if any(x in haystack for x in ["tāme", "tame", "estimate", "quote", "quotation", "смета", "смет"]):
+        return "estimate"
+    if any(x in haystack for x in ["projekts", "project", "проект", "plāns", "plans", "drawing", "rasēj", "rasej", "чертеж"]):
+        return "project_document"
+    return "document"
+
+
+def canonical_document_object_type(document_kind: str) -> str:
+    return {
+        "contract": "contract",
+        "invoice": "invoice",
+        "estimate": "estimate",
+        "project_document": "document_case",
+        "document": "document_case",
+    }.get(_clean(document_kind), "document_case")
+
+
+def _normalize_for_match(text: str) -> str:
+    return _collapse(text).casefold()
+
+
+def _extract_json_object(raw: str) -> Dict[str, Any]:
+    match = re.search(r"\{.*\}", _clean(raw), flags=re.DOTALL)
+    if not match:
+        return {}
+    try:
+        value = json.loads(match.group(0))
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def extract_grounded_document_facts(
+    text: str,
+    document_kind: str,
+    generator: Callable[[str], str] | None,
+) -> Dict[str, Any]:
+    source = _clean(text)
+    if not source or generator is None:
+        return {"ok": False, "facts": [], "error": "missing_source_or_generator"}
+
+    prompt = f"""
+Tu esi ONE NINA dokumentu darba faktu ekstraktors.
+Dokumenta veids: {document_kind}.
+
+Atrodi līdz {MAX_FACTS} biznesā svarīgākajiem faktiem.
+Katram faktam obligāti dod ĪSU PRECĪZU CITĀTU no avota laukā evidence.
+Nedrīkst interpretēt, vērtēt, secināt risku vai izdomāt faktus.
+Ja fakts nav skaidri dokumentā, to neiekļauj.
+
+Atbildi TIKAI ar JSON:
+{{"facts":[{{"label":"īss nosaukums","value":"īsa fakta vērtība","evidence":"precīzs fragments no avota"}}]}}
+
+DOKUMENTA TEKSTS:
+{source[:MAX_EXTRACTED_CHARS]}
+""".strip()
+    try:
+        data = _extract_json_object(generator(prompt))
+    except Exception as exc:
+        return {"ok": False, "facts": [], "error": repr(exc)}
+
+    normalized_source = _normalize_for_match(source)
+    validated: List[Dict[str, str]] = []
+    seen = set()
+    for item in data.get("facts") or []:
+        if not isinstance(item, dict):
+            continue
+        label = _clean(item.get("label"))[:100]
+        value = _clean(item.get("value"))[:500]
+        evidence = _clean(item.get("evidence"))[:1000]
+        evidence_norm = _normalize_for_match(evidence)
+        if not label or not value or len(evidence_norm) < 3:
+            continue
+        if evidence_norm not in normalized_source:
+            continue
+        key = (label.casefold(), value.casefold(), evidence_norm)
+        if key in seen:
+            continue
+        seen.add(key)
+        validated.append({"label": label, "value": value, "evidence": evidence})
+        if len(validated) >= MAX_FACTS:
+            break
+    return {"ok": bool(validated), "facts": validated, "validated_count": len(validated)}
+
+
+def build_document_acknowledgement(filename: str, document_kind: str, facts: List[Dict[str, str]]) -> str:
+    labels = {
+        "contract": "līgumu",
+        "invoice": "rēķinu",
+        "estimate": "tāmi / piedāvājumu",
+        "project_document": "projekta / plāna dokumentu",
+        "document": "dokumentu",
+    }
+    kind_label = labels.get(document_kind, "dokumentu")
+    first = f"Saņēmu {kind_label} “{_clean(filename) or 'dokuments'}” un piesaistīju to darba kontekstam."
+    if not facts:
+        return first + " Dokumenta tekstu izlasīju, bet droši izceļamus faktus šoreiz neatradu."
+    lines = [first, "", "Svarīgākais, ko atradu dokumentā:"]
+    for fact in facts[:8]:
+        lines.append(f"• {fact['label']}: {fact['value']}")
+    return "\n".join(lines)
+
+
+def prepare_document_intake(
+    *,
+    file_bytes: bytes,
+    filename: str,
+    mime_type: str,
+    generator: Callable[[str], str] | None,
+) -> Dict[str, Any]:
+    extracted = extract_document_text(file_bytes, filename=filename, mime_type=mime_type)
+    fingerprint = document_fingerprint(file_bytes)
+    if not extracted.get("ok"):
+        return {
+            "ok": False,
+            "fingerprint": fingerprint,
+            "filename": _clean(filename),
+            "mime_type": _clean(mime_type),
+            "error": extracted.get("error", "extract_failed"),
+            "extraction": extracted,
+        }
+    text = _clean(extracted.get("text"))
+    kind = classify_document_kind(filename, mime_type, text)
+    grounded = extract_grounded_document_facts(text, kind, generator)
+    facts = grounded.get("facts") if grounded.get("ok") else []
+    return {
+        "ok": True,
+        "fingerprint": fingerprint,
+        "filename": _clean(filename),
+        "mime_type": _clean(mime_type),
+        "document_kind": kind,
+        "object_type": canonical_document_object_type(kind),
+        "extracted_text": text,
+        "extraction_method": extracted.get("method"),
+        "text_chars": extracted.get("text_chars", len(text)),
+        "truncated": bool(extracted.get("truncated")),
+        "facts": facts,
+        "grounded_fact_count": len(facts),
+        "acknowledgement": build_document_acknowledgement(filename, kind, facts),
+    }
