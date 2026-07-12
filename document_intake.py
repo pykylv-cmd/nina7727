@@ -387,7 +387,8 @@ KANONISKAIS DOKUMENTA TEKSTS:
 # ONE NINA Document Work Actions V1
 # =========================
 
-DOCUMENT_WORK_ACTIONS_VERSION = "ONE NINA Document Work Actions V1.1 — Deterministic Document Calculations V1"
+DOCUMENT_WORK_ACTIONS_VERSION = "ONE NINA Document Work Actions V1.2 — Document-to-Client Action V1"
+DOCUMENT_TO_CLIENT_ACTION_VERSION = "ONE NINA Document-to-Client Action V1"
 _DOCUMENT_ACTIONS = {"client_message", "top_cost_items", "risk_review", "summary", "compare"}
 
 
@@ -407,8 +408,10 @@ def classify_document_work_action(text: str) -> Dict[str, Any]:
 
     client_markers = (
         "uztaisi klientam", "sagatavo klientam", "uzraksti klientam", "īsu ziņu klientam",
-        "isu zinu klientam", "ziņu par šo tāmi", "zinu par so tami", "client message",
-        "message to client", "сообщение клиенту",
+        "isu zinu klientam", "ziņu par šo tāmi", "zinu par so tami", "par šo tāmi klientam",
+        "par so tami klientam", "ko sūtīt klientam", "ko sutit klientam", "atbildi klientam",
+        "pārsūtīt klientam", "parsutit klientam", "client message", "message to client",
+        "send to client", "сообщение клиенту", "написать клиенту", "ответ клиенту",
     )
     if any(x in value for x in client_markers):
         return {"matched": True, "action": "client_message"}
@@ -684,6 +687,79 @@ def build_deterministic_top_cost_answer(items: List[Dict[str, Any]], limit: int 
         lines.append(f"{index}. {_clean(item.get('label'))} — {_format_business_amount(float(item.get('amount') or 0), _clean(item.get('amount_text')))}")
     return "\n".join(lines)
 
+def execute_document_to_client_action(
+    *,
+    instruction: str,
+    source_text: str,
+    document_kind: str,
+    grounded_facts: List[Dict[str, str]] | None,
+    generator: Callable[[str], str] | None,
+) -> Dict[str, Any]:
+    """Prepare one owner-ready client message from the SAME canonical document source.
+
+    The result is a deliverable for the owner to forward in the current channel.
+    It does not send, create a second Work Object, or expose NinaOS/AI wording.
+    """
+    instruction = _clean(instruction)
+    source = _clean(source_text)
+    facts = list(grounded_facts or [])
+    if not instruction or not source or generator is None:
+        return {"ok": False, "error": "missing_document_to_client_source", "answer": ""}
+
+    fact_context = "\n".join(
+        f"- {_clean(item.get('label'))}: {_clean(item.get('value'))} | evidence: {_clean(item.get('evidence'))}"
+        for item in facts[:MAX_FACTS] if isinstance(item, dict)
+    )
+    prompt = f"""
+Tu esi ONE NINA dokumenta-to-client darba darbība.
+Tu strādā īpašnieka aizkulisēs. Gala tekstu īpašnieks var uzreiz pārsūtīt savam klientam Telegram, WhatsApp vai citā saziņas kanālā.
+Dokumenta veids: {document_kind}.
+Īpašnieka instrukcija: {instruction}
+
+JAU VALIDĒTIE FAKTI:
+{fact_context or '(nav)'}
+
+UZDEVUMS:
+Sagatavo īsu, dabisku un profesionālu ziņu klientam par šo dokumentu.
+
+STINGRIE LIKUMI:
+- raksti tikai gala ziņu klientam;
+- neraksti ievadu "Te ir gatavs teksts";
+- neraksti "Versija", "ONE NINA", "NinaOS", "AI" vai tehnisku tekstu;
+- neraksti, ka ziņu sagatavoja palīgs, robots vai Nina;
+- neizdomā klienta vārdu, ja tas nav dokumentā;
+- neizdomā summas, termiņus, PVN, garantijas, apmaksas vai citus nosacījumus;
+- konkrētus dokumenta faktus izmanto tikai tad, ja tos pamato avots;
+- ja dokumentā ir skaidra gala summa un tā ir būtiska instrukcijai, drīksti to iekļaut;
+- neraksti garu visu pozīciju sarakstu, ja īpašnieks to nav prasījis;
+- saglabā cilvēka dabisku saziņas stilu;
+- evidence masīvā dod 1 līdz 8 ĪSUS PRECĪZUS citātus no avota, kas pamato gala ziņas konkrētos faktus;
+- ja drošu klienta ziņu no dokumenta nevar sagatavot, confident=false.
+
+Atbildi TIKAI ar JSON:
+{{"answer":"tikai gatava klienta ziņa","evidence":["precīzs citāts"],"confident":true}}
+
+KANONISKAIS DOKUMENTA TEKSTS:
+{source[:MAX_EXTRACTED_CHARS]}
+""".strip()
+    try:
+        result = _validated_action_payload(generator(prompt), source)
+    except Exception as exc:
+        return {"ok": False, "error": repr(exc), "answer": ""}
+    if not result.get("ok"):
+        return {
+            "ok": False,
+            "error": "no_validated_document_to_client_evidence",
+            "answer": "No šī dokumenta saglabātā teksta nevaru droši sagatavot klientam nosūtāmu ziņu.",
+            "evidence": result.get("evidence", []),
+        }
+    result["action"] = "client_message"
+    result["action_version"] = DOCUMENT_TO_CLIENT_ACTION_VERSION
+    result["deliverable_type"] = "client_message"
+    result["owner_forward_ready"] = True
+    return result
+
+
 def execute_document_work_action(
     *,
     action: str,
@@ -700,6 +776,15 @@ def execute_document_work_action(
     facts = list(grounded_facts or [])
     if action not in _DOCUMENT_ACTIONS - {"compare"} or not instruction or not source or generator is None:
         return {"ok": False, "error": "invalid_action_or_missing_source", "answer": ""}
+
+    if action == "client_message":
+        return execute_document_to_client_action(
+            instruction=instruction,
+            source_text=source,
+            document_kind=document_kind,
+            grounded_facts=facts,
+            generator=generator,
+        )
 
     if action == "top_cost_items":
         deterministic = extract_deterministic_cost_items(source_text=source, generator=generator)
