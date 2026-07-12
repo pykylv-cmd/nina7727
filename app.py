@@ -55,22 +55,20 @@ except Exception as e:
 
 # ONE NINA CORE V1 — Canonical Persistent Work Objects Bridge
 # One Nina, one shared persistent work layer across Telegram, Web and future channels.
+# V117.3: core persistence imports are isolated from optional migration helpers.
+# A missing migration function must NEVER disable the active canonical work truth.
 try:
     from work_objects import (
         save_or_get_work_object,
         get_work_object_by_source_key,
         persistence_health as work_objects_persistence_health,
         WORK_OBJECTS_VERSION,
-        classify_canonical_work_object_type,
-        migrate_canonical_work_mapping_v2,
-        enrich_canonical_business_metadata,
-        migrate_canonical_business_details_v1,
         list_work_objects,
         update_work_object,
     )
     ONE_NINA_WORK_OBJECTS_READY = True
 except Exception as e:
-    print("work_objects.py ONE NINA imports nav pieejams:", e)
+    print("work_objects.py ONE NINA CORE imports nav pieejams:", repr(e))
     WORK_OBJECTS_VERSION = "Persistent Work Objects nav pieslēgts"
     ONE_NINA_WORK_OBJECTS_READY = False
 
@@ -83,24 +81,47 @@ except Exception as e:
     def work_objects_persistence_health():
         return {"ok": False, "error": "Persistent Work Objects nav pieslēgts"}
 
-    def classify_canonical_work_object_type(raw_text="", title="", metadata=None, default_type="task"):
-        return default_type or "task"
-
-    def migrate_canonical_work_mapping_v2():
-        return {"ok": False, "updated": 0}
-
-
-    def enrich_canonical_business_metadata(*, raw_text="", title="", object_type="task", client_id="", due_date="", metadata=None):
-        return dict(metadata or {})
-
-    def migrate_canonical_business_details_v1():
-        return {"ok": False, "updated": 0, "error": "Persistent Work Objects nav pieslēgts"}
-
     def list_work_objects(*args, **kwargs):
         return []
 
     def update_work_object(*args, **kwargs):
         return None
+
+
+try:
+    from work_objects import classify_canonical_work_object_type
+except Exception as e:
+    print("work_objects.py optional classify import fallback:", repr(e))
+
+    def classify_canonical_work_object_type(raw_text="", title="", metadata=None, default_type="task"):
+        return default_type or "task"
+
+
+try:
+    from work_objects import migrate_canonical_work_mapping_v2
+except Exception as e:
+    print("work_objects.py optional mapping migration fallback:", repr(e))
+
+    def migrate_canonical_work_mapping_v2():
+        return {"ok": False, "updated": 0, "error": "mapping_migration_unavailable"}
+
+
+try:
+    from work_objects import enrich_canonical_business_metadata
+except Exception as e:
+    print("work_objects.py optional business enrichment fallback:", repr(e))
+
+    def enrich_canonical_business_metadata(*, raw_text="", title="", object_type="task", client_id="", due_date="", metadata=None):
+        return dict(metadata or {})
+
+
+try:
+    from work_objects import migrate_canonical_business_details_v1
+except Exception as e:
+    print("work_objects.py optional business detail migration fallback:", repr(e))
+
+    def migrate_canonical_business_details_v1():
+        return {"ok": False, "updated": 0, "error": "business_detail_migration_unavailable"}
 
 
 
@@ -12581,7 +12602,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V117.2 + ONE NINA Material Fact Grounding V1"
+APP_VERSION = "V117.3 + ONE NINA Work Objects Import Recovery V1"
 
 
 def rb_remove_version_lines(text):
@@ -17605,7 +17626,11 @@ if __name__ == "__main__":
         print("ONE NINA Canonical Business Detail migration error:", repr(e))
 
     print(
-        "NinaOS Telegram Runtime V116.5 starting...",
+        "NinaOS Telegram Runtime starting...",
+        "APP_VERSION=" + str(APP_VERSION),
+        "WORK_ENGINE_VERSION=" + str(WORK_ENGINE_VERSION),
+        "WORK_OBJECTS_VERSION=" + str(WORK_OBJECTS_VERSION),
+        "WORK_OBJECTS_READY=" + str(bool(ONE_NINA_WORK_OBJECTS_READY)),
         "PostgreSQL" if USE_POSTGRES else "SQLite fallback",
     )
 
