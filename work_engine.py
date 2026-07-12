@@ -44,7 +44,7 @@ try:
 except ImportError:
     _save_canonical_action_result = None
 
-WORK_ENGINE_VERSION = "Work Engine V1.5 — ONE NINA Semantic Channel Work Intake V1"
+WORK_ENGINE_VERSION = "Work Engine V1.6 — ONE NINA Channel Work Context V1"
 ESTIMATE_ACTION_KEY = "estimate_draft_v1"
 ESTIMATE_ACTION_VERSION = "ONE_NINA_CANONICAL_ESTIMATE_ACTION_V1"
 ESTIMATE_APPROVAL_VERSION = "ONE_NINA_ESTIMATE_APPROVAL_V1"
@@ -446,26 +446,29 @@ def execute_natural_work_request(
 
 
 def classify_channel_business_intake(user_text: str, classifier) -> Dict[str, Any]:
-    """Classify channel text in the shared Work Engine, not in a channel-specific brain.
+    """Classify channel content by business meaning and next useful action.
 
-    This is the semantic fallback for channels that do not preserve forward metadata.
-    It distinguishes incoming business content from the owner's instruction/question to Nina.
+    A channel is only transport. This shared Work Engine decides whether content is:
+    - an incoming message that needs a reply;
+    - work material/evidence that should be attached to one canonical work context;
+    - an owner instruction or ordinary conversation.
     """
     text = _clean(user_text)
     if not text or classifier is None:
-        return {"matched": False, "kind": "unknown", "reason": "empty_or_no_classifier"}
+        return {"matched": False, "kind": "unknown", "action": "none", "reason": "empty_or_no_classifier"}
 
     prompt = f"""
 Tu esi ONE NINA centrālais Work Engine intake klasifikators.
-Nosaki, vai zemāk dotais teksts izskatās pēc IENĀKOŠAS DARBA INFORMĀCIJAS no klienta, piegādātāja, kolēģa vai cita sadarbības partnera, ko vajag piesaistīt biznesa darbam.
+Skaties uz INFORMĀCIJAS JĒGU, nevis Telegram pogām vai forward metadata.
 
-Svarīgi:
-- business_intake = true, ja teksts izskatās pēc pasūtījuma, cenas, adreses, piegādes/gatavības laika, objekta informācijas, klienta problēmas, dokumenta satura vai citas ienākošas darba informācijas.
-- business_intake = false, ja īpašnieks jautā Ninai, dod Ninai komandu, vienkārši sarunājas, stāsta faktu par sevi vai prasa vispārīgu informāciju.
-- Neizdomā trūkstošu klienta vārdu.
+Nosaki vienu no četriem veidiem:
+1) incoming_message — klienta/piegādātāja/partnera ziņa, uz kuru īpašniekam ticami vajag sagatavot atbildi.
+2) work_material — sludinājuma teksts, tāmes saturs, cenas/adreses/parametri, projekta/plāna/līguma/dokumenta saturs, objektu apraksti vai cita darba informācija, kas vispirms jāsaprot un jāpiesaista darba kontekstam. To NEDRĪKST automātiski pārvērst klienta atbildē.
+3) owner_instruction — īpašnieks dod Ninai komandu vai jautā Ninai.
+4) conversation — parasta saruna/personīgs fakts/vispārīgs jautājums.
 
 Atbildi TIKAI ar JSON vienā rindā:
-{{"business_intake":true|false,"kind":"client_request|supplier_message|work_info|owner_instruction|conversation","reason":"īsi"}}
+{{"business_intake":true|false,"kind":"incoming_message|work_material|owner_instruction|conversation","action":"prepare_reply|attach_context|none","reason":"īsi"}}
 
 TEKSTS:
 {text}
@@ -474,16 +477,43 @@ TEKSTS:
         raw = _clean(classifier(prompt))
         match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
         if not match:
-            return {"matched": False, "kind": "unknown", "reason": "classifier_no_json"}
+            return {"matched": False, "kind": "unknown", "action": "none", "reason": "classifier_no_json"}
         data = json.loads(match.group(0))
-        matched = bool(data.get("business_intake"))
-        return {
-            "matched": matched,
-            "kind": _clean(data.get("kind")) or ("work_info" if matched else "conversation"),
-            "reason": _clean(data.get("reason")),
-        }
+        kind = _clean(data.get("kind")) or "conversation"
+        action = _clean(data.get("action")) or "none"
+        matched = bool(data.get("business_intake")) and kind in {"incoming_message", "work_material"}
+        if kind == "incoming_message":
+            action = "prepare_reply"
+        elif kind == "work_material":
+            action = "attach_context"
+        else:
+            action = "none"
+        return {"matched": matched, "kind": kind, "action": action, "reason": _clean(data.get("reason"))}
     except Exception as exc:
-        return {"matched": False, "kind": "unknown", "reason": "classifier_failed", "detail": repr(exc)}
+        return {"matched": False, "kind": "unknown", "action": "none", "reason": "classifier_failed", "detail": repr(exc)}
+
+
+def build_channel_material_acknowledgement(user_text: str, generator) -> Dict[str, Any]:
+    """Create a short owner-facing acknowledgement for work material, never a client reply."""
+    text = _clean(user_text)
+    if not text or generator is None:
+        return {"ok": False, "text": ""}
+    prompt = f"""
+Tu esi Nina — uzņēmuma īpašnieka neredzamais AI darbinieks.
+Šis ir DARBA MATERIĀLS, nevis klienta ziņa, uz kuru automātiski jāatbild.
+Īsi pasaki, ko no materiāla saprati un ka to piefiksēji darba kontekstā.
+Neizdomā faktus. Neuzdod tukšu vispārīgu jautājumu. Neizmanto vārdus NinaOS, AI, versija, Work Object vai tehniskus terminus.
+Atbilde latviski, 2-4 īsi teikumi.
+
+MATERIĀLS:
+{text}
+""".strip()
+    try:
+        result = _clean(generator(prompt))
+        result = re.sub(r"(?im)^\s*Versija\s*:.*$", "", result).strip()
+        return {"ok": bool(result), "text": result}
+    except Exception as exc:
+        return {"ok": False, "text": "", "error": repr(exc)}
 
 def work_engine_status():
     return (
