@@ -25,31 +25,73 @@ from telegram.ext import Application, MessageHandler, CommandHandler, filters, C
 from openai import OpenAI
 
 # ONE NINA Canonical Channel Content + Document Work Intake V1
+# V117.8: channel-content and document-action imports are isolated.
+# An optional version symbol must never disable the active document work brain.
 try:
     from channel_content import (
         CHANNEL_CONTENT_VERSION,
         canonical_channel_source_key,
         normalize_channel_content,
     )
-    from document_intake import (
-        DOCUMENT_INTAKE_VERSION, DOCUMENT_WORK_ACTIONS_VERSION, DOCUMENT_TO_CLIENT_ACTION_VERSION, prepare_document_intake,
-        answer_document_followup, classify_document_work_action, execute_document_work_action,
-        compare_canonical_documents,
-    )
-    ONE_NINA_DOCUMENT_INTAKE_READY = True
 except Exception as e:
-    print("ONE NINA document intake imports nav pieejams:", repr(e))
+    print("ONE NINA channel content imports nav pieejams:", repr(e))
     CHANNEL_CONTENT_VERSION = "Canonical Channel Content nav pieslēgts"
-    DOCUMENT_INTAKE_VERSION = "Document Work Intake nav pieslēgts"
-    DOCUMENT_WORK_ACTIONS_VERSION = "Document Work Actions nav pieslēgts"
-    DOCUMENT_TO_CLIENT_ACTION_VERSION = "Document-to-Client Action nav pieslēgts"
-    ONE_NINA_DOCUMENT_INTAKE_READY = False
 
     def normalize_channel_content(**kwargs):
         raise RuntimeError("Canonical Channel Content nav pieslēgts")
 
     def canonical_channel_source_key(content):
         return ""
+
+try:
+    import document_intake as _one_nina_document_intake
+
+    DOCUMENT_INTAKE_VERSION = getattr(
+        _one_nina_document_intake,
+        "DOCUMENT_INTAKE_VERSION",
+        "Document Work Intake version unavailable",
+    )
+    DOCUMENT_WORK_ACTIONS_VERSION = getattr(
+        _one_nina_document_intake,
+        "DOCUMENT_WORK_ACTIONS_VERSION",
+        "Document Work Actions version unavailable",
+    )
+    DOCUMENT_TO_CLIENT_ACTION_VERSION = getattr(
+        _one_nina_document_intake,
+        "DOCUMENT_TO_CLIENT_ACTION_VERSION",
+        "Document-to-Client Action version unavailable",
+    )
+    prepare_document_intake = _one_nina_document_intake.prepare_document_intake
+    answer_document_followup = _one_nina_document_intake.answer_document_followup
+    classify_document_work_action = _one_nina_document_intake.classify_document_work_action
+    execute_document_work_action = _one_nina_document_intake.execute_document_work_action
+    compare_canonical_documents = _one_nina_document_intake.compare_canonical_documents
+
+    _document_client_action_contract = classify_document_work_action(
+        "uztaisi klientam īsu ziņu par šo tāmi"
+    )
+    if not (
+        isinstance(_document_client_action_contract, dict)
+        and _document_client_action_contract.get("matched")
+        and _document_client_action_contract.get("action") == "client_message"
+    ):
+        raise RuntimeError(
+            "Document-to-Client action contract failed: "
+            + repr(_document_client_action_contract)
+        )
+
+    ONE_NINA_DOCUMENT_INTAKE_READY = True
+    print(
+        "ONE NINA Document Action Contract: PASS",
+        "action=client_message",
+        "version=" + str(DOCUMENT_TO_CLIENT_ACTION_VERSION),
+    )
+except Exception as e:
+    print("ONE NINA document intake imports nav pieejams:", repr(e))
+    DOCUMENT_INTAKE_VERSION = "Document Work Intake nav pieslēgts"
+    DOCUMENT_WORK_ACTIONS_VERSION = "Document Work Actions nav pieslēgts"
+    DOCUMENT_TO_CLIENT_ACTION_VERSION = "Document-to-Client Action nav pieslēgts"
+    ONE_NINA_DOCUMENT_INTAKE_READY = False
 
     def prepare_document_intake(**kwargs):
         return {"ok": False, "error": "document_intake_unavailable"}
@@ -12644,7 +12686,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V117.7 + ONE NINA Document-to-Client Action V1"
+APP_VERSION = "V117.8 + ONE NINA Document Action Import Isolation V1"
 
 
 def rb_remove_version_lines(text):
