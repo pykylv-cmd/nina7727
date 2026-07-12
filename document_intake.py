@@ -388,7 +388,7 @@ KANONISKAIS DOKUMENTA TEKSTS:
 # =========================
 
 DOCUMENT_WORK_ACTIONS_VERSION = "ONE NINA Document Work Actions V1.2 — Document-to-Client Action V1"
-DOCUMENT_TO_CLIENT_ACTION_VERSION = "ONE NINA Document-to-Client Action V1"
+DOCUMENT_TO_CLIENT_ACTION_VERSION = "ONE NINA Document-to-Client Action V1.1 — Safe Neutral Fallback"
 _DOCUMENT_ACTIONS = {"client_message", "top_cost_items", "risk_review", "summary", "compare"}
 
 
@@ -747,12 +747,23 @@ KANONISKAIS DOKUMENTA TEKSTS:
     except Exception as exc:
         return {"ok": False, "error": repr(exc), "answer": ""}
     if not result.get("ok"):
-        return {
-            "ok": False,
-            "error": "no_validated_document_to_client_evidence",
-            "answer": "No šī dokumenta saglabātā teksta nevaru droši sagatavot klientam nosūtāmu ziņu.",
-            "evidence": result.get("evidence", []),
+        # V1.1: a client deliverable does not need to fail merely because the model
+        # did not return a byte-exact evidence quote. When no document fact can be
+        # safely validated, return a deterministic neutral message with ZERO
+        # document claims. This is still grounded-safe: no amount, date, person,
+        # tax, warranty, payment term or other source fact is invented.
+        result = {
+            "ok": True,
+            "answer": (
+                "Labdien! Nosūtu sagatavoto tāmi. "
+                "Lūdzu, apskatiet to un dodiet ziņu, ja ir jautājumi vai vēlaties ko precizēt."
+            ),
+            "evidence": [],
+            "validated_evidence_count": 0,
+            "grounding_mode": "safe_neutral_no_document_claims",
         }
+    else:
+        result["grounding_mode"] = "validated_document_evidence"
     result["action"] = "client_message"
     result["action_version"] = DOCUMENT_TO_CLIENT_ACTION_VERSION
     result["deliverable_type"] = "client_message"
