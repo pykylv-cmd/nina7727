@@ -12561,7 +12561,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V116.6 + ONE NINA Forwarded Work Intake V1.1"
+APP_VERSION = "V116.7 + ONE NINA Forwarded Work Intake V1.2"
 
 
 def rb_remove_version_lines(text):
@@ -15224,35 +15224,111 @@ def nina_generate_client_deliverable(prompt):
 # ONE NINA Channel Work Intake V1 — forwarded text
 # =========================
 
+def nina_is_forwarded_message(message):
+    """Detect Telegram forwards across current and older python-telegram-bot message shapes."""
+    if not message:
+        return False
+
+    if getattr(message, "forward_origin", None):
+        return True
+
+    legacy_fields = (
+        "forward_from",
+        "forward_from_chat",
+        "forward_sender_name",
+        "forward_date",
+        "forward_signature",
+    )
+    if any(getattr(message, field, None) for field in legacy_fields):
+        return True
+
+    api_kwargs = getattr(message, "api_kwargs", None)
+    if isinstance(api_kwargs, dict):
+        if api_kwargs.get("forward_origin"):
+            return True
+        if any(api_kwargs.get(field) for field in legacy_fields):
+            return True
+
+    return False
+
+
 def nina_forward_origin_name(message):
-    origin = getattr(message, "forward_origin", None) if message else None
-    if not origin:
+    if not message:
         return ""
 
-    sender_user = getattr(origin, "sender_user", None)
-    if sender_user:
-        full_name = str(getattr(sender_user, "full_name", "") or "").strip()
+    origin = getattr(message, "forward_origin", None)
+    if origin:
+        sender_user = getattr(origin, "sender_user", None)
+        if sender_user:
+            full_name = str(getattr(sender_user, "full_name", "") or "").strip()
+            if full_name:
+                return full_name
+
+        sender_name = str(getattr(origin, "sender_user_name", "") or "").strip()
+        if sender_name:
+            return sender_name
+
+        chat = getattr(origin, "chat", None)
+        if chat:
+            title = str(getattr(chat, "title", "") or "").strip()
+            if title:
+                return title
+
+    legacy_user = getattr(message, "forward_from", None)
+    if legacy_user:
+        full_name = str(getattr(legacy_user, "full_name", "") or "").strip()
         if full_name:
             return full_name
 
-    sender_name = str(getattr(origin, "sender_user_name", "") or "").strip()
-    if sender_name:
-        return sender_name
+    legacy_sender_name = str(getattr(message, "forward_sender_name", "") or "").strip()
+    if legacy_sender_name:
+        return legacy_sender_name
 
-    chat = getattr(origin, "chat", None)
-    if chat:
-        title = str(getattr(chat, "title", "") or "").strip()
+    legacy_chat = getattr(message, "forward_from_chat", None)
+    if legacy_chat:
+        title = str(getattr(legacy_chat, "title", "") or "").strip()
         if title:
             return title
+
+    api_kwargs = getattr(message, "api_kwargs", None)
+    if isinstance(api_kwargs, dict):
+        raw_origin = api_kwargs.get("forward_origin")
+        if isinstance(raw_origin, dict):
+            sender_name = str(raw_origin.get("sender_user_name") or "").strip()
+            if sender_name:
+                return sender_name
+            sender_user = raw_origin.get("sender_user")
+            if isinstance(sender_user, dict):
+                first_name = str(sender_user.get("first_name") or "").strip()
+                last_name = str(sender_user.get("last_name") or "").strip()
+                full_name = " ".join(x for x in [first_name, last_name] if x).strip()
+                if full_name:
+                    return full_name
+            chat = raw_origin.get("chat")
+            if isinstance(chat, dict):
+                title = str(chat.get("title") or "").strip()
+                if title:
+                    return title
+
+        sender_name = str(api_kwargs.get("forward_sender_name") or "").strip()
+        if sender_name:
+            return sender_name
 
     return ""
 
 
 def nina_forward_origin_kind(message):
-    origin = getattr(message, "forward_origin", None) if message else None
-    if not origin:
+    if not message:
         return ""
-    return origin.__class__.__name__
+    origin = getattr(message, "forward_origin", None)
+    if origin:
+        return origin.__class__.__name__
+    if any(getattr(message, field, None) for field in ("forward_from", "forward_from_chat", "forward_sender_name", "forward_date")):
+        return "LegacyForwardMetadata"
+    api_kwargs = getattr(message, "api_kwargs", None)
+    if isinstance(api_kwargs, dict) and (api_kwargs.get("forward_origin") or api_kwargs.get("forward_date")):
+        return "ApiKwargsForwardMetadata"
+    return ""
 
 
 def nina_save_forwarded_text_to_one_nina(update, user_id, user_text):
@@ -15262,7 +15338,7 @@ def nina_save_forwarded_text_to_one_nina(update, user_id, user_text):
     Telegram only supplies channel metadata; canonical work remains in work_objects.py.
     """
     message = getattr(update, "message", None)
-    if not message or not getattr(message, "forward_origin", None):
+    if not nina_is_forwarded_message(message):
         return None
     if not ONE_NINA_WORK_OBJECTS_READY:
         return None
