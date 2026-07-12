@@ -14,7 +14,7 @@ try:
 except Exception:
     PdfReader = None
 
-DOCUMENT_INTAKE_VERSION = "Document Work Intake V1"
+DOCUMENT_INTAKE_VERSION = "Document Work Intake V1.2 — ONE NINA Document Work Actions V1"
 MAX_EXTRACTED_CHARS = 50000
 MAX_FACTS = 12
 
@@ -344,3 +344,193 @@ KANONISKAIS DOKUMENTA TEKSTS:
         "evidence": validated_evidence,
         "validated_evidence_count": len(validated_evidence),
     }
+
+# =========================
+# ONE NINA Document Work Actions V1
+# =========================
+
+DOCUMENT_WORK_ACTIONS_VERSION = "ONE NINA Document Work Actions V1"
+_DOCUMENT_ACTIONS = {"client_message", "top_cost_items", "risk_review", "summary", "compare"}
+
+
+def classify_document_work_action(text: str) -> Dict[str, Any]:
+    """Deterministically detect explicit owner instructions to work with a document.
+
+    This is intentionally narrow: ordinary questions remain in canonical document
+    follow-up. Only clear work verbs/actions enter the action executor.
+    """
+    value = _collapse(text).casefold()
+    if not value:
+        return {"matched": False, "action": ""}
+
+    compare_markers = ("salīdzini", "salidzini", "salīdzināt", "salidzinat", "compare", "сравни")
+    if any(x in value for x in compare_markers) and any(x in value for x in ("tām", "tam", "dokument", "rēķ", "rekin", "līgum", "ligum", "pdf", "fail", "смет", "счет", "договор")):
+        return {"matched": True, "action": "compare"}
+
+    client_markers = (
+        "uztaisi klientam", "sagatavo klientam", "uzraksti klientam", "īsu ziņu klientam",
+        "isu zinu klientam", "ziņu par šo tāmi", "zinu par so tami", "client message",
+        "message to client", "сообщение клиенту",
+    )
+    if any(x in value for x in client_markers):
+        return {"matched": True, "action": "client_message"}
+
+    cost_markers = (
+        "dārgāk", "dargak", "lielākās pozīc", "lielakas pozic", "top pozīc", "top pozic",
+        "highest cost", "most expensive", "дорог", "самые большие позиции",
+    )
+    if any(x in value for x in cost_markers):
+        return {"matched": True, "action": "top_cost_items"}
+
+    risk_markers = ("atrodi risk", "riski līgum", "riski ligum", "izvērtē risk", "izverte risk", "risk review", "find risks", "найди риск")
+    if any(x in value for x in risk_markers):
+        return {"matched": True, "action": "risk_review"}
+
+    summary_markers = ("apkopo šo", "apkopo so", "īss kopsavilk", "iss kopsavilk", "summarize this", "summary of this", "кратко резюм")
+    if any(x in value for x in summary_markers):
+        return {"matched": True, "action": "summary"}
+
+    return {"matched": False, "action": ""}
+
+
+def _validated_action_payload(raw: str, source_text: str) -> Dict[str, Any]:
+    data = _extract_json_object(raw)
+    answer = _clean(data.get("answer"))[:4000]
+    evidence_items = data.get("evidence") or []
+    if not isinstance(evidence_items, list):
+        evidence_items = []
+    normalized_source = _normalize_for_match(source_text)
+    validated: List[str] = []
+    seen = set()
+    for raw_evidence in evidence_items[:8]:
+        evidence = _clean(raw_evidence)[:1500]
+        norm = _normalize_for_match(evidence)
+        if len(norm) < 3 or norm not in normalized_source or norm in seen:
+            continue
+        seen.add(norm)
+        validated.append(evidence)
+    confident = bool(data.get("confident")) and bool(answer) and bool(validated)
+    return {"ok": confident, "answer": answer, "evidence": validated, "validated_evidence_count": len(validated)}
+
+
+def execute_document_work_action(
+    *,
+    action: str,
+    instruction: str,
+    source_text: str,
+    document_kind: str,
+    grounded_facts: List[Dict[str, str]] | None,
+    generator: Callable[[str], str] | None,
+) -> Dict[str, Any]:
+    """Execute a grounded work action against one canonical document source."""
+    action = _clean(action)
+    instruction = _clean(instruction)
+    source = _clean(source_text)
+    facts = list(grounded_facts or [])
+    if action not in _DOCUMENT_ACTIONS - {"compare"} or not instruction or not source or generator is None:
+        return {"ok": False, "error": "invalid_action_or_missing_source", "answer": ""}
+
+    action_rules = {
+        "client_message": "Sagatavo īsu, dabisku, klientam pārsūtāmu ziņu. Neraksti, ka to sagatavoja AI/Nina. Neizdomā klienta vārdu. Iekļauj tikai dokumentā pamatotus faktus.",
+        "top_cost_items": "Atrodi dokumentā dārgākās pozīcijas. Salīdzini tikai summas, kas skaidri piesaistītas konkrētām pozīcijām. Atbildē sakārto no lielākās uz mazāko.",
+        "risk_review": "Atrodi dokumentā redzamus biznesa riskus vai neskaidrus nosacījumus. Katru risku pamato ar dokumenta tekstu. Nesniedz juridisku spriedumu un neizdomā neesošus nosacījumus.",
+        "summary": "Dod īsu darba kopsavilkumu tikai no dokumenta faktiem.",
+    }
+    fact_context = "\n".join(
+        f"- {_clean(item.get('label'))}: {_clean(item.get('value'))} | evidence: {_clean(item.get('evidence'))}"
+        for item in facts[:MAX_FACTS] if isinstance(item, dict)
+    )
+    prompt = f"""
+Tu esi ONE NINA dokumentu darba darbību dzinējs.
+Strādā ar VIENU jau saglabātu canonical dokumenta Work Object.
+Dokumenta veids: {document_kind}.
+Darbība: {action}.
+Lietotāja instrukcija: {instruction}
+
+DARBĪBAS LIKUMS:
+{action_rules[action]}
+
+JAU VALIDĒTIE FAKTI:
+{fact_context or '(nav)'}
+
+OBLIGĀTI:
+- atbildi tikai no dokumenta avota;
+- neizdomā summas, datumus, personas, pozīcijas vai nosacījumus;
+- visi konkrētie dokumenta fakti gala atbildē jābalsta ar evidence;
+- evidence masīvā dod 1 līdz 8 ĪSUS PRECĪZUS citātus no avota;
+- ja darbību nevar droši izdarīt no avota, confident=false;
+- gala answer nedrīkst saturēt "Versija", "ONE NINA", "NinaOS" vai AI tehnisku tekstu.
+
+Atbildi TIKAI ar JSON:
+{{"answer":"gatavs darba rezultāts","evidence":["precīzs citāts"],"confident":true}}
+
+KANONISKAIS DOKUMENTA TEKSTS:
+{source[:MAX_EXTRACTED_CHARS]}
+""".strip()
+    try:
+        result = _validated_action_payload(generator(prompt), source)
+    except Exception as exc:
+        return {"ok": False, "error": repr(exc), "answer": ""}
+    if not result.get("ok"):
+        return {"ok": False, "error": "no_validated_document_action_evidence", "answer": "No šī dokumenta saglabātā teksta šo darbību nevaru droši izpildīt.", "evidence": result.get("evidence", [])}
+    result["action"] = action
+    result["action_version"] = DOCUMENT_WORK_ACTIONS_VERSION
+    return result
+
+
+def compare_canonical_documents(
+    *,
+    instruction: str,
+    first_source_text: str,
+    first_label: str,
+    second_source_text: str,
+    second_label: str,
+    generator: Callable[[str], str] | None,
+) -> Dict[str, Any]:
+    """Compare two already-persisted canonical document sources with source-tagged evidence."""
+    first = _clean(first_source_text)
+    second = _clean(second_source_text)
+    if not first or not second or generator is None:
+        return {"ok": False, "error": "two_document_sources_required", "answer": "Lai salīdzinātu, vajag divus saglabātus dokumentus."}
+    prompt = f"""
+Tu esi ONE NINA canonical dokumentu salīdzināšanas dzinējs.
+Lietotāja instrukcija: {_clean(instruction)}
+Salīdzini tikai zemāk dotos DIVUS dokumentus.
+Neizdomā faktus un nevērtē pēc ārējām zināšanām.
+Katram konkrētam secinājumam jābūt pamatotam ar precīzu citātu.
+Evidence ieraksti formā "A: precīzs citāts" vai "B: precīzs citāts".
+Ja drošu salīdzinājumu nevar izdarīt, confident=false.
+Atbildi TIKAI JSON:
+{{"answer":"īss praktisks salīdzinājums","evidence":["A: citāts","B: citāts"],"confident":true}}
+
+DOKUMENTS A — {_clean(first_label)}:
+{first[:MAX_EXTRACTED_CHARS // 2]}
+
+DOKUMENTS B — {_clean(second_label)}:
+{second[:MAX_EXTRACTED_CHARS // 2]}
+""".strip()
+    try:
+        data = _extract_json_object(generator(prompt))
+    except Exception as exc:
+        return {"ok": False, "error": repr(exc), "answer": ""}
+    answer = _clean(data.get("answer"))[:4000]
+    raw_evidence = data.get("evidence") or []
+    if not isinstance(raw_evidence, list):
+        raw_evidence = []
+    first_norm = _normalize_for_match(first)
+    second_norm = _normalize_for_match(second)
+    validated = []
+    for item in raw_evidence[:10]:
+        evidence = _clean(item)
+        if len(evidence) < 4 or ":" not in evidence:
+            continue
+        tag, quote = evidence.split(":", 1)
+        quote_norm = _normalize_for_match(quote)
+        if tag.strip().upper() == "A" and quote_norm and quote_norm in first_norm:
+            validated.append(evidence)
+        elif tag.strip().upper() == "B" and quote_norm and quote_norm in second_norm:
+            validated.append(evidence)
+    if not (bool(data.get("confident")) and answer and validated):
+        return {"ok": False, "error": "no_validated_comparison_evidence", "answer": "No abiem saglabātajiem dokumentiem drošu salīdzinājumu šoreiz nevaru izveidot.", "evidence": validated}
+    return {"ok": True, "action": "compare", "answer": answer, "evidence": validated, "action_version": DOCUMENT_WORK_ACTIONS_VERSION}
+
