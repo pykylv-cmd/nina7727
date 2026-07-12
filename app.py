@@ -24,6 +24,30 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 from openai import OpenAI
 
+# ONE NINA Canonical Channel Content + Document Work Intake V1
+try:
+    from channel_content import (
+        CHANNEL_CONTENT_VERSION,
+        canonical_channel_source_key,
+        normalize_channel_content,
+    )
+    from document_intake import DOCUMENT_INTAKE_VERSION, prepare_document_intake
+    ONE_NINA_DOCUMENT_INTAKE_READY = True
+except Exception as e:
+    print("ONE NINA document intake imports nav pieejams:", repr(e))
+    CHANNEL_CONTENT_VERSION = "Canonical Channel Content nav pieslēgts"
+    DOCUMENT_INTAKE_VERSION = "Document Work Intake nav pieslēgts"
+    ONE_NINA_DOCUMENT_INTAKE_READY = False
+
+    def normalize_channel_content(**kwargs):
+        raise RuntimeError("Canonical Channel Content nav pieslēgts")
+
+    def canonical_channel_source_key(content):
+        return ""
+
+    def prepare_document_intake(**kwargs):
+        return {"ok": False, "error": "document_intake_unavailable"}
+
 # Core Evolution 2.0 — Employee Brain Import
 try:
     from employee_brain import employee_reply
@@ -12602,7 +12626,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V117.3 + ONE NINA Work Objects Import Recovery V1"
+APP_VERSION = "V117.4 + ONE NINA Canonical Channel Content + Document Work Intake V1"
 
 
 def rb_remove_version_lines(text):
@@ -13551,6 +13575,116 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("handle_voice V1.8 kļūda:", repr(e))
         try:
             await safe_reply_text(update, build_voice_error_answer(str(e)))
+        except Exception:
+            pass
+
+
+# =========================
+# ONE NINA Canonical Channel Content + Document Work Intake V1
+# =========================
+
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Telegram adapter -> canonical channel envelope -> shared document intake -> one Work Object."""
+    try:
+        message = update.message
+        document = getattr(message, "document", None) if message else None
+        if not message or not document:
+            return
+
+        mime_type = str(getattr(document, "mime_type", "") or "").strip().lower()
+        if mime_type.startswith("audio/"):
+            return
+
+        if not ONE_NINA_DOCUMENT_INTAKE_READY:
+            await safe_reply_text(update, "Dokumentu darba intake šobrīd nav pieslēgts. Failu saņēmu, bet droši apstrādāt nevaru.", client_deliverable=True)
+            return
+        if not ONE_NINA_WORK_OBJECTS_READY:
+            await safe_reply_text(update, "Failu saņēmu, bet canonical darba slānis šobrīd nav pieejams. Dokumentu neinterpretēšu atrauti.", client_deliverable=True)
+            return
+
+        user_id = str(update.effective_user.id) if update.effective_user else "unknown"
+        filename = str(getattr(document, "file_name", "") or "dokuments").strip()
+        caption = str(getattr(message, "caption", "") or "").strip()
+        event_id = str(getattr(message, "message_id", "") or getattr(document, "file_unique_id", "") or document.file_id)
+        sender_name = nina_forward_origin_name(message)
+
+        channel_content = normalize_channel_content(
+            channel="telegram", owner_user_id=user_id, event_id=event_id, content_type="document",
+            caption=caption, filename=filename, mime_type=mime_type,
+            media_id=str(getattr(document, "file_id", "") or ""),
+            media_unique_id=str(getattr(document, "file_unique_id", "") or ""),
+            sender_name=sender_name, forwarded=nina_is_forwarded_message(message),
+        )
+
+        tg_file = await context.bot.get_file(document.file_id)
+        buffer = BytesIO()
+        await tg_file.download_to_memory(out=buffer)
+        file_bytes = buffer.getvalue()
+
+        intake = prepare_document_intake(
+            file_bytes=file_bytes, filename=filename, mime_type=mime_type,
+            generator=nina_generate_client_deliverable,
+        )
+        if not intake.get("ok"):
+            error = str(intake.get("error") or "extract_failed")
+            print("ONE NINA document extract error:", filename, error)
+            await safe_reply_text(update, f"Saņēmu dokumentu “{filename}”, bet šoreiz no tā nevarēju droši nolasīt tekstu. Failu neinterpretēšu uz minējumiem.", client_deliverable=True)
+            return
+
+        canonical_client = resolve_canonical_client_name(sender_name) if sender_name else ""
+        source_key = canonical_channel_source_key(channel_content)
+        extracted_text = str(intake.get("extracted_text") or "").strip()
+        document_kind = str(intake.get("document_kind") or "document").strip()
+        object_type = str(intake.get("object_type") or "document_case").strip()
+        fingerprint = str(intake.get("fingerprint") or "").strip()
+        metadata = {
+            "source": "canonical_channel_document_intake_v1",
+            "one_nina_bridge": "canonical_channel_content_v1",
+            "intake_kind": "document",
+            "channel_content": channel_content.to_dict(),
+            "document_content": {
+                "filename": filename, "mime_type": mime_type, "document_kind": document_kind,
+                "fingerprint_sha256": fingerprint, "extraction_method": intake.get("extraction_method"),
+                "text_chars": intake.get("text_chars"), "truncated": bool(intake.get("truncated")),
+                "source_text": extracted_text[:30000],
+                "grounded_facts": list(intake.get("facts") or []),
+                "grounded_fact_count": int(intake.get("grounded_fact_count") or 0),
+            },
+            "channel_evidence": [{
+                "kind": "document", "filename": filename, "mime_type": mime_type,
+                "media_unique_id": channel_content.media_unique_id, "fingerprint_sha256": fingerprint,
+                "summary": str(intake.get("acknowledgement") or "")[:2000],
+                "received_at": channel_content.received_at,
+            }],
+        }
+        if caption:
+            metadata["caption"] = caption
+
+        obj, created = save_or_get_work_object(
+            object_type=object_type, title=filename, workspace_id="demo_small_business",
+            assigned_agent_id="nina_office_manager_smb", client_id=canonical_client, priority="normal",
+            linked_files=[channel_content.media_unique_id or channel_content.media_id], metadata=metadata,
+            origin_channel=channel_content.channel, origin_user_id=channel_content.owner_user_id, source_key=source_key,
+        )
+        if not created:
+            existing_metadata = dict(getattr(obj, "metadata", {}) or {})
+            existing_doc = existing_metadata.get("document_content") if isinstance(existing_metadata.get("document_content"), dict) else {}
+            if str(existing_doc.get("fingerprint_sha256") or "") != fingerprint:
+                print("ONE NINA document source-key collision blocked:", source_key)
+                await safe_reply_text(update, "Dokumenta notikuma identitāte konfliktē ar jau saglabātu darba objektu. Neko nepārrakstīju.", client_deliverable=True)
+                return
+
+        try:
+            save_conversation_state(user_id, "[DOCUMENT] " + filename + (" | " + caption if caption else ""), str(intake.get("acknowledgement") or ""), "one_nina_channel_document", "neutral", "work")
+        except Exception as e:
+            print("ONE NINA document conversation save error:", repr(e))
+
+        answer = str(intake.get("acknowledgement") or "Dokumentu saņēmu un piesaistīju darba kontekstam.").strip()
+        await safe_reply_text(update, answer, client_deliverable=True)
+    except Exception as e:
+        print("handle_document V117.4 kļūda:", repr(e))
+        try:
+            await safe_reply_text(update, "Dokumentu saņēmu, bet šoreiz droši apstrādāt neizdevās. Neko neizdomāju un neizveidoju paralēlu darba kopiju.", client_deliverable=True)
         except Exception:
             pass
 
@@ -17506,6 +17640,7 @@ telegram_app = (
 telegram_app.add_handler(CommandHandler("start", start_command))
 telegram_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 telegram_app.add_handler(MessageHandler(filters.LOCATION, handle_location))
+telegram_app.add_handler(MessageHandler(filters.Document.ALL & ~filters.Document.AUDIO, handle_document))
 telegram_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.Document.AUDIO, handle_voice))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
@@ -17631,6 +17766,9 @@ if __name__ == "__main__":
         "WORK_ENGINE_VERSION=" + str(WORK_ENGINE_VERSION),
         "WORK_OBJECTS_VERSION=" + str(WORK_OBJECTS_VERSION),
         "WORK_OBJECTS_READY=" + str(bool(ONE_NINA_WORK_OBJECTS_READY)),
+        "CHANNEL_CONTENT_VERSION=" + str(CHANNEL_CONTENT_VERSION),
+        "DOCUMENT_INTAKE_VERSION=" + str(DOCUMENT_INTAKE_VERSION),
+        "DOCUMENT_INTAKE_READY=" + str(bool(ONE_NINA_DOCUMENT_INTAKE_READY)),
         "PostgreSQL" if USE_POSTGRES else "SQLite fallback",
     )
 
