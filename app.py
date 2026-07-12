@@ -31,12 +31,17 @@ try:
         canonical_channel_source_key,
         normalize_channel_content,
     )
-    from document_intake import DOCUMENT_INTAKE_VERSION, prepare_document_intake, answer_document_followup
+    from document_intake import (
+        DOCUMENT_INTAKE_VERSION, DOCUMENT_WORK_ACTIONS_VERSION, prepare_document_intake,
+        answer_document_followup, classify_document_work_action, execute_document_work_action,
+        compare_canonical_documents,
+    )
     ONE_NINA_DOCUMENT_INTAKE_READY = True
 except Exception as e:
     print("ONE NINA document intake imports nav pieejams:", repr(e))
     CHANNEL_CONTENT_VERSION = "Canonical Channel Content nav pieslēgts"
     DOCUMENT_INTAKE_VERSION = "Document Work Intake nav pieslēgts"
+    DOCUMENT_WORK_ACTIONS_VERSION = "Document Work Actions nav pieslēgts"
     ONE_NINA_DOCUMENT_INTAKE_READY = False
 
     def normalize_channel_content(**kwargs):
@@ -50,6 +55,15 @@ except Exception as e:
 
     def answer_document_followup(**kwargs):
         return {"ok": False, "error": "document_followup_unavailable", "answer": ""}
+
+    def classify_document_work_action(text):
+        return {"matched": False, "action": ""}
+
+    def execute_document_work_action(**kwargs):
+        return {"ok": False, "error": "document_actions_unavailable", "answer": ""}
+
+    def compare_canonical_documents(**kwargs):
+        return {"ok": False, "error": "document_compare_unavailable", "answer": ""}
 
 # Core Evolution 2.0 — Employee Brain Import
 try:
@@ -12629,7 +12643,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V117.5 + ONE NINA Canonical Document Follow-up V1"
+APP_VERSION = "V117.6 + ONE NINA Document Work Actions V1"
 
 
 def rb_remove_version_lines(text):
@@ -13763,6 +13777,106 @@ def nina_answer_latest_document_question(user_id, user_text):
     if not answer:
         return None
     return {"object": obj, "result": result, "answer": answer}
+
+
+# =========================
+# ONE NINA Document Work Actions V1
+# =========================
+
+def nina_latest_canonical_documents(user_id, limit=2, max_age_minutes=1440):
+    """Read recent document Work Objects from the same canonical persistence truth."""
+    if not ONE_NINA_WORK_OBJECTS_READY:
+        return []
+    try:
+        now = datetime.now(timezone.utc)
+        ranked = []
+        for obj in list_work_objects(workspace_id="demo_small_business", limit=500) or []:
+            if str(getattr(obj, "origin_user_id", "") or "") != str(user_id):
+                continue
+            metadata = obj.metadata if isinstance(getattr(obj, "metadata", None), dict) else {}
+            if metadata.get("source") != "canonical_channel_document_intake_v1":
+                continue
+            doc = metadata.get("document_content") if isinstance(metadata.get("document_content"), dict) else {}
+            if not str(doc.get("source_text") or "").strip():
+                continue
+            raw_time = str(getattr(obj, "updated_at", "") or getattr(obj, "created_at", "") or "")
+            try:
+                dt = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                dt = datetime.min.replace(tzinfo=timezone.utc)
+            if dt != datetime.min.replace(tzinfo=timezone.utc) and (now - dt).total_seconds() > int(max_age_minutes) * 60:
+                continue
+            ranked.append((dt, obj))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        return [item[1] for item in ranked[:max(1, int(limit))]]
+    except Exception as e:
+        print("ONE NINA latest canonical documents error:", repr(e))
+        return []
+
+
+def nina_save_document_action_result(obj, instruction, action, result):
+    """Persist action output on the SAME document Work Object; never create an action copy."""
+    if obj is None or not result:
+        return obj
+    metadata = dict(getattr(obj, "metadata", {}) or {})
+    actions = metadata.get("document_actions")
+    actions = list(actions) if isinstance(actions, list) else []
+    actions.append({
+        "action": str(action or "").strip(),
+        "instruction": str(instruction or "").strip()[:1000],
+        "answer": str(result.get("answer") or "").strip()[:4000],
+        "evidence": list(result.get("evidence") or [])[:10],
+        "action_version": str(result.get("action_version") or DOCUMENT_WORK_ACTIONS_VERSION),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    metadata["document_actions"] = actions[-30:]
+    metadata["latest_document_action"] = metadata["document_actions"][-1]
+    return update_work_object(obj.object_id, metadata=metadata)
+
+
+def nina_execute_latest_document_action(user_id, user_text, action):
+    documents = nina_latest_canonical_documents(user_id, limit=2)
+    if not documents:
+        return None
+
+    if action == "compare":
+        if len(documents) < 2:
+            return {"object": documents[0], "result": {"ok": False}, "answer": "Lai salīdzinātu, atsūti vēl vienu dokumentu. Pašlaik man šajā darba kontekstā ir tikai viens dokuments."}
+        first_obj, second_obj = documents[0], documents[1]
+        first_meta = first_obj.metadata if isinstance(getattr(first_obj, "metadata", None), dict) else {}
+        second_meta = second_obj.metadata if isinstance(getattr(second_obj, "metadata", None), dict) else {}
+        first_doc = first_meta.get("document_content") if isinstance(first_meta.get("document_content"), dict) else {}
+        second_doc = second_meta.get("document_content") if isinstance(second_meta.get("document_content"), dict) else {}
+        result = compare_canonical_documents(
+            instruction=user_text,
+            first_source_text=str(first_doc.get("source_text") or ""),
+            first_label=str(first_doc.get("filename") or getattr(first_obj, "title", "dokuments A")),
+            second_source_text=str(second_doc.get("source_text") or ""),
+            second_label=str(second_doc.get("filename") or getattr(second_obj, "title", "dokuments B")),
+            generator=nina_generate_client_deliverable,
+        )
+        answer = str(result.get("answer") or "").strip()
+        if result.get("ok"):
+            nina_save_document_action_result(first_obj, user_text, action, result)
+        return {"object": first_obj, "result": result, "answer": answer} if answer else None
+
+    obj = documents[0]
+    metadata = obj.metadata if isinstance(getattr(obj, "metadata", None), dict) else {}
+    doc = metadata.get("document_content") if isinstance(metadata.get("document_content"), dict) else {}
+    result = execute_document_work_action(
+        action=action,
+        instruction=user_text,
+        source_text=str(doc.get("source_text") or ""),
+        document_kind=str(doc.get("document_kind") or "document"),
+        grounded_facts=list(doc.get("grounded_facts") or []),
+        generator=nina_generate_client_deliverable,
+    )
+    answer = str(result.get("answer") or "").strip()
+    if result.get("ok"):
+        nina_save_document_action_result(obj, user_text, action, result)
+    return {"object": obj, "result": result, "answer": answer} if answer else None
 
 
 # =========================
@@ -15837,6 +15951,33 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_text = update.message.text
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
+
+        # ONE NINA Document Work Actions V1 — explicit owner instructions execute
+        # real work against the latest canonical document before generic chat.
+        if ONE_NINA_DOCUMENT_INTAKE_READY:
+            try:
+                document_action_match = classify_document_work_action(user_text)
+            except Exception as e:
+                print("ONE NINA document action classify error:", repr(e))
+                document_action_match = {"matched": False, "action": ""}
+            if document_action_match.get("matched"):
+                try:
+                    document_action = nina_execute_latest_document_action(
+                        user_id,
+                        user_text,
+                        str(document_action_match.get("action") or ""),
+                    )
+                except Exception as e:
+                    print("ONE NINA canonical document action error:", repr(e))
+                    document_action = None
+                if document_action and str(document_action.get("answer") or "").strip():
+                    answer = str(document_action.get("answer") or "").strip()
+                    try:
+                        save_conversation_state(user_id, user_text, answer, "one_nina_document_work_action_v1", "neutral", "work")
+                    except Exception:
+                        pass
+                    await safe_reply_text(update, answer, client_deliverable=True)
+                    return
 
         # ONE NINA Canonical Document Follow-up V1 — questions about the latest
         # document are answered from the same persisted Work Object source_text.
