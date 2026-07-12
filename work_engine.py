@@ -44,7 +44,7 @@ try:
 except ImportError:
     _save_canonical_action_result = None
 
-WORK_ENGINE_VERSION = "Work Engine V1.8 — ONE NINA Source-Anchored Material Facts V1"
+WORK_ENGINE_VERSION = "Work Engine V1.9 — ONE NINA Deterministic Material Gate V1"
 ESTIMATE_ACTION_KEY = "estimate_draft_v1"
 ESTIMATE_ACTION_VERSION = "ONE_NINA_CANONICAL_ESTIMATE_ACTION_V1"
 ESTIMATE_APPROVAL_VERSION = "ONE_NINA_ESTIMATE_APPROVAL_V1"
@@ -452,10 +452,42 @@ def classify_channel_business_intake(user_text: str, classifier) -> Dict[str, An
     - an incoming message that needs a reply;
     - work material/evidence that should be attached to one canonical work context;
     - an owner instruction or ordinary conversation.
+
+    V1.9 adds a deterministic material gate before any model classifier so explicit
+    listings/documents cannot fall through into isolated Vision chat.
     """
     text = _clean(user_text)
-    if not text or classifier is None:
-        return {"matched": False, "kind": "unknown", "action": "none", "reason": "empty_or_no_classifier"}
+    if not text:
+        return {"matched": False, "kind": "unknown", "action": "none", "reason": "empty"}
+
+    lower = text.lower()
+    object_markers = (
+        "garāža", "garaza", "гараж", "dzīvok", "квартир", "apartment",
+        "līgums", "ligums", "договор", "tāme", "tame", "смет",
+        "projekts", "project", "проект", "sludināj", "sludinaj", "объявлен"
+    )
+    listing_markers = (
+        "izīr", "izir", "сдаётся", "сдается", "for rent", "rent a", "аренд"
+    )
+    structured_fact_markers = (
+        "€", " eur", "€/mēn", "€/men", "€/мес", "cena:", "цена:",
+        "iela", "street", "улиц", "prospekts", "bulvāris", "gatve"
+    )
+
+    explicit_object = any(marker in lower for marker in object_markers)
+    explicit_listing = any(marker in lower for marker in listing_markers)
+    structured_material = any(marker in lower for marker in structured_fact_markers)
+
+    if explicit_object and (explicit_listing or structured_material):
+        return {
+            "matched": True,
+            "kind": "work_material",
+            "action": "attach_context",
+            "reason": "deterministic_explicit_work_material",
+        }
+
+    if classifier is None:
+        return {"matched": False, "kind": "unknown", "action": "none", "reason": "no_classifier"}
 
     prompt = f"""
 Tu esi ONE NINA centrālais Work Engine intake klasifikators.
