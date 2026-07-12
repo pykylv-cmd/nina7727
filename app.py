@@ -106,7 +106,7 @@ except Exception as e:
 
 # NinaOS Work Engine Import
 try:
-    from work_engine import work_plan, work_engine_status, execute_natural_work_request, resolve_canonical_client_name, prepare_canonical_client_reply, classify_channel_business_intake, build_channel_material_acknowledgement, WORK_ENGINE_VERSION
+    from work_engine import work_plan, work_engine_status, execute_natural_work_request, resolve_canonical_client_name, prepare_canonical_client_reply, classify_channel_business_intake, build_channel_material_acknowledgement, build_grounded_material_acknowledgement, build_grounded_photo_material_answer, WORK_ENGINE_VERSION
 except Exception as e:
     print("work_engine.py imports nav pieejams:", e)
     WORK_ENGINE_VERSION = "Work Engine nav pieslēgts"
@@ -127,6 +127,12 @@ except Exception as e:
         return {"matched": False, "kind": "unknown", "reason": "semantic_intake_unavailable"}
 
     def build_channel_material_acknowledgement(*args, **kwargs):
+        return {"ok": False, "text": ""}
+
+    def build_grounded_material_acknowledgement(*args, **kwargs):
+        return {"ok": False, "text": ""}
+
+    def build_grounded_photo_material_answer(*args, **kwargs):
         return {"ok": False, "text": ""}
 
     def resolve_canonical_client_name(candidate_name, workspace_id="demo_small_business"):
@@ -12575,7 +12581,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V117.1 + ONE NINA Forwarded Photo Series Context V1"
+APP_VERSION = "V117.2 + ONE NINA Material Fact Grounding V1"
 
 
 def rb_remove_version_lines(text):
@@ -13587,30 +13593,18 @@ def nina_append_photo_evidence(obj, vision_text, caption="", telegram_file_id=""
 
 
 def nina_photo_context_answer(obj, vision_text, caption=""):
-    """Use one Nina to explain a photo inside the active work context, not as isolated Vision chat."""
+    """Ground photo evidence against the active material; no marketing prose or guesses."""
     metadata = obj.metadata if obj is not None and isinstance(getattr(obj, "metadata", None), dict) else {}
     raw_text = str(metadata.get("raw_text") or getattr(obj, "title", "") or "").strip() if obj is not None else ""
-    prompt = f"""
-Tu esi Nina — uzņēmuma īpašnieka neredzamais darba palīgs.
-Foto ir saņemts kā daļa no viena darba konteksta. Neapraksti foto atrauti un neuzdod vispārīgu 'ko vēlies darīt ar bildi?' jautājumu.
-Īsi pasaki, ko šis foto papildina vai apstiprina saistībā ar darba materiālu.
-Neizdomā neredzamus faktus. Neraksti NinaOS, AI, versiju vai tehniskus terminus.
-Atbilde latviski, 2-4 teikumi.
-
-DARBA MATERIĀLS:
-{raw_text[:4000]}
-
-FOTO PARAKSTS:
-{str(caption or '').strip() or 'nav'}
-
-VISION ANALĪZE:
-{str(vision_text or '').strip()[:3000]}
-""".strip()
-    try:
-        return (nina_generate_client_deliverable(prompt) or "").strip()
-    except Exception as e:
-        print("ONE NINA contextual photo answer error:", repr(e))
-        return "Foto saņēmu un piesaistīju tam pašam darba materiālam."
+    grounded = build_grounded_photo_material_answer(
+        raw_text,
+        vision_text,
+        caption,
+        generator=nina_generate_client_deliverable,
+    )
+    if grounded.get("ok") and grounded.get("text"):
+        return grounded.get("text")
+    return "Foto saņēmu un piesaistīju tam pašam darba materiālam."
 
 
 def nina_is_recent_photo_series_continuation(obj, caption="", max_age_seconds=120):
@@ -13739,7 +13733,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if media_group_id:
                 if caption:
-                    material_ack = build_channel_material_acknowledgement(
+                    material_ack = build_grounded_material_acknowledgement(
                         caption,
                         generator=nina_generate_client_deliverable,
                     )
@@ -15670,7 +15664,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             # Work material is context/evidence, not automatically a client reply.
-            material_ack = build_channel_material_acknowledgement(
+            material_ack = build_grounded_material_acknowledgement(
                 user_text,
                 generator=nina_generate_client_deliverable,
             )
