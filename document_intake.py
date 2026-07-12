@@ -14,7 +14,7 @@ try:
 except Exception:
     PdfReader = None
 
-DOCUMENT_INTAKE_VERSION = "Document Work Intake V1.2 — ONE NINA Document Work Actions V1"
+DOCUMENT_INTAKE_VERSION = "Document Work Intake V1.4 — ONE NINA Table-Aware Deterministic Calculations V1"
 MAX_EXTRACTED_CHARS = 50000
 MAX_FACTS = 12
 
@@ -349,7 +349,7 @@ KANONISKAIS DOKUMENTA TEKSTS:
 # ONE NINA Document Work Actions V1
 # =========================
 
-DOCUMENT_WORK_ACTIONS_VERSION = "ONE NINA Document Work Actions V1"
+DOCUMENT_WORK_ACTIONS_VERSION = "ONE NINA Document Work Actions V1.1 — Deterministic Document Calculations V1"
 _DOCUMENT_ACTIONS = {"client_message", "top_cost_items", "risk_review", "summary", "compare"}
 
 
@@ -413,6 +413,172 @@ def _validated_action_payload(raw: str, source_text: str) -> Dict[str, Any]:
     return {"ok": confident, "answer": answer, "evidence": validated, "validated_evidence_count": len(validated)}
 
 
+
+# =========================
+# ONE NINA Table-Aware Deterministic Calculations V1
+# =========================
+
+DETERMINISTIC_DOCUMENT_CALCULATIONS_VERSION = "ONE NINA Table-Aware Deterministic Calculations V1"
+
+
+def _parse_business_amount(value: Any) -> float | None:
+    """Parse a business amount without asking the model to compare numbers.
+
+    Supports common Latvian/EU representations such as 2 232,00; 1.050,50;
+    792.00 and plain integer amounts. Returns None for ambiguous/non-numeric input.
+    """
+    raw = _clean(value)
+    if not raw:
+        return None
+    text = raw.replace("\u00a0", " ").strip()
+    text = re.sub(r"(?i)(eur|euro|€)", "", text).strip()
+    text = re.sub(r"[^0-9,.' -]", "", text).strip()
+    text = text.replace("'", "").replace(" ", "")
+    if not text or not re.search(r"\d", text):
+        return None
+
+    # Both separators present: the last separator is the decimal separator.
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "," in text:
+        parts = text.split(",")
+        if len(parts) == 2 and 1 <= len(parts[1]) <= 2:
+            text = parts[0] + "." + parts[1]
+        else:
+            text = "".join(parts)
+    elif "." in text:
+        parts = text.split(".")
+        if not (len(parts) == 2 and 1 <= len(parts[1]) <= 2):
+            text = "".join(parts)
+
+    try:
+        amount = float(text)
+    except Exception:
+        return None
+    if amount < 0 or amount > 1_000_000_000:
+        return None
+    return amount
+
+
+def _format_business_amount(amount: float, amount_text: str = "") -> str:
+    decimals = 2 if abs(amount - round(amount)) > 0.000001 else 0
+    rendered = f"{amount:,.{decimals}f}"
+    rendered = rendered.replace(",", " ").replace(".", ",")
+    currency = "EUR" if re.search(r"(?i)(eur|euro|€)", _clean(amount_text)) else "EUR"
+    return f"{rendered} {currency}"
+
+
+def extract_deterministic_cost_items(
+    *,
+    source_text: str,
+    generator: Callable[[str], str] | None,
+) -> Dict[str, Any]:
+    """Extract position/total candidates from flattened document tables.
+
+    PDF table extraction often separates a row label and its total into different
+    text fragments. The model may locate candidate anchors, but core validates the
+    label and amount independently against source text and requires them to occur
+    in the same local source window. Numeric parsing and ordering stay deterministic.
+    """
+    source = _clean(source_text)
+    if not source or generator is None:
+        return {"ok": False, "items": [], "error": "missing_source_or_generator"}
+
+    prompt = f"""
+Tu esi PDF tabulas kandidātu ekstraktors.
+Atrodi darba pozīcijas un tām piesaistīto KOPĒJO SUMMU / KOPĀ CENU.
+PDF tekstā tabulas kolonnas var būt saplacinātas un pozīcijas nosaukums ar summu var nebūt vienā teikumā.
+NEKĀRTO un NESALĪDZINI skaitļus.
+Katram kandidātam dod:
+- label: dokumentā redzamais pozīcijas nosaukums;
+- amount_text: dokumentā redzamā kopējā summa šai pozīcijai;
+- label_evidence: īss PRECĪZS fragments tikai ar pozīcijas nosaukumu;
+- amount_evidence: īss PRECĪZS fragments tikai ar summu.
+Neņem daudzumu, vienības cenu vai procentus par kopējo summu.
+Neizdomā vērtības.
+
+Atbildi TIKAI ar JSON:
+{{"items":[{{"label":"pozīcija","amount_text":"1 152,00","label_evidence":"precīzs nosaukuma fragments","amount_evidence":"1 152,00"}}]}}
+
+DOKUMENTA TEKSTS:
+{source[:MAX_EXTRACTED_CHARS]}
+""".strip()
+    try:
+        data = _extract_json_object(generator(prompt))
+    except Exception as exc:
+        return {"ok": False, "items": [], "error": repr(exc)}
+
+    normalized_source = _normalize_for_match(source)
+    validated: List[Dict[str, Any]] = []
+    seen = set()
+    for item in data.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        label = _collapse(item.get("label"))[:240]
+        amount_text = _collapse(item.get("amount_text"))[:120]
+        label_ev = _clean(item.get("label_evidence") or label)[:800]
+        amount_ev = _clean(item.get("amount_evidence") or amount_text)[:300]
+        label_norm = _normalize_for_match(label_ev)
+        amount_ev_norm = _normalize_for_match(amount_ev)
+        amount_norm = _normalize_for_match(amount_text)
+        amount = _parse_business_amount(amount_text)
+        if not label or amount is None or len(label_norm) < 3 or len(amount_ev_norm) < 1:
+            continue
+        if label_norm not in normalized_source or amount_ev_norm not in normalized_source:
+            continue
+        if amount_norm and amount_norm not in amount_ev_norm:
+            continue
+
+        # Table-aware source pairing: both validated anchors must occur in one local
+        # source region. This accepts flattened PDF rows without trusting model math.
+        label_pos = normalized_source.find(label_norm)
+        paired = False
+        search_from = 0
+        while label_pos >= 0:
+            left = max(0, label_pos - 300)
+            right = min(len(normalized_source), label_pos + len(label_norm) + 1400)
+            if amount_ev_norm in normalized_source[left:right]:
+                paired = True
+                break
+            search_from = label_pos + max(1, len(label_norm))
+            label_pos = normalized_source.find(label_norm, search_from)
+        if not paired:
+            continue
+
+        key = (label.casefold(), round(amount, 4))
+        if key in seen:
+            continue
+        seen.add(key)
+        validated.append({
+            "label": label,
+            "amount": amount,
+            "amount_text": amount_text,
+            "evidence": f"{label_ev} | {amount_ev}",
+            "label_evidence": label_ev,
+            "amount_evidence": amount_ev,
+        })
+
+    validated.sort(key=lambda row: (-float(row["amount"]), row["label"].casefold()))
+    return {
+        "ok": bool(validated),
+        "items": validated,
+        "validated_count": len(validated),
+        "calculation_version": DETERMINISTIC_DOCUMENT_CALCULATIONS_VERSION,
+    }
+
+
+def build_deterministic_top_cost_answer(items: List[Dict[str, Any]], limit: int = 15) -> str:
+    ranked = list(items or [])[:max(1, int(limit))]
+    if not ranked:
+        return "No dokumenta saglabātā teksta nevaru droši noteikt pozīciju kopējās summas."
+    lines = ["Dārgākās pozīcijas šajā tāmē no lielākās uz mazāko:"]
+    for index, item in enumerate(ranked, start=1):
+        lines.append(f"{index}. {_clean(item.get('label'))} — {_format_business_amount(float(item.get('amount') or 0), _clean(item.get('amount_text')))}")
+    return "\n".join(lines)
+
 def execute_document_work_action(
     *,
     action: str,
@@ -429,6 +595,27 @@ def execute_document_work_action(
     facts = list(grounded_facts or [])
     if action not in _DOCUMENT_ACTIONS - {"compare"} or not instruction or not source or generator is None:
         return {"ok": False, "error": "invalid_action_or_missing_source", "answer": ""}
+
+    if action == "top_cost_items":
+        deterministic = extract_deterministic_cost_items(source_text=source, generator=generator)
+        if not deterministic.get("ok"):
+            return {
+                "ok": False,
+                "error": "no_validated_deterministic_cost_items",
+                "answer": "No šī dokumenta saglabātā teksta nevaru droši noteikt pozīciju kopējās summas.",
+                "evidence": [],
+            }
+        items = list(deterministic.get("items") or [])
+        return {
+            "ok": True,
+            "answer": build_deterministic_top_cost_answer(items),
+            "evidence": [str(item.get("evidence") or "") for item in items[:8]],
+            "validated_evidence_count": min(len(items), 8),
+            "action": action,
+            "action_version": DOCUMENT_WORK_ACTIONS_VERSION,
+            "calculation_version": deterministic.get("calculation_version"),
+            "calculated_items": items[:15],
+        }
 
     action_rules = {
         "client_message": "Sagatavo īsu, dabisku, klientam pārsūtāmu ziņu. Neraksti, ka to sagatavoja AI/Nina. Neizdomā klienta vārdu. Iekļauj tikai dokumentā pamatotus faktus.",
