@@ -33,7 +33,8 @@ except Exception:
     psycopg2 = None
 
 
-WORK_OBJECTS_VERSION = "Persistent Work Objects V2.3.1 — ONE NINA Release-Safe Canonical Action Metadata"
+WORK_OBJECTS_VERSION = "Persistent Work Objects V2.4 — ONE NINA Client Conversation Thread V1"
+CLIENT_CONVERSATION_THREAD_VERSION = "ONE_NINA_CLIENT_CONVERSATION_THREAD_V1"
 DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
 DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
 USE_POSTGRES = bool(DATABASE_URL and psycopg2)
@@ -1277,6 +1278,106 @@ def save_canonical_action_result(
     next_metadata["canonical_actions"] = actions
     next_metadata["canonical_action_version"] = "ONE_NINA_CANONICAL_ACTION_V1"
     return update_work_object(obj.object_id, metadata=next_metadata)
+
+
+def canonical_client_conversation_thread(obj: Optional[WorkObject]) -> Dict[str, Any]:
+    """Read the canonical client conversation thread stored on one Work Object.
+
+    This is metadata on the business object, not a parallel conversation database.
+    """
+    if not obj:
+        return {}
+    metadata = obj.metadata if isinstance(obj.metadata, dict) else {}
+    thread = metadata.get("client_conversation_thread")
+    return dict(thread) if isinstance(thread, dict) else {}
+
+
+def append_client_conversation_turn(
+    object_id: str,
+    *,
+    question: str,
+    answer: str,
+    sender_name: str = "",
+    channel: str = "",
+    event_id: str = "",
+    evidence: Optional[List[str]] = None,
+    match_score: int = 0,
+    match_reasons: Optional[List[str]] = None,
+    action_version: str = "",
+    intake_version: str = "",
+    owner_forward_ready: bool = False,
+) -> Optional[WorkObject]:
+    """Append one grounded client question/reply turn to the SAME Work Object.
+
+    event_id is an idempotency key. Reprocessing the same channel event updates
+    neither the turn count nor the business truth.
+    """
+    obj = get_work_object(object_id)
+    if not obj:
+        return None
+
+    clean_question = _clean(question)[:2000]
+    clean_answer = _clean(answer)[:4000]
+    clean_event_id = _clean(event_id)[:200]
+    if not clean_question or not clean_answer:
+        raise ValueError("question and answer are required for a conversation turn.")
+
+    metadata = dict(obj.metadata or {})
+    thread = metadata.get("client_conversation_thread")
+    thread = dict(thread) if isinstance(thread, dict) else {}
+    turns = thread.get("turns")
+    turns = list(turns) if isinstance(turns, list) else []
+
+    if clean_event_id:
+        for existing in turns:
+            if isinstance(existing, dict) and _clean(existing.get("event_id")) == clean_event_id:
+                return obj
+
+    now = _utc_now()
+    thread_id = _clean(thread.get("thread_id")) or f"client_thread:{obj.object_id}"
+    turn = {
+        "turn_index": len(turns) + 1,
+        "question": clean_question,
+        "answer": clean_answer,
+        "sender_name": _clean(sender_name)[:200],
+        "channel": _clean(channel)[:50],
+        "event_id": clean_event_id,
+        "evidence": [_clean(item)[:1500] for item in list(evidence or [])[:8] if _clean(item)],
+        "match_score": int(match_score or 0),
+        "match_reasons": [_clean(item)[:100] for item in list(match_reasons or [])[:10] if _clean(item)],
+        "action_version": _clean(action_version)[:200],
+        "intake_version": _clean(intake_version)[:200],
+        "owner_forward_ready": bool(owner_forward_ready),
+        "created_at": now,
+    }
+    turns.append(turn)
+    turns = turns[-100:]
+
+    thread.update({
+        "thread_id": thread_id,
+        "version": CLIENT_CONVERSATION_THREAD_VERSION,
+        "object_id": obj.object_id,
+        "client_id": _clean(obj.client_id),
+        "turn_count": len(turns),
+        "turns": turns,
+        "latest_turn": turn,
+        "latest_question": clean_question,
+        "latest_answer": clean_answer,
+        "last_activity_at": now,
+        "channels": sorted({
+            _clean(item.get("channel"))
+            for item in turns
+            if isinstance(item, dict) and _clean(item.get("channel"))
+        }),
+    })
+    if not thread.get("created_at"):
+        thread["created_at"] = now
+
+    metadata["client_conversation_thread"] = thread
+    metadata["client_conversation_thread_version"] = CLIENT_CONVERSATION_THREAD_VERSION
+    metadata["latest_client_question"] = turn
+    return update_work_object(obj.object_id, metadata=metadata)
+
 
 def update_work_object_status(object_id: str, status: str) -> Optional[WorkObject]:
     return update_work_object(object_id, status=status)
