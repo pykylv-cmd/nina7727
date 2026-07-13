@@ -66,12 +66,17 @@ try:
     classify_document_work_action = _one_nina_document_intake.classify_document_work_action
     execute_document_work_action = _one_nina_document_intake.execute_document_work_action
     compare_canonical_documents = _one_nina_document_intake.compare_canonical_documents
+    classify_client_question_intake = _one_nina_document_intake.classify_client_question_intake
+    CLIENT_QUESTION_INTAKE_VERSION = getattr(_one_nina_document_intake, "CLIENT_QUESTION_INTAKE_VERSION", "Client Question Intake version unavailable")
 
     _document_client_action_contract = classify_document_work_action(
         "uztaisi klientam īsu ziņu par šo tāmi"
     )
     _document_client_reply_contract = classify_document_work_action(
         "klients jautā cik šajā tāmē kopā ir summa, uztaisi atbildi klientam"
+    )
+    _client_question_intake_contract = classify_client_question_intake(
+        "Sveiki! Cik šajā tāmē kopā ir summa?"
     )
     if not (
         isinstance(_document_client_action_contract, dict)
@@ -80,10 +85,12 @@ try:
         and isinstance(_document_client_reply_contract, dict)
         and _document_client_reply_contract.get("matched")
         and _document_client_reply_contract.get("action") == "client_reply"
+        and isinstance(_client_question_intake_contract, dict)
+        and _client_question_intake_contract.get("matched")
     ):
         raise RuntimeError(
             "Document action routing contract failed: "
-            + repr((_document_client_action_contract, _document_client_reply_contract))
+            + repr((_document_client_action_contract, _document_client_reply_contract, _client_question_intake_contract))
         )
 
     ONE_NINA_DOCUMENT_INTAKE_READY = True
@@ -113,6 +120,11 @@ except Exception as e:
 
     def compare_canonical_documents(**kwargs):
         return {"ok": False, "error": "document_compare_unavailable", "answer": ""}
+
+    CLIENT_QUESTION_INTAKE_VERSION = "Client Question Intake nav pieslēgts"
+
+    def classify_client_question_intake(text):
+        return {"matched": False, "question": "", "reason": "unavailable"}
 
 # Core Evolution 2.0 — Employee Brain Import
 try:
@@ -12692,7 +12704,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V117.8 + ONE NINA Document Action Import Isolation V1"
+APP_VERSION = "V117.9 + ONE NINA Client Question Intake V1"
 
 
 def rb_remove_version_lines(text):
@@ -15947,6 +15959,159 @@ def nina_forward_origin_kind(message):
     return ""
 
 
+
+def _nina_parse_iso_datetime(value):
+    try:
+        dt = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def nina_match_canonical_document_for_client_question(user_id, sender_name="", max_age_minutes=43200):
+    """Match a client question to one existing canonical document Work Object.
+
+    Exact canonical client match wins. Without a sender identity, matching is allowed
+    only when there is exactly one recent document candidate for the owner.
+    """
+    if not ONE_NINA_WORK_OBJECTS_READY:
+        return {"ok": False, "error": "work_objects_unavailable"}
+
+    canonical_sender = resolve_canonical_client_name(sender_name) if sender_name else ""
+    now = datetime.now(timezone.utc)
+    candidates = []
+    for obj in list_work_objects(workspace_id="demo_small_business", limit=500) or []:
+        if str(getattr(obj, "origin_user_id", "") or "") != str(user_id):
+            continue
+        metadata = obj.metadata if isinstance(getattr(obj, "metadata", None), dict) else {}
+        if metadata.get("source") != "canonical_channel_document_intake_v1":
+            continue
+        document_content = metadata.get("document_content") if isinstance(metadata.get("document_content"), dict) else {}
+        if not str(document_content.get("source_text") or "").strip():
+            continue
+        dt = _nina_parse_iso_datetime(getattr(obj, "updated_at", "") or getattr(obj, "created_at", ""))
+        if dt != datetime.min.replace(tzinfo=timezone.utc) and (now - dt).total_seconds() > int(max_age_minutes) * 60:
+            continue
+
+        obj_client = str(getattr(obj, "client_id", "") or "").strip()
+        channel_content = metadata.get("channel_content") if isinstance(metadata.get("channel_content"), dict) else {}
+        source_sender = str(channel_content.get("sender_name") or metadata.get("forward_sender_name") or "").strip()
+        score = 0
+        reasons = []
+        if canonical_sender and obj_client and obj_client.casefold() == canonical_sender.casefold():
+            score += 100
+            reasons.append("canonical_client_exact")
+        if sender_name and source_sender and source_sender.casefold() == sender_name.casefold():
+            score += 80
+            reasons.append("source_sender_exact")
+        candidates.append({"object": obj, "score": score, "reasons": reasons, "updated_at": dt})
+
+    if not candidates:
+        return {"ok": False, "error": "no_recent_canonical_document"}
+
+    if canonical_sender or sender_name:
+        matched = [item for item in candidates if item["score"] > 0]
+        if not matched:
+            return {"ok": False, "error": "no_document_for_client", "client_name": canonical_sender or sender_name}
+        matched.sort(key=lambda item: (item["score"], item["updated_at"]), reverse=True)
+        if len(matched) > 1 and matched[0]["score"] == matched[1]["score"]:
+            return {"ok": False, "error": "ambiguous_client_document_match", "client_name": canonical_sender or sender_name}
+        winner = matched[0]
+    else:
+        candidates.sort(key=lambda item: item["updated_at"], reverse=True)
+        if len(candidates) != 1:
+            return {"ok": False, "error": "sender_missing_and_document_match_ambiguous"}
+        winner = candidates[0]
+        winner["reasons"].append("single_recent_document")
+
+    return {
+        "ok": True,
+        "object": winner["object"],
+        "client_name": canonical_sender or sender_name,
+        "match_score": winner["score"],
+        "match_reasons": winner["reasons"],
+        "version": CLIENT_QUESTION_INTAKE_VERSION,
+    }
+
+
+def nina_save_client_question_on_document(obj, *, question, sender_name, channel, event_id, match_result, reply_result):
+    """Append question and grounded reply to the SAME canonical document object."""
+    if obj is None:
+        return None
+    metadata = dict(getattr(obj, "metadata", {}) or {})
+    questions = metadata.get("client_questions")
+    questions = list(questions) if isinstance(questions, list) else []
+    record = {
+        "question": str(question or "").strip()[:2000],
+        "sender_name": str(sender_name or "").strip()[:200],
+        "channel": str(channel or "").strip(),
+        "event_id": str(event_id or "").strip()[:200],
+        "match_score": int(match_result.get("match_score") or 0),
+        "match_reasons": list(match_result.get("match_reasons") or [])[:10],
+        "answer": str(reply_result.get("answer") or "").strip()[:4000],
+        "evidence": list(reply_result.get("evidence") or [])[:8],
+        "action_version": str(reply_result.get("action_version") or ""),
+        "intake_version": CLIENT_QUESTION_INTAKE_VERSION,
+        "owner_forward_ready": bool(reply_result.get("owner_forward_ready")),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    questions.append(record)
+    metadata["client_questions"] = questions[-50:]
+    metadata["latest_client_question"] = record
+    return update_work_object(obj.object_id, metadata=metadata)
+
+
+def nina_execute_forwarded_client_question(update, user_id, user_text):
+    """Channel adapter orchestration for one forwarded client question."""
+    message = getattr(update, "message", None)
+    if not nina_is_forwarded_message(message):
+        return None
+    classified = classify_client_question_intake(user_text)
+    if not classified.get("matched"):
+        return None
+
+    sender_name = nina_forward_origin_name(message)
+    match_result = nina_match_canonical_document_for_client_question(user_id, sender_name=sender_name)
+    if not match_result.get("ok"):
+        return {"matched": True, "ok": False, "error": match_result.get("error"), "sender_name": sender_name}
+
+    obj = match_result.get("object")
+    metadata = obj.metadata if isinstance(getattr(obj, "metadata", None), dict) else {}
+    doc = metadata.get("document_content") if isinstance(metadata.get("document_content"), dict) else {}
+    reply_result = execute_document_work_action(
+        action="client_reply",
+        instruction=str(classified.get("question") or user_text),
+        source_text=str(doc.get("source_text") or ""),
+        document_kind=str(doc.get("document_kind") or "document"),
+        grounded_facts=list(doc.get("grounded_facts") or []),
+        generator=nina_generate_client_deliverable,
+    )
+    if not reply_result.get("ok") or not str(reply_result.get("answer") or "").strip():
+        return {"matched": True, "ok": False, "error": reply_result.get("error", "client_reply_failed"), "object": obj}
+
+    event_id = getattr(message, "message_id", "")
+    nina_save_client_question_on_document(
+        obj,
+        question=str(classified.get("question") or user_text),
+        sender_name=sender_name,
+        channel="telegram",
+        event_id=event_id,
+        match_result=match_result,
+        reply_result=reply_result,
+    )
+    nina_save_document_action_result(obj, user_text, "client_reply", reply_result)
+    return {
+        "matched": True,
+        "ok": True,
+        "object": obj,
+        "answer": str(reply_result.get("answer") or "").strip(),
+        "sender_name": sender_name,
+        "match_result": match_result,
+        "reply_result": reply_result,
+    }
+
 def nina_save_forwarded_text_to_one_nina(update, user_id, user_text, force_business_intake=False, intake_kind=""):
     """Persist one forwarded business message as one canonical client_request.
 
@@ -16056,6 +16221,39 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
                 await safe_reply_text(update, answer, client_deliverable=True)
                 return
+
+        # ONE NINA Client Question Intake V1 — a forwarded client question is
+        # attached to the SAME canonical document and answered from that truth.
+        try:
+            client_question_intake = nina_execute_forwarded_client_question(update, user_id, user_text)
+        except Exception as e:
+            print("ONE NINA client question intake error:", repr(e))
+            client_question_intake = None
+
+        if client_question_intake and client_question_intake.get("matched"):
+            if client_question_intake.get("ok") and str(client_question_intake.get("answer") or "").strip():
+                answer = str(client_question_intake.get("answer") or "").strip()
+                try:
+                    save_conversation_state(user_id, user_text, answer, "one_nina_client_question_intake_v1", "neutral", "work")
+                except Exception:
+                    pass
+                await safe_reply_text(update, answer, client_deliverable=True)
+                return
+
+            error = str(client_question_intake.get("error") or "client_question_match_failed")
+            if error in {"no_document_for_client", "ambiguous_client_document_match", "sender_missing_and_document_match_ambiguous"}:
+                await safe_reply_text(
+                    update,
+                    "Klienta jautājumu atpazinu, bet nevaru droši noteikt, kuram dokumentam tas pieder. Neko nepiesaistīju nepareizam darbam. Pievieno klienta vārdu vai atsūti attiecīgo dokumentu vēlreiz.",
+                    client_deliverable=True,
+                )
+            else:
+                await safe_reply_text(
+                    update,
+                    "Klienta jautājumu atpazinu un atradu dokumenta kontekstu, bet pamatotu atbildi šoreiz droši sagatavot nevarēju.",
+                    client_deliverable=True,
+                )
+            return
 
         # ONE NINA Channel Work Intake V1 — forwarded text is business intake.
         # It becomes one canonical client_request and is never stored as a Web copy.
