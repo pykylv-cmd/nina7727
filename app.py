@@ -229,7 +229,7 @@ except Exception as e:
 
 # NinaOS Work Engine Import
 try:
-    from work_engine import work_plan, work_engine_status, execute_natural_work_request, resolve_canonical_client_name, prepare_canonical_client_reply, classify_channel_business_intake, build_channel_material_acknowledgement, build_grounded_material_acknowledgement, build_grounded_photo_material_answer, WORK_ENGINE_VERSION
+    from work_engine import work_plan, work_engine_status, execute_natural_work_request, resolve_canonical_client_name, prepare_canonical_client_reply, classify_channel_business_intake, build_channel_material_acknowledgement, build_grounded_material_acknowledgement, build_grounded_photo_material_answer, persist_client_conversation_turn, read_client_conversation_thread, WORK_ENGINE_VERSION
 except Exception as e:
     print("work_engine.py imports nav pieejams:", e)
     WORK_ENGINE_VERSION = "Work Engine nav pieslēgts"
@@ -245,6 +245,12 @@ except Exception as e:
 
     def prepare_canonical_client_reply(*args, **kwargs):
         return {"ok": False, "error": "client_reply_action_unavailable"}
+
+    def persist_client_conversation_turn(*args, **kwargs):
+        return None
+
+    def read_client_conversation_thread(*args, **kwargs):
+        return {}
 
     def classify_channel_business_intake(*args, **kwargs):
         return {"matched": False, "kind": "unknown", "reason": "semantic_intake_unavailable"}
@@ -12704,7 +12710,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V117.9 + ONE NINA Client Question Intake V1"
+APP_VERSION = "V118.0 + ONE NINA Client Conversation Thread V1"
 
 
 def rb_remove_version_lines(text):
@@ -16037,30 +16043,23 @@ def nina_match_canonical_document_for_client_question(user_id, sender_name="", m
 
 
 def nina_save_client_question_on_document(obj, *, question, sender_name, channel, event_id, match_result, reply_result):
-    """Append question and grounded reply to the SAME canonical document object."""
+    """Persist one turn through the shared Work Engine on the SAME Work Object."""
     if obj is None:
         return None
-    metadata = dict(getattr(obj, "metadata", {}) or {})
-    questions = metadata.get("client_questions")
-    questions = list(questions) if isinstance(questions, list) else []
-    record = {
-        "question": str(question or "").strip()[:2000],
-        "sender_name": str(sender_name or "").strip()[:200],
-        "channel": str(channel or "").strip(),
-        "event_id": str(event_id or "").strip()[:200],
-        "match_score": int(match_result.get("match_score") or 0),
-        "match_reasons": list(match_result.get("match_reasons") or [])[:10],
-        "answer": str(reply_result.get("answer") or "").strip()[:4000],
-        "evidence": list(reply_result.get("evidence") or [])[:8],
-        "action_version": str(reply_result.get("action_version") or ""),
-        "intake_version": CLIENT_QUESTION_INTAKE_VERSION,
-        "owner_forward_ready": bool(reply_result.get("owner_forward_ready")),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    questions.append(record)
-    metadata["client_questions"] = questions[-50:]
-    metadata["latest_client_question"] = record
-    return update_work_object(obj.object_id, metadata=metadata)
+    return persist_client_conversation_turn(
+        obj.object_id,
+        question=str(question or "").strip(),
+        answer=str(reply_result.get("answer") or "").strip(),
+        sender_name=str(sender_name or "").strip(),
+        channel=str(channel or "").strip(),
+        event_id=str(event_id or "").strip(),
+        evidence=list(reply_result.get("evidence") or [])[:8],
+        match_score=int(match_result.get("match_score") or 0),
+        match_reasons=list(match_result.get("match_reasons") or [])[:10],
+        action_version=str(reply_result.get("action_version") or ""),
+        intake_version=CLIENT_QUESTION_INTAKE_VERSION,
+        owner_forward_ready=bool(reply_result.get("owner_forward_ready")),
+    )
 
 
 def nina_execute_forwarded_client_question(update, user_id, user_text):
