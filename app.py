@@ -229,7 +229,7 @@ except Exception as e:
 
 # NinaOS Work Engine Import
 try:
-    from work_engine import work_plan, work_engine_status, execute_natural_work_request, resolve_canonical_client_name, prepare_canonical_client_reply, classify_channel_business_intake, build_channel_material_acknowledgement, build_grounded_material_acknowledgement, build_grounded_photo_material_answer, persist_client_conversation_turn, read_client_conversation_thread, WORK_ENGINE_VERSION
+    from work_engine import work_plan, work_engine_status, execute_natural_work_request, resolve_canonical_client_name, prepare_canonical_client_reply, classify_channel_business_intake, build_channel_material_acknowledgement, build_grounded_material_acknowledgement, build_grounded_photo_material_answer, persist_client_conversation_turn, read_client_conversation_thread, classify_client_decision, apply_client_decision_to_work_object, WORK_ENGINE_VERSION
 except Exception as e:
     print("work_engine.py imports nav pieejams:", e)
     WORK_ENGINE_VERSION = "Work Engine nav pieslēgts"
@@ -251,6 +251,12 @@ except Exception as e:
 
     def read_client_conversation_thread(*args, **kwargs):
         return {}
+
+    def classify_client_decision(*args, **kwargs):
+        return {"matched": False, "decision": "", "reason": "client_decision_unavailable"}
+
+    def apply_client_decision_to_work_object(*args, **kwargs):
+        return {"ok": False, "matched": False, "error": "client_decision_unavailable"}
 
     def classify_channel_business_intake(*args, **kwargs):
         return {"matched": False, "kind": "unknown", "reason": "semantic_intake_unavailable"}
@@ -12710,7 +12716,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V118.0.1 + ONE NINA Output Trace Filter V1"
+APP_VERSION = "V118.1 + ONE NINA Client Decision & Workflow Actions V1"
 
 
 def rb_remove_version_lines(text):
@@ -16139,6 +16145,39 @@ def nina_execute_forwarded_client_question(update, user_id, user_text):
         "reply_result": reply_result,
     }
 
+
+def nina_execute_forwarded_client_decision(update, user_id, user_text):
+    """Channel adapter only: resolve an explicit forwarded decision to the SAME document Work Object."""
+    message = getattr(update, "message", None)
+    if not nina_is_forwarded_message(message):
+        return None
+    classified = classify_client_decision(user_text)
+    if not classified.get("matched"):
+        return None
+
+    sender_name = nina_forward_origin_name(message)
+    match_result = nina_match_canonical_document_for_client_question(user_id, sender_name=sender_name)
+    if not match_result.get("ok"):
+        return {"matched": True, "ok": False, "error": match_result.get("error"), "sender_name": sender_name}
+
+    obj = match_result.get("object")
+    event_id = getattr(message, "message_id", "")
+    result = apply_client_decision_to_work_object(
+        obj.object_id,
+        client_text=str(user_text or "").strip(),
+        sender_name=sender_name,
+        channel="telegram",
+        event_id=str(event_id or ""),
+    )
+    return {
+        "matched": True,
+        "ok": bool(result.get("ok")),
+        "answer": str(result.get("text") or "").strip(),
+        "object": obj,
+        "decision_result": result,
+        "error": result.get("error", ""),
+    }
+
 def nina_save_forwarded_text_to_one_nina(update, user_id, user_text, force_business_intake=False, intake_kind=""):
     """Persist one forwarded business message as one canonical client_request.
 
@@ -16248,6 +16287,31 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
                 await safe_reply_text(update, answer, client_deliverable=True)
                 return
+
+        # ONE NINA Client Decision & Workflow Actions V1 — explicit forwarded client
+        # decisions update the SAME canonical document before question/general intake.
+        try:
+            client_decision_intake = nina_execute_forwarded_client_decision(update, user_id, user_text)
+        except Exception as e:
+            print("ONE NINA client decision intake error:", repr(e))
+            client_decision_intake = None
+
+        if client_decision_intake and client_decision_intake.get("matched"):
+            if client_decision_intake.get("ok") and str(client_decision_intake.get("answer") or "").strip():
+                answer = str(client_decision_intake.get("answer") or "").strip()
+                try:
+                    save_conversation_state(user_id, user_text, answer, "one_nina_client_decision_v1", "neutral", "work")
+                except Exception:
+                    pass
+                await safe_reply_text(update, answer)
+                return
+
+            await safe_reply_text(
+                update,
+                "Klienta lēmumu atpazinu, bet nevaru droši noteikt, kuram dokumentam tas pieder. Neko nepiesaistīju nepareizam darbam.",
+                client_deliverable=True,
+            )
+            return
 
         # ONE NINA Client Question Intake V1 — a forwarded client question is
         # attached to the SAME canonical document and answered from that truth.
