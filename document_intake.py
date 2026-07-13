@@ -389,9 +389,57 @@ KANONISKAIS DOKUMENTA TEKSTS:
 
 DOCUMENT_WORK_ACTIONS_VERSION = "ONE NINA Document Work Actions V1.4 — Client Reply Deterministic Grounding V1"
 DOCUMENT_TO_CLIENT_ACTION_VERSION = "ONE NINA Document-to-Client Action V1.4 — Production PASS"
-DOCUMENT_TO_CLIENT_REPLY_VERSION = "ONE NINA Document-to-Client Reply Intelligence V1.1 — Deterministic Total Reply V1"
+DOCUMENT_TO_CLIENT_REPLY_VERSION = "ONE NINA Document-to-Client Reply Intelligence V1.2 — Client Question Intake V1"
+CLIENT_QUESTION_INTAKE_VERSION = "ONE NINA Client Question Intake V1.0 — Canonical Document Match Contract"
 _DOCUMENT_ACTIONS = {"client_message", "client_reply", "top_cost_items", "risk_review", "summary", "compare"}
 
+
+
+def classify_client_question_intake(text: str) -> Dict[str, Any]:
+    """Classify a channel message as a client question that may belong to a document.
+
+    This capability is channel-independent. Channel adapters only provide forwarding
+    and sender metadata; this function decides whether the content is question-like.
+    """
+    raw = _clean(text)
+    value = _collapse(raw).casefold()
+    if not value:
+        return {"matched": False, "question": "", "reason": "empty"}
+
+    owner_instruction_markers = (
+        "uztaisi klientam", "sagatavo klientam", "uzraksti klientam",
+        "uztaisi atbildi klientam", "sagatavo atbildi klientam",
+        "ko atbildēt klientam", "ko atbildet klientam",
+    )
+    if any(marker in value for marker in owner_instruction_markers):
+        return {"matched": False, "question": "", "reason": "owner_instruction"}
+
+    question_starts = (
+        "cik ", "kāda ", "kada ", "kāds ", "kads ", "kāpēc ", "kapec ",
+        "kad ", "kur ", "vai ", "ko ", "kas ", "kuri ", "kuras ",
+        "how ", "what ", "why ", "when ", "where ", "is ", "are ",
+        "сколько ", "почему ", "когда ", "где ", "какая ", "какой ",
+    )
+    question_words = (
+        "cik", "kāpēc", "kapec", "kāda", "kada", "kāds", "kads", "vai",
+        "summa", "kopā", "kopa", "pozīc", "pozic", "termiņ", "termin",
+        "apmaksa", "garant", "pvn", "tāme", "tame", "piedāvājum", "piedavajum",
+        "document", "estimate", "invoice", "contract", "сумм", "смет", "срок",
+    )
+    question_like = (
+        "?" in raw
+        or any(value.startswith(prefix) for prefix in question_starts)
+        or sum(1 for marker in question_words if marker in value) >= 2
+    )
+    if not question_like:
+        return {"matched": False, "question": "", "reason": "not_question_like"}
+
+    return {
+        "matched": True,
+        "question": raw[:2000],
+        "reason": "channel_client_question",
+        "version": CLIENT_QUESTION_INTAKE_VERSION,
+    }
 
 def classify_document_work_action(text: str) -> Dict[str, Any]:
     """Deterministically detect explicit owner instructions to work with a document.
@@ -1198,4 +1246,3 @@ DOKUMENTS B — {_clean(second_label)}:
     if not (bool(data.get("confident")) and answer and validated):
         return {"ok": False, "error": "no_validated_comparison_evidence", "answer": "No abiem saglabātajiem dokumentiem drošu salīdzinājumu šoreiz nevaru izveidot.", "evidence": validated}
     return {"ok": True, "action": "compare", "answer": answer, "evidence": validated, "action_version": DOCUMENT_WORK_ACTIONS_VERSION}
-
