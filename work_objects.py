@@ -33,8 +33,9 @@ except Exception:
     psycopg2 = None
 
 
-WORK_OBJECTS_VERSION = "Persistent Work Objects V2.4 — ONE NINA Client Conversation Thread V1"
+WORK_OBJECTS_VERSION = "Persistent Work Objects V2.5 — ONE NINA Client Decision Workflow State V1"
 CLIENT_CONVERSATION_THREAD_VERSION = "ONE_NINA_CLIENT_CONVERSATION_THREAD_V1"
+CLIENT_DECISION_WORKFLOW_VERSION = "ONE_NINA_CLIENT_DECISION_WORKFLOW_V1"
 DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
 DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
 USE_POSTGRES = bool(DATABASE_URL and psycopg2)
@@ -1378,6 +1379,117 @@ def append_client_conversation_turn(
     metadata["latest_client_question"] = turn
     return update_work_object(obj.object_id, metadata=metadata)
 
+
+
+def canonical_client_workflow_state(obj: Optional[WorkObject]) -> Dict[str, Any]:
+    """Read client workflow state from the SAME canonical Work Object metadata."""
+    if not obj:
+        return {}
+    metadata = obj.metadata if isinstance(obj.metadata, dict) else {}
+    state = metadata.get("client_workflow_state")
+    return dict(state) if isinstance(state, dict) else {}
+
+
+def save_client_workflow_decision(
+    object_id: str,
+    *,
+    decision: str,
+    evidence_text: str,
+    sender_name: str = "",
+    channel: str = "",
+    event_id: str = "",
+    owner_next_action: str = "",
+    confidence: str = "explicit",
+) -> Optional[WorkObject]:
+    """Persist one explicit client decision on the SAME Work Object.
+
+    The incoming client message is the evidence. event_id is an idempotency key.
+    No second workflow object or conversation database is created.
+    """
+    allowed = {"client_approved", "client_rejected", "client_requests_changes", "client_needs_followup"}
+    clean_decision = _clean(decision)
+    if clean_decision not in allowed:
+        raise ValueError(f"Unsupported client decision: {clean_decision}")
+
+    obj = get_work_object(object_id)
+    if not obj:
+        return None
+
+    clean_evidence = _clean(evidence_text)[:4000]
+    clean_event_id = _clean(event_id)[:200]
+    if not clean_evidence:
+        raise ValueError("evidence_text is required for a client workflow decision.")
+
+    metadata = dict(obj.metadata or {})
+    state = metadata.get("client_workflow_state")
+    state = dict(state) if isinstance(state, dict) else {}
+    events = state.get("events")
+    events = list(events) if isinstance(events, list) else []
+
+    if clean_event_id:
+        for existing in events:
+            if isinstance(existing, dict) and _clean(existing.get("event_id")) == clean_event_id:
+                return obj
+
+    now = _utc_now()
+    event = {
+        "event_index": len(events) + 1,
+        "decision": clean_decision,
+        "evidence_text": clean_evidence,
+        "sender_name": _clean(sender_name)[:200],
+        "channel": _clean(channel)[:50],
+        "event_id": clean_event_id,
+        "confidence": _clean(confidence)[:50] or "explicit",
+        "owner_next_action": _clean(owner_next_action)[:1000],
+        "created_at": now,
+    }
+    events.append(event)
+    events = events[-100:]
+
+    state.update({
+        "version": CLIENT_DECISION_WORKFLOW_VERSION,
+        "object_id": obj.object_id,
+        "client_id": _clean(obj.client_id),
+        "decision_state": clean_decision,
+        "event_count": len(events),
+        "events": events,
+        "latest_event": event,
+        "latest_evidence_text": clean_evidence,
+        "owner_next_action": event["owner_next_action"],
+        "last_activity_at": now,
+    })
+    if not state.get("created_at"):
+        state["created_at"] = now
+
+    actions = metadata.get("canonical_actions")
+    actions = dict(actions) if isinstance(actions, dict) else {}
+    actions["client_decision_v1"] = {
+        "ok": True,
+        "action": "client_decision",
+        "action_version": CLIENT_DECISION_WORKFLOW_VERSION,
+        "object_id": obj.object_id,
+        "decision": clean_decision,
+        "evidence_text": clean_evidence,
+        "owner_next_action": event["owner_next_action"],
+        "decided_at": now,
+        "event_id": clean_event_id,
+    }
+
+    metadata["client_workflow_state"] = state
+    metadata["client_workflow_state_version"] = CLIENT_DECISION_WORKFLOW_VERSION
+    metadata["latest_client_decision"] = event
+    metadata["canonical_actions"] = actions
+    metadata["canonical_action_version"] = "ONE_NINA_CANONICAL_ACTION_V1"
+
+    status_map = {
+        "client_approved": "approved",
+        "client_rejected": "rejected",
+        "client_requests_changes": "in_progress",
+    }
+    next_status = status_map.get(clean_decision)
+    if next_status and next_status in (get_work_object_type(obj.object_type).default_statuses if get_work_object_type(obj.object_type) else []):
+        return update_work_object(obj.object_id, status=next_status, metadata=metadata)
+    return update_work_object(obj.object_id, metadata=metadata)
 
 def update_work_object_status(object_id: str, status: str) -> Optional[WorkObject]:
     return update_work_object(object_id, status=status)
