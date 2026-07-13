@@ -12710,7 +12710,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V118.0 + ONE NINA Client Conversation Thread V1"
+APP_VERSION = "V118.0.1 + ONE NINA Output Trace Filter V1"
 
 
 def rb_remove_version_lines(text):
@@ -12722,6 +12722,28 @@ def rb_remove_version_lines(text):
             continue
         cleaned.append(line)
     return "\n".join(cleaned).strip()
+
+
+def rb_strip_internal_trace_lines(text):
+    """Remove internal runtime/build trace lines from every public channel output.
+
+    This is the final output boundary. It does not rewrite business content; it only
+    removes standalone diagnostic markers that must stay in logs, never in replies.
+    """
+    blocked_patterns = (
+        r"^\s*Versija\s*:",
+        r"^\s*APP_VERSION\s*[=:]",
+        r"^\s*WORK_OBJECTS_READY\s*[=:]",
+        r"^\s*ONE\s+NINA\s+(?:Document|Work|Client|Runtime|Contract|Action|Import|Startup|Output)\b",
+        r"^\s*NinaOS\s+(?:version|build|runtime|debug|trace|contract|status)\b",
+    )
+    cleaned = []
+    for raw_line in str(text or "").splitlines():
+        line = str(raw_line or "")
+        if any(re.search(pattern, line, flags=re.IGNORECASE) for pattern in blocked_patterns):
+            continue
+        cleaned.append(line)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(cleaned)).strip()
 
 
 def rb_clean_text(value):
@@ -12880,6 +12902,12 @@ async def safe_reply_text(update, text, disable_web_page_preview=True, client_de
                     source="safe_reply_text",
                     channel="telegram",
                 )
+
+            # V118.0.1: one final public-output boundary for every Telegram reply.
+            # Internal version/build/runtime traces remain in logs only.
+            final_text = rb_strip_internal_trace_lines(final_text)
+            if not final_text:
+                final_text = "Esmu te. Pasaki, ko vajag izdarīt."
 
             await update.message.reply_text(
                 final_text,
