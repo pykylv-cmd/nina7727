@@ -12716,7 +12716,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V118.1 + ONE NINA Client Decision & Workflow Actions V1"
+APP_VERSION = "V118.1.1 + ONE NINA Active Thread Decision Match Fix V1"
 
 
 def rb_remove_version_lines(text):
@@ -16010,11 +16010,14 @@ def _nina_parse_iso_datetime(value):
         return datetime.min.replace(tzinfo=timezone.utc)
 
 
-def nina_match_canonical_document_for_client_question(user_id, sender_name="", max_age_minutes=43200):
-    """Match a client question to one existing canonical document Work Object.
+def nina_match_canonical_document_for_client_question(user_id, sender_name="", max_age_minutes=43200, prefer_active_thread=False):
+    """Match one client continuation to one existing canonical document Work Object.
 
-    Exact canonical client match wins. Without a sender identity, matching is allowed
-    only when there is exactly one recent document candidate for the owner.
+    Exact canonical client/source sender match remains authoritative. For explicit
+    client decisions, the SAME recent canonical client conversation thread is a
+    first-class continuation signal. This keeps the decision on the Work Object
+    that already owns the client's question/reply thread instead of guessing from
+    the newest document or creating a parallel workflow truth.
     """
     if not ONE_NINA_WORK_OBJECTS_READY:
         return {"ok": False, "error": "work_objects_unavailable"}
@@ -16038,6 +16041,20 @@ def nina_match_canonical_document_for_client_question(user_id, sender_name="", m
         obj_client = str(getattr(obj, "client_id", "") or "").strip()
         channel_content = metadata.get("channel_content") if isinstance(metadata.get("channel_content"), dict) else {}
         source_sender = str(channel_content.get("sender_name") or metadata.get("forward_sender_name") or "").strip()
+        thread = metadata.get("client_conversation_thread") if isinstance(metadata.get("client_conversation_thread"), dict) else {}
+        thread_turn_count = int(thread.get("turn_count") or 0)
+        thread_last_activity = _nina_parse_iso_datetime(thread.get("last_activity_at") or "")
+        thread_is_recent = (
+            thread_turn_count > 0
+            and thread_last_activity != datetime.min.replace(tzinfo=timezone.utc)
+            and (now - thread_last_activity).total_seconds() <= 24 * 60 * 60
+        )
+        thread_sender_names = {
+            str(item.get("sender_name") or "").strip().casefold()
+            for item in list(thread.get("turns") or [])[-20:]
+            if isinstance(item, dict) and str(item.get("sender_name") or "").strip()
+        }
+
         score = 0
         reasons = []
         if canonical_sender and obj_client and obj_client.casefold() == canonical_sender.casefold():
@@ -16046,7 +16063,21 @@ def nina_match_canonical_document_for_client_question(user_id, sender_name="", m
         if sender_name and source_sender and source_sender.casefold() == sender_name.casefold():
             score += 80
             reasons.append("source_sender_exact")
-        candidates.append({"object": obj, "score": score, "reasons": reasons, "updated_at": dt})
+        if sender_name and sender_name.casefold() in thread_sender_names:
+            score += 120
+            reasons.append("conversation_thread_sender_exact")
+        if prefer_active_thread and thread_is_recent:
+            score += 60
+            reasons.append("active_conversation_thread")
+
+        candidates.append({
+            "object": obj,
+            "score": score,
+            "reasons": reasons,
+            "updated_at": dt,
+            "thread_last_activity": thread_last_activity,
+            "thread_is_recent": thread_is_recent,
+        })
 
     if not candidates:
         return {"ok": False, "error": "no_recent_canonical_document"}
@@ -16055,10 +16086,19 @@ def nina_match_canonical_document_for_client_question(user_id, sender_name="", m
         matched = [item for item in candidates if item["score"] > 0]
         if not matched:
             return {"ok": False, "error": "no_document_for_client", "client_name": canonical_sender or sender_name}
-        matched.sort(key=lambda item: (item["score"], item["updated_at"]), reverse=True)
-        if len(matched) > 1 and matched[0]["score"] == matched[1]["score"]:
+        matched.sort(key=lambda item: (item["score"], item["thread_last_activity"], item["updated_at"]), reverse=True)
+        if len(matched) > 1 and matched[0]["score"] == matched[1]["score"] and matched[0]["thread_last_activity"] == matched[1]["thread_last_activity"]:
             return {"ok": False, "error": "ambiguous_client_document_match", "client_name": canonical_sender or sender_name}
         winner = matched[0]
+    elif prefer_active_thread:
+        active = [item for item in candidates if item["thread_is_recent"]]
+        active.sort(key=lambda item: (item["thread_last_activity"], item["updated_at"]), reverse=True)
+        if not active:
+            return {"ok": False, "error": "no_active_client_conversation_thread"}
+        if len(active) > 1 and active[0]["thread_last_activity"] == active[1]["thread_last_activity"]:
+            return {"ok": False, "error": "ambiguous_active_client_conversation_thread"}
+        winner = active[0]
+        winner["reasons"].append("latest_unique_active_conversation_thread")
     else:
         candidates.sort(key=lambda item: item["updated_at"], reverse=True)
         if len(candidates) != 1:
@@ -16156,7 +16196,11 @@ def nina_execute_forwarded_client_decision(update, user_id, user_text):
         return None
 
     sender_name = nina_forward_origin_name(message)
-    match_result = nina_match_canonical_document_for_client_question(user_id, sender_name=sender_name)
+    match_result = nina_match_canonical_document_for_client_question(
+        user_id,
+        sender_name=sender_name,
+        prefer_active_thread=True,
+    )
     if not match_result.get("ok"):
         return {"matched": True, "ok": False, "error": match_result.get("error"), "sender_name": sender_name}
 
