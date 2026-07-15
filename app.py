@@ -12716,7 +12716,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V118.1.4 + ONE NINA Client Context Metadata Lost Update Fix V1"
+APP_VERSION = "V118.1.5 + ONE NINA Client Context Metadata Lost Update Fix V1"
 
 
 def rb_remove_version_lines(text):
@@ -16277,30 +16277,47 @@ def nina_execute_forwarded_client_question(update, user_id, user_text):
     }
 
 
-def nina_execute_forwarded_client_decision(update, user_id, user_text):
-    """Channel adapter only: resolve an explicit forwarded decision to the SAME document Work Object."""
+def nina_execute_client_decision(update, user_id, user_text):
+    """Resolve one explicit client decision to the SAME active canonical document.
+
+    Telegram forward metadata is useful evidence but not mandatory. Some channels and
+    copy/paste flows strip it. In that case an explicit decision may continue only
+    through one unique active canonical document/thread for the same owner. No latest-
+    document guessing and no new Work Object are allowed.
+    """
     message = getattr(update, "message", None)
-    if not nina_is_forwarded_message(message):
-        return None
     classified = classify_client_decision(user_text)
     if not classified.get("matched"):
         return None
 
-    sender_name = nina_forward_origin_name(message)
+    is_forwarded = nina_is_forwarded_message(message)
+    sender_name = nina_forward_origin_name(message) if is_forwarded else ""
     match_result = nina_match_canonical_document_for_client_question(
         user_id,
         sender_name=sender_name,
         prefer_active_thread=True,
     )
     if not match_result.get("ok"):
-        return {"matched": True, "ok": False, "error": match_result.get("error"), "sender_name": sender_name}
+        return {
+            "matched": True,
+            "ok": False,
+            "error": match_result.get("error"),
+            "sender_name": sender_name,
+            "decision": classified.get("decision", ""),
+        }
 
     obj = match_result.get("object")
-    event_id = getattr(message, "message_id", "")
+    if obj is None:
+        return {"matched": True, "ok": False, "error": "matched_document_missing"}
+
+    # When channel metadata is stripped, use the already-canonical client identity
+    # from the matched Work Object for owner-facing wording. This is not extraction.
+    effective_sender = sender_name or str(getattr(obj, "client_id", "") or "").strip()
+    event_id = getattr(message, "message_id", "") if message is not None else ""
     result = apply_client_decision_to_work_object(
         obj.object_id,
         client_text=str(user_text or "").strip(),
-        sender_name=sender_name,
+        sender_name=effective_sender,
         channel="telegram",
         event_id=str(event_id or ""),
     )
@@ -16311,7 +16328,14 @@ def nina_execute_forwarded_client_decision(update, user_id, user_text):
         "object": obj,
         "decision_result": result,
         "error": result.get("error", ""),
+        "resolved_by": match_result.get("resolved_by", ""),
+        "forward_metadata_present": bool(is_forwarded),
     }
+
+
+# Backward-compatible alias for any older internal caller.
+def nina_execute_forwarded_client_decision(update, user_id, user_text):
+    return nina_execute_client_decision(update, user_id, user_text)
 
 def nina_save_forwarded_text_to_one_nina(update, user_id, user_text, force_business_intake=False, intake_kind=""):
     """Persist one forwarded business message as one canonical client_request.
@@ -16369,6 +16393,33 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
 
+        # V118.1.5 — explicit client decisions are terminal and have routing priority.
+        # They must never fall through into document actions, generic document Q&A,
+        # semantic intake, memory or legacy chat. Forward metadata is optional; one
+        # unique active canonical document context is sufficient continuation proof.
+        try:
+            client_decision_intake = nina_execute_client_decision(update, user_id, user_text)
+        except Exception as e:
+            print("ONE NINA client decision intake error:", repr(e))
+            client_decision_intake = None
+
+        if client_decision_intake and client_decision_intake.get("matched"):
+            if client_decision_intake.get("ok") and str(client_decision_intake.get("answer") or "").strip():
+                answer = str(client_decision_intake.get("answer") or "").strip()
+                try:
+                    save_conversation_state(user_id, user_text, answer, "one_nina_client_decision_v1", "neutral", "work")
+                except Exception:
+                    pass
+                await safe_reply_text(update, answer, client_deliverable=True)
+                return
+
+            await safe_reply_text(
+                update,
+                "Klienta lēmumu atpazinu, bet nevaru droši noteikt, kuram dokumentam tas pieder. Neko nepiesaistīju nepareizam darbam.",
+                client_deliverable=True,
+            )
+            return
+
         # ONE NINA Document Work Actions V1 — explicit owner instructions execute
         # real work against the latest canonical document before generic chat.
         if ONE_NINA_DOCUMENT_INTAKE_READY:
@@ -16422,31 +16473,6 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
                 await safe_reply_text(update, answer, client_deliverable=True)
                 return
-
-        # ONE NINA Client Decision & Workflow Actions V1 — explicit forwarded client
-        # decisions update the SAME canonical document before question/general intake.
-        try:
-            client_decision_intake = nina_execute_forwarded_client_decision(update, user_id, user_text)
-        except Exception as e:
-            print("ONE NINA client decision intake error:", repr(e))
-            client_decision_intake = None
-
-        if client_decision_intake and client_decision_intake.get("matched"):
-            if client_decision_intake.get("ok") and str(client_decision_intake.get("answer") or "").strip():
-                answer = str(client_decision_intake.get("answer") or "").strip()
-                try:
-                    save_conversation_state(user_id, user_text, answer, "one_nina_client_decision_v1", "neutral", "work")
-                except Exception:
-                    pass
-                await safe_reply_text(update, answer)
-                return
-
-            await safe_reply_text(
-                update,
-                "Klienta lēmumu atpazinu, bet nevaru droši noteikt, kuram dokumentam tas pieder. Neko nepiesaistīju nepareizam darbam.",
-                client_deliverable=True,
-            )
-            return
 
         # ONE NINA Client Question Intake V1 — a forwarded client question is
         # attached to the SAME canonical document and answered from that truth.
