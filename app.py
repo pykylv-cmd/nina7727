@@ -12716,7 +12716,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V118.1.3 + ONE NINA Canonical Active Document Context Fix V1"
+APP_VERSION = "V118.1.4 + ONE NINA Client Context Metadata Lost Update Fix V1"
 
 
 def rb_remove_version_lines(text):
@@ -16235,7 +16235,12 @@ def nina_execute_forwarded_client_question(update, user_id, user_text):
         return {"matched": True, "ok": False, "error": reply_result.get("error", "client_reply_failed"), "object": obj}
 
     event_id = getattr(message, "message_id", "")
-    nina_save_client_question_on_document(
+
+    # V118.1.4 — metadata lost-update fix.
+    # Every write must continue from the fresh Work Object returned by the previous
+    # write. Reusing the stale pre-write `obj` would overwrite the conversation
+    # thread / active context with an older metadata snapshot.
+    saved_obj = nina_save_client_question_on_document(
         obj,
         question=str(classified.get("question") or user_text),
         sender_name=sender_name,
@@ -16244,7 +16249,23 @@ def nina_execute_forwarded_client_question(update, user_id, user_text):
         match_result=match_result,
         reply_result=reply_result,
     )
-    nina_save_document_action_result(obj, user_text, "client_reply", reply_result)
+    if saved_obj is not None:
+        obj = saved_obj
+
+    saved_obj = nina_mark_active_document_context(
+        obj,
+        user_id=user_id,
+        interaction_type="client_question_intake",
+        user_text=str(classified.get("question") or user_text),
+        answer=str(reply_result.get("answer") or "").strip(),
+    )
+    if saved_obj is not None:
+        obj = saved_obj
+
+    saved_obj = nina_save_document_action_result(obj, user_text, "client_reply", reply_result)
+    if saved_obj is not None:
+        obj = saved_obj
+
     return {
         "matched": True,
         "ok": True,
