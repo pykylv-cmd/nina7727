@@ -12720,7 +12720,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V118.1.8 + ONE NINA Decision Routing Diagnostic V1"
+APP_VERSION = "V118.1.9 + ONE NINA Document Inclusion Follow-up Gate Fix V1"
 
 
 def rb_remove_version_lines(text):
@@ -13855,14 +13855,28 @@ def nina_latest_canonical_document(user_id, max_age_minutes=240):
 
 def nina_is_document_followup_question(user_text):
     text = str(user_text or "").strip().lower()
-    if not text or "?" not in text and not any(text.startswith(x) for x in ("cik ", "kas ", "kāda ", "kads ", "kad ", "kur ", "kam ", "vai ")):
+    if not text or "?" not in text and not any(
+        text.startswith(x) for x in ("cik ", "kas ", "kāda ", "kads ", "kad ", "kur ", "kam ", "vai ")
+    ):
         return False
+
     document_refs = (
         "šajā tāmē", "saja tame", "tāmē", "tame", "šajā dokumentā", "dokumentā",
         "šajā rēķinā", "rēķinā", "rekina", "šajā līgumā", "līgumā", "liguma",
         "šajā pdf", "pdf", "failā", "faila", "dokumente", "смет", "документ", "счет", "счёт", "договор",
     )
-    return any(ref in text for ref in document_refs)
+    if any(ref in text for ref in document_refs):
+        return True
+
+    # V118.1.9 — natural continuation questions often omit the repeated words
+    # “tāme” or “dokuments”. Inclusion questions are document-grounded when a
+    # canonical document exists; the next function safely returns None otherwise.
+    inclusion_markers = (
+        "ir iekļauts", "ir iekļauta", "ir iekļauti", "ir iekļautas",
+        "vai iekļauts", "vai iekļauta", "vai ietilpst",
+        "ieklauts", "ieklauta", "ietilpst",
+    )
+    return text.startswith("vai ") and any(marker in text for marker in inclusion_markers)
 
 
 def nina_mark_active_document_context(obj, *, user_id, interaction_type, user_text="", answer=""):
@@ -16304,15 +16318,6 @@ def nina_execute_client_decision(update, user_id, user_text, active_object_id=""
     # before accepting the pointer.
     match_result = None
     pointer_id = str(active_object_id or "").strip()
-    pointer_debug = {
-        "pointer_id": pointer_id,
-        "work_objects_ready": bool(ONE_NINA_WORK_OBJECTS_READY),
-        "pointer_object_found": False,
-        "pointer_owner_ok": False,
-        "pointer_source_ok": False,
-        "pointer_text_ok": False,
-        "fallback_error": "",
-    }
     if pointer_id and ONE_NINA_WORK_OBJECTS_READY:
         try:
             pointer_obj = get_work_object(pointer_id)
@@ -16320,15 +16325,11 @@ def nina_execute_client_decision(update, user_id, user_text, active_object_id=""
             print("ONE NINA active session pointer read error:", repr(e))
             pointer_obj = None
         if pointer_obj is not None:
-            pointer_debug["pointer_object_found"] = True
             pointer_meta = pointer_obj.metadata if isinstance(getattr(pointer_obj, "metadata", None), dict) else {}
             pointer_doc = pointer_meta.get("document_content") if isinstance(pointer_meta.get("document_content"), dict) else {}
             pointer_owner_ok = str(getattr(pointer_obj, "origin_user_id", "") or "") == str(user_id)
             pointer_source_ok = pointer_meta.get("source") == "canonical_channel_document_intake_v1"
             pointer_text_ok = bool(str(pointer_doc.get("source_text") or "").strip())
-            pointer_debug["pointer_owner_ok"] = bool(pointer_owner_ok)
-            pointer_debug["pointer_source_ok"] = bool(pointer_source_ok)
-            pointer_debug["pointer_text_ok"] = bool(pointer_text_ok)
             if pointer_owner_ok and pointer_source_ok and pointer_text_ok:
                 match_result = {
                     "ok": True,
@@ -16346,14 +16347,12 @@ def nina_execute_client_decision(update, user_id, user_text, active_object_id=""
             prefer_active_thread=True,
         )
     if not match_result.get("ok"):
-        pointer_debug["fallback_error"] = str(match_result.get("error") or "")
         return {
             "matched": True,
             "ok": False,
             "error": match_result.get("error"),
             "sender_name": sender_name,
             "decision": classified.get("decision", ""),
-            "diagnostic": pointer_debug,
         }
 
     obj = match_result.get("object")
@@ -16468,18 +16467,11 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await safe_reply_text(update, answer, client_deliverable=True)
                 return
 
-            diagnostic = client_decision_intake.get("diagnostic") or {}
-            debug_text = (
-                "DECISION DEBUG\n"
-                f"pointer_id={diagnostic.get('pointer_id') or 'EMPTY'}\n"
-                f"work_objects_ready={diagnostic.get('work_objects_ready')}\n"
-                f"pointer_object_found={diagnostic.get('pointer_object_found')}\n"
-                f"pointer_owner_ok={diagnostic.get('pointer_owner_ok')}\n"
-                f"pointer_source_ok={diagnostic.get('pointer_source_ok')}\n"
-                f"pointer_text_ok={diagnostic.get('pointer_text_ok')}\n"
-                f"fallback_error={diagnostic.get('fallback_error') or client_decision_intake.get('error') or 'unknown'}"
+            await safe_reply_text(
+                update,
+                "Klienta lēmumu atpazinu, bet nevaru droši noteikt, kuram dokumentam tas pieder. Neko nepiesaistīju nepareizam darbam.",
+                client_deliverable=True,
             )
-            await safe_reply_text(update, debug_text, client_deliverable=True)
             return
 
         # ONE NINA Document Work Actions V1 — explicit owner instructions execute
