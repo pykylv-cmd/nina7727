@@ -12716,7 +12716,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V118.1.2 + ONE NINA Durable Active Thread Decision Match Fix V2"
+APP_VERSION = "V118.1.3 + ONE NINA Canonical Active Document Context Fix V1"
 
 
 def rb_remove_version_lines(text):
@@ -13861,6 +13861,34 @@ def nina_is_document_followup_question(user_text):
     return any(ref in text for ref in document_refs)
 
 
+def nina_mark_active_document_context(obj, *, user_id, interaction_type, user_text="", answer=""):
+    """Mark the SAME canonical document as the owner's active business context.
+
+    This is not a second conversation truth. It is a durable routing pointer stored
+    on the Work Object that already owns the document source and business facts.
+    """
+    if obj is None:
+        return None
+    metadata = dict(getattr(obj, "metadata", {}) or {})
+    now = datetime.now(timezone.utc).isoformat()
+    current = metadata.get("active_document_context")
+    current = dict(current) if isinstance(current, dict) else {}
+    current.update({
+        "version": "ONE_NINA_ACTIVE_DOCUMENT_CONTEXT_V1",
+        "object_id": str(getattr(obj, "object_id", "") or ""),
+        "owner_user_id": str(user_id or ""),
+        "interaction_type": str(interaction_type or "document_interaction")[:100],
+        "last_user_text": str(user_text or "").strip()[:2000],
+        "last_answer": str(answer or "").strip()[:4000],
+        "last_activity_at": now,
+    })
+    if not current.get("created_at"):
+        current["created_at"] = now
+    metadata["active_document_context"] = current
+    metadata["active_document_context_version"] = "ONE_NINA_ACTIVE_DOCUMENT_CONTEXT_V1"
+    return update_work_object(obj.object_id, metadata=metadata)
+
+
 def nina_answer_latest_document_question(user_id, user_text):
     obj = nina_latest_canonical_document(user_id)
     if obj is None:
@@ -13877,6 +13905,19 @@ def nina_answer_latest_document_question(user_id, user_text):
     answer = str(result.get("answer") or "").strip()
     if not answer:
         return None
+    if result.get("ok"):
+        try:
+            saved = nina_mark_active_document_context(
+                obj,
+                user_id=user_id,
+                interaction_type="canonical_document_followup",
+                user_text=user_text,
+                answer=answer,
+            )
+            if saved is not None:
+                obj = saved
+        except Exception as e:
+            print("ONE NINA active document context save error:", repr(e))
     return {"object": obj, "result": result, "answer": answer}
 
 
@@ -16044,6 +16085,9 @@ def nina_match_canonical_document_for_client_question(user_id, sender_name="", m
         thread = metadata.get("client_conversation_thread") if isinstance(metadata.get("client_conversation_thread"), dict) else {}
         thread_turn_count = int(thread.get("turn_count") or 0)
         thread_last_activity = _nina_parse_iso_datetime(thread.get("last_activity_at") or "")
+        active_context = metadata.get("active_document_context") if isinstance(metadata.get("active_document_context"), dict) else {}
+        active_context_owner = str(active_context.get("owner_user_id") or "").strip()
+        active_context_last_activity = _nina_parse_iso_datetime(active_context.get("last_activity_at") or "")
         # A client conversation is durable business context, not a 24-hour chat session.
         # Reuse the same max-age horizon as the canonical document candidate window
         # (default 30 days). This keeps a decision on the same Work Object even when
@@ -16052,6 +16096,11 @@ def nina_match_canonical_document_for_client_question(user_id, sender_name="", m
             thread_turn_count > 0
             and thread_last_activity != datetime.min.replace(tzinfo=timezone.utc)
             and (now - thread_last_activity).total_seconds() <= int(max_age_minutes) * 60
+        )
+        active_context_is_recent = (
+            active_context_owner == str(user_id)
+            and active_context_last_activity != datetime.min.replace(tzinfo=timezone.utc)
+            and (now - active_context_last_activity).total_seconds() <= int(max_age_minutes) * 60
         )
         thread_sender_names = {
             str(item.get("sender_name") or "").strip().casefold()
@@ -16073,6 +16122,9 @@ def nina_match_canonical_document_for_client_question(user_id, sender_name="", m
         if prefer_active_thread and thread_is_recent:
             score += 60
             reasons.append("active_conversation_thread")
+        if prefer_active_thread and active_context_is_recent:
+            score += 90
+            reasons.append("active_document_context")
 
         candidates.append({
             "object": obj,
@@ -16081,6 +16133,8 @@ def nina_match_canonical_document_for_client_question(user_id, sender_name="", m
             "updated_at": dt,
             "thread_last_activity": thread_last_activity,
             "thread_is_recent": thread_is_recent,
+            "active_context_last_activity": active_context_last_activity,
+            "active_context_is_recent": active_context_is_recent,
         })
 
     if not candidates:
@@ -16095,14 +16149,26 @@ def nina_match_canonical_document_for_client_question(user_id, sender_name="", m
             return {"ok": False, "error": "ambiguous_client_document_match", "client_name": canonical_sender or sender_name}
         winner = matched[0]
     elif prefer_active_thread:
-        active = [item for item in candidates if item["thread_is_recent"]]
-        active.sort(key=lambda item: (item["thread_last_activity"], item["updated_at"]), reverse=True)
+        active = [item for item in candidates if item["active_context_is_recent"] or item["thread_is_recent"]]
+        active.sort(
+            key=lambda item: (
+                max(item["active_context_last_activity"], item["thread_last_activity"]),
+                item["updated_at"],
+            ),
+            reverse=True,
+        )
         if not active:
-            return {"ok": False, "error": "no_active_client_conversation_thread"}
-        if len(active) > 1 and active[0]["thread_last_activity"] == active[1]["thread_last_activity"]:
-            return {"ok": False, "error": "ambiguous_active_client_conversation_thread"}
+            return {"ok": False, "error": "no_active_canonical_document_context"}
+        first_activity = max(active[0]["active_context_last_activity"], active[0]["thread_last_activity"])
+        if len(active) > 1:
+            second_activity = max(active[1]["active_context_last_activity"], active[1]["thread_last_activity"])
+            if first_activity == second_activity:
+                return {"ok": False, "error": "ambiguous_active_canonical_document_context"}
         winner = active[0]
-        winner["reasons"].append("latest_unique_active_conversation_thread")
+        if winner["active_context_is_recent"]:
+            winner["reasons"].append("latest_unique_active_document_context")
+        else:
+            winner["reasons"].append("latest_unique_active_conversation_thread")
     else:
         candidates.sort(key=lambda item: item["updated_at"], reverse=True)
         if len(candidates) != 1:
