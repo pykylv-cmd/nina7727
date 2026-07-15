@@ -12716,7 +12716,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V118.1.1 + ONE NINA Active Thread Decision Match Fix V1"
+APP_VERSION = "V118.1.2 + ONE NINA Durable Active Thread Decision Match Fix V2"
 
 
 def rb_remove_version_lines(text):
@@ -16015,7 +16015,7 @@ def nina_match_canonical_document_for_client_question(user_id, sender_name="", m
 
     Exact canonical client/source sender match remains authoritative. For explicit
     client decisions, the SAME recent canonical client conversation thread is a
-    first-class continuation signal. This keeps the decision on the Work Object
+    durable continuation signal (default 30 days). This keeps the decision on the Work Object
     that already owns the client's question/reply thread instead of guessing from
     the newest document or creating a parallel workflow truth.
     """
@@ -16044,10 +16044,14 @@ def nina_match_canonical_document_for_client_question(user_id, sender_name="", m
         thread = metadata.get("client_conversation_thread") if isinstance(metadata.get("client_conversation_thread"), dict) else {}
         thread_turn_count = int(thread.get("turn_count") or 0)
         thread_last_activity = _nina_parse_iso_datetime(thread.get("last_activity_at") or "")
+        # A client conversation is durable business context, not a 24-hour chat session.
+        # Reuse the same max-age horizon as the canonical document candidate window
+        # (default 30 days). This keeps a decision on the same Work Object even when
+        # the client replies after a weekend or several working days.
         thread_is_recent = (
             thread_turn_count > 0
             and thread_last_activity != datetime.min.replace(tzinfo=timezone.utc)
-            and (now - thread_last_activity).total_seconds() <= 24 * 60 * 60
+            and (now - thread_last_activity).total_seconds() <= int(max_age_minutes) * 60
         )
         thread_sender_names = {
             str(item.get("sender_name") or "").strip().casefold()
