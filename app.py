@@ -163,6 +163,7 @@ try:
     from work_objects import (
         save_or_get_work_object,
         get_work_object_by_source_key,
+        get_work_object,
         persistence_health as work_objects_persistence_health,
         WORK_OBJECTS_VERSION,
         list_work_objects,
@@ -178,6 +179,9 @@ except Exception as e:
         raise RuntimeError("Persistent Work Objects nav pieslēgts")
 
     def get_work_object_by_source_key(source_key, workspace_id="demo_small_business"):
+        return None
+
+    def get_work_object(object_id):
         return None
 
     def work_objects_persistence_health():
@@ -12716,7 +12720,7 @@ def nina_progress_answer(user_id):
 # Core 2.5.2 polish: gala tekstā drīkst palikt tikai viena "Versija:" rinda.
 
 REPLY_BUILDER_VERSION = "Core 2.5.2 — Reply Builder Polish V1.1 + Sprint B.2 Safe Reconnect"
-APP_VERSION = "V118.1.5 + ONE NINA Client Context Metadata Lost Update Fix V1"
+APP_VERSION = "V118.1.6 + ONE NINA Session-Bound Canonical Decision Routing V1"
 
 
 def rb_remove_version_lines(text):
@@ -16277,7 +16281,7 @@ def nina_execute_forwarded_client_question(update, user_id, user_text):
     }
 
 
-def nina_execute_client_decision(update, user_id, user_text):
+def nina_execute_client_decision(update, user_id, user_text, active_object_id=""):
     """Resolve one explicit client decision to the SAME active canonical document.
 
     Telegram forward metadata is useful evidence but not mandatory. Some channels and
@@ -16292,11 +16296,42 @@ def nina_execute_client_decision(update, user_id, user_text):
 
     is_forwarded = nina_is_forwarded_message(message)
     sender_name = nina_forward_origin_name(message) if is_forwarded else ""
-    match_result = nina_match_canonical_document_for_client_question(
-        user_id,
-        sender_name=sender_name,
-        prefer_active_thread=True,
-    )
+
+    # V118.1.6 — use the exact canonical Work Object selected by the immediately
+    # preceding successful document interaction in this channel session. This is
+    # only a routing pointer; all business truth and workflow state remain on the
+    # same persistent Work Object. Validate ownership and canonical document source
+    # before accepting the pointer.
+    match_result = None
+    pointer_id = str(active_object_id or "").strip()
+    if pointer_id and ONE_NINA_WORK_OBJECTS_READY:
+        try:
+            pointer_obj = get_work_object(pointer_id)
+        except Exception as e:
+            print("ONE NINA active session pointer read error:", repr(e))
+            pointer_obj = None
+        if pointer_obj is not None:
+            pointer_meta = pointer_obj.metadata if isinstance(getattr(pointer_obj, "metadata", None), dict) else {}
+            pointer_doc = pointer_meta.get("document_content") if isinstance(pointer_meta.get("document_content"), dict) else {}
+            pointer_owner_ok = str(getattr(pointer_obj, "origin_user_id", "") or "") == str(user_id)
+            pointer_source_ok = pointer_meta.get("source") == "canonical_channel_document_intake_v1"
+            pointer_text_ok = bool(str(pointer_doc.get("source_text") or "").strip())
+            if pointer_owner_ok and pointer_source_ok and pointer_text_ok:
+                match_result = {
+                    "ok": True,
+                    "object": pointer_obj,
+                    "client_name": str(getattr(pointer_obj, "client_id", "") or "").strip(),
+                    "match_score": 1000,
+                    "match_reasons": ["session_bound_canonical_work_object"],
+                    "resolved_by": "session_bound_canonical_work_object",
+                }
+
+    if not match_result:
+        match_result = nina_match_canonical_document_for_client_question(
+            user_id,
+            sender_name=sender_name,
+            prefer_active_thread=True,
+        )
     if not match_result.get("ok"):
         return {
             "matched": True,
@@ -16398,7 +16433,12 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # semantic intake, memory or legacy chat. Forward metadata is optional; one
         # unique active canonical document context is sufficient continuation proof.
         try:
-            client_decision_intake = nina_execute_client_decision(update, user_id, user_text)
+            client_decision_intake = nina_execute_client_decision(
+                update,
+                user_id,
+                user_text,
+                active_object_id=str(context.chat_data.get("one_nina_active_work_object_id") or ""),
+            )
         except Exception as e:
             print("ONE NINA client decision intake error:", repr(e))
             client_decision_intake = None
@@ -16467,6 +16507,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 document_followup = None
             if document_followup:
                 answer = document_followup.get("answer")
+                followup_obj = document_followup.get("object")
+                if followup_obj is not None and str(getattr(followup_obj, "object_id", "") or "").strip():
+                    context.chat_data["one_nina_active_work_object_id"] = str(followup_obj.object_id)
+                    context.chat_data["one_nina_active_work_object_at"] = datetime.now(timezone.utc).isoformat()
                 try:
                     save_conversation_state(user_id, user_text, answer, "one_nina_document_followup_v1", "neutral", "work")
                 except Exception:
@@ -16485,6 +16529,10 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if client_question_intake and client_question_intake.get("matched"):
             if client_question_intake.get("ok") and str(client_question_intake.get("answer") or "").strip():
                 answer = str(client_question_intake.get("answer") or "").strip()
+                question_obj = client_question_intake.get("object")
+                if question_obj is not None and str(getattr(question_obj, "object_id", "") or "").strip():
+                    context.chat_data["one_nina_active_work_object_id"] = str(question_obj.object_id)
+                    context.chat_data["one_nina_active_work_object_at"] = datetime.now(timezone.utc).isoformat()
                 try:
                     save_conversation_state(user_id, user_text, answer, "one_nina_client_question_intake_v1", "neutral", "work")
                 except Exception:
