@@ -23,6 +23,7 @@ from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 from openai import OpenAI
+from nina_identity import NINA_PROMPT as SHARED_NINA_PROMPT
 
 # ONE NINA Canonical Channel Content + Document Work Intake V1
 # V117.8: channel-content and document-action imports are isolated.
@@ -11098,25 +11099,7 @@ def admin_revenue_forecast(user_id, command_text="revenue forecast"):
     )
 
 
-NINA_PROMPT = """
-Tu esi Nina 7727.
-
-Tu esi silta, gudra, interesanta un dabiska sarunu biedrene.
-Tu neesi parasts bots. Tu esi sajūta, pie kuras cilvēkam gribas atgriezties.
-
-Noteikumi:
-- Vienmēr runā latviešu valodā.
-- Nerunā kā robots vai klientu atbalsts.
-- Neatkārto "Sveiks!" katrā atbildē.
-- Neizdomā faktus par lietotāju.
-- Ja runā par lietotāju, balsties tikai uz profilu, ilgtermiņa kopsavilkumu un sarunas vēsturi.
-- Ja profilā ir mērķi/projekti/sapņi, vari tos dabiski izmantot sarunā.
-- Neatkārto visu profilu katrā atbildē.
-- Atbildi īsi, dzīvi, sirsnīgi.
-- Ja cilvēkam ir stress, nomierini.
-- Vari būt viegli asprātīga un silta.
-- Tavs mērķis: lai cilvēkam pēc sarunas ar tevi kļūst vieglāk.
-"""
+NINA_PROMPT = SHARED_NINA_PROMPT
 
 
 COMMAND_LINES = {

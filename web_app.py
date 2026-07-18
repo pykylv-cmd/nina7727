@@ -7,6 +7,7 @@ import os
 from datetime import datetime
 from urllib.parse import quote_plus, unquote_plus
 from flask import Flask, Response, redirect, request
+from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, load_web_conversation, send_message_to_nina
 
 # ONE NINA V51.3 — shared canonical Work Object read bridge.
 # Web does not classify Telegram text here. It reads the same persistent
@@ -574,6 +575,7 @@ def q(path):
 def tx(key, lang=None):
     lang = lang or current_language()
     d = {
+        "talk_to_nina": {"en": "Talk to Nina", "lv": "Runā ar Ninu", "ru": "Поговорить с Ниной"},
         "search": {"en": "Search anything...", "lv": "Meklēt jebko...", "ru": "Искать..."},
         "dashboard": {"en": "Dashboard", "lv": "Panelis", "ru": "Панель"},
         "workers": {"en": "Workers", "lv": "Darbinieki", "ru": "Работники"},
@@ -4001,6 +4003,7 @@ def nina_logo_html(size="small"):
 
 def css():
     return """
+.chat-layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:18px}.chat-shell{min-height:680px;display:flex;flex-direction:column}.chat-head{display:flex;align-items:center;gap:14px;padding-bottom:18px;border-bottom:1px solid var(--line2)}.chat-stream{display:flex;flex-direction:column;gap:14px;min-height:430px;max-height:58vh;overflow-y:auto;padding:22px 4px}.chat-message{max-width:78%;padding:14px 17px;border-radius:18px;line-height:1.55;white-space:pre-wrap}.chat-message.user{align-self:flex-end;background:linear-gradient(135deg,#187fff,#6544ff)}.chat-message.nina{align-self:flex-start;background:rgba(255,255,255,.07);border:1px solid var(--line)}.chat-message small{display:block;margin-top:7px;color:#bfd0ef}.chat-compose{margin-top:auto;padding-top:16px;border-top:1px solid var(--line2)}.chat-compose textarea{width:100%;min-height:92px;resize:vertical;border:1px solid var(--line);border-radius:16px;background:rgba(5,9,20,.62);color:var(--text);padding:15px;font:inherit}.channel-card{display:flex;justify-content:space-between;gap:10px;padding:14px 0;border-bottom:1px solid var(--line2)}.channel-card:last-child{border-bottom:0}.channel-state{font-size:12px;font-weight:950;color:var(--green)}.channel-state.next{color:#ffd057}@media(max-width:1100px){.chat-layout{grid-template-columns:1fr}}@media(max-width:640px){.chat-message{max-width:92%}}
 :root{--line:rgba(120,153,255,.26);--line2:rgba(255,255,255,.08);--text:#f8fbff;--muted:#a8b7d4;--green:#34e6a4;--shadow:0 30px 100px rgba(0,0,0,.36)}*{box-sizing:border-box}body{margin:0;min-height:100vh;color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif;background:radial-gradient(circle at 13% 14%,rgba(30,105,255,.20),transparent 25%),radial-gradient(circle at 80% 12%,rgba(80,70,255,.20),transparent 28%),linear-gradient(135deg,#080910 0%,#0a0d19 48%,#05060b 100%)}body:before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(rgba(255,255,255,.026) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.021) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(to bottom,rgba(0,0,0,.5),transparent 70%)}a{color:inherit;text-decoration:none}.layout{display:grid;grid-template-columns:210px 1fr;min-height:100vh}.sidebar{position:sticky;top:0;height:100vh;padding:22px 14px;background:radial-gradient(circle at 28px 28px,rgba(44,142,255,.24),transparent 75px),linear-gradient(180deg,rgba(18,22,37,.86),rgba(8,9,15,.83));border-right:1px solid var(--line2);backdrop-filter:blur(16px)}.brand{display:flex;align-items:center;gap:10px;margin:0 6px 28px;font-weight:950}.brand-word span:last-child{color:#2a91ff}
 .nina-logo{position:relative;border-radius:50%;overflow:hidden;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.9),transparent 5%),radial-gradient(circle at 65% 25%,rgba(84,232,255,.9),transparent 10%),radial-gradient(circle at 50% 50%,#1de0ff 0%,#2358ff 38%,#7f45ff 72%,#11152a 100%);box-shadow:0 0 24px rgba(49,140,255,.52),inset 0 0 30px rgba(255,255,255,.12)}.nina-logo.small{width:34px;height:34px}.nina-logo.hero{width:156px;height:156px;flex:0 0 156px}.dot-grid{position:absolute;inset:0;background:radial-gradient(circle,rgba(255,255,255,.86) 0 2px,transparent 2.8px);background-size:16px 16px;transform:rotate(-18deg) scale(1.1);opacity:.58;mask-image:radial-gradient(circle,#000 62%,transparent 70%)}.orbit{position:absolute;left:-22%;right:-22%;top:44%;height:2px;background:rgba(255,255,255,.45);border-radius:999px;transform:rotate(-16deg);box-shadow:0 0 14px rgba(90,190,255,.8)}.orbit-b{transform:rotate(28deg);opacity:.28;top:54%}.nav{display:flex;flex-direction:column;gap:7px}.nav-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:13px;color:#dce7ff;font-size:14px;border:1px solid transparent}.nav-item:hover{background:rgba(255,255,255,.06)}.nav-item.active{background:linear-gradient(90deg,rgba(28,128,255,.95),rgba(90,63,255,.86));color:#fff;box-shadow:0 14px 32px rgba(23,109,255,.23)}.new{margin-left:auto;font-size:10px;padding:2px 7px;border-radius:999px;background:#5638ff}.user{position:absolute;bottom:18px;left:14px;right:14px;border:1px solid var(--line);background:rgba(255,255,255,.045);border-radius:16px;padding:12px;color:var(--muted);font-size:13px}.user b{color:#fff}
 .main{padding:22px 26px 40px;max-width:1460px;width:100%;margin:0 auto}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.search{width:min(520px,55vw);border:1px solid var(--line);border-radius:18px;padding:14px 18px;color:var(--muted);background:rgba(16,24,45,.72);box-shadow:inset 0 0 0 1px rgba(255,255,255,.03),0 12px 34px rgba(0,0,0,.18)}.icons{display:flex;gap:10px;align-items:center}.icon{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.10)}.avatar{background:linear-gradient(135deg,#7c43ff,#dc42ff);font-weight:950}.lang-switch{display:flex;gap:6px}.lang-switch a{font-size:12px;font-weight:950;padding:8px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.06);color:#dbe8ff}.lang-switch a.active{background:linear-gradient(90deg,#168dff,#6443ff);color:#fff}.grid{display:grid;gap:18px}.hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:18px}.card{background:linear-gradient(180deg,rgba(26,36,68,.72),rgba(9,12,24,.70)),radial-gradient(circle at 25% 15%,rgba(40,140,255,.12),transparent 38%);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}.card-pad{padding:24px}.hero-card{min-height:390px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}.hero-lockup{display:flex;align-items:center;justify-content:center;gap:26px}.hero-title{font-size:78px;line-height:.9;font-weight:1000;letter-spacing:-5px;text-shadow:0 10px 40px rgba(0,0,0,.5)}.hero-title span{color:#2493ff}.subtitle{color:#dbe8ff;font-weight:900;letter-spacing:2px;font-size:13px;margin-top:10px}.bigline{margin-top:34px;font-size:25px;line-height:1.35;font-weight:950}.trust{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:24px}.trust span{font-size:12px;font-weight:900;padding:7px 12px;border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:999px}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.kpi{display:block;padding:18px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.025));border-radius:18px;min-height:118px}.kpi small{color:#dbe7ff;font-weight:900}.kpi strong{display:block;font-size:38px;margin:9px 0 2px}.kpi em{color:#71e9ff;font-style:normal;font-size:13px;font-weight:900}.page-title h1{margin:0;font-size:42px;letter-spacing:-1.8px;line-height:1}.page-title p{margin:8px 0 0;color:#c3d4f5;font-weight:800}.section-title{font-size:21px;font-weight:1000;margin:6px 0 13px}.worker-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:16px}.worker-card{overflow:hidden;border-radius:20px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(28,35,60,.78),rgba(9,12,24,.78));min-height:248px;box-shadow:0 20px 55px rgba(0,0,0,.22)}.worker-top{height:112px;display:grid;place-items:center;position:relative;overflow:hidden}.worker-top:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(110deg,rgba(255,255,255,.10) 0 2px,transparent 2px 10px);opacity:.35}.tone-purple{background:linear-gradient(135deg,#4830d8,#6322b7)}.tone-blue{background:linear-gradient(135deg,#058aff,#053c8c)}.tone-green{background:linear-gradient(135deg,#02b973,#095a3b)}.tone-orange{background:linear-gradient(135deg,#d47418,#56321c)}.worker-avatar{position:relative;z-index:1;width:82px;height:82px;border-radius:50%;background:radial-gradient(circle at 36% 30%,#ffe8c8 0 16%,transparent 17%),radial-gradient(circle at 53% 65%,#ffdba8 0 23%,transparent 24%),radial-gradient(circle at 46% 45%,#ef973a 0 45%,#5d3928 46% 62%,#f6c58b 63% 100%);box-shadow:0 16px 34px rgba(0,0,0,.32)}.worker-body{padding:16px}.worker-body h3{margin:0 0 4px;font-size:20px;line-height:1.02}.muted{color:var(--muted)}.status{font-weight:950;font-size:12px;margin:10px 0}.active-dot{color:var(--green)}.idle-dot{color:#ffd057}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px}.list{display:flex;flex-direction:column;gap:10px}.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 15px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(90deg,rgba(28,111,255,.12),rgba(255,255,255,.035))}.row b{display:block;margin-bottom:4px}.pill{display:inline-flex;align-items:center;padding:7px 11px;border-radius:999px;background:rgba(31,124,255,.16);border:1px solid rgba(76,147,255,.32);color:#d7e8ff;font-size:12px;font-weight:950;white-space:nowrap}.btns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}.btn{display:inline-flex;align-items:center;justify-content:center;padding:13px 18px;border-radius:14px;border:1px solid var(--line);font-weight:950;background:rgba(255,255,255,.055);box-shadow:0 12px 26px rgba(0,0,0,.18)}.btn.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.footer-note{margin-top:22px;color:var(--muted);font-size:13px;text-align:center;font-weight:700}.console-nav{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}.console-nav a{padding:10px 13px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.055);font-weight:950}.console-nav a.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.metric-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.metric-mini{padding:13px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.045)}.metric-mini small{color:var(--muted);font-weight:900}.metric-mini b{display:block;font-size:24px;margin-top:4px}.panel-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:18px}.stack-grid{display:grid;gap:12px}.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field{display:flex;flex-direction:column;gap:6px}.field label{font-size:12px;font-weight:950;color:#dbe7ff}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(5,9,20,.58);color:var(--text);padding:12px 13px;font:inherit;outline:none}.field textarea{min-height:92px;resize:vertical}.form-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.preview-box{border:1px solid var(--line);border-radius:18px;background:rgba(31,124,255,.10);padding:16px;margin-bottom:16px}.preview-box b{display:block;margin-bottom:6px}.safe-note{color:#8fe7ff;font-weight:800;font-size:13px;margin-top:10px}@media(max-width:1100px){.layout{grid-template-columns:1fr}.sidebar{position:relative;height:auto}.user{position:static;margin-top:18px}.hero-grid,.two-col{grid-template-columns:1fr}.worker-grid{grid-template-columns:repeat(2,1fr)}.kpis{grid-template-columns:repeat(2,1fr)}}@media(max-width:640px){.main{padding:16px}.worker-grid,.kpis{grid-template-columns:1fr}.hero-lockup{flex-direction:column}.hero-title{font-size:56px;letter-spacing:-3px}.nina-logo.hero{width:128px;height:128px;flex-basis:128px}.search{width:58vw}}
@@ -4010,6 +4013,7 @@ def css():
 def page(title, body, active="dashboard"):
     lang = current_language()
     nav = [
+        ("nina", tx("talk_to_nina", lang), "/nina", "N"),
         ("dashboard", tx("dashboard", lang), "/dashboard", "⌂"),
         ("inbox", tx("inbox", lang), "/inbox", "✦"),
         ("workers", tx("workers", lang), "/workers", "♙"),
@@ -4029,7 +4033,9 @@ def page(title, body, active="dashboard"):
     def lang_link(l):
         cls = "active" if lang == l else ""
         return f'<a class="{cls}" href="?lang={l}">{l.upper()}</a>'
-    return f"""<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{html_escape(title)} · NinaOS</title><style>{css()}</style></head><body><div class="layout"><aside class="sidebar"><a href="/dashboard?lang={lang}" class="brand">{nina_logo_html("small")}<div class="brand-word"><span>Nina</span><span>OS</span></div></a><nav class="nav">{nav_html}</nav><div class="user"><b>Katrin</b><br>Owner<br><br><span class="pill">Runtime: web_app.py</span></div></aside><main class="main"><div class="topbar"><div class="search">{tx("search", lang)}</div><div class="icons"><div class="icon">🔔</div><div class="icon">🌐</div><div class="lang-switch">{lang_link("en")}{lang_link("lv")}{lang_link("ru")}</div><div class="icon">☼</div><div class="icon avatar">K</div></div></div>{body}<div class="footer-note">{WEB_APP_VERSION} · Web service separate from Telegram app.py</div></main></div></body></html>"""
+    user_status = "<span class='pill'>Web active</span>" if active == "nina" else "<span class='pill'>Runtime: web_app.py</span>"
+    footer = "NinaOS" if active == "nina" else f"{WEB_APP_VERSION} · Web service separate from Telegram app.py"
+    return f"""<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{html_escape(title)} · NinaOS</title><style>{css()}</style></head><body><div class="layout"><aside class="sidebar"><a href="/dashboard?lang={lang}" class="brand">{nina_logo_html("small")}<div class="brand-word"><span>Nina</span><span>OS</span></div></a><nav class="nav">{nav_html}</nav><div class="user"><b>Katrin</b><br>Owner<br><br>{user_status}</div></aside><main class="main"><div class="topbar"><div class="search">{tx("search", lang)}</div><div class="icons"><div class="icon">🔔</div><div class="icon">🌐</div><div class="lang-switch">{lang_link("en")}{lang_link("lv")}{lang_link("ru")}</div><div class="icon">☼</div><div class="icon avatar">K</div></div></div>{body}<div class="footer-note">{footer}</div></main></div></body></html>"""
 
 
 def kpi_card(label, value, hint):
@@ -4047,6 +4053,43 @@ def worker_card(w, marketplace=False):
 
 def activity_row(a):
     return f"<div class='row'><div><b>{html_escape(a.get('title'))}</b><span class='muted'>{html_escape(a.get('body'))}</span></div><span class='pill'>{html_escape(a.get('kind','info'))}</span></div>"
+
+
+def nina_chat_body(messages):
+    lang = current_language()
+    copy = {
+        "en": {"title": "Talk to Nina", "sub": "Ask a question, plan work, or tell Nina what needs attention.", "empty": "Start a conversation with Nina.", "placeholder": "Write a message...", "send": "Send", "channels": "Channels", "active": "Active", "connected": "Connected", "connect": "Connect", "next": "Coming next"},
+        "lv": {"title": "Runā ar Ninu", "sub": "Uzdod jautājumu, plāno darbu vai pasaki, kam jāpievērš uzmanība.", "empty": "Sāc sarunu ar Ninu.", "placeholder": "Raksti ziņu...", "send": "Sūtīt", "channels": "Kanāli", "active": "Aktīvs", "connected": "Savienots", "connect": "Savienot", "next": "Drīzumā"},
+        "ru": {"title": "Поговорить с Ниной", "sub": "Задайте вопрос, спланируйте работу или расскажите, что требует внимания.", "empty": "Начните разговор с Ниной.", "placeholder": "Напишите сообщение...", "send": "Отправить", "channels": "Каналы", "active": "Активен", "connected": "Подключён", "connect": "Подключить", "next": "Скоро"},
+    }[lang]
+    bubbles = ""
+    for message in messages:
+        role = "user" if message.get("role") == "user" else "nina"
+        label = "You" if role == "user" and lang == "en" else ("Tu" if role == "user" else "Nina")
+        bubbles += f"<div class='chat-message {role}'>{html_escape(message.get('text'))}<small>{label}</small></div>"
+    if not bubbles:
+        bubbles = f"<div class='chat-message nina'>{html_escape(copy['empty'])}<small>Nina</small></div>"
+
+    telegram_ready = bool(os.environ.get("TELEGRAM_TOKEN"))
+    telegram_state = copy["connected"] if telegram_ready else copy["connect"]
+    channels = (
+        f"<div class='channel-card'><div><b>Web</b></div><span class='channel-state'>{copy['active']}</span></div>"
+        f"<div class='channel-card'><div><b>Telegram</b></div><span class='channel-state'>{telegram_state}</span></div>"
+        f"<div class='channel-card'><div><b>WhatsApp</b><span class='muted'>{copy['next']}</span></div><span class='channel-state next'>{copy['connect']}</span></div>"
+        f"<div class='channel-card'><div><b>Email</b><span class='muted'>{copy['next']}</span></div><span class='channel-state next'>{copy['connect']}</span></div>"
+    )
+    return (
+        "<div class='chat-layout'>"
+        "<section class='card card-pad chat-shell'>"
+        f"<div class='chat-head'>{nina_logo_html('small')}<div><div class='section-title' style='margin:0'>{copy['title']}</div><span class='muted'>{copy['sub']}</span></div></div>"
+        f"<div class='chat-stream'>{bubbles}</div>"
+        f"<form class='chat-compose' method='post' action='/nina?lang={lang}'>"
+        f"<textarea name='message' maxlength='4000' required placeholder='{copy['placeholder']}'></textarea>"
+        f"<div class='form-actions'><button class='btn primary' type='submit'>{copy['send']}</button></div></form>"
+        "</section>"
+        f"<aside class='card card-pad'><div class='section-title'>{copy['channels']}</div>{channels}</aside>"
+        "</div>"
+    )
 
 
 def dashboard_body(data):
@@ -4946,6 +4989,18 @@ def office_manager_body(data):
 
 
 
+@app.route("/nina", methods=["GET", "POST"])
+@app.route("/chat", methods=["GET", "POST"])
+def nina_chat():
+    if request.method == "POST":
+        user_text = (request.form.get("message") or "").strip()
+        if user_text:
+            send_message_to_nina(user_text, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web")
+        return redirect(q("/nina"))
+    messages = load_web_conversation(workspace_id=NINA_WEB_WORKSPACE_ID, limit=30)
+    return Response(page(tx("talk_to_nina"), nina_chat_body(messages), active="nina"), mimetype="text/html")
+
+
 @app.route("/")
 def home():
     return redirect(q("/dashboard"))
@@ -5151,7 +5206,7 @@ def health():
         "preview_objects": len(WORKSPACE_ACTION_PREVIEWS),
         "approved_preview_objects": len(approved_preview_items()),
         "approved_client_threads": len(approved_client_thread_items()),
-        "active_workspace_work_count": approved_workspace_work_count(),
+        "active_workspace_work_count": approved_workspace_object_count(),
         "pending_or_held_preview_objects": len(pending_or_held_preview_items()),
         "rejected_preview_objects": len(rejected_preview_items()),
         "telegram_intake_sync_items": len(load_existing_telegram_intake_sync()),
