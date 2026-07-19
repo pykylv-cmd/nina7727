@@ -4,12 +4,15 @@
 # Telegram service start command stays: python app.py
 
 import json
+import logging
 import os
 from datetime import datetime
 from urllib.parse import quote_plus, unquote_plus
 from flask import Flask, Response, jsonify, redirect, request
 from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, load_web_conversation, send_message_to_nina
 from voice_engine import transcribe_audio_with_openai
+
+logger = logging.getLogger(__name__)
 
 # ONE NINA V51.3 — shared canonical Work Object read bridge.
 # Web does not classify Telegram text here. It reads the same persistent
@@ -68,6 +71,7 @@ except Exception as e:
 WEB_APP_VERSION = "Web App V51.8.1 — ONE NINA Estimate Approval V1 Release-Safe"
 app = Flask(__name__)
 WEB_VOICE_MAX_BYTES = 10 * 1024 * 1024
+WEB_VOICE_TRANSCRIPTION_MODEL = "gpt-4o-transcribe"
 WEB_VOICE_MIME_TYPES = {
     "audio/aac", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav",
     "audio/webm", "audio/x-m4a", "audio/x-wav", "video/webm",
@@ -4101,7 +4105,7 @@ def nina_chat_body(messages):
         f"<aside class='card card-pad'><div class='section-title'>{copy['channels']}</div>{channels}</aside>"
         "</div>"
         f"<script>window.NinaVoiceConfig={json.dumps({'lang': lang, 'ready': copy['ready'], 'recording': copy['recording'], 'processing': copy['processing'], 'error': copy['error'], 'denied': copy['denied'], 'unsupported': copy['unsupported']}, ensure_ascii=False)};</script>"
-        "<script>(function(){const c=window.NinaVoiceConfig,s=document.getElementById('voice-status'),start=document.getElementById('voice-start'),stop=document.getElementById('voice-stop'),cancel=document.getElementById('voice-cancel'),send=document.getElementById('chat-send');let recorder=null,stream=null,chunks=[],cancelled=false;function state(name,text){s.dataset.state=name;s.textContent=text;}function tracksOff(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}function controls(active){start.hidden=active;stop.hidden=!active;cancel.hidden=!active;send.disabled=active;}function reset(){tracksOff();controls(false);recorder=null;chunks=[];cancelled=false;state('ready',c.ready);}async function upload(blob){state('processing',c.processing);controls(false);start.disabled=true;send.disabled=true;const data=new FormData();const ext=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':'webm';data.append('audio',blob,'voice.'+ext);data.append('lang',c.lang);try{const response=await fetch('/nina/voice?lang='+encodeURIComponent(c.lang),{method:'POST',body:data,credentials:'same-origin'});if(!response.ok)throw new Error('upload');window.location.href='/nina?lang='+encodeURIComponent(c.lang);}catch(e){state('error',c.error);start.disabled=false;send.disabled=false;}}start.addEventListener('click',async function(){if(!navigator.mediaDevices||!window.MediaRecorder){state('error',c.unsupported);return;}try{stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks=[];cancelled=false;const preferred=['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus'].find(t=>MediaRecorder.isTypeSupported(t));recorder=preferred?new MediaRecorder(stream,{mimeType:preferred}):new MediaRecorder(stream);recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};recorder.onerror=()=>{tracksOff();controls(false);state('error',c.error);};recorder.onstop=()=>{tracksOff();controls(false);if(cancelled){reset();return;}const blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});if(!blob.size){state('error',c.error);return;}upload(blob);};recorder.start();controls(true);state('recording',c.recording);}catch(e){tracksOff();controls(false);state('error',e&&e.name==='NotAllowedError'?c.denied:c.error);}});stop.addEventListener('click',()=>{if(recorder&&recorder.state!=='inactive')recorder.stop();});cancel.addEventListener('click',()=>{cancelled=true;if(recorder&&recorder.state!=='inactive')recorder.stop();else reset();});})();</script>"
+        "<script>(function(){const c=window.NinaVoiceConfig,s=document.getElementById('voice-status'),start=document.getElementById('voice-start'),stop=document.getElementById('voice-stop'),cancel=document.getElementById('voice-cancel'),send=document.getElementById('chat-send');let recorder=null,stream=null,chunks=[],cancelled=false;function state(name,text){s.dataset.state=name;s.textContent=text;}function tracksOff(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}function controls(active){start.hidden=active;stop.hidden=!active;cancel.hidden=!active;send.disabled=active;}function reset(){tracksOff();controls(false);recorder=null;chunks=[];cancelled=false;state('ready',c.ready);}async function upload(blob){state('processing',c.processing);controls(false);start.disabled=true;send.disabled=true;const data=new FormData();const ext=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':blob.type.includes('mpeg')?'mp3':'webm';data.append('audio',blob,'voice.'+ext);data.append('lang',c.lang);try{const response=await fetch('/nina/voice?lang='+encodeURIComponent(c.lang),{method:'POST',body:data,credentials:'same-origin'});if(!response.ok)throw new Error('upload');window.location.href='/nina?lang='+encodeURIComponent(c.lang);}catch(e){state('error',c.error);start.disabled=false;send.disabled=false;}}start.addEventListener('click',async function(){if(!navigator.mediaDevices||!window.MediaRecorder){state('error',c.unsupported);return;}try{stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});chunks=[];cancelled=false;const preferred=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4','audio/webm','audio/ogg'].find(t=>MediaRecorder.isTypeSupported(t));const options={audioBitsPerSecond:128000};if(preferred)options.mimeType=preferred;recorder=new MediaRecorder(stream,options);recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};recorder.onerror=()=>{tracksOff();controls(false);state('error',c.error);};recorder.onstop=()=>{tracksOff();controls(false);if(cancelled){reset();return;}const blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});if(!blob.size){state('error',c.error);return;}upload(blob);};recorder.start();controls(true);state('recording',c.recording);}catch(e){tracksOff();controls(false);state('error',e&&e.name==='NotAllowedError'?c.denied:c.error);}});stop.addEventListener('click',()=>{if(recorder&&recorder.state!=='inactive')recorder.stop();});cancel.addEventListener('click',()=>{cancelled=true;if(recorder&&recorder.state!=='inactive')recorder.stop();else reset();});})();</script>"
     )
 
 
@@ -5002,7 +5006,7 @@ def office_manager_body(data):
 
 
 
-def _transcribe_web_voice(audio_bytes, filename, language_hint):
+def _transcribe_web_voice(audio_bytes, filename, mime_type, language_hint):
     api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
     if not api_key:
         return ""
@@ -5013,6 +5017,8 @@ def _transcribe_web_voice(audio_bytes, filename, language_hint):
         filename=filename,
         language_hint=language_hint,
         force_language=False,
+        model=WEB_VOICE_TRANSCRIPTION_MODEL,
+        mime_type=mime_type,
     )
 
 
@@ -5025,7 +5031,8 @@ def nina_voice():
     if upload is None:
         return jsonify({"ok": False, "error": "audio_required"}), 400
 
-    mime_type = (upload.mimetype or "").lower().split(";", 1)[0].strip()
+    content_type = (upload.content_type or upload.mimetype or "").lower().strip()
+    mime_type = content_type.split(";", 1)[0].strip()
     if mime_type not in WEB_VOICE_MIME_TYPES:
         return jsonify({"ok": False, "error": "unsupported_audio"}), 415
 
@@ -5037,7 +5044,34 @@ def nina_voice():
 
     lang = (request.form.get("lang") or current_language()).strip().lower()
     lang = lang if lang in {"lv", "en", "ru"} else "en"
-    transcript = _transcribe_web_voice(audio_bytes, upload.filename or "voice.webm", lang).strip()
+    logger.info(
+        "Web voice transcription started mime=%s bytes=%d model=%s language_hint=%s",
+        content_type,
+        len(audio_bytes),
+        WEB_VOICE_TRANSCRIPTION_MODEL,
+        lang,
+    )
+    try:
+        transcript = _transcribe_web_voice(
+            audio_bytes,
+            upload.filename or "voice.webm",
+            content_type,
+            lang,
+        ).strip()
+    except Exception:
+        logger.warning(
+            "Web voice transcription completed success=False chars=0 model=%s language_hint=%s",
+            WEB_VOICE_TRANSCRIPTION_MODEL,
+            lang,
+        )
+        return jsonify({"ok": False, "error": "transcription_unavailable"}), 502
+    logger.info(
+        "Web voice transcription completed success=%s chars=%d model=%s language_hint=%s",
+        bool(transcript),
+        len(transcript),
+        WEB_VOICE_TRANSCRIPTION_MODEL,
+        lang,
+    )
     if not transcript:
         return jsonify({"ok": False, "error": "transcription_unavailable"}), 502
 

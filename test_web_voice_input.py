@@ -107,8 +107,62 @@ class WebVoiceInputTests(unittest.TestCase):
             "Recognized text", workspace_id=web_app.NINA_WEB_WORKSPACE_ID, channel="web"
         )
 
+    def test_web_uses_accuracy_model_and_actual_mime(self):
+        with patch.object(voice_engine, "transcribe_audio_with_openai", return_value="Exact text") as transcribe, \
+             patch.object(web_app, "transcribe_audio_with_openai", transcribe), \
+             patch("openai.OpenAI"):
+            result = web_app._transcribe_web_voice(
+                b"audio", "voice.webm", "audio/webm;codecs=opus", "lv"
+            )
+        self.assertEqual(result, "Exact text")
+        kwargs = transcribe.call_args.kwargs
+        self.assertEqual(kwargs["model"], "gpt-4o-transcribe")
+        self.assertEqual(kwargs["mime_type"], "audio/webm;codecs=opus")
+        self.assertEqual(kwargs["language_hint"], "lv")
+        self.assertFalse(kwargs["force_language"])
+
+    def test_mime_to_extension_mapping(self):
+        cases = {
+            "audio/webm": ".webm",
+            "audio/webm;codecs=opus": ".webm",
+            "audio/ogg": ".ogg",
+            "audio/mp4": ".m4a",
+        }
+        for mime_type, expected in cases.items():
+            self.assertEqual(
+                voice_engine.audio_suffix_for_mime(mime_type, "wrong.ogg"), expected
+            )
+
+    def test_language_hints_are_neutral_and_multilingual(self):
+        for language, name in {"lv": "Latvian", "en": "English", "ru": "Russian"}.items():
+            prompt = voice_engine.transcription_context_prompt(language)
+            self.assertIn(name, prompt)
+            self.assertIn("do not translate", prompt)
+            self.assertIn("izveido uzdevumu", prompt)
+            self.assertIn("create task", prompt)
+            self.assertIn("создай задачу", prompt)
+
+    def test_telegram_transcription_defaults_remain_compatible(self):
+        captured = {}
+
+        class Transcriptions:
+            def create(self, **kwargs):
+                captured.update(kwargs)
+                return "Telegram text"
+
+        client = type(
+            "Client",
+            (),
+            {"audio": type("Audio", (), {"transcriptions": Transcriptions()})()},
+        )()
+        result = voice_engine.transcribe_audio_with_openai(client, b"audio", "voice.ogg")
+        self.assertEqual(result, "Telegram text")
+        self.assertEqual(captured["model"], "whisper-1")
+        self.assertEqual(captured["language"], "lv")
+        self.assertNotIn("prompt", captured)
+
     def test_voice_task_command_persists_canonical_task(self):
-        transcript = "Izveido uzdevumu: rīt piezvanīt Jānim par piedāvājumu."
+        transcript = "Izveido uzdevumu: rīt piezvanīt Pēterim."
         with patch.object(web_app, "_transcribe_web_voice", return_value=transcript):
             response = self.client.post(
                 "/nina/voice?lang=lv",
@@ -119,33 +173,80 @@ class WebVoiceInputTests(unittest.TestCase):
             workspace_id=web_app.NINA_WEB_WORKSPACE_ID, object_type="task"
         )
         self.assertEqual(len(tasks), 1)
-        self.assertIn("piezvanīt Jānim par piedāvājumu", tasks[0].title)
+        self.assertIn("piezvanīt Pēterim", tasks[0].title)
         self.assertEqual(tasks[0].due_date, "tomorrow")
         self.assertEqual(tasks[0].origin_channel, "web")
 
     def test_transcription_temporary_file_is_deleted(self):
-        captured_path = []
+        captured_paths = []
 
         class Transcriptions:
             def create(self, **kwargs):
-                captured_path.append(kwargs["file"].name)
-                return "temporary cleanup"
+                captured_paths.append(kwargs["file"].name)
+                return "Izveido uzdevumu: rīt piezvanīt Pēterim."
 
         client = type(
             "Client",
             (),
             {"audio": type("Audio", (), {"transcriptions": Transcriptions()})()},
         )()
-        result = voice_engine.transcribe_audio_with_openai(
-            client,
-            b"audio",
-            filename="voice.webm",
-            language_hint="en",
-            force_language=False,
-        )
-        self.assertEqual(result, "temporary cleanup")
-        self.assertEqual(len(captured_path), 1)
-        self.assertFalse(os.path.exists(captured_path[0]))
+        for mime_type, suffix in (
+            ("audio/webm", ".webm"),
+            ("audio/webm;codecs=opus", ".webm"),
+            ("audio/ogg", ".ogg"),
+            ("audio/mp4", ".m4a"),
+        ):
+            result = voice_engine.transcribe_audio_with_openai(
+                client,
+                b"audio",
+                filename="voice.bin",
+                language_hint="en",
+                force_language=False,
+                model="gpt-4o-transcribe",
+                mime_type=mime_type,
+            )
+            self.assertEqual(result, "Izveido uzdevumu: rīt piezvanīt Pēterim.")
+            self.assertTrue(captured_paths[-1].endswith(suffix))
+            self.assertFalse(os.path.exists(captured_paths[-1]))
+
+    def test_diagnostic_logs_exclude_secrets_and_transcription(self):
+        spoken = "Private spoken words sk-spoken-secret"
+        with patch.object(web_app, "_transcribe_web_voice", return_value=spoken), \
+             patch.object(web_app, "send_message_to_nina"), \
+             self.assertLogs(web_app.logger, level="INFO") as captured:
+            response = self.client.post(
+                "/nina/voice?lang=ru",
+                data={
+                    "audio": (io.BytesIO(b"audio bytes"), "voice.webm", "audio/webm;codecs=opus"),
+                    "lang": "ru",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        logs = "\n".join(captured.output)
+        self.assertIn("mime=audio/webm;codecs=opus", logs)
+        self.assertIn("bytes=11", logs)
+        self.assertIn("model=gpt-4o-transcribe", logs)
+        self.assertIn("language_hint=ru", logs)
+        self.assertIn(f"chars={len(spoken)}", logs)
+        self.assertNotIn(spoken, logs)
+        self.assertNotIn("test-placeholder", logs)
+        self.assertNotIn("sk-spoken-secret", logs)
+
+    def test_transcription_failure_is_logged_without_exception_details(self):
+        with patch.object(
+            web_app,
+            "_transcribe_web_voice",
+            side_effect=RuntimeError("private provider response sk-secret"),
+        ), self.assertLogs(web_app.logger, level="INFO") as captured:
+            response = self.client.post(
+                "/nina/voice?lang=lv",
+                data={"audio": (io.BytesIO(b"audio"), "voice.webm", "audio/webm")},
+            )
+        self.assertEqual(response.status_code, 502)
+        logs = "\n".join(captured.output)
+        self.assertIn("success=False", logs)
+        self.assertNotIn("private provider response", logs)
+        self.assertNotIn("sk-secret", logs)
 
     def test_customer_chat_has_no_internal_architecture_terms(self):
         body = self.client.get("/nina?lang=en").get_data(as_text=True)
