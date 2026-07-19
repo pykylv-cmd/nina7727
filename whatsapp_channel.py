@@ -13,6 +13,9 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from channel_connections import (
+    decrypt_channel_credential,
+    encrypt_channel_credential,
+    finalize_whatsapp_onboarding,
     get_connection,
     get_secret_references,
     list_whatsapp_connections,
@@ -34,10 +37,64 @@ class WhatsAppProviderError(RuntimeError):
 
 
 def _secret(reference):
-    value = (os.environ.get(str(reference or "")) or "").strip()
+    stored = str(reference or "").strip()
+    value = decrypt_channel_credential(stored) if stored.startswith("enc:v1:") else (os.environ.get(stored) or "").strip()
     if not value:
         raise WhatsAppProviderError("secret_not_configured")
     return value
+
+
+def embedded_signup_public_config():
+    """Return only non-secret identifiers required by Meta's browser SDK."""
+    app_id = (os.environ.get("WHATSAPP_META_APP_ID") or "").strip()
+    config_id = (os.environ.get("WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID") or "").strip()
+    if not _SAFE_ID.fullmatch(app_id) or not _SAFE_ID.fullmatch(config_id):
+        raise WhatsAppProviderError("onboarding_not_configured")
+    return {"app_id": app_id, "config_id": config_id}
+
+
+def _exchange_embedded_signup_code(code, requester=None):
+    clean_code = str(code or "").strip()
+    app_id = (os.environ.get("WHATSAPP_META_APP_ID") or "").strip()
+    app_secret = (os.environ.get("WHATSAPP_META_APP_SECRET") or "").strip()
+    if not clean_code or len(clean_code) > 2048 or not app_id or not app_secret:
+        raise WhatsAppProviderError("onboarding_not_configured")
+    url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/oauth/access_token"
+    payload = {"client_id": app_id, "client_secret": app_secret, "code": clean_code}
+    result = requester("POST", url, "", payload) if requester else _request_oauth_json(url, payload)
+    token = str(result.get("access_token") or "").strip()
+    if not token:
+        raise WhatsAppProviderError("authorization_failed")
+    return token
+
+
+def complete_embedded_signup(workspace_id, code, phone_number_id, business_account_id, business_portfolio_id="", requester=None):
+    """Exchange Meta's code, verify returned assets, subscribe webhooks, and connect once."""
+    phone_id = str(phone_number_id or "").strip()
+    waba_id = str(business_account_id or "").strip()
+    portfolio_id = str(business_portfolio_id or "").strip()
+    if not _SAFE_ID.fullmatch(phone_id) or not _SAFE_ID.fullmatch(waba_id) or (portfolio_id and not _SAFE_ID.fullmatch(portfolio_id)):
+        raise WhatsAppProviderError("invalid_provider_identity")
+    token = _exchange_embedded_signup_code(code, requester=requester)
+    call = requester or _request_json
+    base = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
+    phone = call("GET", f"{base}/{quote(phone_id)}?{urlencode({'fields': 'id,display_phone_number,verified_name,quality_rating,name_status'})}", token, None)
+    phone_list = call("GET", f"{base}/{quote(waba_id)}/phone_numbers?{urlencode({'fields': 'id'})}", token, None)
+    ids = {str(item.get("id")) for item in phone_list.get("data", []) if isinstance(item, dict)}
+    if str(phone.get("id") or "") != phone_id or phone_id not in ids:
+        raise WhatsAppProviderError("provider_identity_mismatch")
+    call("POST", f"{base}/{quote(waba_id)}/subscribed_apps", token, {})
+    safe = {
+        "display_phone_number": str(phone.get("display_phone_number") or "")[:64],
+        "business_display_name": str(phone.get("verified_name") or "")[:160],
+        "quality_rating": str(phone.get("quality_rating") or "")[:40],
+        "name_status": str(phone.get("name_status") or "")[:40],
+    }
+    try:
+        encrypted = encrypt_channel_credential(token)
+        return finalize_whatsapp_onboarding(workspace_id, phone_id, waba_id, encrypted, safe)
+    except ValueError as exc:
+        raise WhatsAppProviderError(str(exc)) from None
 
 
 def _request_json(method, url, access_token, payload=None, timeout=12):
@@ -52,6 +109,21 @@ def _request_json(method, url, access_token, payload=None, timeout=12):
             return data
     except HTTPError as exc:
         raise WhatsAppProviderError("credentials_or_provider_request_rejected", getattr(exc, "code", None)) from None
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError):
+        raise WhatsAppProviderError("provider_unavailable") from None
+
+
+def _request_oauth_json(url, payload, timeout=12):
+    body = urlencode(payload).encode()
+    request = Request(url, data=body, method="POST", headers={"Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            result = json.loads(response.read(1024 * 1024).decode("utf-8"))
+            if not isinstance(result, dict):
+                raise WhatsAppProviderError("invalid_provider_response", getattr(response, "status", None))
+            return result
+    except HTTPError as exc:
+        raise WhatsAppProviderError("authorization_failed", getattr(exc, "code", None)) from None
     except (URLError, TimeoutError, OSError, json.JSONDecodeError):
         raise WhatsAppProviderError("provider_unavailable") from None
 

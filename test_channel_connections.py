@@ -91,19 +91,17 @@ class ChannelConnectionsV1Tests(unittest.TestCase):
         self.assertIn("Owner Name", connected)
         self.assertNotIn(setup["token"], connected)
 
-    def test_whatsapp_validation_persistence_and_secret_masking(self):
-        bad = self.client.post("/channels/whatsapp/configure?lang=en", data={"csrf_token": self.csrf("whatsapp_configure"), "phone_number_id": "x", "business_account_id": "bad spaces", "secret_ref": "actual-token", "webhook_secret_ref": "bad-token"})
-        self.assertEqual(bad.status_code, 400)
-        secret_ref = "WHATSAPP_ACCESS_TOKEN_STAGING"
-        response = self.client.post("/channels/whatsapp/configure?lang=en", data={"csrf_token": self.csrf("whatsapp_configure"), "phone_number_id": "phone_123", "business_account_id": "business_456", "secret_ref": secret_ref, "webhook_secret_ref": "WHATSAPP_WEBHOOK_VERIFY_TOKEN"})
+    def test_whatsapp_customer_connect_is_simple_and_secure(self):
+        page = self.client.get("/channels?lang=en").get_data(as_text=True)
+        self.assertIn("Connect WhatsApp", page)
+        for label in ("Phone Number ID", "Business Account ID", "Access token secret reference", "Meta App Secret reference"):
+            self.assertNotIn(label, page)
+        self.assertEqual(self.client.post("/channels/whatsapp/start", json={}).status_code, 400)
+        env = {"WHATSAPP_META_APP_ID": "app_789", "WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID": "config_456"}
+        with patch.dict(os.environ, env):
+            response = self.client.post("/channels/whatsapp/start", json={"csrf_token": self.csrf("whatsapp_start")})
         self.assertEqual(response.status_code, 200)
-        saved = channel_connections.get_connection(web_app.NINA_WEB_WORKSPACE_ID, "whatsapp")
-        self.assertEqual(saved["status"], "pending")
-        self.assertEqual(saved["metadata"]["phone_number_id"], "phone_123")
-        self.assertFalse(saved["metadata"]["webhook_verified"])
-        page = response.get_data(as_text=True)
-        self.assertNotIn(f"value='{secret_ref}'", page)
-        self.assertIn("Secret reference saved securely", page)
+        self.assertEqual(channel_connections.get_connection(web_app.NINA_WEB_WORKSPACE_ID, "whatsapp")["status"], "pending")
         disconnected = self.client.post("/channels/whatsapp/disconnect?lang=en", data={"csrf_token": self.csrf("whatsapp_disconnect")})
         self.assertEqual(disconnected.status_code, 302)
         self.assertEqual(channel_connections.get_connection(web_app.NINA_WEB_WORKSPACE_ID, "whatsapp")["status"], "disconnected")

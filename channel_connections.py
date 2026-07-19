@@ -30,6 +30,7 @@ _WORKSPACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{3,128}$")
 _SECRET_REF_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,127}$")
 _TELEGRAM_CONNECT_TOKEN_RE = re.compile(r"^ninaos_[A-Za-z0-9_-]{24,48}$")
+_WHATSAPP_STATE_RE = re.compile(r"^wa_[A-Za-z0-9_-]{32,64}$")
 
 
 def _now():
@@ -270,6 +271,116 @@ def configure_whatsapp(workspace_id, phone_number_id, business_account_id, secre
         raise ValueError("invalid_meta_app_id")
     metadata = {"phone_number_id": phone_number_id, "business_account_id": business_account_id, "meta_app_id": meta_app_id, "webhook_verified": False}
     return _upsert(workspace_id, "whatsapp", "pending", metadata, secret_ref=secret_ref, webhook_secret_ref=webhook_secret_ref, app_secret_ref=app_secret_ref)
+
+
+def create_whatsapp_onboarding_state(workspace_id, ttl_seconds=600):
+    """Create a workspace-scoped, hashed, expiring Embedded Signup state."""
+    workspace_id = _validate_workspace(workspace_id)
+    current = get_connection(workspace_id, "whatsapp")
+    if current["status"] == "connected":
+        raise ValueError("whatsapp_already_connected")
+    ttl_seconds = max(60, min(int(ttl_seconds), 1800))
+    state = "wa_" + secrets.token_urlsafe(32)
+    expires = _iso(_now() + timedelta(seconds=ttl_seconds))
+    metadata = {"onboarding_started_at": _iso(_now())}
+    _upsert(
+        workspace_id,
+        "whatsapp",
+        "pending",
+        metadata,
+        token_hash=hashlib.sha256(state.encode()).hexdigest(),
+        token_expires_at=expires,
+    )
+    return {"state": state, "expires_at": expires}
+
+
+def consume_whatsapp_onboarding_state(state, expected_workspace_id=None, now=None):
+    """Consume an Embedded Signup state exactly once and return its workspace."""
+    raw = str(state or "").strip()
+    if not _WHATSAPP_STATE_RE.fullmatch(raw):
+        return None
+    ensure_schema()
+    digest = hashlib.sha256(raw.encode()).hexdigest()
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_sql(f"SELECT workspace_id, status, connect_token_expires_at, connect_token_used_at FROM {_TABLE} WHERE channel=%s AND connect_token_hash=%s"), ("whatsapp", digest))
+        row = cur.fetchone()
+        if not row or row[1] != "pending" or row[3]:
+            cur.close()
+            return None
+        if expected_workspace_id is not None and row[0] != _validate_workspace(expected_workspace_id):
+            cur.close()
+            return None
+        current = now or _now()
+        expires = datetime.fromisoformat(str(row[2]).replace("Z", "+00:00"))
+        if expires <= current:
+            cur.close()
+            return None
+        used = _iso(current)
+        cur.execute(_sql(f"UPDATE {_TABLE} SET connect_token_used_at=%s, updated_at=%s WHERE workspace_id=%s AND channel=%s AND connect_token_hash=%s AND connect_token_used_at=%s"), (used, used, row[0], "whatsapp", digest, ""))
+        conn.commit()
+        changed = cur.rowcount == 1
+        cur.close()
+        return row[0] if changed else None
+    finally:
+        conn.close()
+
+
+def encrypt_channel_credential(value):
+    """Encrypt a provider credential for at-rest storage; never returns plaintext."""
+    from cryptography.fernet import Fernet, InvalidToken
+    key = (os.environ.get("NINA_CHANNEL_CREDENTIAL_KEY") or "").strip().encode()
+    raw = str(value or "").strip()
+    if not key or not raw:
+        raise ValueError("credential_storage_unavailable")
+    try:
+        return "enc:v1:" + Fernet(key).encrypt(raw.encode()).decode()
+    except (ValueError, InvalidToken) as exc:
+        raise ValueError("credential_storage_unavailable") from exc
+
+
+def decrypt_channel_credential(value):
+    from cryptography.fernet import Fernet, InvalidToken
+    stored = str(value or "").strip()
+    if not stored.startswith("enc:v1:"):
+        return ""
+    key = (os.environ.get("NINA_CHANNEL_CREDENTIAL_KEY") or "").strip().encode()
+    if not key:
+        return ""
+    try:
+        return Fernet(key).decrypt(stored[7:].encode()).decode()
+    except (ValueError, InvalidToken):
+        return ""
+
+
+def finalize_whatsapp_onboarding(workspace_id, phone_number_id, business_account_id, encrypted_access_token, safe_metadata=None):
+    workspace_id = _validate_workspace(workspace_id)
+    phone_number_id = str(phone_number_id or "").strip()
+    business_account_id = str(business_account_id or "").strip()
+    encrypted_access_token = str(encrypted_access_token or "").strip()
+    if not _ID_RE.fullmatch(phone_number_id) or not _ID_RE.fullmatch(business_account_id):
+        raise ValueError("invalid_whatsapp_id")
+    if not encrypted_access_token.startswith("enc:v1:"):
+        raise ValueError("invalid_encrypted_credential")
+    metadata = {
+        "phone_number_id": phone_number_id,
+        "business_account_id": business_account_id,
+        "provider_verified": True,
+        "webhook_verified": True,
+        "linked_at": _iso(_now()),
+    }
+    metadata.update({k: v for k, v in (safe_metadata or {}).items() if k in {"display_phone_number", "business_display_name", "quality_rating", "name_status"}})
+    return _upsert(
+        workspace_id,
+        "whatsapp",
+        "connected",
+        metadata,
+        secret_ref=encrypted_access_token,
+        webhook_secret_ref="WHATSAPP_WEBHOOK_VERIFY_TOKEN",
+        app_secret_ref="WHATSAPP_META_APP_SECRET",
+        token_used_at=get_connection(workspace_id, "whatsapp").get("token_used_at", ""),
+    )
 
 
 def get_secret_references(workspace_id, channel):
