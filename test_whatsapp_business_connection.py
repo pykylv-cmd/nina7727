@@ -98,6 +98,22 @@ class WhatsAppBusinessConnectionTests(unittest.TestCase):
         for term in ("Phone Number ID", "Business Account ID", "Meta App ID", "Access Token", "Webhook verify-token", "App Secret reference"):
             self.assertNotIn(term, page)
 
+    def test_personal_messenger_preparation_does_not_start_provider_flow(self):
+        page = self.client.get("/channels?lang=en&whatsapp=prepare").get_data(as_text=True)
+        self.assertIn("Your current number can be kept", page)
+        self.assertIn("I already use WhatsApp Business", page)
+        self.assertIn("How to switch safely", page)
+        self.assertEqual(channel_connections.get_connection(web_app.NINA_WEB_WORKSPACE_ID, "whatsapp")["status"], "disconnected")
+        switch = self.client.get("/channels?lang=en&whatsapp=switch").get_data(as_text=True)
+        self.assertIn("Back up your chats", switch)
+        self.assertNotIn("deregister", switch.lower())
+        self.assertNotIn("delete your", switch.lower())
+
+    def test_browser_flow_is_explicit_business_app_coexistence(self):
+        script = web_app._whatsapp_connect_script()
+        self.assertIn("whatsapp_business_app_onboarding", script)
+        self.assertNotIn("featureType:''", script)
+
     def test_onboarding_state_is_scoped_expiring_single_use(self):
         setup = channel_connections.create_whatsapp_onboarding_state("workspace_a", ttl_seconds=60)
         with open(self.db_file, "rb") as database_file:
@@ -130,6 +146,7 @@ class WhatsAppBusinessConnectionTests(unittest.TestCase):
         connected = channel_connections.get_connection(web_app.NINA_WEB_WORKSPACE_ID, "whatsapp")
         self.assertEqual(connected["status"], "connected")
         self.assertEqual(connected["metadata"]["display_phone_number"], "+371 20000000")
+        self.assertEqual(connected["metadata"]["onboarding_mode"], "business_app_coexistence")
         self.assertIn("+371 20000000", self.client.get("/channels?lang=en").get_data(as_text=True))
         self.assertIsNone(channel_connections.consume_whatsapp_onboarding_state(state))
         with open(self.db_file, "rb") as database_file:
@@ -155,6 +172,28 @@ class WhatsAppBusinessConnectionTests(unittest.TestCase):
             response = self.client.post("/channels/whatsapp/callback", json={"csrf_token": web_app._channel_csrf("whatsapp_callback"), "state": started["state"], "code": "bad-code", "phone_number_id": "phone_123", "business_account_id": "business_456"})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(channel_connections.get_connection(web_app.NINA_WEB_WORKSPACE_ID, "whatsapp")["status"], "error")
+
+    def test_ineligible_coexistence_marks_attention_without_account_change(self):
+        env = {"WHATSAPP_META_APP_ID": "app_789", "WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID": "config_456"}
+        with patch.dict(os.environ, env):
+            started = self.client.post("/channels/whatsapp/start", json={"csrf_token": web_app._channel_csrf("whatsapp_start")}).get_json()
+        response = self.client.post("/channels/whatsapp/attention", json={"csrf_token": web_app._channel_csrf("whatsapp_callback"), "state": started["state"]})
+        self.assertEqual(response.status_code, 200)
+        connection = channel_connections.get_connection(web_app.NINA_WEB_WORKSPACE_ID, "whatsapp")
+        self.assertEqual(connection["status"], "error")
+        self.assertNotIn("phone_number_id", connection["metadata"])
+        self.assertIn("existing WhatsApp account was not changed", self.client.get("/channels?lang=en").get_data(as_text=True))
+
+    def test_existing_number_cannot_be_silently_reassigned(self):
+        key = Fernet.generate_key().decode()
+        channel_connections.set_connection_for_test("other_workspace", "whatsapp", "connected", {"phone_number_id": "phone_123"})
+        try:
+            with patch.dict(os.environ, {"NINA_CHANNEL_CREDENTIAL_KEY": key}):
+                encrypted = channel_connections.encrypt_channel_credential("provider-access-secret")
+                with self.assertRaisesRegex(ValueError, "whatsapp_identity_already_linked"):
+                    channel_connections.finalize_whatsapp_onboarding(web_app.NINA_WEB_WORKSPACE_ID, "phone_123", "business_456", encrypted)
+        finally:
+            channel_connections.disconnect("other_workspace", "whatsapp")
 
     def test_secret_reference_validation_and_raw_token_not_persisted(self):
         with self.assertRaises(ValueError):

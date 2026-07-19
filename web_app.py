@@ -5043,19 +5043,25 @@ def _telegram_bot_username():
 
 def _channels_copy(lang):
     return {
-        "en": {"title": "Channels", "sub": "Choose where you want to talk with Nina.", "active": "Active", "connected": "Connected", "disconnected": "Not connected", "pending": "Connecting", "error": "Connection needs attention", "web_text": "Your Web workspace is ready.", "telegram_text": "Connect your Telegram account to this workspace.", "connect_telegram": "Connect Telegram", "open_telegram": "Open Telegram", "disconnect": "Disconnect", "pending_text": "Open the bot and press Start. Confirmation will appear here when linking is enabled in Telegram.", "whatsapp_text": "Connect your WhatsApp and talk to Nina from the app you already use.", "connect_whatsapp": "Connect WhatsApp", "whatsapp_failed": "The connection could not be completed. Please try again.", "email_text": "Email connection is coming soon.", "coming": "Coming soon"},
-        "lv": {"title": "Kanāli", "sub": "Izvēlies, kur vēlies sarunāties ar Ninu.", "active": "Aktīvs", "connected": "Savienots", "disconnected": "Nav savienots", "pending": "Savieno", "error": "Savienojumam jāpievērš uzmanība", "web_text": "Tava tīmekļa darba vide ir gatava.", "telegram_text": "Savieno savu Telegram kontu ar šo darba vidi.", "connect_telegram": "Savienot Telegram", "open_telegram": "Atvērt Telegram", "disconnect": "Atvienot", "pending_text": "Atver botu un nospied Start. Apstiprinājums šeit parādīsies, kad Telegram savienošana būs iespējota.", "whatsapp_text": "Savieno savu WhatsApp un runā ar Ninu lietotnē, ko jau izmanto.", "connect_whatsapp": "Savienot WhatsApp", "whatsapp_failed": "Savienošanu neizdevās pabeigt. Mēģini vēlreiz.", "email_text": "E-pasta savienojums būs drīzumā.", "coming": "Drīzumā"},
-        "ru": {"title": "Каналы", "sub": "Выберите, где вы хотите общаться с Ниной.", "active": "Активен", "connected": "Подключён", "disconnected": "Не подключён", "pending": "Подключение", "error": "Подключение требует внимания", "web_text": "Ваше веб-пространство готово.", "telegram_text": "Подключите Telegram к этому рабочему пространству.", "connect_telegram": "Подключить Telegram", "open_telegram": "Открыть Telegram", "disconnect": "Отключить", "pending_text": "Откройте бота и нажмите Start. Подтверждение появится здесь, когда подключение в Telegram будет включено.", "whatsapp_text": "Подключите WhatsApp и общайтесь с Ниной в привычном приложении.", "connect_whatsapp": "Подключить WhatsApp", "whatsapp_failed": "Не удалось завершить подключение. Попробуйте ещё раз.", "email_text": "Подключение электронной почты появится позже.", "coming": "Скоро"},
+        "en": {"title": "Channels", "sub": "Choose where you want to talk with Nina.", "active": "Active", "connected": "Connected", "disconnected": "Not connected", "pending": "Connecting", "error": "Connection needs attention", "web_text": "Your Web workspace is ready.", "telegram_text": "Connect your Telegram account to this workspace.", "connect_telegram": "Connect Telegram", "open_telegram": "Open Telegram", "disconnect": "Disconnect", "pending_text": "Open the bot and press Start. Confirmation will appear here when linking is enabled in Telegram.", "whatsapp_text": "Connect your WhatsApp and talk to Nina from the app you already use.", "connect_whatsapp": "Connect WhatsApp", "whatsapp_failed": "This number could not be connected. Your existing WhatsApp account was not changed.", "prepare": "Your current number can be kept. To connect Nina, this number first needs to use WhatsApp Business App.", "backup": "Back up your chats in WhatsApp first, then switch the same number to WhatsApp Business App using WhatsApp's supported process.", "already_business": "I already use WhatsApp Business", "switch_safely": "How to switch safely", "cancel": "Cancel", "retry": "Retry", "email_text": "Email connection is coming soon.", "coming": "Coming soon"},
+        "lv": {"title": "Kanāli", "sub": "Izvēlies, kur vēlies sarunāties ar Ninu.", "active": "Aktīvs", "connected": "Savienots", "disconnected": "Nav savienots", "pending": "Savieno", "error": "Savienojumam jāpievērš uzmanība", "web_text": "Tava tīmekļa darba vide ir gatava.", "telegram_text": "Savieno savu Telegram kontu ar šo darba vidi.", "connect_telegram": "Savienot Telegram", "open_telegram": "Atvērt Telegram", "disconnect": "Atvienot", "pending_text": "Atver botu un nospied Start. Apstiprinājums šeit parādīsies, kad Telegram savienošana būs iespējota.", "whatsapp_text": "Savieno savu WhatsApp un runā ar Ninu lietotnē, ko jau izmanto.", "connect_whatsapp": "Savienot WhatsApp", "whatsapp_failed": "Šo numuru neizdevās savienot. Tavs esošais WhatsApp konts netika mainīts.", "prepare": "Vari paturēt savu pašreizējo numuru. Lai savienotu Ninu, šim numuram vispirms jāizmanto WhatsApp Business lietotne.", "backup": "Vispirms izveido sarunu rezerves kopiju WhatsApp, pēc tam pārej ar to pašu numuru uz WhatsApp Business lietotni, izmantojot WhatsApp drošo pāreju.", "already_business": "Es jau izmantoju WhatsApp Business", "switch_safely": "Kā droši pāriet", "cancel": "Atcelt", "retry": "Mēģināt vēlreiz", "email_text": "E-pasta savienojums būs drīzumā.", "coming": "Drīzumā"},
+        "ru": {"title": "Каналы", "sub": "Выберите, где вы хотите общаться с Ниной.", "active": "Активен", "connected": "Подключён", "disconnected": "Не подключён", "pending": "Подключение", "error": "Подключение требует внимания", "web_text": "Ваше веб-пространство готово.", "telegram_text": "Подключите Telegram к этому рабочему пространству.", "connect_telegram": "Подключить Telegram", "open_telegram": "Открыть Telegram", "disconnect": "Отключить", "pending_text": "Откройте бота и нажмите Start. Подтверждение появится здесь, когда подключение в Telegram будет включено.", "whatsapp_text": "Подключите WhatsApp и общайтесь с Ниной в привычном приложении.", "connect_whatsapp": "Подключить WhatsApp", "whatsapp_failed": "Не удалось подключить этот номер. Существующий аккаунт WhatsApp не был изменён.", "prepare": "Текущий номер можно сохранить. Чтобы подключить Нину, сначала используйте этот номер в приложении WhatsApp Business.", "backup": "Сначала создайте резервную копию чатов в WhatsApp, затем перейдите с тем же номером в WhatsApp Business официальным способом.", "already_business": "Я уже использую WhatsApp Business", "switch_safely": "Как перейти безопасно", "cancel": "Отмена", "retry": "Повторить", "email_text": "Подключение электронной почты появится позже.", "coming": "Скоро"},
     }[lang]
 
 
 def _whatsapp_connect_script():
     return r"""
 (() => {
-  const button = document.getElementById('whatsapp-connect');
+  const button = document.getElementById('whatsapp-business-connect');
   if (!button) return;
   let setup = null, signup = null, code = '';
-  const fail = () => { button.disabled = false; window.location.href = '/channels?lang=' + encodeURIComponent(window.NinaWhatsApp.lang) + '&notice=whatsapp_failed'; };
+  const fail = async () => {
+    button.disabled = false;
+    if (setup && setup.state) {
+      try { await fetch('/channels/whatsapp/attention', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({csrf_token:window.NinaWhatsApp.callbackCsrf,state:setup.state})}); } catch (_) {}
+    }
+    window.location.href = '/channels?lang=' + encodeURIComponent(window.NinaWhatsApp.lang) + '&notice=whatsapp_failed';
+  };
   const finish = async () => {
     if (!setup || !signup || !code) return;
     try {
@@ -5084,7 +5090,7 @@ def _whatsapp_connect_script():
       setup = await response.json();
       if (!window.FB) return fail();
       const init = {appId: setup.app_id, cookie:true, xfbml:false}; init['ver'+'sion'] = setup.gv; FB.init(init);
-      const extras = {setup:{}, featureType:''}; extras['sessionInfo'+'Ver'+'sion'] = '3';
+      const extras = {setup:{}, featureType:'whatsapp_business_app_onboarding'}; extras['sessionInfo'+'Ver'+'sion'] = '3';
       FB.login((result) => {
         code = result && result.authResponse ? (result.authResponse.code || '') : '';
         if (!code) return fail();
@@ -5096,7 +5102,7 @@ def _whatsapp_connect_script():
 """
 
 
-def channels_body(telegram_setup=None, notice=""):
+def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
     lang = current_language()
     c = _channels_copy(lang)
     telegram = get_connection(NINA_WEB_WORKSPACE_ID, "telegram")
@@ -5121,8 +5127,17 @@ def channels_body(telegram_setup=None, notice=""):
         account_label = account_name + (f" · @{username}" if username and username.lower() not in account_name.lower() else "")
         linked_account = f"<div class='safe-note'>{html_escape(account_label)}</div>" if account_label else ""
     whatsapp_action = ""
-    if whatsapp["status"] != "connected":
-        whatsapp_action = f"<button class='btn primary' id='whatsapp-connect' type='button'>{c['connect_whatsapp']}</button>"
+    whatsapp_help = ""
+    if whatsapp["status"] == "disconnected" and whatsapp_view == "prepare":
+        whatsapp_help = f"<div class='channel-message'>{html_escape(c['prepare'])}</div>"
+        whatsapp_action = f"<button class='btn primary' id='whatsapp-business-connect' type='button'>{c['already_business']}</button><a class='btn' href='/channels?lang={lang}&whatsapp=switch'>{c['switch_safely']}</a><a class='btn' href='/channels?lang={lang}'>{c['cancel']}</a>"
+    elif whatsapp["status"] == "disconnected" and whatsapp_view == "switch":
+        whatsapp_help = f"<div class='channel-message'>{html_escape(c['backup'])}</div>"
+        whatsapp_action = f"<button class='btn primary' id='whatsapp-business-connect' type='button'>{c['already_business']}</button><a class='btn' href='https://business.whatsapp.com/products/business-app' rel='noopener noreferrer' target='_blank'>{c['switch_safely']}</a><a class='btn' href='/channels?lang={lang}'>{c['cancel']}</a>"
+    elif whatsapp["status"] == "disconnected":
+        whatsapp_action = f"<a class='btn primary' href='/channels?lang={lang}&whatsapp=prepare'>{c['connect_whatsapp']}</a>"
+    elif whatsapp["status"] == "error":
+        whatsapp_action = f"<a class='btn primary' href='/channels?lang={lang}&whatsapp=prepare'>{c['retry']}</a>"
     if whatsapp["status"] in {"connected", "pending", "error"}:
         whatsapp_action += f"<form method='post' action='/channels/whatsapp/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_disconnect')}'><button class='btn' type='submit'>{c['disconnect']}</button></form>"
     whatsapp_identity = " · ".join(filter(None, [str(wmeta.get("business_display_name") or ""), str(wmeta.get("display_phone_number") or "")]))
@@ -5136,7 +5151,7 @@ def channels_body(telegram_setup=None, notice=""):
         "<div class='channels-grid'>"
         f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Web</h2><span class='connection-status active'>{c['active']}</span></div><p class='muted'>{c['web_text']}</p></section>"
         f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Telegram</h2><span class='connection-status {telegram['status']}'>{status_label[telegram['status']]}</span></div><p class='muted'>{c['telegram_text']}</p><div><b>@{html_escape(bot_username)}</b></div>{linked_account}<div class='connection-actions'>{telegram_action}</div></section>"
-        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>WhatsApp</h2><span class='connection-status {whatsapp['status']}'>{status_label[whatsapp['status']]}</span></div><p class='muted'>{c['whatsapp_text']}</p>{whatsapp_error_html}{whatsapp_identity_html}<div class='connection-actions'>{whatsapp_action}</div></section>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>WhatsApp</h2><span class='connection-status {whatsapp['status']}'>{html_escape({'en':'Preparation needed','lv':'Nepieciešama sagatavošana','ru':'Требуется подготовка'}[lang] if whatsapp['status'] == 'disconnected' and whatsapp_view in {'prepare','switch'} else status_label[whatsapp['status']])}</span></div><p class='muted'>{c['whatsapp_text']}</p>{whatsapp_help}{whatsapp_error_html}{whatsapp_identity_html}<div class='connection-actions'>{whatsapp_action}</div></section>"
         f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Email</h2><span class='connection-status'>{c['coming']}</span></div><p class='muted'>{c['email_text']}</p></section>"
         "</div>"
         "<script async defer crossorigin='anonymous' src='https://connect.facebook.net/en_US/sdk.js'></script>"
@@ -5223,7 +5238,9 @@ def nina_voice():
 def channels():
     notice = (request.args.get("notice") or "").strip()
     notice = notice if notice in {"whatsapp_failed"} else ""
-    return Response(page(_channels_copy(current_language())["title"], channels_body(notice=notice), active="channels"), mimetype="text/html")
+    whatsapp_view = (request.args.get("whatsapp") or "").strip()
+    whatsapp_view = whatsapp_view if whatsapp_view in {"prepare", "switch"} else ""
+    return Response(page(_channels_copy(current_language())["title"], channels_body(notice=notice, whatsapp_view=whatsapp_view), active="channels"), mimetype="text/html")
 
 
 @app.post("/channels/telegram/connect")
@@ -5280,6 +5297,18 @@ def channels_whatsapp_callback():
     except WhatsAppProviderError:
         update_whatsapp_verification(workspace_id, False, error_code="onboarding_failed")
         return jsonify({"ok": False}), 400
+    return jsonify({"ok": True})
+
+
+@app.post("/channels/whatsapp/attention")
+def channels_whatsapp_attention():
+    payload = request.get_json(silent=True) or {}
+    if not hmac.compare_digest(str(payload.get("csrf_token") or ""), _channel_csrf("whatsapp_callback")):
+        return jsonify({"ok": False}), 400
+    workspace_id = consume_whatsapp_onboarding_state(payload.get("state"), expected_workspace_id=NINA_WEB_WORKSPACE_ID)
+    if not workspace_id:
+        return jsonify({"ok": False}), 400
+    update_whatsapp_verification(workspace_id, False, error_code="coexistence_not_completed")
     return jsonify({"ok": True})
 
 

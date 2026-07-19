@@ -363,12 +363,17 @@ def finalize_whatsapp_onboarding(workspace_id, phone_number_id, business_account
         raise ValueError("invalid_whatsapp_id")
     if not encrypted_access_token.startswith("enc:v1:"):
         raise ValueError("invalid_encrypted_credential")
+    for linked in list_whatsapp_connections({"connected"}):
+        linked_phone = str((linked.get("metadata") or {}).get("phone_number_id") or "")
+        if linked_phone == phone_number_id and linked.get("workspace_id") != workspace_id:
+            raise ValueError("whatsapp_identity_already_linked")
     metadata = {
         "phone_number_id": phone_number_id,
         "business_account_id": business_account_id,
         "provider_verified": True,
         "webhook_verified": True,
         "linked_at": _iso(_now()),
+        "onboarding_mode": "business_app_coexistence",
     }
     metadata.update({k: v for k, v in (safe_metadata or {}).items() if k in {"display_phone_number", "business_display_name", "quality_rating", "name_status"}})
     return _upsert(
