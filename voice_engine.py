@@ -106,7 +106,13 @@ def _extract_text_from_result(result):
     return ""
 
 
-def transcribe_audio_with_openai(openai_client, audio_bytes, filename="voice.ogg"):
+def transcribe_audio_with_openai(
+    openai_client,
+    audio_bytes,
+    filename="voice.ogg",
+    language_hint="lv",
+    force_language=True,
+):
     """Telegram audio bytes -> teksts. Pilnā funkcija, lai app.py imports nekristu."""
     if not openai_client:
         LAST_VOICE_DEBUG["error"] = "OpenAI client nav pieejams"
@@ -126,13 +132,19 @@ def transcribe_audio_with_openai(openai_client, audio_bytes, filename="voice.ogg
             temp_path = tmp.name
 
         with open(temp_path, "rb") as audio_file:
+            transcription_args = {
+                "model": "whisper-1",
+                "file": audio_file,
+                "response_format": "text",
+            }
+            if language_hint and force_language:
+                transcription_args["language"] = language_hint
+            elif language_hint:
+                language_names = {"lv": "Latvian", "en": "English", "ru": "Russian"}
+                hint_name = language_names.get(str(language_hint).lower(), str(language_hint))
+                transcription_args["prompt"] = f"The speech may be in {hint_name}."
             try:
-                result = openai_client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    response_format="text",
-                    language="lv",
-                )
+                result = openai_client.audio.transcriptions.create(**transcription_args)
             except TypeError:
                 audio_file.seek(0)
                 result = openai_client.audio.transcriptions.create(
