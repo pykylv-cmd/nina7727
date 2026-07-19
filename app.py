@@ -14122,6 +14122,34 @@ def nina_photo_context_answer(obj, vision_text, caption=""):
     return "Foto saņēmu un piesaistīju tam pašam darba materiālam."
 
 
+def nina_photo_has_explicit_material_intent(caption=""):
+    """Require an explicit save/attach action before treating a photo as work material."""
+    text = re.sub(r"\s+", " ", str(caption or "").strip().lower())
+    if not text:
+        return False
+    action = any(token in text for token in (
+        "pievieno", "piesaisti", "saglabā", "saglabat", "pieliec", "reģistrē",
+        "attach", "add this", "save this", "store this",
+        "добавь", "прикрепи", "сохрани",
+    ))
+    target = any(token in text for token in (
+        "darba materi", "projekt", "klient", "dokument", "lietai", "tāmei", "tamei",
+        "work material", "project", "client", "document",
+        "рабоч", "проект", "клиент", "документ",
+    ))
+    return action and target
+
+
+def nina_vision_failed(raw_answer=""):
+    cleaned = rb_remove_version_lines(str(raw_answer or "")).strip().lower()
+    fallback = rb_remove_version_lines(build_no_vision_fallback(version="V115.2")).strip().lower()
+    return not cleaned or cleaned == fallback
+
+
+def nina_vision_safe_fallback():
+    return "Foto saņēmu, bet šobrīd nevaru to pilnībā analizēt."
+
+
 def nina_is_recent_photo_series_continuation(obj, caption="", max_age_seconds=120):
     """Treat captionless photos arriving right after a captioned work photo as one human photo series.
 
@@ -14168,8 +14196,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not message or not message.photo:
             return
 
+        explicit_material_intent = nina_photo_has_explicit_material_intent(caption)
         caption_context = None
-        if caption:
+        if explicit_material_intent:
             try:
                 semantic_intake = classify_channel_business_intake(
                     caption,
@@ -14179,20 +14208,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 print("ONE NINA album caption classify error:", repr(e))
                 semantic_intake = {"matched": False}
 
-            if semantic_intake.get("matched"):
-                caption_kind = str(semantic_intake.get("kind") or "work_material").strip()
-                try:
-                    saved_intake = nina_save_forwarded_text_to_one_nina(
-                        update,
-                        user_id,
-                        caption,
-                        force_business_intake=True,
-                        intake_kind=caption_kind,
-                    )
-                    caption_context = saved_intake.get("object") if saved_intake else None
-                except Exception as e:
-                    print("ONE NINA album caption save error:", repr(e))
-                    caption_context = None
+            caption_kind = str(semantic_intake.get("kind") or "work_material").strip() if semantic_intake.get("matched") else "work_material"
+            try:
+                saved_intake = nina_save_forwarded_text_to_one_nina(
+                    update,
+                    user_id,
+                    caption,
+                    force_business_intake=True,
+                    intake_kind=caption_kind,
+                )
+                caption_context = saved_intake.get("object") if saved_intake else None
+            except Exception as e:
+                print("ONE NINA explicit photo material save error:", type(e).__name__)
+                caption_context = None
 
         photo = message.photo[-1]
         tg_file = await context.bot.get_file(photo.file_id)
@@ -14207,19 +14235,21 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             version="V115.2",
         )
         vision_clean = rb_remove_version_lines(str(vision_raw or "")).strip()
+        vision_failed = nina_vision_failed(vision_raw)
 
-        active_obj = caption_context or nina_latest_channel_work_context(user_id, max_age_minutes=30)
+        active_obj = caption_context
         silent_series_continuation = False
+        if active_obj is None and not explicit_material_intent:
+            recent_obj = nina_latest_channel_work_context(user_id, max_age_minutes=30)
+            if nina_is_recent_photo_series_continuation(recent_obj, caption=caption, max_age_seconds=120):
+                active_obj = recent_obj
+                silent_series_continuation = True
         if active_obj is not None:
             # Evaluate continuation BEFORE appending this photo. The previous canonical evidence
             # tells us whether a captionless forwarded photo belongs to the same human photo burst.
-            silent_series_continuation = bool(
-                media_group_id
-                or nina_is_recent_photo_series_continuation(
-                    active_obj,
-                    caption=caption,
-                    max_age_seconds=120,
-                )
+            silent_series_continuation = silent_series_continuation or bool(
+                not explicit_material_intent
+                and nina_is_recent_photo_series_continuation(active_obj, caption=caption, max_age_seconds=120)
             )
             saved_obj = nina_append_photo_evidence(
                 active_obj,
@@ -14264,27 +14294,29 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, answer, client_deliverable=True)
             return
 
-        if media_group_id:
-            if caption:
-                answer = v1151_vision_smart_reply(user_id, vision_clean, caption)
-                answer = rb_remove_version_lines(answer).strip()
-                await safe_reply_text(update, answer, client_deliverable=True)
+        if explicit_material_intent:
+            await safe_reply_text(
+                update,
+                "Foto saņēmu, bet neizdevās to droši piesaistīt norādītajam darba materiālam.",
+                client_deliverable=True,
+            )
             return
 
-        answer = v1151_vision_smart_reply(user_id, vision_clean, caption)
-        answer = rb_remove_version_lines(answer).strip()
+        answer = nina_vision_safe_fallback() if vision_failed else v1151_vision_smart_reply(user_id, vision_clean, caption)
+        answer = rb_remove_version_lines(answer).strip() or nina_vision_safe_fallback()
         try:
             v40_log_usage(user_id, "vision", caption)
             save_conversation_state(user_id, "[PHOTO] " + caption, answer, "photo", "neutral", "vision")
+            ctx112_after_vision_answer(user_id, vision_clean or caption)
         except Exception as e:
-            print("Vision conversation save kļūda:", e)
+            print("Vision conversation save kļūda:", type(e).__name__)
         await safe_reply_text(update, answer, client_deliverable=True)
 
     except Exception as e:
-        print("handle_photo V117.1 kļūda:", repr(e))
+        print("handle_photo V117.1 kļūda:", type(e).__name__)
         await safe_reply_text(
             update,
-            "Bildīti saņēmu, bet šoreiz neizdevās to droši apstrādāt. Pamēģini atsūtīt vēlreiz.",
+            nina_vision_safe_fallback(),
             client_deliverable=True,
         )
 
