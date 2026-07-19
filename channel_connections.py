@@ -23,6 +23,7 @@ DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
 USE_POSTGRES = bool(DATABASE_URL and psycopg2)
 _TABLE = "nina_channel_connections"
 _SCHEMA_READY = False
+_SCHEMA_TARGET = ""
 ALLOWED_CHANNELS = {"telegram", "whatsapp"}
 ALLOWED_STATUSES = {"disconnected", "pending", "connected", "error"}
 _WORKSPACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -62,8 +63,10 @@ def _validate_channel(channel):
 
 
 def ensure_schema():
-    global _SCHEMA_READY
-    if _SCHEMA_READY:
+    global _SCHEMA_READY, _SCHEMA_TARGET
+    target = DATABASE_URL if USE_POSTGRES else os.path.abspath(DB_FILE)
+    storage_exists = USE_POSTGRES or os.path.exists(DB_FILE)
+    if _SCHEMA_READY and _SCHEMA_TARGET == target and storage_exists:
         return True
     conn = _connect()
     try:
@@ -76,6 +79,8 @@ def ensure_schema():
                 status TEXT NOT NULL,
                 metadata_json TEXT NOT NULL DEFAULT '{{}}',
                 secret_ref TEXT NOT NULL DEFAULT '',
+                webhook_secret_ref TEXT NOT NULL DEFAULT '',
+                app_secret_ref TEXT NOT NULL DEFAULT '',
                 connect_token_hash TEXT NOT NULL DEFAULT '',
                 connect_token_expires_at TEXT NOT NULL DEFAULT '',
                 connect_token_used_at TEXT NOT NULL DEFAULT '',
@@ -85,9 +90,31 @@ def ensure_schema():
             )
             """
         )
+        if USE_POSTGRES:
+            cur.execute("ALTER TABLE nina_channel_connections ADD COLUMN IF NOT EXISTS webhook_secret_ref TEXT NOT NULL DEFAULT ''")
+            cur.execute("ALTER TABLE nina_channel_connections ADD COLUMN IF NOT EXISTS app_secret_ref TEXT NOT NULL DEFAULT ''")
+        else:
+            cur.execute(f"PRAGMA table_info({_TABLE})")
+            columns = {str(row[1]) for row in cur.fetchall()}
+            if "webhook_secret_ref" not in columns:
+                cur.execute(f"ALTER TABLE {_TABLE} ADD COLUMN webhook_secret_ref TEXT NOT NULL DEFAULT ''")
+            if "app_secret_ref" not in columns:
+                cur.execute(f"ALTER TABLE {_TABLE} ADD COLUMN app_secret_ref TEXT NOT NULL DEFAULT ''")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS nina_channel_message_receipts (
+                workspace_id TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                provider_message_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (workspace_id, channel, provider_message_id)
+            )
+            """
+        )
         conn.commit()
         cur.close()
         _SCHEMA_READY = True
+        _SCHEMA_TARGET = target
         return True
     finally:
         conn.close()
@@ -100,7 +127,7 @@ def get_connection(workspace_id, channel):
     conn = _connect()
     try:
         cur = conn.cursor()
-        cur.execute(_sql(f"SELECT status, metadata_json, secret_ref, connect_token_expires_at, connect_token_used_at, created_at, updated_at FROM {_TABLE} WHERE workspace_id=%s AND channel=%s"), (workspace_id, channel))
+        cur.execute(_sql(f"SELECT status, metadata_json, secret_ref, webhook_secret_ref, app_secret_ref, connect_token_expires_at, connect_token_used_at, created_at, updated_at FROM {_TABLE} WHERE workspace_id=%s AND channel=%s"), (workspace_id, channel))
         row = cur.fetchone()
         cur.close()
     finally:
@@ -114,12 +141,13 @@ def get_connection(workspace_id, channel):
     return {
         "workspace_id": workspace_id, "channel": channel, "status": row[0],
         "metadata": metadata if isinstance(metadata, dict) else {},
-        "secret_configured": bool(row[2]), "token_expires_at": row[3] or "",
-        "token_used_at": row[4] or "", "created_at": row[5], "updated_at": row[6],
+        "secret_configured": bool(row[2]), "webhook_secret_configured": bool(row[3]),
+        "app_secret_configured": bool(row[4]), "token_expires_at": row[5] or "",
+        "token_used_at": row[6] or "", "created_at": row[7], "updated_at": row[8],
     }
 
 
-def _upsert(workspace_id, channel, status, metadata=None, secret_ref="", token_hash="", token_expires_at="", token_used_at=""):
+def _upsert(workspace_id, channel, status, metadata=None, secret_ref="", webhook_secret_ref="", app_secret_ref="", token_hash="", token_expires_at="", token_used_at=""):
     workspace_id = _validate_workspace(workspace_id)
     channel = _validate_channel(channel)
     if status not in ALLOWED_STATUSES:
@@ -133,9 +161,9 @@ def _upsert(workspace_id, channel, status, metadata=None, secret_ref="", token_h
         cur.execute(_sql(f"SELECT created_at FROM {_TABLE} WHERE workspace_id=%s AND channel=%s"), (workspace_id, channel))
         existing = cur.fetchone()
         if existing:
-            cur.execute(_sql(f"UPDATE {_TABLE} SET status=%s, metadata_json=%s, secret_ref=%s, connect_token_hash=%s, connect_token_expires_at=%s, connect_token_used_at=%s, updated_at=%s WHERE workspace_id=%s AND channel=%s"), (status, payload, secret_ref, token_hash, token_expires_at, token_used_at, now, workspace_id, channel))
+            cur.execute(_sql(f"UPDATE {_TABLE} SET status=%s, metadata_json=%s, secret_ref=%s, webhook_secret_ref=%s, app_secret_ref=%s, connect_token_hash=%s, connect_token_expires_at=%s, connect_token_used_at=%s, updated_at=%s WHERE workspace_id=%s AND channel=%s"), (status, payload, secret_ref, webhook_secret_ref, app_secret_ref, token_hash, token_expires_at, token_used_at, now, workspace_id, channel))
         else:
-            cur.execute(_sql(f"INSERT INTO {_TABLE} (workspace_id, channel, status, metadata_json, secret_ref, connect_token_hash, connect_token_expires_at, connect_token_used_at, created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"), (workspace_id, channel, status, payload, secret_ref, token_hash, token_expires_at, token_used_at, now, now))
+            cur.execute(_sql(f"INSERT INTO {_TABLE} (workspace_id, channel, status, metadata_json, secret_ref, webhook_secret_ref, app_secret_ref, connect_token_hash, connect_token_expires_at, connect_token_used_at, created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"), (workspace_id, channel, status, payload, secret_ref, webhook_secret_ref, app_secret_ref, token_hash, token_expires_at, token_used_at, now, now))
         conn.commit()
         cur.close()
     finally:
@@ -225,16 +253,95 @@ def consume_telegram_token(
         conn.close()
 
 
-def configure_whatsapp(workspace_id, phone_number_id, business_account_id, secret_ref):
+def configure_whatsapp(workspace_id, phone_number_id, business_account_id, secret_ref, webhook_secret_ref, meta_app_id="", app_secret_ref=""):
     phone_number_id = str(phone_number_id or "").strip()
     business_account_id = str(business_account_id or "").strip()
     secret_ref = str(secret_ref or "").strip()
+    webhook_secret_ref = str(webhook_secret_ref or "").strip()
+    app_secret_ref = str(app_secret_ref or "").strip()
+    meta_app_id = str(meta_app_id or "").strip()
     if not _ID_RE.fullmatch(phone_number_id) or not _ID_RE.fullmatch(business_account_id):
         raise ValueError("invalid_whatsapp_id")
-    if not _SECRET_REF_RE.fullmatch(secret_ref):
+    if not _SECRET_REF_RE.fullmatch(secret_ref) or not _SECRET_REF_RE.fullmatch(webhook_secret_ref):
         raise ValueError("invalid_secret_reference")
-    metadata = {"phone_number_id": phone_number_id, "business_account_id": business_account_id, "webhook_verified": False}
-    return _upsert(workspace_id, "whatsapp", "pending", metadata, secret_ref=secret_ref)
+    if app_secret_ref and not _SECRET_REF_RE.fullmatch(app_secret_ref):
+        raise ValueError("invalid_secret_reference")
+    if meta_app_id and not _ID_RE.fullmatch(meta_app_id):
+        raise ValueError("invalid_meta_app_id")
+    metadata = {"phone_number_id": phone_number_id, "business_account_id": business_account_id, "meta_app_id": meta_app_id, "webhook_verified": False}
+    return _upsert(workspace_id, "whatsapp", "pending", metadata, secret_ref=secret_ref, webhook_secret_ref=webhook_secret_ref, app_secret_ref=app_secret_ref)
+
+
+def get_secret_references(workspace_id, channel):
+    workspace_id = _validate_workspace(workspace_id)
+    channel = _validate_channel(channel)
+    ensure_schema()
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_sql(f"SELECT secret_ref, webhook_secret_ref, app_secret_ref FROM {_TABLE} WHERE workspace_id=%s AND channel=%s"), (workspace_id, channel))
+        row = cur.fetchone()
+        cur.close()
+        return {"access_token": row[0], "webhook_verify_token": row[1], "app_secret": row[2]} if row else {}
+    finally:
+        conn.close()
+
+
+def update_whatsapp_verification(workspace_id, ok, safe_metadata=None, error_code=""):
+    current = get_connection(workspace_id, "whatsapp")
+    refs = get_secret_references(workspace_id, "whatsapp")
+    metadata = dict(current.get("metadata") or {})
+    metadata.update(safe_metadata or {})
+    if error_code:
+        metadata["verification_error"] = str(error_code)[:80]
+    else:
+        metadata.pop("verification_error", None)
+    return _upsert(workspace_id, "whatsapp", "connected" if ok else "error", metadata, refs.get("access_token", ""), refs.get("webhook_verify_token", ""), refs.get("app_secret", ""))
+
+
+def list_whatsapp_connections(statuses=None):
+    ensure_schema()
+    allowed = set(statuses or ALLOWED_STATUSES)
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_sql(f"SELECT workspace_id FROM {_TABLE} WHERE channel=%s"), ("whatsapp",))
+        workspace_ids = [str(row[0]) for row in cur.fetchall()]
+        cur.close()
+    finally:
+        conn.close()
+    return [item for item in (get_connection(w, "whatsapp") for w in workspace_ids) if item["status"] in allowed]
+
+
+def mark_whatsapp_webhook_verified(workspace_id):
+    current = get_connection(workspace_id, "whatsapp")
+    refs = get_secret_references(workspace_id, "whatsapp")
+    metadata = dict(current.get("metadata") or {})
+    metadata["webhook_verified"] = True
+    return _upsert(workspace_id, "whatsapp", current["status"], metadata, refs.get("access_token", ""), refs.get("webhook_verify_token", ""), refs.get("app_secret", ""))
+
+
+def claim_channel_message(workspace_id, channel, provider_message_id):
+    workspace_id = _validate_workspace(workspace_id)
+    channel = _validate_channel(channel)
+    message_id = str(provider_message_id or "").strip()
+    if not message_id or len(message_id) > 256:
+        return False
+    ensure_schema()
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(_sql("INSERT INTO nina_channel_message_receipts (workspace_id, channel, provider_message_id, created_at) VALUES (%s,%s,%s,%s)"), (workspace_id, channel, message_id, _iso(_now())))
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            return False
+        finally:
+            cur.close()
+    finally:
+        conn.close()
 
 
 def set_connection_for_test(workspace_id, channel, status, metadata=None, secret_ref=""):

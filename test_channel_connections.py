@@ -92,10 +92,10 @@ class ChannelConnectionsV1Tests(unittest.TestCase):
         self.assertNotIn(setup["token"], connected)
 
     def test_whatsapp_validation_persistence_and_secret_masking(self):
-        bad = self.client.post("/channels/whatsapp/configure?lang=en", data={"csrf_token": self.csrf("whatsapp_configure"), "phone_number_id": "x", "business_account_id": "bad spaces", "secret_ref": "actual-token"})
+        bad = self.client.post("/channels/whatsapp/configure?lang=en", data={"csrf_token": self.csrf("whatsapp_configure"), "phone_number_id": "x", "business_account_id": "bad spaces", "secret_ref": "actual-token", "webhook_secret_ref": "bad-token"})
         self.assertEqual(bad.status_code, 400)
         secret_ref = "WHATSAPP_ACCESS_TOKEN_STAGING"
-        response = self.client.post("/channels/whatsapp/configure?lang=en", data={"csrf_token": self.csrf("whatsapp_configure"), "phone_number_id": "phone_123", "business_account_id": "business_456", "secret_ref": secret_ref})
+        response = self.client.post("/channels/whatsapp/configure?lang=en", data={"csrf_token": self.csrf("whatsapp_configure"), "phone_number_id": "phone_123", "business_account_id": "business_456", "secret_ref": secret_ref, "webhook_secret_ref": "WHATSAPP_WEBHOOK_VERIFY_TOKEN"})
         self.assertEqual(response.status_code, 200)
         saved = channel_connections.get_connection(web_app.NINA_WEB_WORKSPACE_ID, "whatsapp")
         self.assertEqual(saved["status"], "pending")
