@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import sqlite3
@@ -15,6 +16,8 @@ except Exception:
 from nina_identity import NINA_PROMPT
 from work_engine import execute_natural_work_request
 from work_objects import list_work_objects
+
+logger = logging.getLogger(__name__)
 
 WORKSPACE_ID = (os.environ.get("NINA_WEB_WORKSPACE_ID") or "demo_small_business").strip()
 DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
@@ -107,6 +110,24 @@ def _openai_generate(prompt: str) -> str:
     return str(response.output_text or "").strip()
 
 
+def _sanitized_provider_error(exc: Exception) -> str:
+    message = str(exc or "").replace("\r", " ").replace("\n", " ").strip()
+    message = re.sub(r"(?i)\bBearer\s+[^\s,;]+", "Bearer [REDACTED]", message)
+    message = re.sub(r"(?i)\b(?:api[_ -]?key)\s*[:=]\s*[^\s,;]+", "api_key=[REDACTED]", message)
+    message = re.sub(r"\bsk-[A-Za-z0-9_-]+", "[REDACTED]", message)
+    return message[:500] or "No provider error message available"
+
+
+def _provider_status(exc: Exception) -> Optional[int]:
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(exc, "status", None)
+    try:
+        return int(status) if status is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _customer_safe_text(value: str) -> str:
     """Keep internal implementation labels out of customer chat output."""
     text = str(value or "").strip()
@@ -149,7 +170,14 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
     )
     try:
         answer = _customer_safe_text((generator or _openai_generate)(prompt))
-    except Exception:
+    except Exception as exc:
+        logger.error(
+            "Nina generation failed: exception=%s status=%s message=%s api_key_present=%s",
+            type(exc).__name__,
+            _provider_status(exc),
+            _sanitized_provider_error(exc),
+            bool((os.environ.get("OPENAI_API_KEY") or "").strip()),
+        )
         answer = "Šobrīd nevaru izveidot atbildi. Lūdzu, mēģini vēlreiz pēc brīža."
         _save_turn(workspace_id, clean, answer)
         return {"ok": False, "error": "generation_unavailable", "text": answer, "channel": channel}
