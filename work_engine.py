@@ -13,7 +13,8 @@ import re
 from typing import Any, Dict, List, Optional
 
 from reply_builder import build_client_estimate_draft, build_client_reply_draft
-from work_objects import get_work_object, list_work_objects, update_work_object
+from task_engine import detect_task
+from work_objects import create_work_object, enrich_canonical_business_metadata, get_work_object, list_work_objects, update_work_object
 
 try:
     from work_objects import append_client_conversation_turn as _append_client_conversation_turn
@@ -571,6 +572,41 @@ def execute_natural_work_request(
     Channel is context only. Telegram, WhatsApp and future surfaces must call the
     same function instead of building channel-specific business brains.
     """
+    task = detect_task(user_text)
+    if task:
+        title = _clean(task.get("title"))
+        due_date = _clean(task.get("deadline"))
+        metadata = enrich_canonical_business_metadata(
+            raw_text=user_text,
+            title=title,
+            object_type="task",
+            client_id=_clean(task.get("client")),
+            due_date=due_date,
+            metadata={
+                "raw_text": _clean(user_text),
+                "source": "natural_work_request",
+                "intent": "create_task",
+            },
+        )
+        obj = create_work_object(
+            object_type="task",
+            title=title,
+            workspace_id=workspace_id,
+            client_id=_clean(task.get("client")),
+            priority=_clean(task.get("priority")) or "normal",
+            due_date=due_date,
+            metadata=metadata,
+            origin_channel=_clean(channel) or "unknown",
+        )
+        return {
+            "ok": True,
+            "handled": True,
+            "action": "create_task",
+            "object_id": obj.object_id,
+            "channel": _clean(channel) or "unknown",
+            "text": f"Uzdevums izveidots: {obj.title}",
+        }
+
     resolved = resolve_canonical_estimate_for_request(user_text, workspace_id=workspace_id)
     if not resolved.get("matched"):
         return None
