@@ -6,11 +6,16 @@
 import json
 import logging
 import os
+import hashlib
+import hmac
+import secrets
+import re
 from datetime import datetime
 from urllib.parse import quote_plus, unquote_plus
 from flask import Flask, Response, jsonify, redirect, request
 from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, load_web_conversation, send_message_to_nina
 from voice_engine import transcribe_audio_with_openai
+from channel_connections import configure_whatsapp, create_telegram_token, disconnect as disconnect_channel, get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +75,7 @@ except Exception as e:
 
 WEB_APP_VERSION = "Web App V51.8.1 — ONE NINA Estimate Approval V1 Release-Safe"
 app = Flask(__name__)
+_CHANNEL_CSRF_SECRET = secrets.token_bytes(32)
 WEB_VOICE_MAX_BYTES = 10 * 1024 * 1024
 WEB_VOICE_TRANSCRIPTION_MODEL = "gpt-4o-transcribe"
 WEB_VOICE_MIME_TYPES = {
@@ -4018,13 +4024,17 @@ def css():
 :root{--line:rgba(120,153,255,.26);--line2:rgba(255,255,255,.08);--text:#f8fbff;--muted:#a8b7d4;--green:#34e6a4;--shadow:0 30px 100px rgba(0,0,0,.36)}*{box-sizing:border-box}body{margin:0;min-height:100vh;color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif;background:radial-gradient(circle at 13% 14%,rgba(30,105,255,.20),transparent 25%),radial-gradient(circle at 80% 12%,rgba(80,70,255,.20),transparent 28%),linear-gradient(135deg,#080910 0%,#0a0d19 48%,#05060b 100%)}body:before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(rgba(255,255,255,.026) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.021) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(to bottom,rgba(0,0,0,.5),transparent 70%)}a{color:inherit;text-decoration:none}.layout{display:grid;grid-template-columns:210px 1fr;min-height:100vh}.sidebar{position:sticky;top:0;height:100vh;padding:22px 14px;background:radial-gradient(circle at 28px 28px,rgba(44,142,255,.24),transparent 75px),linear-gradient(180deg,rgba(18,22,37,.86),rgba(8,9,15,.83));border-right:1px solid var(--line2);backdrop-filter:blur(16px)}.brand{display:flex;align-items:center;gap:10px;margin:0 6px 28px;font-weight:950}.brand-word span:last-child{color:#2a91ff}
 .nina-logo{position:relative;border-radius:50%;overflow:hidden;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.9),transparent 5%),radial-gradient(circle at 65% 25%,rgba(84,232,255,.9),transparent 10%),radial-gradient(circle at 50% 50%,#1de0ff 0%,#2358ff 38%,#7f45ff 72%,#11152a 100%);box-shadow:0 0 24px rgba(49,140,255,.52),inset 0 0 30px rgba(255,255,255,.12)}.nina-logo.small{width:34px;height:34px}.nina-logo.hero{width:156px;height:156px;flex:0 0 156px}.dot-grid{position:absolute;inset:0;background:radial-gradient(circle,rgba(255,255,255,.86) 0 2px,transparent 2.8px);background-size:16px 16px;transform:rotate(-18deg) scale(1.1);opacity:.58;mask-image:radial-gradient(circle,#000 62%,transparent 70%)}.orbit{position:absolute;left:-22%;right:-22%;top:44%;height:2px;background:rgba(255,255,255,.45);border-radius:999px;transform:rotate(-16deg);box-shadow:0 0 14px rgba(90,190,255,.8)}.orbit-b{transform:rotate(28deg);opacity:.28;top:54%}.nav{display:flex;flex-direction:column;gap:7px}.nav-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:13px;color:#dce7ff;font-size:14px;border:1px solid transparent}.nav-item:hover{background:rgba(255,255,255,.06)}.nav-item.active{background:linear-gradient(90deg,rgba(28,128,255,.95),rgba(90,63,255,.86));color:#fff;box-shadow:0 14px 32px rgba(23,109,255,.23)}.new{margin-left:auto;font-size:10px;padding:2px 7px;border-radius:999px;background:#5638ff}.user{position:absolute;bottom:18px;left:14px;right:14px;border:1px solid var(--line);background:rgba(255,255,255,.045);border-radius:16px;padding:12px;color:var(--muted);font-size:13px}.user b{color:#fff}
  .main{padding:22px 26px 40px;max-width:1460px;width:100%;margin:0 auto}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.search{width:min(520px,55vw);border:1px solid var(--line);border-radius:18px;padding:14px 18px;color:var(--muted);background:rgba(16,24,45,.72);box-shadow:inset 0 0 0 1px rgba(255,255,255,.03),0 12px 34px rgba(0,0,0,.18)}.icons{display:flex;gap:10px;align-items:center}.icon{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.10)}.avatar{background:linear-gradient(135deg,#7c43ff,#dc42ff);font-weight:950}.lang-switch{display:flex;gap:6px}.lang-switch a{font-size:12px;font-weight:950;padding:8px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.06);color:#dbe8ff}.lang-switch a.active{background:linear-gradient(90deg,#168dff,#6443ff);color:#fff}.grid{display:grid;gap:18px}.hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:18px}.card{background:linear-gradient(180deg,rgba(26,36,68,.72),rgba(9,12,24,.70)),radial-gradient(circle at 25% 15%,rgba(40,140,255,.12),transparent 38%);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}.card-pad{padding:24px}.hero-card{min-height:390px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}.hero-lockup{display:flex;align-items:center;justify-content:center;gap:26px}.hero-title{font-size:78px;line-height:.9;font-weight:1000;letter-spacing:-5px;text-shadow:0 10px 40px rgba(0,0,0,.5)}.hero-title span{color:#2493ff}.subtitle{color:#dbe8ff;font-weight:900;letter-spacing:2px;font-size:13px;margin-top:10px}.bigline{margin-top:34px;font-size:25px;line-height:1.35;font-weight:950}.trust{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:24px}.trust span{font-size:12px;font-weight:900;padding:7px 12px;border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:999px}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.kpi{display:block;padding:18px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.025));border-radius:18px;min-height:118px}.kpi small{color:#dbe7ff;font-weight:900}.kpi strong{display:block;font-size:38px;margin:9px 0 2px}.kpi em{color:#71e9ff;font-style:normal;font-size:13px;font-weight:900}.page-title h1{margin:0;font-size:42px;letter-spacing:-1.8px;line-height:1}.page-title p{margin:8px 0 0;color:#c3d4f5;font-weight:800}.section-title{font-size:21px;font-weight:1000;margin:6px 0 13px}.worker-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:16px}.worker-card{overflow:hidden;border-radius:20px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(28,35,60,.78),rgba(9,12,24,.78));min-height:248px;box-shadow:0 20px 55px rgba(0,0,0,.22)}.worker-top{height:112px;display:grid;place-items:center;position:relative;overflow:hidden}.worker-top:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(110deg,rgba(255,255,255,.10) 0 2px,transparent 2px 10px);opacity:.35}.tone-purple{background:linear-gradient(135deg,#4830d8,#6322b7)}.tone-blue{background:linear-gradient(135deg,#058aff,#053c8c)}.tone-green{background:linear-gradient(135deg,#02b973,#095a3b)}.tone-orange{background:linear-gradient(135deg,#d47418,#56321c)}.worker-avatar{position:relative;z-index:1;width:82px;height:82px;border-radius:50%;background:radial-gradient(circle at 36% 30%,#ffe8c8 0 16%,transparent 17%),radial-gradient(circle at 53% 65%,#ffdba8 0 23%,transparent 24%),radial-gradient(circle at 46% 45%,#ef973a 0 45%,#5d3928 46% 62%,#f6c58b 63% 100%);box-shadow:0 16px 34px rgba(0,0,0,.32)}.worker-body{padding:16px}.worker-body h3{margin:0 0 4px;font-size:20px;line-height:1.02}.muted{color:var(--muted)}.status{font-weight:950;font-size:12px;margin:10px 0}.active-dot{color:var(--green)}.idle-dot{color:#ffd057}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px}.list{display:flex;flex-direction:column;gap:10px}.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 15px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(90deg,rgba(28,111,255,.12),rgba(255,255,255,.035))}.row b{display:block;margin-bottom:4px}.pill{display:inline-flex;align-items:center;padding:7px 11px;border-radius:999px;background:rgba(31,124,255,.16);border:1px solid rgba(76,147,255,.32);color:#d7e8ff;font-size:12px;font-weight:950;white-space:nowrap}.btns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}.btn{display:inline-flex;align-items:center;justify-content:center;padding:13px 18px;border-radius:14px;border:1px solid var(--line);font-weight:950;background:rgba(255,255,255,.055);box-shadow:0 12px 26px rgba(0,0,0,.18)}.btn.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.footer-note{margin-top:22px;color:var(--muted);font-size:13px;text-align:center;font-weight:700}.console-nav{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}.console-nav a{padding:10px 13px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.055);font-weight:950}.console-nav a.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.metric-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.metric-mini{padding:13px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.045)}.metric-mini small{color:var(--muted);font-weight:900}.metric-mini b{display:block;font-size:24px;margin-top:4px}.panel-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:18px}.stack-grid{display:grid;gap:12px}.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field{display:flex;flex-direction:column;gap:6px}.field label{font-size:12px;font-weight:950;color:#dbe7ff}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(5,9,20,.58);color:var(--text);padding:12px 13px;font:inherit;outline:none}.field textarea{min-height:92px;resize:vertical}.form-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.preview-box{border:1px solid var(--line);border-radius:18px;background:rgba(31,124,255,.10);padding:16px;margin-bottom:16px}.preview-box b{display:block;margin-bottom:6px}.safe-note{color:#8fe7ff;font-weight:800;font-size:13px;margin-top:10px}@media(max-width:1100px){.layout{grid-template-columns:1fr}.sidebar,.main{min-width:0}.sidebar{position:relative;height:auto}.user{position:static;margin-top:18px}.hero-grid,.two-col{grid-template-columns:1fr}.worker-grid{grid-template-columns:repeat(2,1fr)}.kpis{grid-template-columns:repeat(2,1fr)}}@media(max-width:640px){.main{padding:16px}.topbar{gap:12px;flex-wrap:wrap}.search{order:2;width:100%}.icons{max-width:100%;flex-wrap:wrap}.worker-grid,.kpis{grid-template-columns:1fr}.hero-lockup{flex-direction:column}.hero-title{font-size:56px;letter-spacing:-3px}.nina-logo.hero{width:128px;height:128px;flex-basis:128px}}
+
+.channels-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.connection-card{display:flex;flex-direction:column;gap:14px;min-height:260px}.connection-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.connection-head h2{margin:0}.connection-status{padding:7px 11px;border-radius:999px;font-size:12px;font-weight:950;background:rgba(255,255,255,.07);border:1px solid var(--line)}.connection-status.connected,.connection-status.active{color:var(--green)}.connection-status.pending{color:#ffd057}.connection-status.error{color:#ff9aad}.connection-actions{margin-top:auto}.connection-actions form{display:inline-block;margin:0 8px 8px 0}.connection-actions button{cursor:pointer;color:var(--text)}.channel-form{display:grid;gap:12px}.channel-form input{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(5,9,20,.58);color:var(--text);padding:12px 13px;font:inherit}.channel-message{padding:12px 14px;border-radius:14px;background:rgba(31,124,255,.12);color:#d9eaff;font-weight:800}@media(max-width:640px){.channels-grid{grid-template-columns:1fr}.connection-card{min-height:0}body.channels .sidebar{padding-bottom:14px}body.channels .brand{margin-bottom:14px}body.channels .nav{flex-direction:row;overflow-x:auto;padding-bottom:6px}body.channels .nav-item{flex:0 0 auto}body.channels .user{display:none}}
 """
 
 
 def page(title, body, active="dashboard"):
     lang = current_language()
+    channels_label = {"en": "Channels", "lv": "Kanāli", "ru": "Каналы"}[lang]
     nav = [
         ("nina", tx("talk_to_nina", lang), "/nina", "N"),
+        ("channels", channels_label, "/channels", "◉"),
         ("dashboard", tx("dashboard", lang), "/dashboard", "⌂"),
         ("inbox", tx("inbox", lang), "/inbox", "✦"),
         ("workers", tx("workers", lang), "/workers", "♙"),
@@ -4044,8 +4054,9 @@ def page(title, body, active="dashboard"):
     def lang_link(l):
         cls = "active" if lang == l else ""
         return f'<a class="{cls}" href="?lang={l}">{l.upper()}</a>'
-    user_status = "<span class='pill'>Web active</span>" if active == "nina" else "<span class='pill'>Runtime: web_app.py</span>"
-    footer = "NinaOS" if active == "nina" else f"{WEB_APP_VERSION} · Web service separate from Telegram app.py"
+    customer_page = active in {"nina", "channels"}
+    user_status = "<span class='pill'>Web active</span>" if customer_page else "<span class='pill'>Runtime: web_app.py</span>"
+    footer = "NinaOS" if customer_page else f"{WEB_APP_VERSION} · Web service separate from Telegram app.py"
     return f"""<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{html_escape(title)} · NinaOS</title><style>{css()}</style></head><body><div class="layout"><aside class="sidebar"><a href="/dashboard?lang={lang}" class="brand">{nina_logo_html("small")}<div class="brand-word"><span>Nina</span><span>OS</span></div></a><nav class="nav">{nav_html}</nav><div class="user"><b>Katrin</b><br>Owner<br><br>{user_status}</div></aside><main class="main"><div class="topbar"><div class="search">{tx("search", lang)}</div><div class="icons"><div class="icon">🔔</div><div class="icon">🌐</div><div class="lang-switch">{lang_link("en")}{lang_link("lv")}{lang_link("ru")}</div><div class="icon">☼</div><div class="icon avatar">K</div></div></div>{body}<div class="footer-note">{footer}</div></main></div></body></html>"""
 
 
@@ -4081,8 +4092,8 @@ def nina_chat_body(messages):
     if not bubbles:
         bubbles = f"<div class='chat-message nina'>{html_escape(copy['empty'])}<small>Nina</small></div>"
 
-    telegram_ready = bool(os.environ.get("TELEGRAM_TOKEN"))
-    telegram_state = copy["connected"] if telegram_ready else copy["connect"]
+    telegram_connection = get_connection(NINA_WEB_WORKSPACE_ID, "telegram")
+    telegram_state = copy["connected"] if telegram_connection["status"] == "connected" else copy["connect"]
     channels = (
         f"<div class='channel-card'><div><b>Web</b></div><span class='channel-state'>{copy['active']}</span></div>"
         f"<div class='channel-card'><div><b>Telegram</b></div><span class='channel-state'>{telegram_state}</span></div>"
@@ -4102,7 +4113,7 @@ def nina_chat_body(messages):
         f"<button id='voice-cancel' class='btn voice-btn' type='button' hidden>{copy['cancel']}</button>"
         f"<button id='chat-send' class='btn primary' type='submit'>{copy['send']}</button></div></form>"
         "</section>"
-        f"<aside class='card card-pad'><div class='section-title'>{copy['channels']}</div>{channels}</aside>"
+        f"<aside class='card card-pad'><div class='section-title'>{copy['channels']}</div>{channels}<div class='form-actions'><a class='btn' href='/channels?lang={lang}'>{copy['channels']}</a></div></aside>"
         "</div>"
         f"<script>window.NinaVoiceConfig={json.dumps({'lang': lang, 'ready': copy['ready'], 'recording': copy['recording'], 'processing': copy['processing'], 'error': copy['error'], 'denied': copy['denied'], 'unsupported': copy['unsupported']}, ensure_ascii=False)};</script>"
         "<script>(function(){const c=window.NinaVoiceConfig,s=document.getElementById('voice-status'),start=document.getElementById('voice-start'),stop=document.getElementById('voice-stop'),cancel=document.getElementById('voice-cancel'),send=document.getElementById('chat-send');let recorder=null,stream=null,chunks=[],cancelled=false;function state(name,text){s.dataset.state=name;s.textContent=text;}function tracksOff(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}function controls(active){start.hidden=active;stop.hidden=!active;cancel.hidden=!active;send.disabled=active;}function reset(){tracksOff();controls(false);recorder=null;chunks=[];cancelled=false;state('ready',c.ready);}async function upload(blob){state('processing',c.processing);controls(false);start.disabled=true;send.disabled=true;const data=new FormData();const ext=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':blob.type.includes('mpeg')?'mp3':'webm';data.append('audio',blob,'voice.'+ext);data.append('lang',c.lang);try{const response=await fetch('/nina/voice?lang='+encodeURIComponent(c.lang),{method:'POST',body:data,credentials:'same-origin'});if(!response.ok)throw new Error('upload');window.location.href='/nina?lang='+encodeURIComponent(c.lang);}catch(e){state('error',c.error);start.disabled=false;send.disabled=false;}}start.addEventListener('click',async function(){if(!navigator.mediaDevices||!window.MediaRecorder){state('error',c.unsupported);return;}try{stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});chunks=[];cancelled=false;const preferred=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4','audio/webm','audio/ogg'].find(t=>MediaRecorder.isTypeSupported(t));const options={audioBitsPerSecond:128000};if(preferred)options.mimeType=preferred;recorder=new MediaRecorder(stream,options);recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};recorder.onerror=()=>{tracksOff();controls(false);state('error',c.error);};recorder.onstop=()=>{tracksOff();controls(false);if(cancelled){reset();return;}const blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});if(!blob.size){state('error',c.error);return;}upload(blob);};recorder.start();controls(true);state('recording',c.recording);}catch(e){tracksOff();controls(false);state('error',e&&e.name==='NotAllowedError'?c.denied:c.error);}});stop.addEventListener('click',()=>{if(recorder&&recorder.state!=='inactive')recorder.stop();});cancel.addEventListener('click',()=>{cancelled=true;if(recorder&&recorder.state!=='inactive')recorder.stop();else reset();});})();</script>"
@@ -5005,6 +5016,78 @@ def office_manager_body(data):
     )
 
 
+def _channel_csrf(action):
+    message = f"{NINA_WEB_WORKSPACE_ID}:{action}".encode()
+    return hmac.new(_CHANNEL_CSRF_SECRET, message, hashlib.sha256).hexdigest()
+
+
+def _valid_channel_csrf(action):
+    supplied = (request.form.get("csrf_token") or "").strip()
+    return bool(supplied) and hmac.compare_digest(supplied, _channel_csrf(action))
+
+
+def _telegram_bot_username():
+    candidate = (os.environ.get("TELEGRAM_BOT_USERNAME") or "Nina7727_bot").strip().lstrip("@")
+    return candidate if re.fullmatch(r"[A-Za-z0-9_]{5,64}", candidate) else "Nina7727_bot"
+
+
+def _channels_copy(lang):
+    return {
+        "en": {"title": "Channels", "sub": "Choose where you want to talk with Nina.", "active": "Active", "connected": "Connected", "disconnected": "Not connected", "pending": "Pending", "error": "Error", "web_text": "Your Web workspace is ready.", "telegram_text": "Connect your Telegram account to this workspace.", "connect_telegram": "Connect Telegram", "open_telegram": "Open Telegram", "disconnect": "Disconnect", "pending_text": "Open the bot and press Start. Confirmation will appear here when linking is enabled in Telegram.", "whatsapp_text": "Prepare your Meta WhatsApp Business connection.", "phone_id": "Phone number ID", "business_id": "Business account ID", "secret_ref": "Access token secret reference", "save": "Save setup", "webhook": "Webhook verification", "not_verified": "Not verified", "secret_saved": "Secret reference saved securely", "email_text": "Email connection is coming soon.", "coming": "Coming soon", "invalid": "Please check the connection details and try again.", "saved": "Setup saved. Verification is still required."},
+        "lv": {"title": "Kanāli", "sub": "Izvēlies, kur vēlies sarunāties ar Ninu.", "active": "Aktīvs", "connected": "Savienots", "disconnected": "Nav savienots", "pending": "Gaida", "error": "Kļūda", "web_text": "Tava tīmekļa darba vide ir gatava.", "telegram_text": "Savieno savu Telegram kontu ar šo darba vidi.", "connect_telegram": "Savienot Telegram", "open_telegram": "Atvērt Telegram", "disconnect": "Atvienot", "pending_text": "Atver botu un nospied Start. Apstiprinājums šeit parādīsies, kad Telegram savienošana būs iespējota.", "whatsapp_text": "Sagatavo Meta WhatsApp Business savienojumu.", "phone_id": "Tālruņa numura ID", "business_id": "Uzņēmuma konta ID", "secret_ref": "Piekļuves atslēgas slepenā atsauce", "save": "Saglabāt iestatījumus", "webhook": "Webhook pārbaude", "not_verified": "Nav pārbaudīts", "secret_saved": "Slepenā atsauce saglabāta droši", "email_text": "E-pasta savienojums būs drīzumā.", "coming": "Drīzumā", "invalid": "Pārbaudi savienojuma datus un mēģini vēlreiz.", "saved": "Iestatījumi saglabāti. Vēl nepieciešama pārbaude."},
+        "ru": {"title": "Каналы", "sub": "Выберите, где вы хотите общаться с Ниной.", "active": "Активен", "connected": "Подключён", "disconnected": "Не подключён", "pending": "Ожидает", "error": "Ошибка", "web_text": "Ваше веб-пространство готово.", "telegram_text": "Подключите Telegram к этому рабочему пространству.", "connect_telegram": "Подключить Telegram", "open_telegram": "Открыть Telegram", "disconnect": "Отключить", "pending_text": "Откройте бота и нажмите Start. Подтверждение появится здесь, когда подключение в Telegram будет включено.", "whatsapp_text": "Подготовьте подключение Meta WhatsApp Business.", "phone_id": "ID номера телефона", "business_id": "ID бизнес-аккаунта", "secret_ref": "Ссылка на секрет токена доступа", "save": "Сохранить настройки", "webhook": "Проверка webhook", "not_verified": "Не проверено", "secret_saved": "Ссылка на секрет сохранена безопасно", "email_text": "Подключение электронной почты появится позже.", "coming": "Скоро", "invalid": "Проверьте данные подключения и попробуйте снова.", "saved": "Настройки сохранены. Требуется проверка."},
+    }[lang]
+
+
+def channels_body(telegram_setup=None, notice=""):
+    lang = current_language()
+    c = _channels_copy(lang)
+    telegram = get_connection(NINA_WEB_WORKSPACE_ID, "telegram")
+    whatsapp = get_connection(NINA_WEB_WORKSPACE_ID, "whatsapp")
+    tmeta, wmeta = telegram["metadata"], whatsapp["metadata"]
+    refresh_label = {"en": "Refresh status", "lv": "Atjaunot statusu", "ru": "Обновить статус"}[lang]
+    status_label = {"connected": c["connected"], "pending": c["pending"], "error": c["error"], "disconnected": c["disconnected"]}
+    saved_username = str(tmeta.get("bot_username") or "").strip().lstrip("@")
+    bot_username = saved_username if re.fullmatch(r"[A-Za-z0-9_]{5,64}", saved_username) else _telegram_bot_username()
+    telegram_action = ""
+    if telegram_setup and telegram_setup.get("deep_link"):
+        telegram_action = f"<a class='btn primary' href='{html_escape(telegram_setup['deep_link'])}' rel='noopener noreferrer'>{c['open_telegram']}</a><div class='safe-note'>{c['pending_text']}</div>"
+    elif telegram["status"] != "connected":
+        telegram_action = f"<form method='post' action='/channels/telegram/connect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('telegram_connect')}'><button class='btn primary' type='submit'>{c['connect_telegram']}</button></form>"
+    if telegram["status"] in {"connected", "pending", "error"}:
+        telegram_action += f"<form method='post' action='/channels/telegram/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('telegram_disconnect')}'><button class='btn' type='submit'>{c['disconnect']}</button></form>"
+    telegram_action += f"<a class='btn' href='/channels?lang={lang}'>{refresh_label}</a>"
+    linked_account = ""
+    if telegram["status"] == "connected":
+        account_name = str(tmeta.get("telegram_display_name") or tmeta.get("telegram_username") or "").strip()
+        username = str(tmeta.get("telegram_username") or "").strip().lstrip("@")
+        account_label = account_name + (f" · @{username}" if username and username.lower() not in account_name.lower() else "")
+        linked_account = f"<div class='safe-note'>{html_escape(account_label)}</div>" if account_label else ""
+    whatsapp_form = (
+        f"<form class='channel-form' method='post' action='/channels/whatsapp/configure?lang={lang}'>"
+        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_configure')}'>"
+        f"<label>{c['phone_id']}<input name='phone_number_id' maxlength='128' required value='{html_escape(wmeta.get('phone_number_id') or '')}'></label>"
+        f"<label>{c['business_id']}<input name='business_account_id' maxlength='128' required value='{html_escape(wmeta.get('business_account_id') or '')}'></label>"
+        f"<label>{c['secret_ref']}<input name='secret_ref' maxlength='128' autocomplete='off' required placeholder='WHATSAPP_ACCESS_TOKEN'></label>"
+        f"<button class='btn primary' type='submit'>{c['save']}</button></form>"
+    )
+    whatsapp_disconnect = ""
+    if whatsapp["status"] != "disconnected":
+        whatsapp_disconnect = f"<form method='post' action='/channels/whatsapp/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_disconnect')}'><button class='btn' type='submit'>{c['disconnect']}</button></form>"
+    secret_saved_html = f"<div class='safe-note'>{c['secret_saved']}</div>" if whatsapp["secret_configured"] else ""
+    notice_html = f"<div class='channel-message'>{html_escape(c.get(notice, notice))}</div>" if notice else ""
+    return (
+        "<style>@media(max-width:640px){.sidebar{padding-bottom:14px}.brand{margin-bottom:14px}.nav{flex-direction:row;overflow-x:auto;padding-bottom:6px}.nav-item{flex:0 0 auto}.user{display:none}}</style>"
+        f"<div class='page-title'><h1>{c['title']}</h1><p>{c['sub']}</p></div><br>{notice_html}"
+        "<div class='channels-grid'>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Web</h2><span class='connection-status active'>{c['active']}</span></div><p class='muted'>{c['web_text']}</p></section>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Telegram</h2><span class='connection-status {telegram['status']}'>{status_label[telegram['status']]}</span></div><p class='muted'>{c['telegram_text']}</p><div><b>@{html_escape(bot_username)}</b></div>{linked_account}<div class='connection-actions'>{telegram_action}</div></section>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>WhatsApp</h2><span class='connection-status {whatsapp['status']}'>{status_label[whatsapp['status']]}</span></div><p class='muted'>{c['whatsapp_text']}</p><div><b>{c['webhook']}:</b> {c['not_verified']}</div>{secret_saved_html}{whatsapp_form}<div class='connection-actions'>{whatsapp_disconnect}</div></section>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Email</h2><span class='connection-status'>{c['coming']}</span></div><p class='muted'>{c['email_text']}</p></section>"
+        "</div>"
+    )
+
+
 
 def _transcribe_web_voice(audio_bytes, filename, mime_type, language_hint):
     api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
@@ -5077,6 +5160,52 @@ def nina_voice():
 
     send_message_to_nina(transcript, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web")
     return jsonify({"ok": True})
+
+
+@app.get("/channels")
+def channels():
+    return Response(page(_channels_copy(current_language())["title"], channels_body(), active="channels"), mimetype="text/html")
+
+
+@app.post("/channels/telegram/connect")
+def channels_telegram_connect():
+    if not _valid_channel_csrf("telegram_connect"):
+        return Response("Invalid request", status=400)
+    bot_username = _telegram_bot_username()
+    try:
+        setup = create_telegram_token(NINA_WEB_WORKSPACE_ID, bot_username=bot_username)
+    except ValueError as exc:
+        if str(exc) == "telegram_already_connected":
+            return redirect(q("/channels"))
+        raise
+    return Response(page(_channels_copy(current_language())["title"], channels_body(telegram_setup=setup), active="channels"), mimetype="text/html")
+
+
+@app.post("/channels/telegram/disconnect")
+def channels_telegram_disconnect():
+    if not _valid_channel_csrf("telegram_disconnect"):
+        return Response("Invalid request", status=400)
+    disconnect_channel(NINA_WEB_WORKSPACE_ID, "telegram")
+    return redirect(q("/channels"))
+
+
+@app.post("/channels/whatsapp/configure")
+def channels_whatsapp_configure():
+    if not _valid_channel_csrf("whatsapp_configure"):
+        return Response("Invalid request", status=400)
+    try:
+        configure_whatsapp(NINA_WEB_WORKSPACE_ID, request.form.get("phone_number_id"), request.form.get("business_account_id"), request.form.get("secret_ref"))
+    except ValueError:
+        return Response(page(_channels_copy(current_language())["title"], channels_body(notice="invalid"), active="channels"), status=400, mimetype="text/html")
+    return Response(page(_channels_copy(current_language())["title"], channels_body(notice="saved"), active="channels"), mimetype="text/html")
+
+
+@app.post("/channels/whatsapp/disconnect")
+def channels_whatsapp_disconnect():
+    if not _valid_channel_csrf("whatsapp_disconnect"):
+        return Response("Invalid request", status=400)
+    disconnect_channel(NINA_WEB_WORKSPACE_ID, "whatsapp")
+    return redirect(q("/channels"))
 
 
 @app.route("/nina", methods=["GET", "POST"])
