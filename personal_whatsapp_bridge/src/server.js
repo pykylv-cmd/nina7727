@@ -13,7 +13,7 @@ const server=http.createServer(async(req,res)=>{
   const workspace=String(data.workspace_id||'')
   if(!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(workspace)) return reply(res,400,{ok:false})
   try{
-    if(req.method==='POST'&&req.url==='/v1/sessions') return reply(res,200,await startSession(workspace,String(data.session_token||'')))
+    if(req.method==='POST'&&req.url==='/v1/sessions') return reply(res,200,await startSession(workspace,String(data.session_token||''),{resetAuth:true}))
     if(req.method==='POST'&&req.url==='/v1/status') return reply(res,200,publicStatus(workspace))
     if(req.method==='POST'&&req.url==='/v1/disconnect'){await stopSession(workspace,true);return reply(res,200,{ok:true})}
     return reply(res,404,{ok:false})

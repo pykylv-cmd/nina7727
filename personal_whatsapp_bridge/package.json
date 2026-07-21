@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@10.15.1",
   "engines": {"node": ">=20"},
-  "scripts": {"start": "node src/server.js", "test": "node --test test", "check": "node --check src/server.js && node --check src/session_manager.js && node --check src/nina_api.js"},
+  "scripts": {"start": "node src/server.js", "test": "node --test test/boundary.test.js", "check": "node --check src/server.js && node --check src/session_manager.js && node --check src/nina_api.js"},
   "dependencies": {
     "@whiskeysockets/baileys": "7.0.0-rc13",
     "pino": "9.7.0",

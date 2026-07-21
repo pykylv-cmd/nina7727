@@ -17,6 +17,12 @@ export async function loadAuth(workspaceId) {
 export async function storeAuth(workspaceId, records) {
   return ninaRequest('/internal/personal-whatsapp/auth/store', {workspace_id:workspaceId, records})
 }
+export async function clearAuth(workspaceId) {
+  const records = await loadAuth(workspaceId)
+  const removals = Object.fromEntries(Object.keys(records).map(key => [key, null]))
+  if (Object.keys(removals).length) await storeAuth(workspaceId, removals)
+  return Object.keys(removals).length
+}
 export async function linked(workspaceId, sessionToken, identity) {
   return ninaRequest('/internal/personal-whatsapp/linked', {workspace_id:workspaceId, session_token:sessionToken, identity})
 }
