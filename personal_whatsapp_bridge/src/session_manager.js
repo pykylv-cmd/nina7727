@@ -1,7 +1,7 @@
 import makeWASocket, {Browsers, BufferJSON, DisconnectReason, fetchLatestBaileysVersion, initAuthCreds, jidNormalizedUser, makeCacheableSignalKeyStore, proto} from '@whiskeysockets/baileys'
 import pino from 'pino'
 import QRCode from 'qrcode'
-import {clearAuth, inbound, linked, loadAuth, storeAuth} from './nina_api.js'
+import {clearAuth, inbound, linked, loadAuth, ninaErrorDetails, storeAuth} from './nina_api.js'
 
 const lifecycle = pino({level:process.env.LOG_LEVEL || 'info',base:undefined})
 const quiet = lifecycle.child({component:'baileys'},{level:process.env.BAILEYS_LOG_LEVEL || 'warn'})
@@ -24,6 +24,10 @@ export async function resolveWhatsAppVersion(fetcher=fetchLatestBaileysVersion) 
   const result=await fetcher()
   return {version:result.version,isLatest:Boolean(result.isLatest)}
 }
+export async function settleNonFatal(operation,onError=()=>{}) {
+  try { await operation; return true } catch(error) { onError(error); return false }
+}
+function logInternalFailure(error,message) { lifecycle.error(ninaErrorDetails(error),message) }
 
 async function authState(workspaceId) {
   const saved = await loadAuth(workspaceId)
@@ -61,8 +65,8 @@ export async function startSession(workspaceId, sessionToken, options={}) {
   sessions.set(workspaceId, state)
   const socket = makeWASocket({auth:auth.state,version:selected.version,browser:Browsers.ubuntu('NinaOS'),logger:quiet,syncFullHistory:false,markOnlineOnConnect:false,shouldIgnoreJid:jid=>jid.endsWith('@g.us')})
   state.socket = socket
-  socket.ev.on('creds.update', auth.saveCreds)
-  socket.ev.on('connection.update', async update => {
+  socket.ev.on('creds.update',()=>{void settleNonFatal(auth.saveCreds(),error=>logInternalFailure(error,'personal WhatsApp credential persistence failed'))})
+  socket.ev.on('connection.update',update=>{void settleNonFatal((async()=>{
     if (update.qr) {
       state.qrSvg=await QRCode.toString(update.qr,{type:'svg',margin:1,width:300});state.qrSequence+=1
       lifecycle.info({workspace_id:workspaceId,qr_sequence:state.qrSequence,registered:Boolean(auth.state.creds.registered)},'personal WhatsApp QR generated')
@@ -84,7 +88,7 @@ export async function startSession(workspaceId, sessionToken, options={}) {
         state.retryTimer=setTimeout(()=>startSession(workspaceId,sessionToken,{resetAuth:false}).catch(error=>lifecycle.error({workspace_id:workspaceId,error_class:String(error?.name || 'Error').slice(0,80),error_message:String(error?.message || 'restart failed').slice(0,180)},'personal WhatsApp restart failed')),delay)
       }
     }
-  })
+  })(),error=>logInternalFailure(error,'personal WhatsApp connection update failed'))})
   socket.ev.on('messages.upsert', async ({messages,type}) => {
     if (type !== 'notify' || state.status !== 'connected') return
     for (const item of messages) {
