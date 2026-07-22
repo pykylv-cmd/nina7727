@@ -10,6 +10,11 @@ const sessions = new Map()
 function revive(value) { return JSON.parse(JSON.stringify(value), BufferJSON.reviver) }
 function flatten(value) { return JSON.parse(JSON.stringify(value, BufferJSON.replacer)) }
 function textOf(message={}) { return message.conversation || message.extendedTextMessage?.text || '' }
+function normalizedJid(value) { return value ? jidNormalizedUser(String(value)) : '' }
+function unsupportedChat(jid) { return jid === 'status@broadcast' || jid.endsWith('@broadcast') || jid.endsWith('@g.us') || jid.endsWith('@newsletter') }
+export function ownerJids(socketUser={},credsMe={}) {
+  return new Set([socketUser.id,socketUser.lid,credsMe.id,credsMe.lid].map(normalizedJid).filter(Boolean))
+}
 export function normalizeStoredKey(type,value) { return type === 'app-state-sync-key' && value ? proto.Message.AppStateSyncKeyData.fromObject(value) : value }
 export function disconnectDetails(error) {
   const rawCode=error?.output?.statusCode ?? error?.data?.reason ?? error?.statusCode
@@ -28,6 +33,39 @@ export async function settleNonFatal(operation,onError=()=>{}) {
   try { await operation; return true } catch(error) { onError(error); return false }
 }
 function logInternalFailure(error,message) { lifecycle.error(ninaErrorDetails(error),message) }
+
+export async function processMessageUpsert(state,socket,event,api=inbound,log=lifecycle) {
+  const type=String(event?.type || '')
+  if (type !== 'notify') { log.info({workspace_id:state.workspaceId,upsert_type:type,ignored_reason:'not_live_notify'},'personal WhatsApp message ignored'); return 0 }
+  if (state.status !== 'connected') { log.info({workspace_id:state.workspaceId,upsert_type:type,ignored_reason:'not_connected'},'personal WhatsApp message ignored'); return 0 }
+  let processed=0
+  for (const item of event.messages || []) {
+    const key=item.key || {};const id=String(key.id || '');const remote=normalizedJid(key.remoteJid);const alternate=normalizedJid(key.remoteJidAlt)
+    log.info({workspace_id:state.workspaceId,upsert_type:type,from_me:Boolean(key.fromMe),has_remote_alt:Boolean(alternate)},'personal WhatsApp message received')
+    let ignored=''
+    if (!id) ignored='missing_message_id'
+    else if (state.sent.delete(id)) ignored='nina_outbound_echo'
+    else if (!remote || unsupportedChat(remote) || (alternate && unsupportedChat(alternate))) ignored='unsupported_chat'
+    else if (!key.fromMe) ignored='not_owner_message'
+    else if (!state.ownJids.has(remote) && !state.ownJids.has(alternate)) ignored='not_owner_self_chat'
+    const text=textOf(item.message).trim()
+    if (!ignored && !text) ignored='no_supported_text'
+    if (ignored) { log.info({workspace_id:state.workspaceId,ignored_reason:ignored},'personal WhatsApp message ignored'); continue }
+    let result
+    try { result=await api({workspace_id:state.workspaceId,message_id:id,chat_jid:state.primaryJid,text,is_group:false}) }
+    catch(error) { logInternalFailure(error,'personal WhatsApp inbound API failed'); continue }
+    const accepted=Boolean(result?.accepted);const reply=String(result?.reply || '').trim()
+    log.info({workspace_id:state.workspaceId,inbound_accepted:accepted},'personal WhatsApp inbound API completed')
+    if (!accepted || !reply) { log.info({workspace_id:state.workspaceId,reply_generated:false},'personal WhatsApp reply not generated'); continue }
+    log.info({workspace_id:state.workspaceId,reply_generated:true,reply_chars:reply.length},'personal WhatsApp reply generated')
+    try {
+      const sent=await socket.sendMessage(remote,{text:reply});const sentId=String(sent?.key?.id || '')
+      if(sentId) { state.sent.add(sentId);if(state.sent.size>200) state.sent.delete(state.sent.values().next().value) }
+      log.info({workspace_id:state.workspaceId,reply_sent:true},'personal WhatsApp reply sent');processed+=1
+    } catch(error) { log.warn({workspace_id:state.workspaceId,error_class:String(error?.name || 'Error').slice(0,80)},'personal WhatsApp reply send failed') }
+  }
+  return processed
+}
 
 async function authState(workspaceId) {
   const saved = await loadAuth(workspaceId)
@@ -61,9 +99,9 @@ export async function startSession(workspaceId, sessionToken, options={}) {
   const auth = await authState(workspaceId)
   const selected=await resolveWhatsAppVersion()
   lifecycle.info({workspace_id:workspaceId,wa_version:selected.version.join('.'),latest_version:selected.isLatest},'personal WhatsApp socket starting')
-  const state = {workspaceId,sessionToken,socket:null,qrSvg:'',status:'connecting',ownJid:'',sent:new Set(),retryTimer:null,closed:false,qrSequence:0}
+  const state = {workspaceId,sessionToken,socket:null,qrSvg:'',status:'connecting',primaryJid:'',ownJids:new Set(),sent:new Set(),retryTimer:null,closed:false,qrSequence:0}
   sessions.set(workspaceId, state)
-  const socket = makeWASocket({auth:auth.state,version:selected.version,browser:Browsers.ubuntu('NinaOS'),logger:quiet,syncFullHistory:false,markOnlineOnConnect:false,shouldIgnoreJid:jid=>jid.endsWith('@g.us')})
+  const socket = makeWASocket({auth:auth.state,version:selected.version,browser:Browsers.ubuntu('NinaOS'),logger:quiet,emitOwnEvents:false,syncFullHistory:false,markOnlineOnConnect:false,shouldIgnoreJid:jid=>jid.endsWith('@g.us')})
   state.socket = socket
   socket.ev.on('creds.update',()=>{void settleNonFatal(auth.saveCreds(),error=>logInternalFailure(error,'personal WhatsApp credential persistence failed'))})
   socket.ev.on('connection.update',update=>{void settleNonFatal((async()=>{
@@ -72,9 +110,9 @@ export async function startSession(workspaceId, sessionToken, options={}) {
       lifecycle.info({workspace_id:workspaceId,qr_sequence:state.qrSequence,registered:Boolean(auth.state.creds.registered)},'personal WhatsApp QR generated')
     }
     if (update.connection === 'open') {
-      state.status='connected'; state.qrSvg=''; state.ownJid=jidNormalizedUser(socket.user?.id || '')
-      const digits=state.ownJid.split(':')[0].split('@')[0]; const masked=digits.length>4?`${'*'.repeat(Math.min(8,digits.length-4))}${digits.slice(-4)}`:'Linked account'
-      if(sessionToken) await linked(workspaceId,sessionToken,{jid:state.ownJid,display_name:socket.user?.name || '',masked_identity:masked})
+      state.status='connected';state.qrSvg='';state.primaryJid=normalizedJid(socket.user?.id || auth.state.creds.me?.id || '');state.ownJids=ownerJids(socket.user || {},auth.state.creds.me || {})
+      const digits=state.primaryJid.split(':')[0].split('@')[0]; const masked=digits.length>4?`${'*'.repeat(Math.min(8,digits.length-4))}${digits.slice(-4)}`:'Linked account'
+      if(sessionToken) await linked(workspaceId,sessionToken,{jid:state.primaryJid,display_name:socket.user?.name || '',masked_identity:masked})
       lifecycle.info({workspace_id:workspaceId},'personal WhatsApp connected')
     }
     if (update.connection === 'close') {
@@ -89,18 +127,7 @@ export async function startSession(workspaceId, sessionToken, options={}) {
       }
     }
   })(),error=>logInternalFailure(error,'personal WhatsApp connection update failed'))})
-  socket.ev.on('messages.upsert', async ({messages,type}) => {
-    if (type !== 'notify' || state.status !== 'connected') return
-    for (const item of messages) {
-      const jid=item.key?.remoteJid || ''; const id=item.key?.id || ''
-      if (!id || state.sent.delete(id) || jid.endsWith('@g.us') || jid !== state.ownJid) continue
-      const text=textOf(item.message).trim(); if (!text) continue
-      try {
-        const result=await inbound({workspace_id:workspaceId,message_id:id,chat_jid:jid,text,is_group:false})
-        if (result.reply) { const sent=await socket.sendMessage(jid,{text:result.reply}); if(sent?.key?.id) state.sent.add(sent.key.id) }
-      } catch (_) { quiet.warn({workspace_id:workspaceId},'personal WhatsApp inbound delivery failed') }
-    }
-  })
+  socket.ev.on('messages.upsert',event=>{void settleNonFatal(processMessageUpsert(state,socket,event),error=>logInternalFailure(error,'personal WhatsApp message processing failed'))})
   return publicStatus(workspaceId)
 }
 
