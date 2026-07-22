@@ -12,7 +12,7 @@ import secrets
 import re
 from datetime import datetime
 from urllib.parse import quote_plus, unquote_plus
-from flask import Flask, Response, jsonify, redirect, request
+from flask import Flask, Response, g, has_request_context, jsonify, redirect, request
 from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, load_web_conversation, send_message_to_nina
 from voice_engine import transcribe_audio_with_openai
 from channel_connections import claim_channel_message, consume_whatsapp_onboarding_state, create_telegram_token, create_whatsapp_onboarding_state, disconnect as disconnect_channel, get_connection, set_connection_for_test, update_whatsapp_verification
@@ -98,6 +98,8 @@ except Exception as e:
 WEB_APP_VERSION = "Web App V51.8.1 — ONE NINA Estimate Approval V1 Release-Safe"
 app = Flask(__name__)
 _CHANNEL_CSRF_SECRET = secrets.token_bytes(32)
+_WORKSPACE_COOKIE = "nina_workspace"
+_WORKSPACE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
 WEB_VOICE_MAX_BYTES = 10 * 1024 * 1024
 WEB_VOICE_TRANSCRIPTION_MODEL = "gpt-4o-transcribe"
 WEB_VOICE_MIME_TYPES = {
@@ -5038,6 +5040,60 @@ def office_manager_body(data):
     )
 
 
+def _workspace_cookie_secret():
+    value = (os.environ.get("NINA_WEB_WORKSPACE_COOKIE_SECRET") or os.environ.get("NINA_CHANNEL_CREDENTIAL_KEY") or "").strip()
+    if not value:
+        raise RuntimeError("workspace_cookie_secret_missing")
+    return value.encode()
+
+
+def _workspace_cookie_value(workspace_id):
+    signature = hmac.new(_workspace_cookie_secret(), workspace_id.encode(), hashlib.sha256).hexdigest()
+    return f"{workspace_id}.{signature}"
+
+
+def _verified_workspace_cookie(value):
+    raw = str(value or "")
+    try:
+        workspace_id, supplied = raw.rsplit(".", 1)
+    except ValueError:
+        return ""
+    if not re.fullmatch(r"web_[a-f0-9]{32}", workspace_id):
+        return ""
+    expected = hmac.new(_workspace_cookie_secret(), workspace_id.encode(), hashlib.sha256).hexdigest()
+    return workspace_id if hmac.compare_digest(supplied, expected) else ""
+
+
+def current_workspace_id():
+    """Resolve a server-authenticated browser workspace; never trust request parameters."""
+    if not has_request_context():
+        return NINA_WEB_WORKSPACE_ID
+    existing = getattr(g, "nina_workspace_id", "")
+    if existing:
+        return existing
+    workspace_id = _verified_workspace_cookie(request.cookies.get(_WORKSPACE_COOKIE))
+    if not workspace_id:
+        workspace_id = "web_" + secrets.token_hex(16)
+        g.nina_workspace_cookie_new = True
+    g.nina_workspace_id = workspace_id
+    return workspace_id
+
+
+@app.after_request
+def persist_workspace_identity(response):
+    workspace_id = getattr(g, "nina_workspace_id", "")
+    if workspace_id and getattr(g, "nina_workspace_cookie_new", False):
+        response.set_cookie(
+            _WORKSPACE_COOKIE,
+            _workspace_cookie_value(workspace_id),
+            max_age=_WORKSPACE_COOKIE_MAX_AGE,
+            httponly=True,
+            secure=request.is_secure or request.headers.get("X-Forwarded-Proto") == "https",
+            samesite="Lax",
+        )
+    return response
+
+
 def _channel_csrf(action):
     message = f"{NINA_WEB_WORKSPACE_ID}:{action}".encode()
     return hmac.new(_CHANNEL_CSRF_SECRET, message, hashlib.sha256).hexdigest()
@@ -5117,9 +5173,10 @@ def _whatsapp_connect_script():
 def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
     lang = current_language()
     c = _channels_copy(lang)
+    workspace_id = current_workspace_id()
     telegram = get_connection(NINA_WEB_WORKSPACE_ID, "telegram")
     whatsapp = get_connection(NINA_WEB_WORKSPACE_ID, "whatsapp")
-    personal = get_connection(NINA_WEB_WORKSPACE_ID, PERSONAL_WHATSAPP_CHANNEL)
+    personal = get_connection(workspace_id, PERSONAL_WHATSAPP_CHANNEL)
     tmeta, wmeta = telegram["metadata"], whatsapp["metadata"]
     refresh_label = {"en": "Refresh status", "lv": "Atjaunot statusu", "ru": "Обновить статус"}[lang]
     status_label = {"connected": c["connected"], "pending": c["pending"], "error": c["error"], "disconnected": c["disconnected"]}
@@ -5298,24 +5355,27 @@ def channels_personal_whatsapp_connect():
     if not _valid_channel_csrf("whatsapp_personal_connect"):
         return Response("Invalid request", status=400)
     try:
-        pairing = create_personal_whatsapp_pairing(NINA_WEB_WORKSPACE_ID)
-        personal_whatsapp_bridge_request("/v1/sessions", {"workspace_id": NINA_WEB_WORKSPACE_ID, "session_token": pairing["session_token"]})
+        workspace_id = current_workspace_id()
+        pairing = create_personal_whatsapp_pairing(workspace_id)
+        personal_whatsapp_bridge_request("/v1/sessions", {"workspace_id": workspace_id, "session_token": pairing["session_token"]})
     except Exception:
-        logger.warning("Personal WhatsApp pairing could not start workspace=%s", NINA_WEB_WORKSPACE_ID)
-        set_connection_for_test(NINA_WEB_WORKSPACE_ID, PERSONAL_WHATSAPP_CHANNEL, "error", {"error_code": "bridge_unavailable"})
+        workspace_id = current_workspace_id()
+        logger.warning("Personal WhatsApp pairing could not start workspace=%s", workspace_id)
+        set_connection_for_test(workspace_id, PERSONAL_WHATSAPP_CHANNEL, "error", {"error_code": "bridge_unavailable"})
     return redirect(q("/channels"))
 
 
 @app.get("/channels/whatsapp-personal/status")
 def channels_personal_whatsapp_status():
-    connection = get_connection(NINA_WEB_WORKSPACE_ID, PERSONAL_WHATSAPP_CHANNEL)
+    workspace_id = current_workspace_id()
+    connection = get_connection(workspace_id, PERSONAL_WHATSAPP_CHANNEL)
     if connection["status"] == "connected":
         return jsonify({"status": "connected"})
-    if connection["status"] == "pending" and not personal_whatsapp_pairing_is_active(NINA_WEB_WORKSPACE_ID):
-        set_connection_for_test(NINA_WEB_WORKSPACE_ID, PERSONAL_WHATSAPP_CHANNEL, "error", {"error_code": "pairing_expired"})
+    if connection["status"] == "pending" and not personal_whatsapp_pairing_is_active(workspace_id):
+        set_connection_for_test(workspace_id, PERSONAL_WHATSAPP_CHANNEL, "error", {"error_code": "pairing_expired"})
         return jsonify({"status": "connection_lost", "qr_svg": ""})
     try:
-        state = personal_whatsapp_bridge_request("/v1/status", {"workspace_id": NINA_WEB_WORKSPACE_ID})
+        state = personal_whatsapp_bridge_request("/v1/status", {"workspace_id": workspace_id})
     except Exception:
         return jsonify({"status": connection["status"], "qr_svg": ""})
     svg = str(state.get("qr_svg") or "")
@@ -5329,10 +5389,12 @@ def channels_personal_whatsapp_disconnect():
     if not _valid_channel_csrf("whatsapp_personal_disconnect"):
         return Response("Invalid request", status=400)
     try:
-        personal_whatsapp_bridge_request("/v1/disconnect", {"workspace_id": NINA_WEB_WORKSPACE_ID})
+        workspace_id = current_workspace_id()
+        personal_whatsapp_bridge_request("/v1/disconnect", {"workspace_id": workspace_id})
     except Exception:
-        logger.warning("Personal WhatsApp bridge logout unavailable workspace=%s", NINA_WEB_WORKSPACE_ID)
-    disconnect_personal_whatsapp(NINA_WEB_WORKSPACE_ID)
+        workspace_id = current_workspace_id()
+        logger.warning("Personal WhatsApp bridge logout unavailable workspace=%s", workspace_id)
+    disconnect_personal_whatsapp(workspace_id)
     return redirect(q("/channels"))
 
 

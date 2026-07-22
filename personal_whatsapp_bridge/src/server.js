@@ -1,5 +1,5 @@
 import http from 'node:http'
-import {publicStatus, startSession, stopSession} from './session_manager.js'
+import {publicStatus, restoreSessions, startSession, stopSession} from './session_manager.js'
 import {activeWorkspaces} from './nina_api.js'
 import {ninaErrorDetails} from './nina_api.js'
 
@@ -21,4 +21,4 @@ const server=http.createServer(async(req,res)=>{
   }catch(_){return reply(res,503,{ok:false,error:'bridge_operation_failed'})}
 })
 server.listen(port,'0.0.0.0')
-activeWorkspaces().then(ids=>Promise.all(ids.map(id=>startSession(id,'').catch(error=>console.error(JSON.stringify({event:'personal WhatsApp restore failed',workspace_id:id,...ninaErrorDetails(error)})))))).catch(error=>console.error(JSON.stringify({event:'personal WhatsApp active-session lookup failed',...ninaErrorDetails(error)})))
+activeWorkspaces().then(ids=>restoreSessions(ids)).catch(error=>console.error(JSON.stringify({event:'personal WhatsApp active-session lookup failed',...ninaErrorDetails(error)})))

@@ -5,7 +5,7 @@ import {clearAuth, inbound, linked, loadAuth, ninaErrorDetails, storeAuth} from 
 
 const lifecycle = pino({level:process.env.LOG_LEVEL || 'info',base:undefined})
 const quiet = lifecycle.child({component:'baileys'},{level:process.env.BAILEYS_LOG_LEVEL || 'warn'})
-const sessions = new Map()
+export const sessions = new Map()
 
 function revive(value) { return JSON.parse(JSON.stringify(value), BufferJSON.reviver) }
 function flatten(value) { return JSON.parse(JSON.stringify(value, BufferJSON.replacer)) }
@@ -141,4 +141,8 @@ export async function stopSession(workspaceId, logout=true) {
   if(state.retryTimer) clearTimeout(state.retryTimer)
   try { if(logout) await state.socket.logout(); else state.socket.end(undefined) } catch (_) {}
 }
-export async function restoreSessions(workspaceIds=[]) { for (const id of workspaceIds) await startSession(id,'').catch(()=>{}) }
+export async function restoreSessions(workspaceIds=[], starter=startSession) {
+  await Promise.all(workspaceIds.map(workspaceId=>starter(workspaceId,'').catch(error=>{
+    lifecycle.error({workspace_id:workspaceId,...ninaErrorDetails(error)},'personal WhatsApp restore failed')
+  })))
+}

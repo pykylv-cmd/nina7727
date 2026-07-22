@@ -27,6 +27,18 @@ class PersonalWhatsAppTests(unittest.TestCase):
         self.assertTrue(row.startswith("enc:v1:")); self.assertNotIn("value", row)
         self.p=importlib.reload(self.p)
         self.assertEqual(self.p.load_auth_records("a")["creds"]["secret"], "value")
+    def test_auth_pairing_and_connections_never_cross_workspaces(self):
+        pair_a=self.p.create_pairing_session("workspace-a"); pair_b=self.p.create_pairing_session("workspace-b")
+        self.assertIsNone(self.p.mark_connected("workspace-b",pair_a["session_token"],{"jid":"b@s.whatsapp.net"}))
+        self.assertIsNotNone(self.p.mark_connected("workspace-a",pair_a["session_token"],{"jid":"a@s.whatsapp.net"}))
+        self.assertIsNotNone(self.p.mark_connected("workspace-b",pair_b["session_token"],{"jid":"b@s.whatsapp.net"}))
+        self.p.store_auth_record("workspace-a","creds",{"owner":"a"}); self.p.store_auth_record("workspace-b","creds",{"owner":"b"})
+        self.assertEqual(self.p.load_auth_records("workspace-a")["creds"],{"owner":"a"})
+        self.assertEqual(self.p.load_auth_records("workspace-b")["creds"],{"owner":"b"})
+        self.p.disconnect_personal("workspace-a")
+        self.assertEqual(self.p.load_auth_records("workspace-a"),{})
+        self.assertEqual(self.p.load_auth_records("workspace-b")["creds"],{"owner":"b"})
+        self.assertEqual(self.p.get_connection("workspace-b",self.p.CHANNEL)["status"],"connected")
     def test_self_chat_only_dedupe_groups_and_disconnect(self):
         pair=self.p.create_pairing_session("a"); self.p.mark_connected("a",pair["session_token"],{"jid":"1@s.whatsapp.net"})
         self.assertTrue(self.p.accept_inbound("a","m1","1@s.whatsapp.net","hello")); self.assertFalse(self.p.accept_inbound("a","m1","1@s.whatsapp.net","hello"))
