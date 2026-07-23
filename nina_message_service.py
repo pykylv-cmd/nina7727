@@ -54,14 +54,14 @@ def _conversation_id(workspace_id: str) -> str:
     return f"web:{workspace_id or WORKSPACE_ID}"
 
 
-def load_web_conversation(workspace_id: str = WORKSPACE_ID, limit: int = 20) -> List[Dict[str, str]]:
+def _load_conversation(conversation_id: str, limit: int = 20) -> List[Dict[str, str]]:
     _ensure_conversation_store()
     conn = _connect()
     cur = conn.cursor()
     cur.execute(_sql("""
         SELECT user_text, nina_text, created_at FROM conversation_state
         WHERE user_id = %s AND intent = %s ORDER BY id DESC LIMIT %s
-    """), (_conversation_id(workspace_id), "web_chat", max(1, min(int(limit or 20), 100))))
+    """), (conversation_id, "web_chat", max(1, min(int(limit or 20), 100))))
     rows = cur.fetchall() or []
     cur.close()
     conn.close()
@@ -74,14 +74,18 @@ def load_web_conversation(workspace_id: str = WORKSPACE_ID, limit: int = 20) -> 
     return messages
 
 
-def _save_turn(workspace_id: str, user_text: str, nina_text: str) -> None:
+def load_web_conversation(workspace_id: str = WORKSPACE_ID, limit: int = 20) -> List[Dict[str, str]]:
+    return _load_conversation(_conversation_id(workspace_id), limit=limit)
+
+
+def _save_turn(workspace_id: str, user_text: str, nina_text: str, conversation_id: str = "", channel: str = "web") -> None:
     _ensure_conversation_store()
     conn = _connect()
     cur = conn.cursor()
     cur.execute(_sql("""
         INSERT INTO conversation_state (user_id, user_text, nina_text, intent, emotion, topic)
         VALUES (%s, %s, %s, %s, %s, %s)
-    """), (_conversation_id(workspace_id), user_text, nina_text, "web_chat", "", "channel:web"))
+    """), (conversation_id or _conversation_id(workspace_id), user_text, nina_text, "web_chat", "", f"channel:{channel}"))
     conn.commit()
     cur.close()
     conn.close()
@@ -140,7 +144,8 @@ def _customer_safe_text(value: str) -> str:
 
 
 def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, channel: str = "web",
-                         generator: Optional[Callable[[str], str]] = None) -> Dict[str, Any]:
+                         generator: Optional[Callable[[str], str]] = None,
+                         conversation_id: str = "") -> Dict[str, Any]:
     """Route one message through shared work truth and Nina's shared identity."""
     clean = str(user_text or "").strip()
     if not clean:
@@ -154,10 +159,10 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         work_result = None
     if work_result and work_result.get("handled") and str(work_result.get("text") or "").strip():
         answer = _customer_safe_text(work_result.get("text") or "")
-        _save_turn(workspace_id, clean, answer)
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
         return {"ok": True, "text": answer, "source": "shared_work", "channel": channel}
 
-    history = load_web_conversation(workspace_id=workspace_id, limit=12)
+    history = _load_conversation(conversation_id, limit=12) if conversation_id else load_web_conversation(workspace_id=workspace_id, limit=12)
     history_text = "\n".join(
         f"{'Lietotājs' if item['role'] == 'user' else 'Nina'}: {item['text']}" for item in history[-24:]
     )
@@ -179,9 +184,9 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             bool((os.environ.get("OPENAI_API_KEY") or "").strip()),
         )
         answer = "Šobrīd nevaru izveidot atbildi. Lūdzu, mēģini vēlreiz pēc brīža."
-        _save_turn(workspace_id, clean, answer)
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
         return {"ok": False, "error": "generation_unavailable", "text": answer, "channel": channel}
     if not answer:
         return {"ok": False, "error": "empty_response", "text": ""}
-    _save_turn(workspace_id, clean, answer)
+    _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
     return {"ok": True, "text": answer, "source": "nina", "channel": channel}

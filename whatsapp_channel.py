@@ -233,6 +233,19 @@ def send_whatsapp_message(workspace_id, recipient, text, requester=None):
     phone_id = str((connection.get("metadata") or {}).get("phone_number_id") or "")
     refs = get_secret_references(workspace_id, "whatsapp")
     token = _secret(refs.get("access_token"))
+    return send_cloud_api_message(phone_id, token, recipient, clean, requester=requester)
+
+
+def send_cloud_api_message(phone_number_id, access_token, recipient, text, requester=None):
+    """Provider transport shared by isolated WhatsApp channel adapters."""
+    phone_id = str(phone_number_id or "").strip()
+    token = str(access_token or "").strip()
+    recipient = str(recipient or "").strip()
+    clean = str(text or "").strip()
+    if not _SAFE_ID.fullmatch(phone_id) or not token:
+        raise WhatsAppProviderError("channel_not_configured")
+    if not _RECIPIENT.fullmatch(recipient) or not clean or len(clean) > 4096:
+        raise WhatsAppProviderError("invalid_outbound_message")
     call = requester or _request_json
     url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{quote(phone_id)}/messages"
     response = call("POST", url, token, {"messaging_product": "whatsapp", "recipient_type": "individual", "to": recipient, "type": "text", "text": {"preview_url": False, "body": clean}})

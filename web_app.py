@@ -38,6 +38,16 @@ from personal_whatsapp import (
     pairing_is_active as personal_whatsapp_pairing_is_active,
     store_auth_record as store_personal_whatsapp_auth,
 )
+from ninaos_number import (
+    CHANNEL as NINAOS_NUMBER_CHANNEL,
+    number_for_phone_id as ninaos_number_for_phone_id,
+    primary_number as primary_ninaos_number,
+    public_contact as public_ninaos_contact,
+    resolve_sender_identity as resolve_ninaos_sender_identity,
+    send_reply as send_ninaos_number_reply,
+    verify_signature as verify_ninaos_number_signature,
+    verify_token as verify_ninaos_number_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -4124,6 +4134,7 @@ def nina_chat_body(messages):
         f"<div class='channel-card'><div><b>WhatsApp</b><span class='muted'>{copy['next']}</span></div><span class='channel-state next'>{copy['connect']}</span></div>"
         f"<div class='channel-card'><div><b>Email</b><span class='muted'>{copy['next']}</span></div><span class='channel-state next'>{copy['connect']}</span></div>"
     )
+    nina_contact = nina_contact_html(lang)
     return (
         "<div class='chat-layout'>"
         "<section class='card card-pad chat-shell'>"
@@ -4137,10 +4148,36 @@ def nina_chat_body(messages):
         f"<button id='voice-cancel' class='btn voice-btn' type='button' hidden>{copy['cancel']}</button>"
         f"<button id='chat-send' class='btn primary' type='submit'>{copy['send']}</button></div></form>"
         "</section>"
-        f"<aside class='card card-pad'><div class='section-title'>{copy['channels']}</div>{channels}<div class='form-actions'><a class='btn' href='/channels?lang={lang}'>{copy['channels']}</a></div></aside>"
+        f"<aside class='card card-pad'>{nina_contact}<div class='section-title'>{copy['channels']}</div>{channels}<div class='form-actions'><a class='btn' href='/channels?lang={lang}'>{copy['channels']}</a></div></aside>"
         "</div>"
         f"<script>window.NinaVoiceConfig={json.dumps({'lang': lang, 'ready': copy['ready'], 'recording': copy['recording'], 'processing': copy['processing'], 'error': copy['error'], 'denied': copy['denied'], 'unsupported': copy['unsupported']}, ensure_ascii=False)};</script>"
         "<script>(function(){const c=window.NinaVoiceConfig,s=document.getElementById('voice-status'),start=document.getElementById('voice-start'),stop=document.getElementById('voice-stop'),cancel=document.getElementById('voice-cancel'),send=document.getElementById('chat-send');let recorder=null,stream=null,chunks=[],cancelled=false;function state(name,text){s.dataset.state=name;s.textContent=text;}function tracksOff(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}function controls(active){start.hidden=active;stop.hidden=!active;cancel.hidden=!active;send.disabled=active;}function reset(){tracksOff();controls(false);recorder=null;chunks=[];cancelled=false;state('ready',c.ready);}async function upload(blob){state('processing',c.processing);controls(false);start.disabled=true;send.disabled=true;const data=new FormData();const ext=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':blob.type.includes('mpeg')?'mp3':'webm';data.append('audio',blob,'voice.'+ext);data.append('lang',c.lang);try{const response=await fetch('/nina/voice?lang='+encodeURIComponent(c.lang),{method:'POST',body:data,credentials:'same-origin'});if(!response.ok)throw new Error('upload');window.location.href='/nina?lang='+encodeURIComponent(c.lang);}catch(e){state('error',c.error);start.disabled=false;send.disabled=false;}}start.addEventListener('click',async function(){if(!navigator.mediaDevices||!window.MediaRecorder){state('error',c.unsupported);return;}try{stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});chunks=[];cancelled=false;const preferred=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4','audio/webm','audio/ogg'].find(t=>MediaRecorder.isTypeSupported(t));const options={audioBitsPerSecond:128000};if(preferred)options.mimeType=preferred;recorder=new MediaRecorder(stream,options);recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};recorder.onerror=()=>{tracksOff();controls(false);state('error',c.error);};recorder.onstop=()=>{tracksOff();controls(false);if(cancelled){reset();return;}const blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});if(!blob.size){state('error',c.error);return;}upload(blob);};recorder.start();controls(true);state('recording',c.recording);}catch(e){tracksOff();controls(false);state('error',e&&e.name==='NotAllowedError'?c.denied:c.error);}});stop.addEventListener('click',()=>{if(recorder&&recorder.state!=='inactive')recorder.stop();});cancel.addEventListener('click',()=>{cancelled=true;if(recorder&&recorder.state!=='inactive')recorder.stop();else reset();});})();</script>"
+    )
+
+
+def nina_contact_html(lang=None):
+    lang = lang or current_language()
+    try:
+        contact = public_ninaos_contact(primary_ninaos_number())
+    except ValueError:
+        contact = None
+    if not contact:
+        return ""
+    copy = {
+        "en": {"title": "Nina on WhatsApp", "text": "Message Nina directly from WhatsApp.", "talk": "Talk to Nina", "save": "Save Nina", "qr": "QR code"},
+        "lv": {"title": "Nina WhatsApp", "text": "Raksti Ninai tieši no WhatsApp.", "talk": "Runāt ar Ninu", "save": "Saglabāt Ninu", "qr": "QR kods"},
+        "ru": {"title": "Нина в WhatsApp", "text": "Напишите Нине прямо в WhatsApp.", "talk": "Поговорить с Ниной", "save": "Сохранить Нину", "qr": "QR-код"},
+    }[lang]
+    return (
+        "<section class='nina-contact' style='margin-bottom:22px'>"
+        f"<div class='section-title'>{html_escape(copy['title'])}</div>"
+        f"<p class='muted'>{html_escape(copy['text'])}</p>"
+        f"<div><b>{html_escape(contact['name'])}</b><span class='muted'>{html_escape(contact['display_number'])}</span></div>"
+        "<div class='form-actions'>"
+        f"<a class='btn primary' href='{html_escape(contact['whatsapp_url'])}' target='_blank' rel='noopener noreferrer'>{html_escape(copy['talk'])}</a>"
+        f"<a class='btn' href='/nina/contact.vcf'>{html_escape(copy['save'])}</a>"
+        f"<a class='btn' href='/nina/contact-qr.svg' target='_blank' rel='noopener noreferrer'>{html_escape(copy['qr'])}</a>"
+        "</div></section>"
     )
 
 
@@ -5232,7 +5269,7 @@ def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
     return (
         "<style>@media(max-width:640px){.sidebar{padding-bottom:14px}.brand{margin-bottom:14px}.nav{flex-direction:row;overflow-x:auto;padding-bottom:6px}.nav-item{flex:0 0 auto}.user{display:none}}</style>"
         f"<div class='page-title'><h1>{c['title']}</h1><p>{c['sub']}</p></div><br>{notice_html}"
-        "<div class='channels-grid'>"
+        f"{nina_contact_html(lang)}<div class='channels-grid'>"
         f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Web</h2><span class='connection-status active'>{c['active']}</span></div><p class='muted'>{c['web_text']}</p></section>"
         f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Telegram</h2><span class='connection-status {telegram['status']}'>{status_label[telegram['status']]}</span></div><p class='muted'>{c['telegram_text']}</p><div><b>@{html_escape(bot_username)}</b></div>{linked_account}<div class='connection-actions'>{telegram_action}</div></section>"
         f"<section class='card card-pad connection-card whatsapp-stack'><div class='connection-head'><h2>WhatsApp</h2></div><div class='whatsapp-products'><div class='whatsapp-product'><div class='connection-head'><h3>{html_escape(pc['title'])}</h3><span class='connection-status {pstatus}'>{status_label[pstatus]}</span></div><p class='muted'>{html_escape(pc['text'])}</p>{personal_body}</div><div class='whatsapp-product'><div class='connection-head'><h3>{html_escape(pc['business'])}</h3><span class='connection-status {whatsapp['status']}'>{status_label[whatsapp['status']]}</span></div><p class='muted'>{html_escape(pc['business_text'])}</p>{whatsapp_help}{whatsapp_error_html}{whatsapp_identity_html}<div class='connection-actions'>{whatsapp_action}</div></div></div></section>"
@@ -5516,7 +5553,11 @@ def whatsapp_webhook_verify():
     mode = (request.args.get("hub.mode") or "").strip()
     token = request.args.get("hub.verify_token") or ""
     challenge = request.args.get("hub.challenge") or ""
-    if not challenge or len(challenge) > 256 or not resolve_webhook_verification(mode, token):
+    try:
+        official_verified = verify_ninaos_number_token(mode, token)
+    except ValueError:
+        official_verified = False
+    if not challenge or len(challenge) > 256 or not (official_verified or resolve_webhook_verification(mode, token)):
         return Response("Verification rejected", status=403)
     return Response(challenge, status=200, mimetype="text/plain")
 
@@ -5531,6 +5572,40 @@ def whatsapp_webhook_receive():
         messages = parse_inbound_text(payload)
     except Exception:
         return jsonify({"ok": False, "error": "invalid_payload"}), 400
+    official_numbers = {item["phone_number_id"]: ninaos_number_for_phone_id(item["phone_number_id"]) for item in messages}
+    if all(official_numbers.values()):
+        if len({item["phone_number_id"] for item in messages}) != 1:
+            return jsonify({"ok": False, "error": "connection_not_resolved"}), 403
+        number = next(iter(official_numbers.values()))
+        try:
+            signature_ok = verify_ninaos_number_signature(number, raw_body, request.headers.get("X-Hub-Signature-256"))
+        except WhatsAppProviderError:
+            return jsonify({"ok": False, "error": "signature_not_configured"}), 503
+        if not signature_ok:
+            return jsonify({"ok": False, "error": "invalid_signature"}), 403
+        sent = 0
+        processed = 0
+        for item in messages:
+            identity = resolve_ninaos_sender_identity(number, item["sender"])
+            if not claim_channel_message(identity["workspace_id"], NINAOS_NUMBER_CHANNEL, item["message_id"]):
+                continue
+            processed += 1
+            nina_result = send_message_to_nina(
+                item["text"],
+                workspace_id=identity["workspace_id"],
+                channel=NINAOS_NUMBER_CHANNEL,
+                conversation_id=identity["conversation_id"],
+            )
+            reply_text = str(nina_result.get("text") or "").strip()
+            if reply_text:
+                try:
+                    send_ninaos_number_reply(number, item["sender"], reply_text)
+                    sent += 1
+                except WhatsAppProviderError:
+                    pass
+        return jsonify({"ok": True, "processed": processed, "replies_sent": sent})
+    if any(official_numbers.values()):
+        return jsonify({"ok": False, "error": "connection_not_resolved"}), 403
     workspaces = {resolve_workspace_for_phone_number(item["phone_number_id"]) for item in messages}
     if None in workspaces or len(workspaces) != 1:
         return jsonify({"ok": False, "error": "connection_not_resolved"}), 403
@@ -5556,6 +5631,35 @@ def whatsapp_webhook_receive():
             except WhatsAppProviderError:
                 pass
     return jsonify({"ok": True, "processed": processed, "replies_sent": sent})
+
+
+@app.get("/nina/contact.vcf")
+def nina_contact_vcard():
+    try:
+        contact = public_ninaos_contact(primary_ninaos_number(request.args.get("region") or ""))
+    except ValueError:
+        contact = None
+    if not contact:
+        return Response("Contact unavailable", status=404)
+    phone = contact["display_number"]
+    body = f"BEGIN:VCARD\r\nVERSION:3.0\r\nFN:{contact['name']}\r\nTEL;TYPE=CELL:{phone}\r\nEND:VCARD\r\n"
+    return Response(body, mimetype="text/vcard", headers={"Content-Disposition": 'attachment; filename="Nina.vcf"', "Cache-Control": "public, max-age=300"})
+
+
+@app.get("/nina/contact-qr.svg")
+def nina_contact_qr():
+    try:
+        contact = public_ninaos_contact(primary_ninaos_number(request.args.get("region") or ""))
+    except ValueError:
+        contact = None
+    if not contact:
+        return Response("Contact unavailable", status=404)
+    import qrcode
+    import qrcode.image.svg
+    image = qrcode.make(contact["whatsapp_url"], image_factory=qrcode.image.svg.SvgPathImage, box_size=8, border=3)
+    output = __import__("io").BytesIO()
+    image.save(output)
+    return Response(output.getvalue(), mimetype="image/svg+xml", headers={"Cache-Control": "public, max-age=300", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
 
 
 @app.route("/nina", methods=["GET", "POST"])
