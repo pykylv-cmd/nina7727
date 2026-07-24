@@ -50,3 +50,24 @@ export async function inbound(payload) {
 export async function activeWorkspaces() {
   return (await ninaRequest('/internal/personal-whatsapp/active', {})).workspace_ids || []
 }
+export async function loadCompanyAuth(workspaceId) {
+  return (await ninaRequest('/internal/company-whatsapp/auth/load', {workspace_id:workspaceId})).records || {}
+}
+export async function storeCompanyAuth(workspaceId, records) {
+  return ninaRequest('/internal/company-whatsapp/auth/store', {workspace_id:workspaceId, records})
+}
+export async function clearCompanyAuth(workspaceId) {
+  const records = await loadCompanyAuth(workspaceId)
+  const removals = Object.fromEntries(Object.keys(records).map(key => [key, null]))
+  if (Object.keys(removals).length) await storeCompanyAuth(workspaceId, removals)
+  return Object.keys(removals).length
+}
+export async function companyLinked(workspaceId, sessionToken, identity) {
+  return ninaRequest('/internal/company-whatsapp/linked', {workspace_id:workspaceId, session_token:sessionToken, identity})
+}
+export async function companyInbound(payload) {
+  return ninaRequest('/internal/company-whatsapp/inbound', payload)
+}
+export async function activeCompanyWorkspaces() {
+  return (await ninaRequest('/internal/company-whatsapp/active', {})).workspace_ids || []
+}

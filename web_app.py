@@ -47,6 +47,22 @@ from ninaos_number import (
     send_reply as send_ninaos_number_reply,
     verify_signature as verify_ninaos_number_signature,
     verify_token as verify_ninaos_number_token,
+    resolve_channel_identity as resolve_ninaos_channel_identity,
+)
+from company_whatsapp import (
+    CHANNEL as COMPANY_WHATSAPP_CHANNEL,
+    accept_inbound as accept_company_whatsapp_inbound,
+    configured_number as configured_company_whatsapp_number,
+    configured_workspace as configured_company_whatsapp_workspace,
+    create_pairing_session as create_company_whatsapp_pairing,
+    delete_auth_record as delete_company_whatsapp_auth,
+    disconnect_company as disconnect_company_whatsapp,
+    list_connected_workspaces as list_connected_company_whatsapp_workspaces,
+    load_auth_records as load_company_whatsapp_auth,
+    mark_connected as mark_company_whatsapp_connected,
+    pairing_is_active as company_whatsapp_pairing_is_active,
+    sender_digits as company_whatsapp_sender_digits,
+    store_auth_record as store_company_whatsapp_auth,
 )
 
 logger = logging.getLogger(__name__)
@@ -5214,6 +5230,13 @@ def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
     telegram = get_connection(NINA_WEB_WORKSPACE_ID, "telegram")
     whatsapp = get_connection(NINA_WEB_WORKSPACE_ID, "whatsapp")
     personal = get_connection(workspace_id, PERSONAL_WHATSAPP_CHANNEL)
+    try:
+        company_workspace = configured_company_whatsapp_workspace()
+        company_number = configured_company_whatsapp_number()
+        company = get_connection(company_workspace, COMPANY_WHATSAPP_CHANNEL)
+    except ValueError:
+        company_workspace, company_number = "ninaos_company", ""
+        company = {"status": "error", "metadata": {}}
     tmeta, wmeta = telegram["metadata"], whatsapp["metadata"]
     refresh_label = {"en": "Refresh status", "lv": "Atjaunot statusu", "ru": "Обновить статус"}[lang]
     status_label = {"connected": c["connected"], "pending": c["pending"], "error": c["error"], "disconnected": c["disconnected"]}
@@ -5264,12 +5287,32 @@ def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
     else:
         label = pc["reconnect"] if pstatus == "error" else pc["connect"]
         personal_body = f"<form method='post' action='/channels/whatsapp-personal/connect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_personal_connect')}'><button class='btn primary' type='submit'>{html_escape(label)}</button></form><div class='safe-note'>{html_escape(pc['privacy'])}</div>"
+    cc = {
+        "en": {"title":"NinaOS Company WhatsApp","text":"Nina's official private contact for direct conversations.","connect":"Connect company phone","waiting":"Waiting for the company phone to scan the QR…","privacy":"External private conversations are isolated from one another.","not_configured":"Configure the company number before connecting."},
+        "lv": {"title":"NinaOS uzņēmuma WhatsApp","text":"Ninas oficiālais privātais kontakts tiešām sarunām.","connect":"Savienot uzņēmuma tālruni","waiting":"Gaida, kad uzņēmuma tālrunis noskenēs QR kodu…","privacy":"Ārējo cilvēku privātās sarunas ir savstarpēji nodalītas.","not_configured":"Pirms savienošanas konfigurē uzņēmuma numuru."},
+        "ru": {"title":"WhatsApp компании NinaOS","text":"Официальный личный контакт Нины для прямого общения.","connect":"Подключить телефон компании","waiting":"Ожидание сканирования QR-кода телефоном компании…","privacy":"Личные разговоры разных людей изолированы друг от друга.","not_configured":"Перед подключением настройте номер компании."},
+    }[lang]
+    company_status = company["status"]
+    company_meta = company.get("metadata") or {}
+    company_masked = str(company_meta.get("masked_identity") or "")
+    if not company_masked and company_number:
+        digits = re.sub(r"\D", "", company_number)
+        company_masked = ("*" * max(0, len(digits) - 4)) + digits[-4:]
+    if not company_number:
+        company_body = f"<div class='channel-message'>{html_escape(cc['not_configured'])}</div>"
+    elif company_status == "connected":
+        company_body = f"<div class='safe-note'>{html_escape(company_masked)}</div><div class='channel-message'>{html_escape(cc['privacy'])}</div><form method='post' action='/channels/whatsapp-company/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_company_disconnect')}'><button class='btn' type='submit'>{c['disconnect']}</button></form>"
+    elif company_status == "pending":
+        company_body = f"<div id='company-whatsapp-qr' class='qr-shell' hidden></div><div id='company-whatsapp-state' class='channel-message'>{html_escape(cc['waiting'])}</div><form method='post' action='/channels/whatsapp-company/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_company_disconnect')}'><button class='btn' type='submit'>{c['cancel']}</button></form>"
+    else:
+        company_body = f"<form method='post' action='/channels/whatsapp-company/connect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_company_connect')}'><button class='btn primary' type='submit'>{html_escape(cc['connect'])}</button></form><div class='safe-note'>{html_escape(cc['privacy'])}</div>"
     notice_text = c.get(notice, notice)
     notice_html = f"<div class='channel-message'>{html_escape(notice_text)}</div>" if notice else ""
     return (
         "<style>@media(max-width:640px){.sidebar{padding-bottom:14px}.brand{margin-bottom:14px}.nav{flex-direction:row;overflow-x:auto;padding-bottom:6px}.nav-item{flex:0 0 auto}.user{display:none}}</style>"
         f"<div class='page-title'><h1>{c['title']}</h1><p>{c['sub']}</p></div><br>{notice_html}"
         f"{nina_contact_html(lang)}<div class='channels-grid'>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>{html_escape(cc['title'])}</h2><span class='connection-status {company_status}'>{status_label[company_status]}</span></div><p class='muted'>{html_escape(cc['text'])}</p>{company_body}</section>"
         f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Web</h2><span class='connection-status active'>{c['active']}</span></div><p class='muted'>{c['web_text']}</p></section>"
         f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Telegram</h2><span class='connection-status {telegram['status']}'>{status_label[telegram['status']]}</span></div><p class='muted'>{c['telegram_text']}</p><div><b>@{html_escape(bot_username)}</b></div>{linked_account}<div class='connection-actions'>{telegram_action}</div></section>"
         f"<section class='card card-pad connection-card whatsapp-stack'><div class='connection-head'><h2>WhatsApp</h2></div><div class='whatsapp-products'><div class='whatsapp-product'><div class='connection-head'><h3>{html_escape(pc['title'])}</h3><span class='connection-status {pstatus}'>{status_label[pstatus]}</span></div><p class='muted'>{html_escape(pc['text'])}</p>{personal_body}</div><div class='whatsapp-product'><div class='connection-head'><h3>{html_escape(pc['business'])}</h3><span class='connection-status {whatsapp['status']}'>{status_label[whatsapp['status']]}</span></div><p class='muted'>{html_escape(pc['business_text'])}</p>{whatsapp_help}{whatsapp_error_html}{whatsapp_identity_html}<div class='connection-actions'>{whatsapp_action}</div></div></div></section>"
@@ -5279,6 +5322,7 @@ def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
         f"<script>window.NinaWhatsApp={{startCsrf:{json.dumps(_channel_csrf('whatsapp_start'))},callbackCsrf:{json.dumps(_channel_csrf('whatsapp_callback'))},lang:{json.dumps(lang)}}};</script>"
         "<script>" + _whatsapp_connect_script() + "</script>"
         "<script>(()=>{const q=document.getElementById('personal-whatsapp-qr'),s=document.getElementById('personal-whatsapp-state');if(!q||!s)return;const poll=async()=>{try{const r=await fetch('/channels/whatsapp-personal/status',{cache:'no-store'}),d=await r.json();if(d.status==='connected'){location.reload();return}if(d.qr_svg){q.innerHTML=d.qr_svg;q.hidden=false}if(d.status==='connection_lost'||d.status==='logged_out'){s.textContent=" + json.dumps(pc["lost"]) + ";s.classList.add('connection-lost');return}}catch(_){}setTimeout(poll,2000)};poll()})()</script>"
+        "<script>(()=>{const q=document.getElementById('company-whatsapp-qr'),s=document.getElementById('company-whatsapp-state');if(!q||!s)return;const poll=async()=>{try{const r=await fetch('/channels/whatsapp-company/status',{cache:'no-store'}),d=await r.json();if(d.status==='connected'){location.reload();return}if(d.qr_svg){q.innerHTML=d.qr_svg;q.hidden=false}if(d.status==='connection_lost'||d.status==='logged_out'){s.textContent='Connection lost';s.classList.add('connection-lost');return}}catch(_){}setTimeout(poll,2000)};poll()})()</script>"
     )
 
 
@@ -5435,6 +5479,57 @@ def channels_personal_whatsapp_disconnect():
     return redirect(q("/channels"))
 
 
+@app.post("/channels/whatsapp-company/connect")
+def channels_company_whatsapp_connect():
+    if not _valid_channel_csrf("whatsapp_company_connect"):
+        return Response("Invalid request", status=400)
+    try:
+        workspace_id = configured_company_whatsapp_workspace()
+        if not configured_company_whatsapp_number():
+            raise ValueError("company_number_missing")
+        pairing = create_company_whatsapp_pairing(workspace_id)
+        personal_whatsapp_bridge_request("/v1/company/sessions", {"workspace_id": workspace_id, "session_token": pairing["session_token"]})
+    except Exception:
+        logger.warning("Company WhatsApp pairing could not start")
+        try:
+            set_connection_for_test(configured_company_whatsapp_workspace(), COMPANY_WHATSAPP_CHANNEL, "error", {"error_code": "bridge_unavailable"})
+        except ValueError:
+            pass
+    return redirect(q("/channels"))
+
+
+@app.get("/channels/whatsapp-company/status")
+def channels_company_whatsapp_status():
+    workspace_id = configured_company_whatsapp_workspace()
+    connection = get_connection(workspace_id, COMPANY_WHATSAPP_CHANNEL)
+    if connection["status"] == "connected":
+        return jsonify({"status": "connected"})
+    if connection["status"] == "pending" and not company_whatsapp_pairing_is_active(workspace_id):
+        set_connection_for_test(workspace_id, COMPANY_WHATSAPP_CHANNEL, "error", {"error_code": "pairing_expired"})
+        return jsonify({"status": "connection_lost", "qr_svg": ""})
+    try:
+        state = personal_whatsapp_bridge_request("/v1/company/status", {"workspace_id": workspace_id})
+    except Exception:
+        return jsonify({"status": connection["status"], "qr_svg": ""})
+    svg = str(state.get("qr_svg") or "")
+    if len(svg) > 250000 or not svg.lstrip().startswith("<svg") or "<script" in svg.lower() or "onload=" in svg.lower():
+        svg = ""
+    return jsonify({"status": str(state.get("status") or connection["status"]), "qr_svg": svg})
+
+
+@app.post("/channels/whatsapp-company/disconnect")
+def channels_company_whatsapp_disconnect():
+    if not _valid_channel_csrf("whatsapp_company_disconnect"):
+        return Response("Invalid request", status=400)
+    workspace_id = configured_company_whatsapp_workspace()
+    try:
+        personal_whatsapp_bridge_request("/v1/company/disconnect", {"workspace_id": workspace_id})
+    except Exception:
+        logger.warning("Company WhatsApp bridge logout unavailable")
+    disconnect_company_whatsapp(workspace_id)
+    return redirect(q("/channels"))
+
+
 def _bridge_json():
     if not authorize_bridge(request.headers.get("Authorization")):
         return None
@@ -5490,6 +5585,80 @@ def internal_personal_whatsapp_inbound():
     allowed = accept_personal_whatsapp_inbound(workspace_id, payload.get("message_id"), str(payload.get("chat_jid") or ""), payload.get("text"), bool(payload.get("is_group")))
     if not allowed: return jsonify({"ok": True, "accepted": False, "reply": ""})
     result = send_message_to_nina(str(payload.get("text") or ""), workspace_id=workspace_id, channel=PERSONAL_WHATSAPP_CHANNEL)
+    return jsonify({"ok": True, "accepted": True, "reply": str(result.get("text") or "")})
+
+
+@app.post("/internal/company-whatsapp/auth/load")
+def internal_company_whatsapp_auth_load():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    workspace_id = str(payload.get("workspace_id") or "")
+    try:
+        if workspace_id != configured_company_whatsapp_workspace():
+            raise ValueError("invalid_workspace")
+        records = load_company_whatsapp_auth(workspace_id)
+    except ValueError:
+        return jsonify({"ok": False}), 400
+    return jsonify({"ok": True, "records": records})
+
+
+@app.post("/internal/company-whatsapp/auth/store")
+def internal_company_whatsapp_auth_store():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    workspace_id, records = str(payload.get("workspace_id") or ""), payload.get("records")
+    if workspace_id != configured_company_whatsapp_workspace() or not isinstance(records, dict) or len(records) > 1000:
+        return jsonify({"ok": False}), 400
+    try:
+        for key, value in records.items():
+            if value is None:
+                delete_company_whatsapp_auth(workspace_id, key)
+            elif len(json.dumps(value)) <= 1024 * 1024:
+                store_company_whatsapp_auth(workspace_id, key, value)
+            else:
+                return jsonify({"ok": False}), 413
+    except ValueError:
+        return jsonify({"ok": False}), 400
+    return jsonify({"ok": True})
+
+
+@app.post("/internal/company-whatsapp/active")
+def internal_company_whatsapp_active():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    return jsonify({"ok": True, "workspace_ids": list_connected_company_whatsapp_workspaces()})
+
+
+@app.post("/internal/company-whatsapp/linked")
+def internal_company_whatsapp_linked():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    connected = mark_company_whatsapp_connected(str(payload.get("workspace_id") or ""), payload.get("session_token"), payload.get("identity"))
+    return jsonify({"ok": bool(connected)}), (200 if connected else 409)
+
+
+@app.post("/internal/company-whatsapp/inbound")
+def internal_company_whatsapp_inbound():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    workspace_id = str(payload.get("workspace_id") or "")
+    sender_jid = str(payload.get("sender_jid") or "")
+    text = str(payload.get("text") or "")
+    if not accept_company_whatsapp_inbound(workspace_id, payload.get("message_id"), sender_jid, text):
+        return jsonify({"ok": True, "accepted": False, "reply": ""})
+    sender = company_whatsapp_sender_digits(sender_jid)
+    identity = resolve_ninaos_channel_identity(COMPANY_WHATSAPP_CHANNEL, workspace_id, sender)
+    result = send_message_to_nina(
+        text,
+        workspace_id=identity["workspace_id"],
+        channel=COMPANY_WHATSAPP_CHANNEL,
+        conversation_id=identity["conversation_id"],
+    )
     return jsonify({"ok": True, "accepted": True, "reply": str(result.get("text") or "")})
 
 

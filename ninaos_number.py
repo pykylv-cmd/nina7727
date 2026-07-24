@@ -76,11 +76,35 @@ def configured_numbers():
 def primary_number(region=""):
     numbers = configured_numbers()
     requested = str(region or "").strip().upper()
+    company = company_bridge_number()
+    if company and (not requested or company["region"] == requested):
+        return company
     if requested:
         regional = [item for item in numbers if item["region"] == requested]
         if regional:
             return next((item for item in regional if item["primary"]), regional[0])
     return next((item for item in numbers if item["primary"]), numbers[0] if numbers else None)
+
+
+def company_bridge_number():
+    display_number = (os.environ.get("NINA_COMPANY_WHATSAPP_NUMBER") or "").replace(" ", "").strip()
+    if not display_number:
+        return None
+    workspace_id = (os.environ.get("NINA_COMPANY_WHATSAPP_WORKSPACE") or "ninaos_company").strip()
+    region = (os.environ.get("NINA_COMPANY_WHATSAPP_REGION") or "LV").strip().upper()
+    name = (os.environ.get("NINA_COMPANY_WHATSAPP_NAME") or "Nina").strip()[:80]
+    if not _E164.fullmatch(display_number) or not _WORKSPACE.fullmatch(workspace_id) or not re.fullmatch(r"[A-Z]{2,8}", region):
+        raise ValueError("invalid_ninaos_company_number_config")
+    return {
+        "key": f"company-{region.lower()}",
+        "display_number": display_number,
+        "phone_number_id": "",
+        "workspace_id": workspace_id,
+        "region": region,
+        "name": name,
+        "primary": True,
+        "transport": "company_bridge",
+    }
 
 
 def number_for_phone_id(phone_number_id):
@@ -105,21 +129,25 @@ def public_contact(number):
     }
 
 
-def _sender_digest(number, sender):
+def resolve_channel_identity(channel_key, workspace_id, sender):
     clean_sender = str(sender or "").strip()
     if not re.fullmatch(r"[0-9]{6,20}", clean_sender):
         raise ValueError("invalid_sender")
-    material = f"{number['key']}:{number['phone_number_id']}:{clean_sender}".encode()
-    return hmac.new(_identity_secret(), material, hashlib.sha256).hexdigest()[:32]
+    clean_channel = str(channel_key or "").strip()
+    clean_workspace = str(workspace_id or "").strip()
+    if not _SAFE_ID.fullmatch(clean_channel) or not _WORKSPACE.fullmatch(clean_workspace):
+        raise ValueError("invalid_identity_scope")
+    material = f"{clean_channel}:{clean_workspace}:{clean_sender}".encode()
+    digest = hmac.new(_identity_secret(), material, hashlib.sha256).hexdigest()[:32]
+    return {
+        "workspace_id": f"{clean_workspace}.contact.{digest}",
+        "conversation_id": f"{clean_channel}:{digest}",
+        "contact_id": f"contact_{digest}",
+    }
 
 
 def resolve_sender_identity(number, sender):
-    digest = _sender_digest(number, sender)
-    return {
-        "workspace_id": f"{number['workspace_id']}.contact.{digest}",
-        "conversation_id": f"{CHANNEL}:{number['key']}:{digest}",
-        "contact_id": f"contact_{digest}",
-    }
+    return resolve_channel_identity(f"{CHANNEL}.{number['key']}", number["workspace_id"], sender)
 
 
 def verify_token(mode, supplied):
