@@ -580,6 +580,12 @@ def classify_canonical_work_object_type(raw_text="", title="", metadata=None, de
     legacy = metadata.get("legacy_task")
     legacy_text = " " .join(str(v) for v in legacy.values() if v not in (None, "")) if isinstance(legacy, dict) else str(legacy or "")
     text = " ".join([str(raw_text or ""), str(title or ""), str(metadata.get("raw_text") or ""), legacy_text]).lower()
+    try:
+        from task_engine import detect_task
+        if detect_task(raw_text or metadata.get("raw_text") or title):
+            return "task"
+    except Exception:
+        pass
     if any(x in text for x in ("rēķin", "rekin", "invoice", "apmaks")):
         return "invoice"
     if any(x in text for x in ("piedāvājum", "piedavajum", "tāme", "tame", "estimate", "quote", "quotation")):

@@ -9,6 +9,8 @@ V1.2:
 - saglabā statusus: open / completed
 """
 
+import re
+
 TASK_ENGINE_VERSION = "Task Engine V1.2"
 
 
@@ -75,6 +77,7 @@ def detect_task(text):
     if "?" in lower and not lower.startswith(("vai vari", "vari", "palīdzi", "palidzi")):
         return None
 
+    explicit_task = _explicit_task_command(raw)
     task_markers = [
         "jāizdara", "jaizdara",
         "jāpabeidz", "japabeidz",
@@ -91,7 +94,7 @@ def detect_task(text):
         "uzdevums:",
     ]
 
-    if not _contains_any(lower, task_markers):
+    if not explicit_task and not _contains_any(lower, task_markers):
         return None
 
     deadline = detect_deadline(raw)
@@ -117,6 +120,17 @@ def build_task_title(text):
     raw = _clean(text)
     lower = raw.lower()
 
+    explicit = _explicit_task_command(raw)
+    if explicit:
+        title = raw[explicit.end():].strip(" :.,!")
+        title = re.sub(
+            r"^(?:rīt|rit|tomorrow|завтра)\b\s*[:,\-]?\s*",
+            "",
+            title,
+            flags=re.IGNORECASE,
+        )
+        return title.strip(" :.,!")[:120] or raw[:120]
+
     prefixes = ["uzdevums:", "mērķis:", "merkis:", "atgādini", "atgadini", "vajag"]
 
     for prefix in prefixes:
@@ -124,6 +138,26 @@ def build_task_title(text):
             return raw[len(prefix):].strip(" :.,!")[:120] or raw[:120]
 
     return raw[:120]
+
+
+def _explicit_task_command(text):
+    raw = _clean(text)
+    if not raw:
+        return None
+    patterns = (
+        r"^(?:lūdzu\s+)?izveido\s+uzdevumu\b\s*:?\s*",
+        r"^atgādini(?:\s+man)?\b\s*:?\s*",
+        r"^atgadini(?:\s+man)?\b\s*:?\s*",
+        r"^(?:please\s+)?(?:create|add|make)\s+(?:a\s+)?task\b\s*:?\s*",
+        r"^remind\s+me(?:\s+to)?\b\s*:?\s*",
+        r"^(?:пожалуйста[,.]?\s+)?(?:создай|создать|добавь)\s+задачу\b\s*:?\s*",
+        r"^напомни(?:\s+мне)?\b\s*:?\s*",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, raw, flags=re.IGNORECASE)
+        if match:
+            return match
+    return None
 
 
 def detect_client(text):
@@ -152,7 +186,7 @@ def detect_deadline(text):
 
     if any(x in lower for x in ["šodien", "sodien"]):
         return "today"
-    if any(x in lower for x in ["rīt", "rit"]):
+    if any(x in lower for x in ["rīt", "rit", "tomorrow", "завтра"]):
         return "tomorrow"
     if any(x in lower for x in ["parīt", "parit"]):
         return "day_after_tomorrow"

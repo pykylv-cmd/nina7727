@@ -77,12 +77,44 @@ def build_voice_error_answer(error_text=""):
     )
 
 
-def _safe_suffix(filename):
+def audio_suffix_for_mime(mime_type="", filename="voice.ogg"):
+    mime = str(mime_type or "").lower().split(";", 1)[0].strip()
+    mime_suffixes = {
+        "audio/aac": ".aac",
+        "audio/mp4": ".m4a",
+        "audio/mpeg": ".mp3",
+        "audio/ogg": ".ogg",
+        "audio/wav": ".wav",
+        "audio/webm": ".webm",
+        "audio/x-m4a": ".m4a",
+        "audio/x-wav": ".wav",
+        "video/webm": ".webm",
+    }
+    if mime in mime_suffixes:
+        return mime_suffixes[mime]
     name = (filename or "voice.ogg").lower().strip()
-    for suffix in [".ogg", ".oga", ".opus", ".mp3", ".m4a", ".wav", ".webm", ".mp4", ".mpeg", ".mpga"]:
+    for suffix in [".ogg", ".oga", ".opus", ".mp3", ".m4a", ".wav", ".webm", ".mp4", ".mpeg", ".mpga", ".aac"]:
         if name.endswith(suffix):
             return suffix
     return ".ogg"
+
+
+def _safe_suffix(filename):
+    return audio_suffix_for_mime(filename=filename)
+
+
+def transcription_context_prompt(language_hint=""):
+    language_names = {"lv": "Latvian", "en": "English", "ru": "Russian"}
+    hint_name = language_names.get(str(language_hint or "").lower(), "")
+    language_note = f"Speech may primarily be in {hint_name}. " if hint_name else ""
+    return (
+        language_note
+        + "Transcribe exactly in the language or languages spoken; do not translate. "
+        + "Helpful business vocabulary: uzdevums, izveido uzdevumu, atgādini, piezvanīt, "
+        + "klients, piedāvājums, projekts, rīt, šodien; task, create task, remind me, call, "
+        + "client, offer, project, tomorrow, today; задача, создай задачу, напомни, позвонить, "
+        + "клиент, предложение, проект, завтра, сегодня."
+    )
 
 
 def _extract_text_from_result(result):
@@ -106,7 +138,16 @@ def _extract_text_from_result(result):
     return ""
 
 
-def transcribe_audio_with_openai(openai_client, audio_bytes, filename="voice.ogg"):
+def transcribe_audio_with_openai(
+    openai_client,
+    audio_bytes,
+    filename="voice.ogg",
+    language_hint="lv",
+    force_language=True,
+    model="whisper-1",
+    mime_type="",
+    context_prompt="",
+):
     """Telegram audio bytes -> teksts. Pilnā funkcija, lai app.py imports nekristu."""
     if not openai_client:
         LAST_VOICE_DEBUG["error"] = "OpenAI client nav pieejams"
@@ -117,7 +158,7 @@ def transcribe_audio_with_openai(openai_client, audio_bytes, filename="voice.ogg
         LAST_VOICE_DEBUG["error"] = "audio bytes ir tukšs"
         return ""
 
-    suffix = _safe_suffix(filename)
+    suffix = audio_suffix_for_mime(mime_type=mime_type, filename=filename)
     temp_path = ""
 
     try:
@@ -126,17 +167,24 @@ def transcribe_audio_with_openai(openai_client, audio_bytes, filename="voice.ogg
             temp_path = tmp.name
 
         with open(temp_path, "rb") as audio_file:
+            transcription_args = {
+                "model": model,
+                "file": audio_file,
+                "response_format": "text",
+            }
+            if language_hint and force_language:
+                transcription_args["language"] = language_hint
+            prompt = str(context_prompt or "").strip()
+            if prompt:
+                transcription_args["prompt"] = prompt
+            elif language_hint and not force_language:
+                transcription_args["prompt"] = transcription_context_prompt(language_hint)
             try:
-                result = openai_client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    response_format="text",
-                    language="lv",
-                )
+                result = openai_client.audio.transcriptions.create(**transcription_args)
             except TypeError:
                 audio_file.seek(0)
                 result = openai_client.audio.transcriptions.create(
-                    model="whisper-1",
+                    model=model,
                     file=audio_file,
                 )
 

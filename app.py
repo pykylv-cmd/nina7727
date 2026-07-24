@@ -23,6 +23,8 @@ from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 from openai import OpenAI
+from nina_identity import NINA_PROMPT as SHARED_NINA_PROMPT
+from channel_connections import consume_telegram_token, is_telegram_connection_token
 
 # ONE NINA Canonical Channel Content + Document Work Intake V1
 # V117.8: channel-content and document-action imports are isolated.
@@ -11098,25 +11100,7 @@ def admin_revenue_forecast(user_id, command_text="revenue forecast"):
     )
 
 
-NINA_PROMPT = """
-Tu esi Nina 7727.
-
-Tu esi silta, gudra, interesanta un dabiska sarunu biedrene.
-Tu neesi parasts bots. Tu esi sajūta, pie kuras cilvēkam gribas atgriezties.
-
-Noteikumi:
-- Vienmēr runā latviešu valodā.
-- Nerunā kā robots vai klientu atbalsts.
-- Neatkārto "Sveiks!" katrā atbildē.
-- Neizdomā faktus par lietotāju.
-- Ja runā par lietotāju, balsties tikai uz profilu, ilgtermiņa kopsavilkumu un sarunas vēsturi.
-- Ja profilā ir mērķi/projekti/sapņi, vari tos dabiski izmantot sarunā.
-- Neatkārto visu profilu katrā atbildē.
-- Atbildi īsi, dzīvi, sirsnīgi.
-- Ja cilvēkam ir stress, nomierini.
-- Vari būt viegli asprātīga un silta.
-- Tavs mērķis: lai cilvēkam pēc sarunas ar tevi kļūst vieglāk.
-"""
+NINA_PROMPT = SHARED_NINA_PROMPT
 
 
 COMMAND_LINES = {
@@ -12366,13 +12350,37 @@ def nina_launch_invite_text(user_id):
     )
 
 
+def telegram_workspace_connection_answer(payload, update):
+    """Handle only high-confidence NinaOS connection payloads.
+
+    Returning None delegates unchanged to the existing referral/default start flow.
+    """
+    if not is_telegram_connection_token(payload):
+        return None
+    user = getattr(update, "effective_user", None)
+    chat = getattr(update, "effective_chat", None)
+    linked = consume_telegram_token(
+        payload,
+        telegram_user_id=getattr(user, "id", ""),
+        telegram_username=getattr(user, "username", "") or "",
+        telegram_chat_id=getattr(chat, "id", ""),
+        telegram_display_name=getattr(user, "full_name", "") or "",
+    )
+    if linked:
+        return "Telegram ir veiksmīgi savienots ar tavu NinaOS darba vidi. ✅"
+    return "Šī savienošanas saite nav derīga vai ir beigusies. Izveido jaunu savienojumu NinaOS Web sadaļā Kanāli."
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """V12.6: pirmais iespaids + referral capture."""
     user_id = str(update.effective_user.id)
     args = context.args or []
     referral_code = args[0].strip() if args else ""
 
-    if referral_code and re.fullmatch(r"NINA-\d{4,}", referral_code):
+    connection_answer = telegram_workspace_connection_answer(referral_code, update)
+    if connection_answer is not None:
+        answer = connection_answer
+    elif referral_code and re.fullmatch(r"NINA-\d{4,}", referral_code):
         answer = referral_capture_welcome_answer(user_id, referral_code)
         answer += (
             "\n\n"

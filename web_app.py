@@ -3,10 +3,69 @@
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
+import json
+import logging
 import os
+import hashlib
+import hmac
+import secrets
+import re
 from datetime import datetime
 from urllib.parse import quote_plus, unquote_plus
-from flask import Flask, Response, redirect, request
+from flask import Flask, Response, g, has_request_context, jsonify, redirect, request
+from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, load_web_conversation, send_message_to_nina
+from voice_engine import transcribe_audio_with_openai
+from channel_connections import claim_channel_message, consume_whatsapp_onboarding_state, create_telegram_token, create_whatsapp_onboarding_state, disconnect as disconnect_channel, get_connection, set_connection_for_test, update_whatsapp_verification
+from whatsapp_channel import (
+    WhatsAppProviderError,
+    complete_embedded_signup,
+    embedded_signup_public_config,
+    parse_inbound_text,
+    resolve_webhook_verification,
+    resolve_workspace_for_phone_number,
+    send_whatsapp_message,
+    verify_webhook_signature,
+)
+from personal_whatsapp import (
+    CHANNEL as PERSONAL_WHATSAPP_CHANNEL, accept_inbound as accept_personal_whatsapp_inbound,
+    authorize_bridge, bridge_request as personal_whatsapp_bridge_request,
+    create_pairing_session as create_personal_whatsapp_pairing,
+    delete_auth_record as delete_personal_whatsapp_auth,
+    disconnect_personal as disconnect_personal_whatsapp,
+    load_auth_records as load_personal_whatsapp_auth,
+    list_connected_workspaces as list_connected_personal_whatsapp_workspaces,
+    mark_connected as mark_personal_whatsapp_connected,
+    pairing_is_active as personal_whatsapp_pairing_is_active,
+    store_auth_record as store_personal_whatsapp_auth,
+)
+from ninaos_number import (
+    CHANNEL as NINAOS_NUMBER_CHANNEL,
+    number_for_phone_id as ninaos_number_for_phone_id,
+    primary_number as primary_ninaos_number,
+    public_contact as public_ninaos_contact,
+    resolve_sender_identity as resolve_ninaos_sender_identity,
+    send_reply as send_ninaos_number_reply,
+    verify_signature as verify_ninaos_number_signature,
+    verify_token as verify_ninaos_number_token,
+    resolve_channel_identity as resolve_ninaos_channel_identity,
+)
+from company_whatsapp import (
+    CHANNEL as COMPANY_WHATSAPP_CHANNEL,
+    accept_inbound as accept_company_whatsapp_inbound,
+    configured_number as configured_company_whatsapp_number,
+    configured_workspace as configured_company_whatsapp_workspace,
+    create_pairing_session as create_company_whatsapp_pairing,
+    delete_auth_record as delete_company_whatsapp_auth,
+    disconnect_company as disconnect_company_whatsapp,
+    list_connected_workspaces as list_connected_company_whatsapp_workspaces,
+    load_auth_records as load_company_whatsapp_auth,
+    mark_connected as mark_company_whatsapp_connected,
+    pairing_is_active as company_whatsapp_pairing_is_active,
+    sender_digits as company_whatsapp_sender_digits,
+    store_auth_record as store_company_whatsapp_auth,
+)
+
+logger = logging.getLogger(__name__)
 
 # ONE NINA V51.3 — shared canonical Work Object read bridge.
 # Web does not classify Telegram text here. It reads the same persistent
@@ -64,6 +123,15 @@ except Exception as e:
 
 WEB_APP_VERSION = "Web App V51.8.1 — ONE NINA Estimate Approval V1 Release-Safe"
 app = Flask(__name__)
+_CHANNEL_CSRF_SECRET = secrets.token_bytes(32)
+_WORKSPACE_COOKIE = "nina_workspace"
+_WORKSPACE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
+WEB_VOICE_MAX_BYTES = 10 * 1024 * 1024
+WEB_VOICE_TRANSCRIPTION_MODEL = "gpt-4o-transcribe"
+WEB_VOICE_MIME_TYPES = {
+    "audio/aac", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav",
+    "audio/webm", "audio/x-m4a", "audio/x-wav", "video/webm",
+}
 
 # V47.1 safe workspace-object surface polish.
 # This writes only safe web workspace-object snapshots into memory_backups and does NOT touch Telegram app.py.
@@ -574,6 +642,7 @@ def q(path):
 def tx(key, lang=None):
     lang = lang or current_language()
     d = {
+        "talk_to_nina": {"en": "Talk to Nina", "lv": "Runā ar Ninu", "ru": "Поговорить с Ниной"},
         "search": {"en": "Search anything...", "lv": "Meklēt jebko...", "ru": "Искать..."},
         "dashboard": {"en": "Dashboard", "lv": "Panelis", "ru": "Панель"},
         "workers": {"en": "Workers", "lv": "Darbinieki", "ru": "Работники"},
@@ -4001,15 +4070,21 @@ def nina_logo_html(size="small"):
 
 def css():
     return """
+.chat-layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:18px}.chat-shell{height:calc(100vh - 130px);min-height:520px;max-height:820px;display:flex;flex-direction:column;overflow:hidden}.chat-head{display:flex;align-items:center;gap:14px;padding-bottom:18px;border-bottom:1px solid var(--line2);flex:0 0 auto}.chat-stream{display:flex;flex:1 1 auto;flex-direction:column;gap:14px;min-height:0;overflow-y:auto;padding:22px 4px}.chat-message{max-width:78%;padding:14px 17px;border-radius:18px;line-height:1.55;white-space:pre-wrap}.chat-message.user{align-self:flex-end;background:linear-gradient(135deg,#187fff,#6544ff)}.chat-message.nina{align-self:flex-start;background:rgba(255,255,255,.07);border:1px solid var(--line)}.chat-message small{display:block;margin-top:7px;color:#bfd0ef}.chat-compose{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px;flex:0 0 auto;margin-top:0;padding-top:16px;border-top:1px solid var(--line2);background:rgba(9,12,24,.96)}.chat-input{min-width:0}.chat-compose textarea{width:100%;min-width:0;min-height:72px;max-height:160px;resize:vertical;border:1px solid var(--line);border-radius:16px;background:rgba(5,9,20,.62);color:var(--text);padding:15px;font:inherit}.chat-compose .form-actions{margin:0;flex-wrap:nowrap}.chat-compose .btn{min-width:96px;min-height:48px}.voice-btn{min-width:52px!important;font-size:20px;cursor:pointer}.voice-btn[hidden]{display:none!important}.voice-btn.recording{background:#d83b58;border-color:#ff7890}.voice-status{min-height:18px;margin-top:6px;color:var(--muted);font-size:12px;font-weight:800}.voice-status[data-state=recording]{color:#ff9aad}.voice-status[data-state=processing]{color:#8fe7ff}.voice-status[data-state=error]{color:#ffb08f}.channel-card{display:flex;justify-content:space-between;gap:10px;padding:14px 0;border-bottom:1px solid var(--line2)}.channel-card:last-child{border-bottom:0}.channel-state{font-size:12px;font-weight:950;color:var(--green)}.channel-state.next{color:#ffd057}@media(max-width:1100px){.chat-layout{grid-template-columns:1fr}.chat-shell{height:min(720px,calc(100vh - 40px));min-height:500px}}@media(max-width:640px){.chat-message{max-width:92%}.chat-shell{height:auto;min-height:520px;max-height:none}.chat-stream{min-height:260px;max-height:48vh}.chat-compose{grid-template-columns:1fr}.chat-compose .form-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));flex-wrap:wrap}.chat-compose .btn{width:100%;min-width:0}}
 :root{--line:rgba(120,153,255,.26);--line2:rgba(255,255,255,.08);--text:#f8fbff;--muted:#a8b7d4;--green:#34e6a4;--shadow:0 30px 100px rgba(0,0,0,.36)}*{box-sizing:border-box}body{margin:0;min-height:100vh;color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif;background:radial-gradient(circle at 13% 14%,rgba(30,105,255,.20),transparent 25%),radial-gradient(circle at 80% 12%,rgba(80,70,255,.20),transparent 28%),linear-gradient(135deg,#080910 0%,#0a0d19 48%,#05060b 100%)}body:before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(rgba(255,255,255,.026) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.021) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(to bottom,rgba(0,0,0,.5),transparent 70%)}a{color:inherit;text-decoration:none}.layout{display:grid;grid-template-columns:210px 1fr;min-height:100vh}.sidebar{position:sticky;top:0;height:100vh;padding:22px 14px;background:radial-gradient(circle at 28px 28px,rgba(44,142,255,.24),transparent 75px),linear-gradient(180deg,rgba(18,22,37,.86),rgba(8,9,15,.83));border-right:1px solid var(--line2);backdrop-filter:blur(16px)}.brand{display:flex;align-items:center;gap:10px;margin:0 6px 28px;font-weight:950}.brand-word span:last-child{color:#2a91ff}
 .nina-logo{position:relative;border-radius:50%;overflow:hidden;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.9),transparent 5%),radial-gradient(circle at 65% 25%,rgba(84,232,255,.9),transparent 10%),radial-gradient(circle at 50% 50%,#1de0ff 0%,#2358ff 38%,#7f45ff 72%,#11152a 100%);box-shadow:0 0 24px rgba(49,140,255,.52),inset 0 0 30px rgba(255,255,255,.12)}.nina-logo.small{width:34px;height:34px}.nina-logo.hero{width:156px;height:156px;flex:0 0 156px}.dot-grid{position:absolute;inset:0;background:radial-gradient(circle,rgba(255,255,255,.86) 0 2px,transparent 2.8px);background-size:16px 16px;transform:rotate(-18deg) scale(1.1);opacity:.58;mask-image:radial-gradient(circle,#000 62%,transparent 70%)}.orbit{position:absolute;left:-22%;right:-22%;top:44%;height:2px;background:rgba(255,255,255,.45);border-radius:999px;transform:rotate(-16deg);box-shadow:0 0 14px rgba(90,190,255,.8)}.orbit-b{transform:rotate(28deg);opacity:.28;top:54%}.nav{display:flex;flex-direction:column;gap:7px}.nav-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:13px;color:#dce7ff;font-size:14px;border:1px solid transparent}.nav-item:hover{background:rgba(255,255,255,.06)}.nav-item.active{background:linear-gradient(90deg,rgba(28,128,255,.95),rgba(90,63,255,.86));color:#fff;box-shadow:0 14px 32px rgba(23,109,255,.23)}.new{margin-left:auto;font-size:10px;padding:2px 7px;border-radius:999px;background:#5638ff}.user{position:absolute;bottom:18px;left:14px;right:14px;border:1px solid var(--line);background:rgba(255,255,255,.045);border-radius:16px;padding:12px;color:var(--muted);font-size:13px}.user b{color:#fff}
-.main{padding:22px 26px 40px;max-width:1460px;width:100%;margin:0 auto}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.search{width:min(520px,55vw);border:1px solid var(--line);border-radius:18px;padding:14px 18px;color:var(--muted);background:rgba(16,24,45,.72);box-shadow:inset 0 0 0 1px rgba(255,255,255,.03),0 12px 34px rgba(0,0,0,.18)}.icons{display:flex;gap:10px;align-items:center}.icon{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.10)}.avatar{background:linear-gradient(135deg,#7c43ff,#dc42ff);font-weight:950}.lang-switch{display:flex;gap:6px}.lang-switch a{font-size:12px;font-weight:950;padding:8px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.06);color:#dbe8ff}.lang-switch a.active{background:linear-gradient(90deg,#168dff,#6443ff);color:#fff}.grid{display:grid;gap:18px}.hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:18px}.card{background:linear-gradient(180deg,rgba(26,36,68,.72),rgba(9,12,24,.70)),radial-gradient(circle at 25% 15%,rgba(40,140,255,.12),transparent 38%);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}.card-pad{padding:24px}.hero-card{min-height:390px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}.hero-lockup{display:flex;align-items:center;justify-content:center;gap:26px}.hero-title{font-size:78px;line-height:.9;font-weight:1000;letter-spacing:-5px;text-shadow:0 10px 40px rgba(0,0,0,.5)}.hero-title span{color:#2493ff}.subtitle{color:#dbe8ff;font-weight:900;letter-spacing:2px;font-size:13px;margin-top:10px}.bigline{margin-top:34px;font-size:25px;line-height:1.35;font-weight:950}.trust{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:24px}.trust span{font-size:12px;font-weight:900;padding:7px 12px;border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:999px}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.kpi{display:block;padding:18px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.025));border-radius:18px;min-height:118px}.kpi small{color:#dbe7ff;font-weight:900}.kpi strong{display:block;font-size:38px;margin:9px 0 2px}.kpi em{color:#71e9ff;font-style:normal;font-size:13px;font-weight:900}.page-title h1{margin:0;font-size:42px;letter-spacing:-1.8px;line-height:1}.page-title p{margin:8px 0 0;color:#c3d4f5;font-weight:800}.section-title{font-size:21px;font-weight:1000;margin:6px 0 13px}.worker-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:16px}.worker-card{overflow:hidden;border-radius:20px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(28,35,60,.78),rgba(9,12,24,.78));min-height:248px;box-shadow:0 20px 55px rgba(0,0,0,.22)}.worker-top{height:112px;display:grid;place-items:center;position:relative;overflow:hidden}.worker-top:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(110deg,rgba(255,255,255,.10) 0 2px,transparent 2px 10px);opacity:.35}.tone-purple{background:linear-gradient(135deg,#4830d8,#6322b7)}.tone-blue{background:linear-gradient(135deg,#058aff,#053c8c)}.tone-green{background:linear-gradient(135deg,#02b973,#095a3b)}.tone-orange{background:linear-gradient(135deg,#d47418,#56321c)}.worker-avatar{position:relative;z-index:1;width:82px;height:82px;border-radius:50%;background:radial-gradient(circle at 36% 30%,#ffe8c8 0 16%,transparent 17%),radial-gradient(circle at 53% 65%,#ffdba8 0 23%,transparent 24%),radial-gradient(circle at 46% 45%,#ef973a 0 45%,#5d3928 46% 62%,#f6c58b 63% 100%);box-shadow:0 16px 34px rgba(0,0,0,.32)}.worker-body{padding:16px}.worker-body h3{margin:0 0 4px;font-size:20px;line-height:1.02}.muted{color:var(--muted)}.status{font-weight:950;font-size:12px;margin:10px 0}.active-dot{color:var(--green)}.idle-dot{color:#ffd057}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px}.list{display:flex;flex-direction:column;gap:10px}.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 15px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(90deg,rgba(28,111,255,.12),rgba(255,255,255,.035))}.row b{display:block;margin-bottom:4px}.pill{display:inline-flex;align-items:center;padding:7px 11px;border-radius:999px;background:rgba(31,124,255,.16);border:1px solid rgba(76,147,255,.32);color:#d7e8ff;font-size:12px;font-weight:950;white-space:nowrap}.btns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}.btn{display:inline-flex;align-items:center;justify-content:center;padding:13px 18px;border-radius:14px;border:1px solid var(--line);font-weight:950;background:rgba(255,255,255,.055);box-shadow:0 12px 26px rgba(0,0,0,.18)}.btn.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.footer-note{margin-top:22px;color:var(--muted);font-size:13px;text-align:center;font-weight:700}.console-nav{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}.console-nav a{padding:10px 13px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.055);font-weight:950}.console-nav a.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.metric-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.metric-mini{padding:13px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.045)}.metric-mini small{color:var(--muted);font-weight:900}.metric-mini b{display:block;font-size:24px;margin-top:4px}.panel-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:18px}.stack-grid{display:grid;gap:12px}.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field{display:flex;flex-direction:column;gap:6px}.field label{font-size:12px;font-weight:950;color:#dbe7ff}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(5,9,20,.58);color:var(--text);padding:12px 13px;font:inherit;outline:none}.field textarea{min-height:92px;resize:vertical}.form-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.preview-box{border:1px solid var(--line);border-radius:18px;background:rgba(31,124,255,.10);padding:16px;margin-bottom:16px}.preview-box b{display:block;margin-bottom:6px}.safe-note{color:#8fe7ff;font-weight:800;font-size:13px;margin-top:10px}@media(max-width:1100px){.layout{grid-template-columns:1fr}.sidebar{position:relative;height:auto}.user{position:static;margin-top:18px}.hero-grid,.two-col{grid-template-columns:1fr}.worker-grid{grid-template-columns:repeat(2,1fr)}.kpis{grid-template-columns:repeat(2,1fr)}}@media(max-width:640px){.main{padding:16px}.worker-grid,.kpis{grid-template-columns:1fr}.hero-lockup{flex-direction:column}.hero-title{font-size:56px;letter-spacing:-3px}.nina-logo.hero{width:128px;height:128px;flex-basis:128px}.search{width:58vw}}
+ .main{padding:22px 26px 40px;max-width:1460px;width:100%;margin:0 auto}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.search{width:min(520px,55vw);border:1px solid var(--line);border-radius:18px;padding:14px 18px;color:var(--muted);background:rgba(16,24,45,.72);box-shadow:inset 0 0 0 1px rgba(255,255,255,.03),0 12px 34px rgba(0,0,0,.18)}.icons{display:flex;gap:10px;align-items:center}.icon{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.10)}.avatar{background:linear-gradient(135deg,#7c43ff,#dc42ff);font-weight:950}.lang-switch{display:flex;gap:6px}.lang-switch a{font-size:12px;font-weight:950;padding:8px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.06);color:#dbe8ff}.lang-switch a.active{background:linear-gradient(90deg,#168dff,#6443ff);color:#fff}.grid{display:grid;gap:18px}.hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:18px}.card{background:linear-gradient(180deg,rgba(26,36,68,.72),rgba(9,12,24,.70)),radial-gradient(circle at 25% 15%,rgba(40,140,255,.12),transparent 38%);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}.card-pad{padding:24px}.hero-card{min-height:390px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}.hero-lockup{display:flex;align-items:center;justify-content:center;gap:26px}.hero-title{font-size:78px;line-height:.9;font-weight:1000;letter-spacing:-5px;text-shadow:0 10px 40px rgba(0,0,0,.5)}.hero-title span{color:#2493ff}.subtitle{color:#dbe8ff;font-weight:900;letter-spacing:2px;font-size:13px;margin-top:10px}.bigline{margin-top:34px;font-size:25px;line-height:1.35;font-weight:950}.trust{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:24px}.trust span{font-size:12px;font-weight:900;padding:7px 12px;border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:999px}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.kpi{display:block;padding:18px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.025));border-radius:18px;min-height:118px}.kpi small{color:#dbe7ff;font-weight:900}.kpi strong{display:block;font-size:38px;margin:9px 0 2px}.kpi em{color:#71e9ff;font-style:normal;font-size:13px;font-weight:900}.page-title h1{margin:0;font-size:42px;letter-spacing:-1.8px;line-height:1}.page-title p{margin:8px 0 0;color:#c3d4f5;font-weight:800}.section-title{font-size:21px;font-weight:1000;margin:6px 0 13px}.worker-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:16px}.worker-card{overflow:hidden;border-radius:20px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(28,35,60,.78),rgba(9,12,24,.78));min-height:248px;box-shadow:0 20px 55px rgba(0,0,0,.22)}.worker-top{height:112px;display:grid;place-items:center;position:relative;overflow:hidden}.worker-top:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(110deg,rgba(255,255,255,.10) 0 2px,transparent 2px 10px);opacity:.35}.tone-purple{background:linear-gradient(135deg,#4830d8,#6322b7)}.tone-blue{background:linear-gradient(135deg,#058aff,#053c8c)}.tone-green{background:linear-gradient(135deg,#02b973,#095a3b)}.tone-orange{background:linear-gradient(135deg,#d47418,#56321c)}.worker-avatar{position:relative;z-index:1;width:82px;height:82px;border-radius:50%;background:radial-gradient(circle at 36% 30%,#ffe8c8 0 16%,transparent 17%),radial-gradient(circle at 53% 65%,#ffdba8 0 23%,transparent 24%),radial-gradient(circle at 46% 45%,#ef973a 0 45%,#5d3928 46% 62%,#f6c58b 63% 100%);box-shadow:0 16px 34px rgba(0,0,0,.32)}.worker-body{padding:16px}.worker-body h3{margin:0 0 4px;font-size:20px;line-height:1.02}.muted{color:var(--muted)}.status{font-weight:950;font-size:12px;margin:10px 0}.active-dot{color:var(--green)}.idle-dot{color:#ffd057}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px}.list{display:flex;flex-direction:column;gap:10px}.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 15px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(90deg,rgba(28,111,255,.12),rgba(255,255,255,.035))}.row b{display:block;margin-bottom:4px}.pill{display:inline-flex;align-items:center;padding:7px 11px;border-radius:999px;background:rgba(31,124,255,.16);border:1px solid rgba(76,147,255,.32);color:#d7e8ff;font-size:12px;font-weight:950;white-space:nowrap}.btns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}.btn{display:inline-flex;align-items:center;justify-content:center;padding:13px 18px;border-radius:14px;border:1px solid var(--line);font-weight:950;background:rgba(255,255,255,.055);box-shadow:0 12px 26px rgba(0,0,0,.18)}.btn.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.footer-note{margin-top:22px;color:var(--muted);font-size:13px;text-align:center;font-weight:700}.console-nav{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}.console-nav a{padding:10px 13px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.055);font-weight:950}.console-nav a.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.metric-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.metric-mini{padding:13px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.045)}.metric-mini small{color:var(--muted);font-weight:900}.metric-mini b{display:block;font-size:24px;margin-top:4px}.panel-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:18px}.stack-grid{display:grid;gap:12px}.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field{display:flex;flex-direction:column;gap:6px}.field label{font-size:12px;font-weight:950;color:#dbe7ff}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(5,9,20,.58);color:var(--text);padding:12px 13px;font:inherit;outline:none}.field textarea{min-height:92px;resize:vertical}.form-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.preview-box{border:1px solid var(--line);border-radius:18px;background:rgba(31,124,255,.10);padding:16px;margin-bottom:16px}.preview-box b{display:block;margin-bottom:6px}.safe-note{color:#8fe7ff;font-weight:800;font-size:13px;margin-top:10px}@media(max-width:1100px){.layout{grid-template-columns:1fr}.sidebar,.main{min-width:0}.sidebar{position:relative;height:auto}.user{position:static;margin-top:18px}.hero-grid,.two-col{grid-template-columns:1fr}.worker-grid{grid-template-columns:repeat(2,1fr)}.kpis{grid-template-columns:repeat(2,1fr)}}@media(max-width:640px){.main{padding:16px}.topbar{gap:12px;flex-wrap:wrap}.search{order:2;width:100%}.icons{max-width:100%;flex-wrap:wrap}.worker-grid,.kpis{grid-template-columns:1fr}.hero-lockup{flex-direction:column}.hero-title{font-size:56px;letter-spacing:-3px}.nina-logo.hero{width:128px;height:128px;flex-basis:128px}}
+
+.channels-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.connection-card{display:flex;flex-direction:column;gap:14px;min-height:260px}.connection-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.connection-head h2{margin:0}.connection-status{padding:7px 11px;border-radius:999px;font-size:12px;font-weight:950;background:rgba(255,255,255,.07);border:1px solid var(--line)}.connection-status.connected,.connection-status.active{color:var(--green)}.connection-status.pending{color:#ffd057}.connection-status.error{color:#ff9aad}.connection-actions{margin-top:auto}.connection-actions form{display:inline-block;margin:0 8px 8px 0}.connection-actions button{cursor:pointer;color:var(--text)}.channel-form{display:grid;gap:12px}.channel-form input{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(5,9,20,.58);color:var(--text);padding:12px 13px;font:inherit}.channel-message{padding:12px 14px;border-radius:14px;background:rgba(31,124,255,.12);color:#d9eaff;font-weight:800}.whatsapp-stack{grid-column:1/-1}.whatsapp-products{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}.whatsapp-product{padding:18px;border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.035)}.whatsapp-product h3{margin:0 0 8px}.qr-shell{max-width:320px;padding:12px;background:#fff;border-radius:16px;margin:8px auto}.qr-shell svg{display:block;width:100%;height:auto}.pairing-steps{line-height:1.65}.connection-lost{color:#ff9aad}@media(max-width:640px){.channels-grid,.whatsapp-products{grid-template-columns:1fr}.connection-card{min-height:0}.whatsapp-stack{grid-column:auto}.qr-shell{max-width:280px}body.channels .sidebar{padding-bottom:14px}body.channels .brand{margin-bottom:14px}body.channels .nav{flex-direction:row;overflow-x:auto;padding-bottom:6px}body.channels .nav-item{flex:0 0 auto}body.channels .user{display:none}}
 """
 
 
 def page(title, body, active="dashboard"):
     lang = current_language()
+    channels_label = {"en": "Channels", "lv": "Kanāli", "ru": "Каналы"}[lang]
     nav = [
+        ("nina", tx("talk_to_nina", lang), "/nina", "N"),
+        ("channels", channels_label, "/channels", "◉"),
         ("dashboard", tx("dashboard", lang), "/dashboard", "⌂"),
         ("inbox", tx("inbox", lang), "/inbox", "✦"),
         ("workers", tx("workers", lang), "/workers", "♙"),
@@ -4029,7 +4104,10 @@ def page(title, body, active="dashboard"):
     def lang_link(l):
         cls = "active" if lang == l else ""
         return f'<a class="{cls}" href="?lang={l}">{l.upper()}</a>'
-    return f"""<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{html_escape(title)} · NinaOS</title><style>{css()}</style></head><body><div class="layout"><aside class="sidebar"><a href="/dashboard?lang={lang}" class="brand">{nina_logo_html("small")}<div class="brand-word"><span>Nina</span><span>OS</span></div></a><nav class="nav">{nav_html}</nav><div class="user"><b>Katrin</b><br>Owner<br><br><span class="pill">Runtime: web_app.py</span></div></aside><main class="main"><div class="topbar"><div class="search">{tx("search", lang)}</div><div class="icons"><div class="icon">🔔</div><div class="icon">🌐</div><div class="lang-switch">{lang_link("en")}{lang_link("lv")}{lang_link("ru")}</div><div class="icon">☼</div><div class="icon avatar">K</div></div></div>{body}<div class="footer-note">{WEB_APP_VERSION} · Web service separate from Telegram app.py</div></main></div></body></html>"""
+    customer_page = active in {"nina", "channels"}
+    user_status = "<span class='pill'>Web active</span>" if customer_page else "<span class='pill'>Runtime: web_app.py</span>"
+    footer = "NinaOS" if customer_page else f"{WEB_APP_VERSION} · Web service separate from Telegram app.py"
+    return f"""<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{html_escape(title)} · NinaOS</title><style>{css()}</style></head><body><div class="layout"><aside class="sidebar"><a href="/dashboard?lang={lang}" class="brand">{nina_logo_html("small")}<div class="brand-word"><span>Nina</span><span>OS</span></div></a><nav class="nav">{nav_html}</nav><div class="user"><b>Katrin</b><br>Owner<br><br>{user_status}</div></aside><main class="main"><div class="topbar"><div class="search">{tx("search", lang)}</div><div class="icons"><div class="icon">🔔</div><div class="icon">🌐</div><div class="lang-switch">{lang_link("en")}{lang_link("lv")}{lang_link("ru")}</div><div class="icon">☼</div><div class="icon avatar">K</div></div></div>{body}<div class="footer-note">{footer}</div></main></div></body></html>"""
 
 
 def kpi_card(label, value, hint):
@@ -4047,6 +4125,76 @@ def worker_card(w, marketplace=False):
 
 def activity_row(a):
     return f"<div class='row'><div><b>{html_escape(a.get('title'))}</b><span class='muted'>{html_escape(a.get('body'))}</span></div><span class='pill'>{html_escape(a.get('kind','info'))}</span></div>"
+
+
+def nina_chat_body(messages):
+    lang = current_language()
+    copy = {
+        "en": {"title": "Talk to Nina", "sub": "Ask a question, plan work, or tell Nina what needs attention.", "empty": "Start a conversation with Nina.", "placeholder": "Write a message...", "send": "Send", "channels": "Channels", "active": "Active", "connected": "Connected", "connect": "Connect", "next": "Coming next", "ready": "Ready", "recording": "Recording", "processing": "Processing", "error": "Voice input could not be processed.", "denied": "Microphone permission was denied.", "unsupported": "Voice recording is not supported in this browser.", "stop": "Stop", "cancel": "Cancel", "mic": "Start voice input"},
+        "lv": {"title": "Runā ar Ninu", "sub": "Uzdod jautājumu, plāno darbu vai pasaki, kam jāpievērš uzmanība.", "empty": "Sāc sarunu ar Ninu.", "placeholder": "Raksti ziņu...", "send": "Sūtīt", "channels": "Kanāli", "active": "Aktīvs", "connected": "Savienots", "connect": "Savienot", "next": "Drīzumā", "ready": "Gatavs", "recording": "Ieraksta", "processing": "Apstrādā", "error": "Balss ziņu neizdevās apstrādāt.", "denied": "Mikrofona atļauja tika liegta.", "unsupported": "Šī pārlūkprogramma neatbalsta balss ierakstu.", "stop": "Apturēt", "cancel": "Atcelt", "mic": "Sākt balss ievadi"},
+        "ru": {"title": "Поговорить с Ниной", "sub": "Задайте вопрос, спланируйте работу или расскажите, что требует внимания.", "empty": "Начните разговор с Ниной.", "placeholder": "Напишите сообщение...", "send": "Отправить", "channels": "Каналы", "active": "Активен", "connected": "Подключён", "connect": "Подключить", "next": "Скоро", "ready": "Готово", "recording": "Запись", "processing": "Обработка", "error": "Не удалось обработать голосовое сообщение.", "denied": "Доступ к микрофону запрещён.", "unsupported": "Этот браузер не поддерживает запись голоса.", "stop": "Стоп", "cancel": "Отмена", "mic": "Начать голосовой ввод"},
+    }[lang]
+    bubbles = ""
+    for message in messages:
+        role = "user" if message.get("role") == "user" else "nina"
+        label = "You" if role == "user" and lang == "en" else ("Tu" if role == "user" else "Nina")
+        bubbles += f"<div class='chat-message {role}'>{html_escape(message.get('text'))}<small>{label}</small></div>"
+    if not bubbles:
+        bubbles = f"<div class='chat-message nina'>{html_escape(copy['empty'])}<small>Nina</small></div>"
+
+    telegram_connection = get_connection(NINA_WEB_WORKSPACE_ID, "telegram")
+    telegram_state = copy["connected"] if telegram_connection["status"] == "connected" else copy["connect"]
+    channels = (
+        f"<div class='channel-card'><div><b>Web</b></div><span class='channel-state'>{copy['active']}</span></div>"
+        f"<div class='channel-card'><div><b>Telegram</b></div><span class='channel-state'>{telegram_state}</span></div>"
+        f"<div class='channel-card'><div><b>WhatsApp</b><span class='muted'>{copy['next']}</span></div><span class='channel-state next'>{copy['connect']}</span></div>"
+        f"<div class='channel-card'><div><b>Email</b><span class='muted'>{copy['next']}</span></div><span class='channel-state next'>{copy['connect']}</span></div>"
+    )
+    nina_contact = nina_contact_html(lang)
+    return (
+        "<div class='chat-layout'>"
+        "<section class='card card-pad chat-shell'>"
+        f"<div class='chat-head'>{nina_logo_html('small')}<div><div class='section-title' style='margin:0'>{copy['title']}</div><span class='muted'>{copy['sub']}</span></div></div>"
+        f"<div class='chat-stream'>{bubbles}</div>"
+        f"<form class='chat-compose' method='post' action='/nina?lang={lang}'>"
+        f"<div class='chat-input'><textarea name='message' maxlength='4000' required placeholder='{copy['placeholder']}'></textarea>"
+        f"<div id='voice-status' class='voice-status' data-state='ready' role='status' aria-live='polite'>{copy['ready']}</div></div>"
+        f"<div class='form-actions'><button id='voice-start' class='btn voice-btn' type='button' aria-label='{copy['mic']}' title='{copy['mic']}'>🎤</button>"
+        f"<button id='voice-stop' class='btn voice-btn recording' type='button' hidden>{copy['stop']}</button>"
+        f"<button id='voice-cancel' class='btn voice-btn' type='button' hidden>{copy['cancel']}</button>"
+        f"<button id='chat-send' class='btn primary' type='submit'>{copy['send']}</button></div></form>"
+        "</section>"
+        f"<aside class='card card-pad'>{nina_contact}<div class='section-title'>{copy['channels']}</div>{channels}<div class='form-actions'><a class='btn' href='/channels?lang={lang}'>{copy['channels']}</a></div></aside>"
+        "</div>"
+        f"<script>window.NinaVoiceConfig={json.dumps({'lang': lang, 'ready': copy['ready'], 'recording': copy['recording'], 'processing': copy['processing'], 'error': copy['error'], 'denied': copy['denied'], 'unsupported': copy['unsupported']}, ensure_ascii=False)};</script>"
+        "<script>(function(){const c=window.NinaVoiceConfig,s=document.getElementById('voice-status'),start=document.getElementById('voice-start'),stop=document.getElementById('voice-stop'),cancel=document.getElementById('voice-cancel'),send=document.getElementById('chat-send');let recorder=null,stream=null,chunks=[],cancelled=false;function state(name,text){s.dataset.state=name;s.textContent=text;}function tracksOff(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}function controls(active){start.hidden=active;stop.hidden=!active;cancel.hidden=!active;send.disabled=active;}function reset(){tracksOff();controls(false);recorder=null;chunks=[];cancelled=false;state('ready',c.ready);}async function upload(blob){state('processing',c.processing);controls(false);start.disabled=true;send.disabled=true;const data=new FormData();const ext=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':blob.type.includes('mpeg')?'mp3':'webm';data.append('audio',blob,'voice.'+ext);data.append('lang',c.lang);try{const response=await fetch('/nina/voice?lang='+encodeURIComponent(c.lang),{method:'POST',body:data,credentials:'same-origin'});if(!response.ok)throw new Error('upload');window.location.href='/nina?lang='+encodeURIComponent(c.lang);}catch(e){state('error',c.error);start.disabled=false;send.disabled=false;}}start.addEventListener('click',async function(){if(!navigator.mediaDevices||!window.MediaRecorder){state('error',c.unsupported);return;}try{stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});chunks=[];cancelled=false;const preferred=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4','audio/webm','audio/ogg'].find(t=>MediaRecorder.isTypeSupported(t));const options={audioBitsPerSecond:128000};if(preferred)options.mimeType=preferred;recorder=new MediaRecorder(stream,options);recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};recorder.onerror=()=>{tracksOff();controls(false);state('error',c.error);};recorder.onstop=()=>{tracksOff();controls(false);if(cancelled){reset();return;}const blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});if(!blob.size){state('error',c.error);return;}upload(blob);};recorder.start();controls(true);state('recording',c.recording);}catch(e){tracksOff();controls(false);state('error',e&&e.name==='NotAllowedError'?c.denied:c.error);}});stop.addEventListener('click',()=>{if(recorder&&recorder.state!=='inactive')recorder.stop();});cancel.addEventListener('click',()=>{cancelled=true;if(recorder&&recorder.state!=='inactive')recorder.stop();else reset();});})();</script>"
+    )
+
+
+def nina_contact_html(lang=None):
+    lang = lang or current_language()
+    try:
+        contact = public_ninaos_contact(primary_ninaos_number())
+    except ValueError:
+        contact = None
+    if not contact:
+        return ""
+    copy = {
+        "en": {"title": "Nina on WhatsApp", "text": "Message Nina directly from WhatsApp.", "talk": "Talk to Nina", "save": "Save Nina", "qr": "QR code"},
+        "lv": {"title": "Nina WhatsApp", "text": "Raksti Ninai tieši no WhatsApp.", "talk": "Runāt ar Ninu", "save": "Saglabāt Ninu", "qr": "QR kods"},
+        "ru": {"title": "Нина в WhatsApp", "text": "Напишите Нине прямо в WhatsApp.", "talk": "Поговорить с Ниной", "save": "Сохранить Нину", "qr": "QR-код"},
+    }[lang]
+    return (
+        "<section class='nina-contact' style='margin-bottom:22px'>"
+        f"<div class='section-title'>{html_escape(copy['title'])}</div>"
+        f"<p class='muted'>{html_escape(copy['text'])}</p>"
+        f"<div><b>{html_escape(contact['name'])}</b><span class='muted'>{html_escape(contact['display_number'])}</span></div>"
+        "<div class='form-actions'>"
+        f"<a class='btn primary' href='{html_escape(contact['whatsapp_url'])}' target='_blank' rel='noopener noreferrer'>{html_escape(copy['talk'])}</a>"
+        f"<a class='btn' href='/nina/contact.vcf'>{html_escape(copy['save'])}</a>"
+        f"<a class='btn' href='/nina/contact-qr.svg' target='_blank' rel='noopener noreferrer'>{html_escape(copy['qr'])}</a>"
+        "</div></section>"
+    )
 
 
 def dashboard_body(data):
@@ -4945,6 +5093,755 @@ def office_manager_body(data):
     )
 
 
+def _workspace_cookie_secret():
+    value = (os.environ.get("NINA_WEB_WORKSPACE_COOKIE_SECRET") or os.environ.get("NINA_CHANNEL_CREDENTIAL_KEY") or "").strip()
+    if not value:
+        raise RuntimeError("workspace_cookie_secret_missing")
+    return value.encode()
+
+
+def _workspace_cookie_value(workspace_id):
+    signature = hmac.new(_workspace_cookie_secret(), workspace_id.encode(), hashlib.sha256).hexdigest()
+    return f"{workspace_id}.{signature}"
+
+
+def _verified_workspace_cookie(value):
+    raw = str(value or "")
+    try:
+        workspace_id, supplied = raw.rsplit(".", 1)
+    except ValueError:
+        return ""
+    if not re.fullmatch(r"web_[a-f0-9]{32}", workspace_id):
+        return ""
+    expected = hmac.new(_workspace_cookie_secret(), workspace_id.encode(), hashlib.sha256).hexdigest()
+    return workspace_id if hmac.compare_digest(supplied, expected) else ""
+
+
+def current_workspace_id():
+    """Resolve a server-authenticated browser workspace; never trust request parameters."""
+    if not has_request_context():
+        return NINA_WEB_WORKSPACE_ID
+    existing = getattr(g, "nina_workspace_id", "")
+    if existing:
+        return existing
+    workspace_id = _verified_workspace_cookie(request.cookies.get(_WORKSPACE_COOKIE))
+    if not workspace_id:
+        workspace_id = "web_" + secrets.token_hex(16)
+        g.nina_workspace_cookie_new = True
+    g.nina_workspace_id = workspace_id
+    return workspace_id
+
+
+@app.after_request
+def persist_workspace_identity(response):
+    workspace_id = getattr(g, "nina_workspace_id", "")
+    if workspace_id and getattr(g, "nina_workspace_cookie_new", False):
+        response.set_cookie(
+            _WORKSPACE_COOKIE,
+            _workspace_cookie_value(workspace_id),
+            max_age=_WORKSPACE_COOKIE_MAX_AGE,
+            httponly=True,
+            secure=request.is_secure or request.headers.get("X-Forwarded-Proto") == "https",
+            samesite="Lax",
+        )
+    return response
+
+
+def _channel_csrf(action):
+    message = f"{NINA_WEB_WORKSPACE_ID}:{action}".encode()
+    return hmac.new(_CHANNEL_CSRF_SECRET, message, hashlib.sha256).hexdigest()
+
+
+def _valid_channel_csrf(action):
+    supplied = (request.form.get("csrf_token") or "").strip()
+    return bool(supplied) and hmac.compare_digest(supplied, _channel_csrf(action))
+
+
+def _telegram_bot_username():
+    candidate = (os.environ.get("TELEGRAM_BOT_USERNAME") or "Nina7727_bot").strip().lstrip("@")
+    return candidate if re.fullmatch(r"[A-Za-z0-9_]{5,64}", candidate) else "Nina7727_bot"
+
+
+def _channels_copy(lang):
+    return {
+        "en": {"title": "Channels", "sub": "Choose where you want to talk with Nina.", "active": "Active", "connected": "Connected", "disconnected": "Not connected", "pending": "Connecting", "error": "Connection needs attention", "web_text": "Your Web workspace is ready.", "telegram_text": "Connect your Telegram account to this workspace.", "connect_telegram": "Connect Telegram", "open_telegram": "Open Telegram", "disconnect": "Disconnect", "pending_text": "Open the bot and press Start. Confirmation will appear here when linking is enabled in Telegram.", "whatsapp_text": "Connect your WhatsApp and talk to Nina from the app you already use.", "connect_whatsapp": "Connect WhatsApp", "whatsapp_failed": "This number could not be connected. Your existing WhatsApp account was not changed.", "prepare": "Your current number can be kept. To connect Nina, this number first needs to use WhatsApp Business App.", "backup": "Back up your chats in WhatsApp first, then switch the same number to WhatsApp Business App using WhatsApp's supported process.", "already_business": "I already use WhatsApp Business", "switch_safely": "How to switch safely", "cancel": "Cancel", "retry": "Retry", "email_text": "Email connection is coming soon.", "coming": "Coming soon"},
+        "lv": {"title": "Kanāli", "sub": "Izvēlies, kur vēlies sarunāties ar Ninu.", "active": "Aktīvs", "connected": "Savienots", "disconnected": "Nav savienots", "pending": "Savieno", "error": "Savienojumam jāpievērš uzmanība", "web_text": "Tava tīmekļa darba vide ir gatava.", "telegram_text": "Savieno savu Telegram kontu ar šo darba vidi.", "connect_telegram": "Savienot Telegram", "open_telegram": "Atvērt Telegram", "disconnect": "Atvienot", "pending_text": "Atver botu un nospied Start. Apstiprinājums šeit parādīsies, kad Telegram savienošana būs iespējota.", "whatsapp_text": "Savieno savu WhatsApp un runā ar Ninu lietotnē, ko jau izmanto.", "connect_whatsapp": "Savienot WhatsApp", "whatsapp_failed": "Šo numuru neizdevās savienot. Tavs esošais WhatsApp konts netika mainīts.", "prepare": "Vari paturēt savu pašreizējo numuru. Lai savienotu Ninu, šim numuram vispirms jāizmanto WhatsApp Business lietotne.", "backup": "Vispirms izveido sarunu rezerves kopiju WhatsApp, pēc tam pārej ar to pašu numuru uz WhatsApp Business lietotni, izmantojot WhatsApp drošo pāreju.", "already_business": "Es jau izmantoju WhatsApp Business", "switch_safely": "Kā droši pāriet", "cancel": "Atcelt", "retry": "Mēģināt vēlreiz", "email_text": "E-pasta savienojums būs drīzumā.", "coming": "Drīzumā"},
+        "ru": {"title": "Каналы", "sub": "Выберите, где вы хотите общаться с Ниной.", "active": "Активен", "connected": "Подключён", "disconnected": "Не подключён", "pending": "Подключение", "error": "Подключение требует внимания", "web_text": "Ваше веб-пространство готово.", "telegram_text": "Подключите Telegram к этому рабочему пространству.", "connect_telegram": "Подключить Telegram", "open_telegram": "Открыть Telegram", "disconnect": "Отключить", "pending_text": "Откройте бота и нажмите Start. Подтверждение появится здесь, когда подключение в Telegram будет включено.", "whatsapp_text": "Подключите WhatsApp и общайтесь с Ниной в привычном приложении.", "connect_whatsapp": "Подключить WhatsApp", "whatsapp_failed": "Не удалось подключить этот номер. Существующий аккаунт WhatsApp не был изменён.", "prepare": "Текущий номер можно сохранить. Чтобы подключить Нину, сначала используйте этот номер в приложении WhatsApp Business.", "backup": "Сначала создайте резервную копию чатов в WhatsApp, затем перейдите с тем же номером в WhatsApp Business официальным способом.", "already_business": "Я уже использую WhatsApp Business", "switch_safely": "Как перейти безопасно", "cancel": "Отмена", "retry": "Повторить", "email_text": "Подключение электронной почты появится позже.", "coming": "Скоро"},
+    }[lang]
+
+
+def _whatsapp_connect_script():
+    return r"""
+(() => {
+  const button = document.getElementById('whatsapp-business-connect');
+  if (!button) return;
+  let setup = null, signup = null, code = '';
+  const fail = async () => {
+    button.disabled = false;
+    if (setup && setup.state) {
+      try { await fetch('/channels/whatsapp/attention', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({csrf_token:window.NinaWhatsApp.callbackCsrf,state:setup.state})}); } catch (_) {}
+    }
+    window.location.href = '/channels?lang=' + encodeURIComponent(window.NinaWhatsApp.lang) + '&notice=whatsapp_failed';
+  };
+  const finish = async () => {
+    if (!setup || !signup || !code) return;
+    try {
+      const response = await fetch('/channels/whatsapp/callback', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({csrf_token: window.NinaWhatsApp.callbackCsrf, state: setup.state, code,
+          phone_number_id: signup.phone_number_id, business_account_id: signup.waba_id,
+          business_portfolio_id: signup.business_id || ''})
+      });
+      if (!response.ok) return fail();
+      window.location.href = '/channels?lang=' + encodeURIComponent(window.NinaWhatsApp.lang);
+    } catch (_) { fail(); }
+  };
+  window.addEventListener('message', (event) => {
+    if (!(event.origin === 'https://www.facebook.com' || event.origin.endsWith('.facebook.com'))) return;
+    try {
+      const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+      if (data && data.type === 'WA_EMBEDDED_SIGNUP' && data.event === 'FINISH') { signup = data.data || {}; finish(); }
+    } catch (_) {}
+  });
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      const response = await fetch('/channels/whatsapp/start', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({csrf_token:window.NinaWhatsApp.startCsrf})});
+      if (!response.ok) return fail();
+      setup = await response.json();
+      if (!window.FB) return fail();
+      const init = {appId: setup.app_id, cookie:true, xfbml:false}; init['ver'+'sion'] = setup.gv; FB.init(init);
+      const extras = {setup:{}, featureType:'whatsapp_business_app_onboarding'}; extras['sessionInfo'+'Ver'+'sion'] = '3';
+      FB.login((result) => {
+        code = result && result.authResponse ? (result.authResponse.code || '') : '';
+        if (!code) return fail();
+        finish();
+      }, {config_id:setup.config_id, response_type:'code', override_default_response_type:true, extras});
+    } catch (_) { fail(); }
+  });
+})();
+"""
+
+
+def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
+    lang = current_language()
+    c = _channels_copy(lang)
+    workspace_id = current_workspace_id()
+    telegram = get_connection(NINA_WEB_WORKSPACE_ID, "telegram")
+    whatsapp = get_connection(NINA_WEB_WORKSPACE_ID, "whatsapp")
+    personal = get_connection(workspace_id, PERSONAL_WHATSAPP_CHANNEL)
+    try:
+        company_workspace = configured_company_whatsapp_workspace()
+        company_number = configured_company_whatsapp_number()
+        company = get_connection(company_workspace, COMPANY_WHATSAPP_CHANNEL)
+    except ValueError:
+        company_workspace, company_number = "ninaos_company", ""
+        company = {"status": "error", "metadata": {}}
+    tmeta, wmeta = telegram["metadata"], whatsapp["metadata"]
+    refresh_label = {"en": "Refresh status", "lv": "Atjaunot statusu", "ru": "Обновить статус"}[lang]
+    status_label = {"connected": c["connected"], "pending": c["pending"], "error": c["error"], "disconnected": c["disconnected"]}
+    saved_username = str(tmeta.get("bot_username") or "").strip().lstrip("@")
+    bot_username = saved_username if re.fullmatch(r"[A-Za-z0-9_]{5,64}", saved_username) else _telegram_bot_username()
+    telegram_action = ""
+    if telegram_setup and telegram_setup.get("deep_link"):
+        telegram_action = f"<a class='btn primary' href='{html_escape(telegram_setup['deep_link'])}' rel='noopener noreferrer'>{c['open_telegram']}</a><div class='safe-note'>{c['pending_text']}</div>"
+    elif telegram["status"] != "connected":
+        telegram_action = f"<form method='post' action='/channels/telegram/connect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('telegram_connect')}'><button class='btn primary' type='submit'>{c['connect_telegram']}</button></form>"
+    if telegram["status"] in {"connected", "pending", "error"}:
+        telegram_action += f"<form method='post' action='/channels/telegram/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('telegram_disconnect')}'><button class='btn' type='submit'>{c['disconnect']}</button></form>"
+    telegram_action += f"<a class='btn' href='/channels?lang={lang}'>{refresh_label}</a>"
+    linked_account = ""
+    if telegram["status"] == "connected":
+        account_name = str(tmeta.get("telegram_display_name") or tmeta.get("telegram_username") or "").strip()
+        username = str(tmeta.get("telegram_username") or "").strip().lstrip("@")
+        account_label = account_name + (f" · @{username}" if username and username.lower() not in account_name.lower() else "")
+        linked_account = f"<div class='safe-note'>{html_escape(account_label)}</div>" if account_label else ""
+    whatsapp_action = ""
+    whatsapp_help = ""
+    if whatsapp["status"] == "disconnected" and whatsapp_view == "prepare":
+        whatsapp_help = f"<div class='channel-message'>{html_escape(c['prepare'])}</div>"
+        whatsapp_action = f"<button class='btn primary' id='whatsapp-business-connect' type='button'>{c['already_business']}</button><a class='btn' href='/channels?lang={lang}&whatsapp=switch'>{c['switch_safely']}</a><a class='btn' href='/channels?lang={lang}'>{c['cancel']}</a>"
+    elif whatsapp["status"] == "disconnected" and whatsapp_view == "switch":
+        whatsapp_help = f"<div class='channel-message'>{html_escape(c['backup'])}</div>"
+        whatsapp_action = f"<button class='btn primary' id='whatsapp-business-connect' type='button'>{c['already_business']}</button><a class='btn' href='https://business.whatsapp.com/products/business-app' rel='noopener noreferrer' target='_blank'>{c['switch_safely']}</a><a class='btn' href='/channels?lang={lang}'>{c['cancel']}</a>"
+    elif whatsapp["status"] == "disconnected":
+        whatsapp_action = f"<a class='btn primary' href='/channels?lang={lang}&whatsapp=prepare'>{c['connect_whatsapp']}</a>"
+    elif whatsapp["status"] == "error":
+        whatsapp_action = f"<a class='btn primary' href='/channels?lang={lang}&whatsapp=prepare'>{c['retry']}</a>"
+    if whatsapp["status"] in {"connected", "pending", "error"}:
+        whatsapp_action += f"<form method='post' action='/channels/whatsapp/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_disconnect')}'><button class='btn' type='submit'>{c['disconnect']}</button></form>"
+    whatsapp_identity = " · ".join(filter(None, [str(wmeta.get("business_display_name") or ""), str(wmeta.get("display_phone_number") or "")]))
+    whatsapp_identity_html = f"<div class='safe-note'>{html_escape(whatsapp_identity)}</div>" if whatsapp_identity else ""
+    whatsapp_error_html = f"<div class='channel-message'>{html_escape(c['whatsapp_failed'])}</div>" if whatsapp["status"] == "error" else ""
+    pc = {
+        "en": {"title":"Personal WhatsApp","text":"Talk and work with Nina through the WhatsApp you already use.","connect":"Connect WhatsApp","steps":"WhatsApp → Settings → Linked Devices → Link a Device","waiting":"Waiting for connection…","lost":"Connection lost","reconnect":"Reconnect","business":"WhatsApp Business","business_text":"For business customer messaging","privacy":"V1 responds only in your Message yourself chat. Groups and other chats are ignored.","remove":"For full revocation, also remove NinaOS under Linked Devices in WhatsApp."},
+        "lv": {"title":"Personīgais WhatsApp","text":"Runā un strādā ar Ninu savā esošajā WhatsApp.","connect":"Savienot WhatsApp","steps":"WhatsApp → Iestatījumi → Saistītās ierīces → Saistīt ierīci","waiting":"Gaida savienojumu…","lost":"Savienojums zaudēts","reconnect":"Savienot atkārtoti","business":"WhatsApp Business","business_text":"Uzņēmuma klientu saziņai","privacy":"V1 Nina atbild tikai tavā čatā “Ziņa sev”. Grupas un citi čati tiek ignorēti.","remove":"Pilnīgai atsaukšanai noņem NinaOS arī WhatsApp sadaļā Saistītās ierīces."},
+        "ru": {"title":"Личный WhatsApp","text":"Общайтесь и работайте с Ниной в своём обычном WhatsApp.","connect":"Подключить WhatsApp","steps":"WhatsApp → Настройки → Связанные устройства → Привязка устройства","waiting":"Ожидание подключения…","lost":"Соединение потеряно","reconnect":"Подключить снова","business":"WhatsApp Business","business_text":"Для общения с клиентами компании","privacy":"В V1 Нина отвечает только в чате «Сообщение себе». Группы и другие чаты игнорируются.","remove":"Для полного отзыва также удалите NinaOS в разделе «Связанные устройства» WhatsApp."},
+    }[lang]
+    pstatus = personal["status"]
+    pmeta = personal.get("metadata") or {}
+    if pstatus == "connected":
+        personal_body = f"<div class='safe-note'>{html_escape(pmeta.get('masked_identity') or '')}</div><div class='channel-message'>{html_escape(pc['privacy'])}</div><form method='post' action='/channels/whatsapp-personal/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_personal_disconnect')}'><button class='btn' type='submit'>{c['disconnect']}</button></form><p class='muted'>{html_escape(pc['remove'])}</p>"
+    elif pstatus == "pending":
+        personal_body = f"<div id='personal-whatsapp-qr' class='qr-shell' hidden></div><div id='personal-whatsapp-state' class='channel-message'>{html_escape(pc['waiting'])}</div><p class='pairing-steps'>{html_escape(pc['steps'])}</p><form method='post' action='/channels/whatsapp-personal/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_personal_disconnect')}'><button class='btn' type='submit'>{c['cancel']}</button></form>"
+    else:
+        label = pc["reconnect"] if pstatus == "error" else pc["connect"]
+        personal_body = f"<form method='post' action='/channels/whatsapp-personal/connect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_personal_connect')}'><button class='btn primary' type='submit'>{html_escape(label)}</button></form><div class='safe-note'>{html_escape(pc['privacy'])}</div>"
+    cc = {
+        "en": {"title":"NinaOS Company WhatsApp","text":"Nina's official private contact for direct conversations.","connect":"Connect company phone","waiting":"Waiting for the company phone to scan the QR…","privacy":"External private conversations are isolated from one another.","not_configured":"Configure the company number before connecting."},
+        "lv": {"title":"NinaOS uzņēmuma WhatsApp","text":"Ninas oficiālais privātais kontakts tiešām sarunām.","connect":"Savienot uzņēmuma tālruni","waiting":"Gaida, kad uzņēmuma tālrunis noskenēs QR kodu…","privacy":"Ārējo cilvēku privātās sarunas ir savstarpēji nodalītas.","not_configured":"Pirms savienošanas konfigurē uzņēmuma numuru."},
+        "ru": {"title":"WhatsApp компании NinaOS","text":"Официальный личный контакт Нины для прямого общения.","connect":"Подключить телефон компании","waiting":"Ожидание сканирования QR-кода телефоном компании…","privacy":"Личные разговоры разных людей изолированы друг от друга.","not_configured":"Перед подключением настройте номер компании."},
+    }[lang]
+    company_status = company["status"]
+    company_meta = company.get("metadata") or {}
+    company_masked = str(company_meta.get("masked_identity") or "")
+    if not company_masked and company_number:
+        digits = re.sub(r"\D", "", company_number)
+        company_masked = ("*" * max(0, len(digits) - 4)) + digits[-4:]
+    if not company_number:
+        company_body = f"<div class='channel-message'>{html_escape(cc['not_configured'])}</div>"
+    elif company_status == "connected":
+        company_body = f"<div class='safe-note'>{html_escape(company_masked)}</div><div class='channel-message'>{html_escape(cc['privacy'])}</div><form method='post' action='/channels/whatsapp-company/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_company_disconnect')}'><button class='btn' type='submit'>{c['disconnect']}</button></form>"
+    elif company_status == "pending":
+        company_body = f"<div id='company-whatsapp-qr' class='qr-shell' hidden></div><div id='company-whatsapp-state' class='channel-message'>{html_escape(cc['waiting'])}</div><form method='post' action='/channels/whatsapp-company/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_company_disconnect')}'><button class='btn' type='submit'>{c['cancel']}</button></form>"
+    else:
+        company_body = f"<form method='post' action='/channels/whatsapp-company/connect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_company_connect')}'><button class='btn primary' type='submit'>{html_escape(cc['connect'])}</button></form><div class='safe-note'>{html_escape(cc['privacy'])}</div>"
+    notice_text = c.get(notice, notice)
+    notice_html = f"<div class='channel-message'>{html_escape(notice_text)}</div>" if notice else ""
+    return (
+        "<style>@media(max-width:640px){.sidebar{padding-bottom:14px}.brand{margin-bottom:14px}.nav{flex-direction:row;overflow-x:auto;padding-bottom:6px}.nav-item{flex:0 0 auto}.user{display:none}}</style>"
+        f"<div class='page-title'><h1>{c['title']}</h1><p>{c['sub']}</p></div><br>{notice_html}"
+        f"{nina_contact_html(lang)}<div class='channels-grid'>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>{html_escape(cc['title'])}</h2><span class='connection-status {company_status}'>{status_label[company_status]}</span></div><p class='muted'>{html_escape(cc['text'])}</p>{company_body}</section>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Web</h2><span class='connection-status active'>{c['active']}</span></div><p class='muted'>{c['web_text']}</p></section>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Telegram</h2><span class='connection-status {telegram['status']}'>{status_label[telegram['status']]}</span></div><p class='muted'>{c['telegram_text']}</p><div><b>@{html_escape(bot_username)}</b></div>{linked_account}<div class='connection-actions'>{telegram_action}</div></section>"
+        f"<section class='card card-pad connection-card whatsapp-stack'><div class='connection-head'><h2>WhatsApp</h2></div><div class='whatsapp-products'><div class='whatsapp-product'><div class='connection-head'><h3>{html_escape(pc['title'])}</h3><span class='connection-status {pstatus}'>{status_label[pstatus]}</span></div><p class='muted'>{html_escape(pc['text'])}</p>{personal_body}</div><div class='whatsapp-product'><div class='connection-head'><h3>{html_escape(pc['business'])}</h3><span class='connection-status {whatsapp['status']}'>{status_label[whatsapp['status']]}</span></div><p class='muted'>{html_escape(pc['business_text'])}</p>{whatsapp_help}{whatsapp_error_html}{whatsapp_identity_html}<div class='connection-actions'>{whatsapp_action}</div></div></div></section>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Email</h2><span class='connection-status'>{c['coming']}</span></div><p class='muted'>{c['email_text']}</p></section>"
+        "</div>"
+        "<script async defer crossorigin='anonymous' src='https://connect.facebook.net/en_US/sdk.js'></script>"
+        f"<script>window.NinaWhatsApp={{startCsrf:{json.dumps(_channel_csrf('whatsapp_start'))},callbackCsrf:{json.dumps(_channel_csrf('whatsapp_callback'))},lang:{json.dumps(lang)}}};</script>"
+        "<script>" + _whatsapp_connect_script() + "</script>"
+        "<script>(()=>{const q=document.getElementById('personal-whatsapp-qr'),s=document.getElementById('personal-whatsapp-state');if(!q||!s)return;const poll=async()=>{try{const r=await fetch('/channels/whatsapp-personal/status',{cache:'no-store'}),d=await r.json();if(d.status==='connected'){location.reload();return}if(d.qr_svg){q.innerHTML=d.qr_svg;q.hidden=false}if(d.status==='connection_lost'||d.status==='logged_out'){s.textContent=" + json.dumps(pc["lost"]) + ";s.classList.add('connection-lost');return}}catch(_){}setTimeout(poll,2000)};poll()})()</script>"
+        "<script>(()=>{const q=document.getElementById('company-whatsapp-qr'),s=document.getElementById('company-whatsapp-state');if(!q||!s)return;const poll=async()=>{try{const r=await fetch('/channels/whatsapp-company/status',{cache:'no-store'}),d=await r.json();if(d.status==='connected'){location.reload();return}if(d.qr_svg){q.innerHTML=d.qr_svg;q.hidden=false}if(d.status==='connection_lost'||d.status==='logged_out'){s.textContent='Connection lost';s.classList.add('connection-lost');return}}catch(_){}setTimeout(poll,2000)};poll()})()</script>"
+    )
+
+
+
+def _transcribe_web_voice(audio_bytes, filename, mime_type, language_hint):
+    api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        return ""
+    from openai import OpenAI
+    return transcribe_audio_with_openai(
+        OpenAI(api_key=api_key),
+        audio_bytes,
+        filename=filename,
+        language_hint=language_hint,
+        force_language=False,
+        model=WEB_VOICE_TRANSCRIPTION_MODEL,
+        mime_type=mime_type,
+    )
+
+
+@app.post("/nina/voice")
+def nina_voice():
+    if request.content_length and request.content_length > WEB_VOICE_MAX_BYTES + (1024 * 1024):
+        return jsonify({"ok": False, "error": "audio_too_large"}), 413
+
+    upload = request.files.get("audio")
+    if upload is None:
+        return jsonify({"ok": False, "error": "audio_required"}), 400
+
+    content_type = (upload.content_type or upload.mimetype or "").lower().strip()
+    mime_type = content_type.split(";", 1)[0].strip()
+    if mime_type not in WEB_VOICE_MIME_TYPES:
+        return jsonify({"ok": False, "error": "unsupported_audio"}), 415
+
+    audio_bytes = upload.stream.read(WEB_VOICE_MAX_BYTES + 1)
+    if not audio_bytes:
+        return jsonify({"ok": False, "error": "audio_required"}), 400
+    if len(audio_bytes) > WEB_VOICE_MAX_BYTES:
+        return jsonify({"ok": False, "error": "audio_too_large"}), 413
+
+    lang = (request.form.get("lang") or current_language()).strip().lower()
+    lang = lang if lang in {"lv", "en", "ru"} else "en"
+    logger.info(
+        "Web voice transcription started mime=%s bytes=%d model=%s language_hint=%s",
+        content_type,
+        len(audio_bytes),
+        WEB_VOICE_TRANSCRIPTION_MODEL,
+        lang,
+    )
+    try:
+        transcript = _transcribe_web_voice(
+            audio_bytes,
+            upload.filename or "voice.webm",
+            content_type,
+            lang,
+        ).strip()
+    except Exception:
+        logger.warning(
+            "Web voice transcription completed success=False chars=0 model=%s language_hint=%s",
+            WEB_VOICE_TRANSCRIPTION_MODEL,
+            lang,
+        )
+        return jsonify({"ok": False, "error": "transcription_unavailable"}), 502
+    logger.info(
+        "Web voice transcription completed success=%s chars=%d model=%s language_hint=%s",
+        bool(transcript),
+        len(transcript),
+        WEB_VOICE_TRANSCRIPTION_MODEL,
+        lang,
+    )
+    if not transcript:
+        return jsonify({"ok": False, "error": "transcription_unavailable"}), 502
+
+    send_message_to_nina(transcript, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web")
+    return jsonify({"ok": True})
+
+
+@app.get("/channels")
+def channels():
+    notice = (request.args.get("notice") or "").strip()
+    notice = notice if notice in {"whatsapp_failed"} else ""
+    whatsapp_view = (request.args.get("whatsapp") or "").strip()
+    whatsapp_view = whatsapp_view if whatsapp_view in {"prepare", "switch"} else ""
+    return Response(page(_channels_copy(current_language())["title"], channels_body(notice=notice, whatsapp_view=whatsapp_view), active="channels"), mimetype="text/html")
+
+
+@app.post("/channels/telegram/connect")
+def channels_telegram_connect():
+    if not _valid_channel_csrf("telegram_connect"):
+        return Response("Invalid request", status=400)
+    bot_username = _telegram_bot_username()
+    try:
+        setup = create_telegram_token(NINA_WEB_WORKSPACE_ID, bot_username=bot_username)
+    except ValueError as exc:
+        if str(exc) == "telegram_already_connected":
+            return redirect(q("/channels"))
+        raise
+    return Response(page(_channels_copy(current_language())["title"], channels_body(telegram_setup=setup), active="channels"), mimetype="text/html")
+
+
+@app.post("/channels/telegram/disconnect")
+def channels_telegram_disconnect():
+    if not _valid_channel_csrf("telegram_disconnect"):
+        return Response("Invalid request", status=400)
+    disconnect_channel(NINA_WEB_WORKSPACE_ID, "telegram")
+    return redirect(q("/channels"))
+
+
+@app.post("/channels/whatsapp-personal/connect")
+def channels_personal_whatsapp_connect():
+    if not _valid_channel_csrf("whatsapp_personal_connect"):
+        return Response("Invalid request", status=400)
+    try:
+        workspace_id = current_workspace_id()
+        pairing = create_personal_whatsapp_pairing(workspace_id)
+        personal_whatsapp_bridge_request("/v1/sessions", {"workspace_id": workspace_id, "session_token": pairing["session_token"]})
+    except Exception:
+        workspace_id = current_workspace_id()
+        logger.warning("Personal WhatsApp pairing could not start workspace=%s", workspace_id)
+        set_connection_for_test(workspace_id, PERSONAL_WHATSAPP_CHANNEL, "error", {"error_code": "bridge_unavailable"})
+    return redirect(q("/channels"))
+
+
+@app.get("/channels/whatsapp-personal/status")
+def channels_personal_whatsapp_status():
+    workspace_id = current_workspace_id()
+    connection = get_connection(workspace_id, PERSONAL_WHATSAPP_CHANNEL)
+    if connection["status"] == "connected":
+        return jsonify({"status": "connected"})
+    if connection["status"] == "pending" and not personal_whatsapp_pairing_is_active(workspace_id):
+        set_connection_for_test(workspace_id, PERSONAL_WHATSAPP_CHANNEL, "error", {"error_code": "pairing_expired"})
+        return jsonify({"status": "connection_lost", "qr_svg": ""})
+    try:
+        state = personal_whatsapp_bridge_request("/v1/status", {"workspace_id": workspace_id})
+    except Exception:
+        return jsonify({"status": connection["status"], "qr_svg": ""})
+    svg = str(state.get("qr_svg") or "")
+    if len(svg) > 250000 or not svg.lstrip().startswith("<svg") or "<script" in svg.lower() or "onload=" in svg.lower():
+        svg = ""
+    return jsonify({"status": str(state.get("status") or connection["status"]), "qr_svg": svg})
+
+
+@app.post("/channels/whatsapp-personal/disconnect")
+def channels_personal_whatsapp_disconnect():
+    if not _valid_channel_csrf("whatsapp_personal_disconnect"):
+        return Response("Invalid request", status=400)
+    try:
+        workspace_id = current_workspace_id()
+        personal_whatsapp_bridge_request("/v1/disconnect", {"workspace_id": workspace_id})
+    except Exception:
+        workspace_id = current_workspace_id()
+        logger.warning("Personal WhatsApp bridge logout unavailable workspace=%s", workspace_id)
+    disconnect_personal_whatsapp(workspace_id)
+    return redirect(q("/channels"))
+
+
+@app.post("/channels/whatsapp-company/connect")
+def channels_company_whatsapp_connect():
+    if not _valid_channel_csrf("whatsapp_company_connect"):
+        return Response("Invalid request", status=400)
+    try:
+        workspace_id = configured_company_whatsapp_workspace()
+        if not configured_company_whatsapp_number():
+            raise ValueError("company_number_missing")
+        pairing = create_company_whatsapp_pairing(workspace_id)
+        personal_whatsapp_bridge_request("/v1/company/sessions", {"workspace_id": workspace_id, "session_token": pairing["session_token"]})
+    except Exception:
+        logger.warning("Company WhatsApp pairing could not start")
+        try:
+            set_connection_for_test(configured_company_whatsapp_workspace(), COMPANY_WHATSAPP_CHANNEL, "error", {"error_code": "bridge_unavailable"})
+        except ValueError:
+            pass
+    return redirect(q("/channels"))
+
+
+@app.get("/channels/whatsapp-company/status")
+def channels_company_whatsapp_status():
+    workspace_id = configured_company_whatsapp_workspace()
+    connection = get_connection(workspace_id, COMPANY_WHATSAPP_CHANNEL)
+    if connection["status"] == "connected":
+        return jsonify({"status": "connected"})
+    if connection["status"] == "pending" and not company_whatsapp_pairing_is_active(workspace_id):
+        set_connection_for_test(workspace_id, COMPANY_WHATSAPP_CHANNEL, "error", {"error_code": "pairing_expired"})
+        return jsonify({"status": "connection_lost", "qr_svg": ""})
+    try:
+        state = personal_whatsapp_bridge_request("/v1/company/status", {"workspace_id": workspace_id})
+    except Exception:
+        return jsonify({"status": connection["status"], "qr_svg": ""})
+    svg = str(state.get("qr_svg") or "")
+    if len(svg) > 250000 or not svg.lstrip().startswith("<svg") or "<script" in svg.lower() or "onload=" in svg.lower():
+        svg = ""
+    return jsonify({"status": str(state.get("status") or connection["status"]), "qr_svg": svg})
+
+
+@app.post("/channels/whatsapp-company/disconnect")
+def channels_company_whatsapp_disconnect():
+    if not _valid_channel_csrf("whatsapp_company_disconnect"):
+        return Response("Invalid request", status=400)
+    workspace_id = configured_company_whatsapp_workspace()
+    try:
+        personal_whatsapp_bridge_request("/v1/company/disconnect", {"workspace_id": workspace_id})
+    except Exception:
+        logger.warning("Company WhatsApp bridge logout unavailable")
+    disconnect_company_whatsapp(workspace_id)
+    return redirect(q("/channels"))
+
+
+def _bridge_json():
+    if not authorize_bridge(request.headers.get("Authorization")):
+        return None
+    payload = request.get_json(silent=True)
+    return payload if isinstance(payload, dict) else None
+
+
+@app.post("/internal/personal-whatsapp/auth/load")
+def internal_personal_whatsapp_auth_load():
+    payload = _bridge_json()
+    if payload is None: return jsonify({"ok": False}), 401
+    workspace_id = str(payload.get("workspace_id") or "")
+    try: records = load_personal_whatsapp_auth(workspace_id)
+    except ValueError: return jsonify({"ok": False}), 400
+    return jsonify({"ok": True, "records": records})
+
+
+@app.post("/internal/personal-whatsapp/active")
+def internal_personal_whatsapp_active():
+    payload = _bridge_json()
+    if payload is None: return jsonify({"ok": False}), 401
+    return jsonify({"ok": True, "workspace_ids": list_connected_personal_whatsapp_workspaces()})
+
+
+@app.post("/internal/personal-whatsapp/auth/store")
+def internal_personal_whatsapp_auth_store():
+    payload = _bridge_json()
+    if payload is None: return jsonify({"ok": False}), 401
+    workspace_id, records = str(payload.get("workspace_id") or ""), payload.get("records")
+    if not isinstance(records, dict) or len(records) > 1000: return jsonify({"ok": False}), 400
+    try:
+        for key, value in records.items():
+            if value is None: delete_personal_whatsapp_auth(workspace_id, key)
+            elif len(json.dumps(value)) <= 1024 * 1024: store_personal_whatsapp_auth(workspace_id, key, value)
+            else: return jsonify({"ok": False}), 413
+    except ValueError: return jsonify({"ok": False}), 400
+    return jsonify({"ok": True})
+
+
+@app.post("/internal/personal-whatsapp/linked")
+def internal_personal_whatsapp_linked():
+    payload = _bridge_json()
+    if payload is None: return jsonify({"ok": False}), 401
+    connected = mark_personal_whatsapp_connected(str(payload.get("workspace_id") or ""), payload.get("session_token"), payload.get("identity"))
+    return (jsonify({"ok": True}) if connected else (jsonify({"ok": False}), 409))
+
+
+@app.post("/internal/personal-whatsapp/inbound")
+def internal_personal_whatsapp_inbound():
+    payload = _bridge_json()
+    if payload is None: return jsonify({"ok": False}), 401
+    workspace_id = str(payload.get("workspace_id") or "")
+    allowed = accept_personal_whatsapp_inbound(workspace_id, payload.get("message_id"), str(payload.get("chat_jid") or ""), payload.get("text"), bool(payload.get("is_group")))
+    if not allowed: return jsonify({"ok": True, "accepted": False, "reply": ""})
+    result = send_message_to_nina(str(payload.get("text") or ""), workspace_id=workspace_id, channel=PERSONAL_WHATSAPP_CHANNEL)
+    return jsonify({"ok": True, "accepted": True, "reply": str(result.get("text") or "")})
+
+
+@app.post("/internal/company-whatsapp/auth/load")
+def internal_company_whatsapp_auth_load():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    workspace_id = str(payload.get("workspace_id") or "")
+    try:
+        if workspace_id != configured_company_whatsapp_workspace():
+            raise ValueError("invalid_workspace")
+        records = load_company_whatsapp_auth(workspace_id)
+    except ValueError:
+        return jsonify({"ok": False}), 400
+    return jsonify({"ok": True, "records": records})
+
+
+@app.post("/internal/company-whatsapp/auth/store")
+def internal_company_whatsapp_auth_store():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    workspace_id, records = str(payload.get("workspace_id") or ""), payload.get("records")
+    if workspace_id != configured_company_whatsapp_workspace() or not isinstance(records, dict) or len(records) > 1000:
+        return jsonify({"ok": False}), 400
+    try:
+        for key, value in records.items():
+            if value is None:
+                delete_company_whatsapp_auth(workspace_id, key)
+            elif len(json.dumps(value)) <= 1024 * 1024:
+                store_company_whatsapp_auth(workspace_id, key, value)
+            else:
+                return jsonify({"ok": False}), 413
+    except ValueError:
+        return jsonify({"ok": False}), 400
+    return jsonify({"ok": True})
+
+
+@app.post("/internal/company-whatsapp/active")
+def internal_company_whatsapp_active():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    return jsonify({"ok": True, "workspace_ids": list_connected_company_whatsapp_workspaces()})
+
+
+@app.post("/internal/company-whatsapp/linked")
+def internal_company_whatsapp_linked():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    connected = mark_company_whatsapp_connected(str(payload.get("workspace_id") or ""), payload.get("session_token"), payload.get("identity"))
+    return jsonify({"ok": bool(connected)}), (200 if connected else 409)
+
+
+@app.post("/internal/company-whatsapp/inbound")
+def internal_company_whatsapp_inbound():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    workspace_id = str(payload.get("workspace_id") or "")
+    sender_jid = str(payload.get("sender_jid") or "")
+    text = str(payload.get("text") or "")
+    if not accept_company_whatsapp_inbound(workspace_id, payload.get("message_id"), sender_jid, text):
+        return jsonify({"ok": True, "accepted": False, "reply": ""})
+    sender = company_whatsapp_sender_digits(sender_jid)
+    identity = resolve_ninaos_channel_identity(COMPANY_WHATSAPP_CHANNEL, workspace_id, sender)
+    result = send_message_to_nina(
+        text,
+        workspace_id=identity["workspace_id"],
+        channel=COMPANY_WHATSAPP_CHANNEL,
+        conversation_id=identity["conversation_id"],
+    )
+    return jsonify({"ok": True, "accepted": True, "reply": str(result.get("text") or "")})
+
+
+@app.post("/channels/whatsapp/start")
+def channels_whatsapp_start():
+    payload = request.get_json(silent=True) or {}
+    if not hmac.compare_digest(str(payload.get("csrf_token") or ""), _channel_csrf("whatsapp_start")):
+        return jsonify({"ok": False}), 400
+    try:
+        provider = embedded_signup_public_config()
+        state = create_whatsapp_onboarding_state(NINA_WEB_WORKSPACE_ID)
+    except (ValueError, WhatsAppProviderError):
+        return jsonify({"ok": False}), 503
+    return jsonify({"ok": True, "state": state["state"], "expires_at": state["expires_at"], "app_id": provider["app_id"], "config_id": provider["config_id"], "gv": os.environ.get("WHATSAPP_GRAPH_API_VERSION", "v25.0")})
+
+
+@app.post("/channels/whatsapp/callback")
+def channels_whatsapp_callback():
+    payload = request.get_json(silent=True) or {}
+    if not hmac.compare_digest(str(payload.get("csrf_token") or ""), _channel_csrf("whatsapp_callback")):
+        return jsonify({"ok": False}), 400
+    workspace_id = consume_whatsapp_onboarding_state(payload.get("state"), expected_workspace_id=NINA_WEB_WORKSPACE_ID)
+    if not workspace_id:
+        return jsonify({"ok": False}), 400
+    try:
+        complete_embedded_signup(
+            workspace_id,
+            payload.get("code"),
+            payload.get("phone_number_id"),
+            payload.get("business_account_id"),
+            payload.get("business_portfolio_id"),
+        )
+    except WhatsAppProviderError:
+        update_whatsapp_verification(workspace_id, False, error_code="onboarding_failed")
+        return jsonify({"ok": False}), 400
+    return jsonify({"ok": True})
+
+
+@app.post("/channels/whatsapp/attention")
+def channels_whatsapp_attention():
+    payload = request.get_json(silent=True) or {}
+    if not hmac.compare_digest(str(payload.get("csrf_token") or ""), _channel_csrf("whatsapp_callback")):
+        return jsonify({"ok": False}), 400
+    workspace_id = consume_whatsapp_onboarding_state(payload.get("state"), expected_workspace_id=NINA_WEB_WORKSPACE_ID)
+    if not workspace_id:
+        return jsonify({"ok": False}), 400
+    update_whatsapp_verification(workspace_id, False, error_code="coexistence_not_completed")
+    return jsonify({"ok": True})
+
+
+@app.post("/channels/whatsapp/disconnect")
+def channels_whatsapp_disconnect():
+    if not _valid_channel_csrf("whatsapp_disconnect"):
+        return Response("Invalid request", status=400)
+    disconnect_channel(NINA_WEB_WORKSPACE_ID, "whatsapp")
+    return redirect(q("/channels"))
+
+
+@app.get("/webhooks/whatsapp")
+def whatsapp_webhook_verify():
+    mode = (request.args.get("hub.mode") or "").strip()
+    token = request.args.get("hub.verify_token") or ""
+    challenge = request.args.get("hub.challenge") or ""
+    try:
+        official_verified = verify_ninaos_number_token(mode, token)
+    except ValueError:
+        official_verified = False
+    if not challenge or len(challenge) > 256 or not (official_verified or resolve_webhook_verification(mode, token)):
+        return Response("Verification rejected", status=403)
+    return Response(challenge, status=200, mimetype="text/plain")
+
+
+@app.post("/webhooks/whatsapp")
+def whatsapp_webhook_receive():
+    if request.content_length and request.content_length > 1024 * 1024:
+        return jsonify({"ok": False, "error": "payload_too_large"}), 413
+    raw_body = request.get_data(cache=True)
+    try:
+        payload = request.get_json(force=False, silent=False)
+        messages = parse_inbound_text(payload)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_payload"}), 400
+    official_numbers = {item["phone_number_id"]: ninaos_number_for_phone_id(item["phone_number_id"]) for item in messages}
+    if all(official_numbers.values()):
+        if len({item["phone_number_id"] for item in messages}) != 1:
+            return jsonify({"ok": False, "error": "connection_not_resolved"}), 403
+        number = next(iter(official_numbers.values()))
+        try:
+            signature_ok = verify_ninaos_number_signature(number, raw_body, request.headers.get("X-Hub-Signature-256"))
+        except WhatsAppProviderError:
+            return jsonify({"ok": False, "error": "signature_not_configured"}), 503
+        if not signature_ok:
+            return jsonify({"ok": False, "error": "invalid_signature"}), 403
+        sent = 0
+        processed = 0
+        for item in messages:
+            identity = resolve_ninaos_sender_identity(number, item["sender"])
+            if not claim_channel_message(identity["workspace_id"], NINAOS_NUMBER_CHANNEL, item["message_id"]):
+                continue
+            processed += 1
+            nina_result = send_message_to_nina(
+                item["text"],
+                workspace_id=identity["workspace_id"],
+                channel=NINAOS_NUMBER_CHANNEL,
+                conversation_id=identity["conversation_id"],
+            )
+            reply_text = str(nina_result.get("text") or "").strip()
+            if reply_text:
+                try:
+                    send_ninaos_number_reply(number, item["sender"], reply_text)
+                    sent += 1
+                except WhatsAppProviderError:
+                    pass
+        return jsonify({"ok": True, "processed": processed, "replies_sent": sent})
+    if any(official_numbers.values()):
+        return jsonify({"ok": False, "error": "connection_not_resolved"}), 403
+    workspaces = {resolve_workspace_for_phone_number(item["phone_number_id"]) for item in messages}
+    if None in workspaces or len(workspaces) != 1:
+        return jsonify({"ok": False, "error": "connection_not_resolved"}), 403
+    workspace_id = next(iter(workspaces))
+    try:
+        signature_ok = verify_webhook_signature(workspace_id, raw_body, request.headers.get("X-Hub-Signature-256"))
+    except WhatsAppProviderError:
+        return jsonify({"ok": False, "error": "signature_not_configured"}), 503
+    if not signature_ok:
+        return jsonify({"ok": False, "error": "invalid_signature"}), 403
+    sent = 0
+    processed = 0
+    for item in messages:
+        if not claim_channel_message(workspace_id, "whatsapp", item["message_id"]):
+            continue
+        processed += 1
+        nina_result = send_message_to_nina(item["text"], workspace_id=workspace_id, channel="whatsapp")
+        reply_text = str(nina_result.get("text") or "").strip()
+        if reply_text:
+            try:
+                send_whatsapp_message(workspace_id, item["sender"], reply_text)
+                sent += 1
+            except WhatsAppProviderError:
+                pass
+    return jsonify({"ok": True, "processed": processed, "replies_sent": sent})
+
+
+@app.get("/nina/contact.vcf")
+def nina_contact_vcard():
+    try:
+        contact = public_ninaos_contact(primary_ninaos_number(request.args.get("region") or ""))
+    except ValueError:
+        contact = None
+    if not contact:
+        return Response("Contact unavailable", status=404)
+    phone = contact["display_number"]
+    body = f"BEGIN:VCARD\r\nVERSION:3.0\r\nFN:{contact['name']}\r\nTEL;TYPE=CELL:{phone}\r\nEND:VCARD\r\n"
+    return Response(body, mimetype="text/vcard", headers={"Content-Disposition": 'attachment; filename="Nina.vcf"', "Cache-Control": "public, max-age=300"})
+
+
+@app.get("/nina/contact-qr.svg")
+def nina_contact_qr():
+    try:
+        contact = public_ninaos_contact(primary_ninaos_number(request.args.get("region") or ""))
+    except ValueError:
+        contact = None
+    if not contact:
+        return Response("Contact unavailable", status=404)
+    import qrcode
+    import qrcode.image.svg
+    image = qrcode.make(contact["whatsapp_url"], image_factory=qrcode.image.svg.SvgPathImage, box_size=8, border=3)
+    output = __import__("io").BytesIO()
+    image.save(output)
+    return Response(output.getvalue(), mimetype="image/svg+xml", headers={"Cache-Control": "public, max-age=300", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
+
+
+@app.route("/nina", methods=["GET", "POST"])
+@app.route("/chat", methods=["GET", "POST"])
+def nina_chat():
+    if request.method == "POST":
+        user_text = (request.form.get("message") or "").strip()
+        if user_text:
+            send_message_to_nina(user_text, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web")
+        return redirect(q("/nina"))
+    messages = load_web_conversation(workspace_id=NINA_WEB_WORKSPACE_ID, limit=30)
+    return Response(page(tx("talk_to_nina"), nina_chat_body(messages), active="nina"), mimetype="text/html")
+
 
 @app.route("/")
 def home():
@@ -5151,7 +6048,7 @@ def health():
         "preview_objects": len(WORKSPACE_ACTION_PREVIEWS),
         "approved_preview_objects": len(approved_preview_items()),
         "approved_client_threads": len(approved_client_thread_items()),
-        "active_workspace_work_count": approved_workspace_work_count(),
+        "active_workspace_work_count": approved_workspace_object_count(),
         "pending_or_held_preview_objects": len(pending_or_held_preview_items()),
         "rejected_preview_objects": len(rejected_preview_items()),
         "telegram_intake_sync_items": len(load_existing_telegram_intake_sync()),
