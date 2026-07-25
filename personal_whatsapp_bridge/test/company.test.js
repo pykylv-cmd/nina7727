@@ -23,6 +23,41 @@ test('company outbound echo never loops',async()=>{
   await processCompanyMessageUpsert(value,{}, {type:'notify',messages:[message('37120000001@s.whatsapp.net','outbound-1',true)]},async()=>{calls+=1},quiet)
   assert.equal(calls,0);assert.equal(value.sent.size,0)
 })
+test('company voice note and regular audio use shared media inbound',async()=>{
+  for(const ptt of [true,false]){
+    const calls=[]
+    const item={key:{id:`audio-${ptt}`,remoteJid:'37120000001@s.whatsapp.net',fromMe:false},message:{audioMessage:{mimetype:'audio/ogg; codecs=opus',ptt,fileLength:4}}}
+    await processCompanyMessageUpsert(state(),{sendMessage:async()=>({key:{id:'reply'}}),updateMediaMessage(){}},{type:'notify',messages:[item]},async payload=>{calls.push(payload);return{accepted:true,reply:'ok'}},quiet,async()=>Buffer.from('opus'))
+    assert.equal(calls[0].media.kind,'audio');assert.equal(calls[0].media.data_base64,Buffer.from('opus').toString('base64'))
+  }
+})
+test('company images preserve optional caption and use media inbound',async()=>{
+  for(const caption of ['','Kas ir attēlā?']){
+    const calls=[],item={key:{id:`image-${caption}`,remoteJid:'37120000001@s.whatsapp.net'},message:{imageMessage:{mimetype:'image/jpeg',caption,fileLength:3}}}
+    await processCompanyMessageUpsert(state(),{sendMessage:async()=>({key:{id:'reply'}}),updateMediaMessage(){}},{type:'notify',messages:[item]},async payload=>{calls.push(payload);return{accepted:true,reply:'vision'}},quiet,async()=>Buffer.from('img'))
+    assert.equal(calls[0].media.kind,'image');assert.equal(calls[0].media.caption,caption)
+  }
+})
+test('company supported document and quoted context reach shared inbound',async()=>{
+  const calls=[],item={key:{id:'doc',remoteJid:'37120000001@s.whatsapp.net'},message:{documentMessage:{mimetype:'application/pdf',fileName:'work.pdf',fileLength:3,contextInfo:{quotedMessage:{conversation:'Earlier'}}}}}
+  await processCompanyMessageUpsert(state(),{sendMessage:async()=>({key:{id:'reply'}}),updateMediaMessage(){}},{type:'notify',messages:[item]},async payload=>{calls.push(payload);return{accepted:true,reply:'saved'}},quiet,async()=>Buffer.from('pdf'))
+  assert.equal(calls[0].media.kind,'document');assert.equal(calls[0].quoted_text,'Earlier')
+})
+test('company media sender identities remain isolated',async()=>{
+  const calls=[]
+  const messages=['37120000001','37120000002'].map((sender,index)=>({key:{id:`image-${index}`,remoteJid:`${sender}@s.whatsapp.net`},message:{imageMessage:{mimetype:'image/jpeg',fileLength:3}}}))
+  await processCompanyMessageUpsert(state(),{sendMessage:async()=>({key:{id:'reply'}}),updateMediaMessage(){}},{type:'notify',messages},async payload=>{calls.push(payload);return{accepted:true,reply:'vision'}},quiet,async()=>Buffer.from('img'))
+  assert.deepEqual(calls.map(value=>value.sender_jid),['37120000001@s.whatsapp.net','37120000002@s.whatsapp.net'])
+})
+test('company rejects unsupported and oversized media before download',async()=>{
+  let calls=0,downloads=0,sends=0
+  const items=[
+    {key:{id:'bad',remoteJid:'37120000001@s.whatsapp.net'},message:{documentMessage:{mimetype:'application/x-msdownload',fileLength:2}}},
+    {key:{id:'large',remoteJid:'37120000001@s.whatsapp.net'},message:{imageMessage:{mimetype:'image/jpeg',fileLength:11*1024*1024}}},
+  ]
+  await processCompanyMessageUpsert(state(),{sendMessage:async()=>{sends+=1;return{key:{id:`safe-${sends}`}}}},{type:'notify',messages:items},async()=>{calls+=1},quiet,async()=>{downloads+=1})
+  assert.equal(calls,0);assert.equal(downloads,0);assert.equal(sends,2)
+})
 test('company LID message uses phone alternate for stable identity but replies to LID chat',async()=>{
   const calls=[],sends=[],item=message('999000@lid','lid-message')
   item.key.remoteJidAlt='37120000001@s.whatsapp.net'

@@ -187,10 +187,10 @@ def sender_digits(sender_jid):
     return match.group(1) if match else ""
 
 
-def accept_inbound(workspace_id, message_id, sender_jid, text):
+def accept_inbound(workspace_id, message_id, sender_jid, text="", has_media=False):
     if workspace_id != configured_workspace() or get_connection(workspace_id, CHANNEL)["status"] != "connected":
         return False
-    if not sender_digits(sender_jid) or not str(text or "").strip():
+    if not sender_digits(sender_jid) or not (str(text or "").strip() or has_media):
         return False
     return claim_channel_message(workspace_id, CHANNEL, message_id)
 

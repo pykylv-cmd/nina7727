@@ -1,4 +1,4 @@
-import makeWASocket, {Browsers, BufferJSON, DisconnectReason, fetchLatestBaileysVersion, initAuthCreds, jidNormalizedUser, makeCacheableSignalKeyStore, proto} from '@whiskeysockets/baileys'
+import makeWASocket, {Browsers, BufferJSON, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, initAuthCreds, jidNormalizedUser, makeCacheableSignalKeyStore, proto} from '@whiskeysockets/baileys'
 import pino from 'pino'
 import QRCode from 'qrcode'
 import {clearCompanyAuth, companyInbound, companyLinked, loadCompanyAuth, ninaErrorDetails, storeCompanyAuth} from './nina_api.js'
@@ -9,14 +9,28 @@ export const companySessions=new Map()
 const revive=value=>JSON.parse(JSON.stringify(value),BufferJSON.reviver)
 const flatten=value=>JSON.parse(JSON.stringify(value,BufferJSON.replacer))
 const normalizedJid=value=>value?jidNormalizedUser(String(value)):''
-const textOf=(message={})=>message.conversation||message.extendedTextMessage?.text||''
+const unwrap=message=>message?.ephemeralMessage?.message||message?.viewOnceMessage?.message||message?.viewOnceMessageV2?.message||message||{}
+const textOf=(message={})=>{const value=unwrap(message);return value.conversation||value.extendedTextMessage?.text||''}
+const captionOf=message=>{const value=unwrap(message);return value.imageMessage?.caption||value.documentMessage?.caption||''}
+const quotedTextOf=message=>{const value=unwrap(message),context=value.extendedTextMessage?.contextInfo||value.imageMessage?.contextInfo||value.documentMessage?.contextInfo||value.audioMessage?.contextInfo;return String(textOf(context?.quotedMessage)||captionOf(context?.quotedMessage)||'').trim().slice(0,1000)}
+const MEDIA_LIMITS={audio:16*1024*1024,image:10*1024*1024,document:20*1024*1024}
+const ALLOWED_MIMES={audio:new Set(['audio/aac','audio/mp4','audio/mpeg','audio/ogg','audio/opus','audio/wav','audio/webm','audio/x-m4a']),image:new Set(['image/jpeg','image/png','image/webp']),document:new Set(['application/csv','application/json','application/pdf','application/rtf','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/xml','text/csv','text/html','text/markdown','text/plain','text/rtf','text/xml'])}
+const baseMime=value=>String(value||'').split(';',1)[0].trim().toLowerCase()
+const numberValue=value=>{try{return Number(value?.toString?.()??value??0)}catch{return 0}}
+function mediaOf(message={}){
+  const value=unwrap(message)
+  if(value.audioMessage)return{kind:'audio',node:value.audioMessage,mime_type:String(value.audioMessage.mimetype||'audio/ogg'),filename:value.audioMessage.ptt?'voice.ogg':'audio',caption:''}
+  if(value.imageMessage)return{kind:'image',node:value.imageMessage,mime_type:String(value.imageMessage.mimetype||'image/jpeg'),filename:'image',caption:String(value.imageMessage.caption||'')}
+  if(value.documentMessage)return{kind:'document',node:value.documentMessage,mime_type:String(value.documentMessage.mimetype||''),filename:String(value.documentMessage.fileName||'document'),caption:String(value.documentMessage.caption||'')}
+  return null
+}
 const unsupportedChat=jid=>jid==='status@broadcast'||jid.endsWith('@broadcast')||jid.endsWith('@g.us')||jid.endsWith('@newsletter')
 const normalizeStoredKey=(type,value)=>type==='app-state-sync-key'&&value?proto.Message.AppStateSyncKeyData.fromObject(value):value
 function reconnectDelay(code){return[DisconnectReason.loggedOut,DisconnectReason.badSession,DisconnectReason.connectionReplaced,DisconnectReason.multideviceMismatch,DisconnectReason.forbidden].includes(code)?null:(code===DisconnectReason.restartRequired?250:5000)}
 function closeDetails(error){const value=Number(error?.output?.statusCode??error?.data?.reason??error?.statusCode);return{status_code:Number.isFinite(value)?value:0,error_class:String(error?.name||'Error').slice(0,80)}}
 async function settle(operation,message,workspaceId){try{await operation}catch(error){lifecycle.error({workspace_id:workspaceId,...ninaErrorDetails(error)},message)}}
 
-export async function processCompanyMessageUpsert(state,socket,event,api=companyInbound,log=lifecycle){
+export async function processCompanyMessageUpsert(state,socket,event,api=companyInbound,log=lifecycle,download=downloadMediaMessage){
   const type=String(event?.type||'')
   if(type!=='notify'){log.info({workspace_id:state.workspaceId,ignored_reason:'not_live_notify'},'company WhatsApp message ignored');return 0}
   if(state.status!=='connected'){log.info({workspace_id:state.workspaceId,ignored_reason:'not_connected'},'company WhatsApp message ignored');return 0}
@@ -31,11 +45,23 @@ export async function processCompanyMessageUpsert(state,socket,event,api=company
     else if(key.fromMe)ignored='from_company_account'
     else if(!remote||unsupportedChat(remote)||(alternate&&unsupportedChat(alternate)))ignored='unsupported_chat'
     else if(!(sender.endsWith('@s.whatsapp.net')||sender.endsWith('@lid')))ignored='unsupported_identity'
-    const text=textOf(item.message).trim()
-    if(!ignored&&!text)ignored='no_supported_text'
+    const text=textOf(item.message).trim(),media=mediaOf(item.message),quoted_text=quotedTextOf(item.message)
+    if(!ignored&&!text&&!media)ignored='no_supported_content'
     if(ignored){log.info({workspace_id:state.workspaceId,ignored_reason:ignored},'company WhatsApp message ignored');continue}
+    let mediaPayload
+    if(media){
+      const mime=baseMime(media.mime_type),declared=numberValue(media.node?.fileLength),limit=MEDIA_LIMITS[media.kind]
+      if(!ALLOWED_MIMES[media.kind]?.has(mime)){log.info({workspace_id:state.workspaceId,media_kind:media.kind,ignored_reason:'unsupported_media_type'},'company WhatsApp media rejected');await sendSafeReply(state,socket,remote,'Šis faila veids netiek atbalstīts.',log);continue}
+      if(declared>limit){log.info({workspace_id:state.workspaceId,media_kind:media.kind,ignored_reason:'media_too_large'},'company WhatsApp media rejected');await sendSafeReply(state,socket,remote,'Šis fails ir pārāk liels drošai apstrādei.',log);continue}
+      try{
+        const buffer=await download(item,'buffer',{}, {logger:quiet,reuploadRequest:socket.updateMediaMessage})
+        if(!Buffer.isBuffer(buffer)||!buffer.length||buffer.length>limit){await sendSafeReply(state,socket,remote,'Šo failu nevarēju droši apstrādāt.',log);continue}
+        mediaPayload={kind:media.kind,mime_type:media.mime_type,filename:media.filename,caption:media.caption,size:buffer.length,data_base64:buffer.toString('base64')}
+        log.info({workspace_id:state.workspaceId,media_kind:media.kind,media_bytes:buffer.length},'company WhatsApp media downloaded')
+      }catch(error){log.warn({workspace_id:state.workspaceId,media_kind:media.kind,error_class:String(error?.name||'Error').slice(0,80)},'company WhatsApp media download failed');await sendSafeReply(state,socket,remote,'Failu saņēmu, bet lejupielāde neizdevās.',log);continue}
+    }
     let result
-    try{result=await api({workspace_id:state.workspaceId,message_id:id,sender_jid:sender,text})}catch(error){lifecycle.error({workspace_id:state.workspaceId,...ninaErrorDetails(error)},'company WhatsApp inbound API failed');continue}
+    try{result=await api({workspace_id:state.workspaceId,message_id:id,sender_jid:sender,text,quoted_text,...(mediaPayload?{media:mediaPayload}:{})})}catch(error){lifecycle.error({workspace_id:state.workspaceId,...ninaErrorDetails(error)},'company WhatsApp inbound API failed');continue}
     const accepted=Boolean(result?.accepted),reply=String(result?.reply||'').trim()
     log.info({workspace_id:state.workspaceId,inbound_accepted:accepted},'company WhatsApp inbound API completed')
     if(!accepted||!reply){log.info({workspace_id:state.workspaceId,reply_generated:false},'company WhatsApp reply not generated');continue}
@@ -43,6 +69,10 @@ export async function processCompanyMessageUpsert(state,socket,event,api=company
     try{const sent=await socket.sendMessage(remote,{text:reply}),sentId=String(sent?.key?.id||'');if(sentId){state.sent.add(sentId);if(state.sent.size>200)state.sent.delete(state.sent.values().next().value)}log.info({workspace_id:state.workspaceId,reply_sent:true},'company WhatsApp reply sent');processed+=1}catch(error){log.warn({workspace_id:state.workspaceId,error_class:String(error?.name||'Error').slice(0,80)},'company WhatsApp reply send failed')}
   }
   return processed
+}
+
+async function sendSafeReply(state,socket,remote,text,log){
+  try{const sent=await socket.sendMessage(remote,{text}),id=String(sent?.key?.id||'');if(id)state.sent.add(id);log.info({workspace_id:state.workspaceId,reply_sent:true},'company WhatsApp safe media reply sent')}catch(error){log.warn({workspace_id:state.workspaceId,error_class:String(error?.name||'Error').slice(0,80)},'company WhatsApp safe media reply failed')}
 }
 
 async function authState(workspaceId){

@@ -5,6 +5,8 @@
 
 import json
 import logging
+import base64
+import binascii
 import os
 import hashlib
 import hmac
@@ -64,6 +66,7 @@ from company_whatsapp import (
     sender_digits as company_whatsapp_sender_digits,
     store_auth_record as store_company_whatsapp_auth,
 )
+from nina_media_service import MediaValidationError, process_media_message
 
 logger = logging.getLogger(__name__)
 
@@ -5649,16 +5652,51 @@ def internal_company_whatsapp_inbound():
     workspace_id = str(payload.get("workspace_id") or "")
     sender_jid = str(payload.get("sender_jid") or "")
     text = str(payload.get("text") or "")
-    if not accept_company_whatsapp_inbound(workspace_id, payload.get("message_id"), sender_jid, text):
+    media = payload.get("media") if isinstance(payload.get("media"), dict) else None
+    if request.content_length and request.content_length > 28 * 1024 * 1024:
+        return jsonify({"ok": False, "error": "media_too_large"}), 413
+    if not accept_company_whatsapp_inbound(
+        workspace_id, payload.get("message_id"), sender_jid, text, has_media=bool(media)
+    ):
         return jsonify({"ok": True, "accepted": False, "reply": ""})
     sender = company_whatsapp_sender_digits(sender_jid)
     identity = resolve_ninaos_channel_identity(COMPANY_WHATSAPP_CHANNEL, workspace_id, sender)
-    result = send_message_to_nina(
-        text,
-        workspace_id=identity["workspace_id"],
-        channel=COMPANY_WHATSAPP_CHANNEL,
-        conversation_id=identity["conversation_id"],
-    )
+    if media:
+        try:
+            encoded = str(media.get("data_base64") or "")
+            raw = base64.b64decode(encoded, validate=True)
+            if int(media.get("size") or len(raw)) != len(raw):
+                raise MediaValidationError("media_size_mismatch")
+            result = process_media_message(
+                kind=str(media.get("kind") or ""),
+                data=raw,
+                mime_type=str(media.get("mime_type") or ""),
+                filename=str(media.get("filename") or ""),
+                caption=str(media.get("caption") or ""),
+                quoted_text=str(payload.get("quoted_text") or ""),
+                workspace_id=identity["workspace_id"],
+                conversation_id=identity["conversation_id"],
+                channel=COMPANY_WHATSAPP_CHANNEL,
+                origin_user_id=sender,
+                message_id=str(payload.get("message_id") or ""),
+            )
+        except (MediaValidationError, ValueError, binascii.Error) as exc:
+            error = str(exc)
+            return jsonify({"ok": True, "accepted": True, "reply": "Šo failu nevarēju droši apstrādāt.", "error": error})
+        except Exception as exc:
+            logger.error(
+                "Company WhatsApp media processing failed: error_class=%s",
+                type(exc).__name__,
+            )
+            return jsonify({"ok": True, "accepted": True, "reply": "Multividi saņēmu, bet šobrīd nevarēju to apstrādāt."})
+    else:
+        quoted = str(payload.get("quoted_text") or "").strip()[:1000]
+        result = send_message_to_nina(
+            (f"Citētā ziņa: {quoted}\n\n{text}" if quoted else text),
+            workspace_id=identity["workspace_id"],
+            channel=COMPANY_WHATSAPP_CHANNEL,
+            conversation_id=identity["conversation_id"],
+        )
     return jsonify({"ok": True, "accepted": True, "reply": str(result.get("text") or "")})
 
 

@@ -91,6 +91,17 @@ def _save_turn(workspace_id: str, user_text: str, nina_text: str, conversation_i
     conn.close()
 
 
+def save_channel_turn(workspace_id: str, user_text: str, nina_text: str,
+                      conversation_id: str = "", channel: str = "web") -> None:
+    """Persist a shared-channel turn without introducing another memory store."""
+    _save_turn(workspace_id, user_text, nina_text, conversation_id=conversation_id, channel=channel)
+
+
+def generate_with_nina(prompt: str) -> str:
+    """Expose Nina's established provider boundary to shared media services."""
+    return _openai_generate(prompt)
+
+
 def _work_context(workspace_id: str, limit: int = 12) -> str:
     try:
         objects = list_work_objects(workspace_id=workspace_id, limit=limit)
