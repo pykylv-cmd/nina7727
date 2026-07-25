@@ -62,6 +62,7 @@ from company_whatsapp import (
     disconnect_company as disconnect_company_whatsapp,
     list_connected_workspaces as list_connected_company_whatsapp_workspaces,
     load_auth_records as load_company_whatsapp_auth,
+    load_auth_records_with_diagnostics as load_company_whatsapp_auth_with_diagnostics,
     mark_connected as mark_company_whatsapp_connected,
     mark_runtime_state as mark_company_whatsapp_runtime_state,
     pairing_is_active as company_whatsapp_pairing_is_active,
@@ -5594,7 +5595,35 @@ def admin_workers():
 @app.get("/admin/system")
 @platform_admin_required
 def admin_system():
-    return _admin_placeholder("Admin System", "Safe platform service status.")
+    workspace_id = configured_company_whatsapp_workspace()
+    connection = get_connection(workspace_id, COMPANY_WHATSAPP_CHANNEL)
+    _, auth = load_company_whatsapp_auth_with_diagnostics(workspace_id)
+    bridge_reachable = False
+    restoration = {}
+    try:
+        restoration = personal_whatsapp_bridge_request("/v1/company/diagnostics", {"workspace_id": workspace_id})
+        bridge_reachable = True
+    except Exception:
+        restoration = {}
+    metadata = connection.get("metadata") or {}
+    values = (
+        ("Bridge reachable", "Yes" if bridge_reachable else "No"),
+        ("Persisted status", str(connection.get("status") or "unknown")),
+        ("Stored auth records", str(auth["stored_record_count"])),
+        ("Auth state", str(auth["error_class"] or "available")),
+        ("Restoration state", str(restoration.get("restoration_state") or metadata.get("runtime_state") or "idle")),
+        ("Last restoration error", str(restoration.get("last_error_class") or auth["error_class"] or "none")),
+        ("Last successful connection", str(metadata.get("last_connected_at") or metadata.get("linked_at") or "not recorded")),
+    )
+    rows = "".join(
+        f"<div class='list-item'><b>{html_escape(label)}</b><span>{html_escape(value)}</span></div>"
+        for label, value in values
+    )
+    body = _admin_subnav() + (
+        "<section class='card card-pad'><div class='page-title'><h1>Admin System</h1>"
+        "<p>Safe platform service status.</p></div><div class='list'>" + rows + "</div></section>"
+    )
+    return Response(page("Admin System", body, active="admin"), mimetype="text/html")
 
 
 @app.post("/channels/telegram/connect")
@@ -5704,8 +5733,10 @@ def channels_company_whatsapp_status():
     connection = get_connection(workspace_id, COMPANY_WHATSAPP_CHANNEL)
     if connection["status"] == "connected":
         return jsonify({"status": "connected"})
-    if connection["status"] == "pending" and not company_whatsapp_pairing_is_active(workspace_id):
+    runtime_state = str((connection.get("metadata") or {}).get("runtime_state") or "")
+    if connection["status"] == "pending" and runtime_state not in {"reconnecting", "temporary_failure", "backend_unavailable"} and not company_whatsapp_pairing_is_active(workspace_id):
         set_connection_for_test(workspace_id, COMPANY_WHATSAPP_CHANNEL, "error", {"error_code": "pairing_expired"})
+        logger.info("Company WhatsApp status write status=error runtime_state=pairing_expired")
         return jsonify({"status": "connection_lost", "qr_svg": ""})
     try:
         state = personal_whatsapp_bridge_request("/v1/company/status", {"workspace_id": workspace_id})
@@ -5807,10 +5838,10 @@ def internal_company_whatsapp_auth_load():
     try:
         if workspace_id != configured_company_whatsapp_workspace():
             raise ValueError("invalid_workspace")
-        records = load_company_whatsapp_auth(workspace_id)
+        records, diagnostics = load_company_whatsapp_auth_with_diagnostics(workspace_id)
     except ValueError:
         return jsonify({"ok": False}), 400
-    return jsonify({"ok": True, "records": records})
+    return jsonify({"ok": True, "records": records, "diagnostics": diagnostics})
 
 
 @app.post("/internal/company-whatsapp/auth/store")

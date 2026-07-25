@@ -1,5 +1,11 @@
 const base = () => (process.env.NINA_WEB_INTERNAL_URL || '').replace(/\/$/, '')
 const token = () => process.env.NINA_PERSONAL_WHATSAPP_BRIDGE_TOKEN || ''
+export function backendDescriptor() {
+  try {
+    const value=new URL(base())
+    return `${value.protocol}//${value.host}${value.pathname.replace(/\/$/,'')}`
+  } catch { return 'invalid_or_missing' }
+}
 
 function safeResponseBody(raw) {
   try {
@@ -51,7 +57,10 @@ export async function activeWorkspaces() {
   return (await ninaRequest('/internal/personal-whatsapp/active', {})).workspace_ids || []
 }
 export async function loadCompanyAuth(workspaceId) {
-  return (await ninaRequest('/internal/company-whatsapp/auth/load', {workspace_id:workspaceId})).records || {}
+  const result=await ninaRequest('/internal/company-whatsapp/auth/load', {workspace_id:workspaceId})
+  const records=result.records || {},diagnostics=result.diagnostics || {}
+  console.info(JSON.stringify({event:'company WhatsApp auth load completed',backend_url:backendDescriptor(),record_count:Object.keys(records).length,stored_record_count:Number(diagnostics.stored_record_count||0),error_class:String(diagnostics.error_class||'none')}))
+  return records
 }
 export async function storeCompanyAuth(workspaceId, records) {
   return ninaRequest('/internal/company-whatsapp/auth/store', {workspace_id:workspaceId, records})

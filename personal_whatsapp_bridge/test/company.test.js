@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {companySessions,createCompanyAuthState,processCompanyMessageUpsert,publicCompanyStatus,reconnectDelay,restoreCompanySessions,restoredQrIsInvalid,stopCompanySession} from '../src/company_session_manager.js'
+import {companyRestorationDiagnostics,companySessions,createCompanyAuthState,processCompanyMessageUpsert,publicCompanyDiagnostics,publicCompanyStatus,reconnectDelay,restoreCompanySessions,restoredQrIsInvalid,stopCompanySession} from '../src/company_session_manager.js'
 import {DisconnectReason} from '@whiskeysockets/baileys'
 import {publicStatus,sessions,stopSession} from '../src/session_manager.js'
 
@@ -105,4 +105,8 @@ test('ordinary restart never creates a pairing QR while invalid credentials requ
   assert.equal(reconnectDelay(DisconnectReason.loggedOut),null)
   assert.equal(reconnectDelay(DisconnectReason.badSession),null)
   assert.notEqual(reconnectDelay(DisconnectReason.restartRequired),null)
+})
+test('Company restoration diagnostics expose lifecycle state without auth values',()=>{
+  companyRestorationDiagnostics.set('company',{restoration_state:'connected',last_error_class:'',restore_attempt:2,last_connected_at:'2026-01-01T00:00:00Z',credential:'never'})
+  assert.deepEqual(publicCompanyDiagnostics('company'),{restoration_state:'connected',last_error_class:'',restore_attempt:2,last_connected_at:'2026-01-01T00:00:00Z'})
 })

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -23,6 +24,7 @@ CHANNEL = "whatsapp_company"
 AUTH_TABLE = "nina_company_whatsapp_auth"
 PAIR_TABLE = "nina_company_whatsapp_pairing"
 _JID = re.compile(r"^([0-9]{6,20})(?::[0-9]+)?@(?:s\.whatsapp\.net|lid)$")
+logger = logging.getLogger(__name__)
 
 
 def configured_workspace():
@@ -85,6 +87,7 @@ def create_pairing_session(workspace_id=None, ttl_seconds=300):
     finally:
         conn.close()
     set_connection_for_test(workspace_id, CHANNEL, "pending", {"mode": "company_external", "pairing_expires_at": _iso(now + timedelta(seconds=ttl))})
+    logger.info("Company WhatsApp status write status=pending runtime_state=pairing")
     return {"session_token": raw, "expires_at": _iso(now + timedelta(seconds=ttl))}
 
 
@@ -150,7 +153,7 @@ def delete_auth_record(workspace_id, auth_key):
         conn.close()
 
 
-def load_auth_records(workspace_id):
+def load_auth_records_with_diagnostics(workspace_id):
     ensure_schema()
     conn = _connect()
     try:
@@ -161,14 +164,33 @@ def load_auth_records(workspace_id):
     finally:
         conn.close()
     result = {}
+    invalid = 0
     for key, encrypted in rows:
         raw = decrypt_channel_credential(encrypted)
         if raw:
             try:
                 result[key] = json.loads(raw)
             except Exception:
-                pass
-    return result
+                invalid += 1
+        else:
+            invalid += 1
+    diagnostics = {
+        "storage_backend": "postgresql" if USE_POSTGRES else "sqlite",
+        "stored_record_count": len(rows),
+        "loaded_record_count": len(result),
+        "invalid_record_count": invalid,
+        "error_class": "invalid_auth" if invalid else "",
+    }
+    logger.info(
+        "Company WhatsApp auth load completed backend=%s stored_records=%d loaded_records=%d error_class=%s",
+        diagnostics["storage_backend"], diagnostics["stored_record_count"],
+        diagnostics["loaded_record_count"], diagnostics["error_class"] or "none",
+    )
+    return result, diagnostics
+
+
+def load_auth_records(workspace_id):
+    return load_auth_records_with_diagnostics(workspace_id)[0]
 
 
 def mark_connected(workspace_id, session_token, identity):
@@ -179,25 +201,34 @@ def mark_connected(workspace_id, session_token, identity):
         "masked_identity": str((identity or {}).get("masked_identity") or "")[:40],
         "linked_at": _iso(_now()),
     }
-    return set_connection_for_test(workspace_id, CHANNEL, "connected", safe)
+    connected = set_connection_for_test(workspace_id, CHANNEL, "connected", safe)
+    logger.info("Company WhatsApp status write status=connected runtime_state=paired")
+    return connected
 
 
 def mark_runtime_state(workspace_id, state):
-    if workspace_id != configured_workspace() or state not in {"reconnecting", "connected", "invalid"}:
+    allowed = {"reconnecting", "connected", "invalid_auth", "logged_out", "temporary_failure", "backend_unavailable"}
+    if workspace_id != configured_workspace() or state not in allowed:
         return None
     current = get_connection(workspace_id, CHANNEL)
     metadata = dict(current.get("metadata") or {})
     metadata["mode"] = "company_external"
-    if state == "reconnecting":
-        metadata["runtime_state"] = "reconnecting"
+    if state in {"reconnecting", "temporary_failure", "backend_unavailable"}:
+        metadata["runtime_state"] = state
+        metadata["qr_required"] = False
         status = "pending"
     elif state == "connected":
         metadata.pop("runtime_state", None)
+        metadata["qr_required"] = False
+        metadata["last_connected_at"] = _iso(_now())
         status = "connected"
     else:
-        metadata["runtime_state"] = "credentials_invalid"
+        metadata["runtime_state"] = state
+        metadata["qr_required"] = state == "logged_out"
         status = "error"
-    return set_connection_for_test(workspace_id, CHANNEL, status, metadata)
+    updated = set_connection_for_test(workspace_id, CHANNEL, status, metadata)
+    logger.info("Company WhatsApp status write status=%s runtime_state=%s", status, state)
+    return updated
 
 
 def sender_digits(sender_jid):
@@ -225,13 +256,22 @@ def disconnect_company(workspace_id=None):
         cur.close()
     finally:
         conn.close()
-    return disconnect(workspace_id, CHANNEL)
+    disconnected = disconnect(workspace_id, CHANNEL)
+    logger.info("Company WhatsApp status write status=disconnected runtime_state=explicit_disconnect")
+    return disconnected
 
 
 def list_connected_workspaces():
     workspace_id = configured_workspace()
+    logger.info("Company WhatsApp active workspace lookup started backend=%s", "postgresql" if USE_POSTGRES else "sqlite")
     connection = get_connection(workspace_id, CHANNEL)
     if connection["status"] not in {"connected", "pending"}:
+        logger.info("Company WhatsApp active workspace lookup completed count=0 persisted_status=%s", connection["status"])
         return []
-    records = load_auth_records(workspace_id)
-    return [workspace_id] if isinstance(records.get("creds"), dict) else []
+    records, diagnostics = load_auth_records_with_diagnostics(workspace_id)
+    result = [workspace_id] if isinstance(records.get("creds"), dict) and not diagnostics["error_class"] else []
+    logger.info(
+        "Company WhatsApp active workspace lookup completed count=%d persisted_status=%s auth_error=%s",
+        len(result), connection["status"], diagnostics["error_class"] or "none",
+    )
+    return result

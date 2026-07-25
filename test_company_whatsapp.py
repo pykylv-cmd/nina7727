@@ -125,11 +125,60 @@ class CompanyWhatsAppTests(unittest.TestCase):
         invalid = self.client.post(
             "/internal/company-whatsapp/runtime-state",
             headers=auth,
-            json={"workspace_id": "ninaos_company", "state": "invalid"},
+            json={"workspace_id": "ninaos_company", "state": "invalid_auth"},
         )
         self.assertEqual(invalid.status_code, 200)
         self.assertEqual(self.connections.get_connection("ninaos_company", "whatsapp_company")["status"], "error")
         self.assertEqual(self.company.list_connected_workspaces(), [])
+
+    def test_reconnecting_status_is_not_mistaken_for_expired_pairing(self):
+        self.company.store_auth_record("ninaos_company", "creds", {"registered": True})
+        self.connections.set_connection_for_test(
+            "ninaos_company", "whatsapp_company", "pending",
+            {"mode": "company_external", "runtime_state": "reconnecting"},
+        )
+        with patch.object(self.web, "personal_whatsapp_bridge_request", return_value={"status": "connecting"}):
+            response = self.client.get("/channels/whatsapp-company/status")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["status"], "connecting")
+        self.assertEqual(
+            self.connections.get_connection("ninaos_company", "whatsapp_company")["status"], "pending"
+        )
+        self.assertEqual(self.company.list_connected_workspaces(), ["ninaos_company"])
+
+    def test_auth_survives_python_reload_and_wrong_key_is_diagnostic(self):
+        self.company.store_auth_record("ninaos_company", "creds", {"registered": True})
+        self.connections.set_connection_for_test("ninaos_company", "whatsapp_company", "connected", {})
+        restored = importlib.reload(self.company)
+        records, healthy = restored.load_auth_records_with_diagnostics("ninaos_company")
+        self.assertTrue(records["creds"]["registered"])
+        self.assertEqual(healthy["error_class"], "")
+        with patch.dict(os.environ, {"NINA_CHANNEL_CREDENTIAL_KEY": Fernet.generate_key().decode()}):
+            records, broken = restored.load_auth_records_with_diagnostics("ninaos_company")
+            self.assertEqual(records, {})
+            self.assertEqual(broken["error_class"], "invalid_auth")
+            self.assertGreater(broken["invalid_record_count"], 0)
+
+    def test_admin_system_exposes_only_safe_company_restoration_diagnostics(self):
+        self.company.store_auth_record("ninaos_company", "creds", {"registered": True})
+        self.connections.set_connection_for_test("ninaos_company", "whatsapp_company", "connected", {})
+        with patch.object(
+            self.web, "personal_whatsapp_bridge_request",
+            return_value={"restoration_state": "connected", "last_error_class": "", "last_connected_at": "2026-01-01T00:00:00Z"},
+        ):
+            page = self.client.get("/admin/system?lang=en").get_data(as_text=True)
+        self.assertIn("Bridge reachable", page)
+        self.assertIn("Stored auth records", page)
+        self.assertIn("Restoration state", page)
+        self.assertNotIn("registered", page)
+        self.assertNotIn("NINA_CHANNEL_CREDENTIAL_KEY", page)
+
+    def test_only_logged_out_runtime_state_requires_new_qr(self):
+        self.connections.set_connection_for_test("ninaos_company", "whatsapp_company", "connected", {})
+        invalid = self.company.mark_runtime_state("ninaos_company", "invalid_auth")
+        self.assertFalse(invalid["metadata"]["qr_required"])
+        logged_out = self.company.mark_runtime_state("ninaos_company", "logged_out")
+        self.assertTrue(logged_out["metadata"]["qr_required"])
 
 
 if __name__=="__main__":
