@@ -30,6 +30,15 @@ class AdminPanelSeparationTests(unittest.TestCase):
         client_page = web_app.app.test_client().get("/channels?lang=en")
         self.assertNotIn(b">Admin<", client_page.data)
 
+    def test_clients_sidebar_link_is_role_aware(self):
+        admin_page = self.admin_client().get("/admin/channels?lang=en").get_data(as_text=True)
+        client_page = web_app.app.test_client().get("/channels?lang=en").get_data(as_text=True)
+
+        self.assertIn("href='/admin/clients?lang=en'", admin_page)
+        self.assertNotIn("href='/clients?lang=en'", admin_page)
+        self.assertIn("href='/clients?lang=en'", client_page)
+        self.assertNotIn("href='/admin/clients?lang=en'", client_page)
+
     def test_admin_company_connect_status_qr_and_disconnect(self):
         admin = self.admin_client()
         env = {

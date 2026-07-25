@@ -4090,6 +4090,7 @@ def css():
 
 def page(title, body, active="dashboard"):
     lang = current_language()
+    admin_role = current_web_role() == ADMIN_ROLE
     channels_label = {"en": "Channels", "lv": "Kanāli", "ru": "Каналы"}[lang]
     nav = [
         ("nina", tx("talk_to_nina", lang), "/nina", "N"),
@@ -4098,14 +4099,14 @@ def page(title, body, active="dashboard"):
         ("inbox", tx("inbox", lang), "/inbox", "✦"),
         ("workers", tx("workers", lang), "/workers", "♙"),
         ("tasks", tx("tasks", lang), "/tasks", "☑"),
-        ("clients", tx("clients", lang), "/clients", "●"),
+        ("clients", tx("clients", lang), "/admin/clients" if admin_role else "/clients", "●"),
         ("projects", tx("projects", lang), "/projects", "▣"),
         ("calendar", tx("calendar", lang), "/calendar", "◫"),
         ("files", tx("files", lang), "/files", "▤"),
         ("analytics", tx("analytics", lang), "/analytics", "⌁"),
         ("exchange", tx("exchange", lang), "/exchange", "◎"),
     ]
-    if current_web_role() == ADMIN_ROLE:
+    if admin_role:
         nav.append(("admin", "Admin", "/admin/channels", "A"))
     nav_html = ""
     for key, label, href, icon in nav:
