@@ -65,6 +65,9 @@ export async function clearCompanyAuth(workspaceId) {
 export async function companyLinked(workspaceId, sessionToken, identity) {
   return ninaRequest('/internal/company-whatsapp/linked', {workspace_id:workspaceId, session_token:sessionToken, identity})
 }
+export async function companyRuntimeState(workspaceId, state) {
+  return ninaRequest('/internal/company-whatsapp/runtime-state', {workspace_id:workspaceId, state})
+}
 export async function companyInbound(payload) {
   return ninaRequest('/internal/company-whatsapp/inbound', payload)
 }

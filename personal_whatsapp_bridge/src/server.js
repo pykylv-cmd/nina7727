@@ -3,6 +3,7 @@ import {publicStatus, restoreSessions, startSession, stopSession} from './sessio
 import {publicCompanyStatus, restoreCompanySessions, startCompanySession, stopCompanySession} from './company_session_manager.js'
 import {activeCompanyWorkspaces, activeWorkspaces} from './nina_api.js'
 import {ninaErrorDetails} from './nina_api.js'
+import {initializeCompanySessions} from './startup.js'
 
 const token=process.env.NINA_PERSONAL_WHATSAPP_BRIDGE_TOKEN || ''
 const port=Number(process.env.PORT || 8080)
@@ -26,4 +27,4 @@ const server=http.createServer(async(req,res)=>{
 })
 server.listen(port,'0.0.0.0')
 activeWorkspaces().then(ids=>restoreSessions(ids)).catch(error=>console.error(JSON.stringify({event:'personal WhatsApp active-session lookup failed',...ninaErrorDetails(error)})))
-activeCompanyWorkspaces().then(ids=>restoreCompanySessions(ids)).catch(error=>console.error(JSON.stringify({event:'company WhatsApp active-session lookup failed',...ninaErrorDetails(error)})))
+void initializeCompanySessions(activeCompanyWorkspaces,restoreCompanySessions)

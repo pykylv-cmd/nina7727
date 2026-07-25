@@ -63,6 +63,7 @@ from company_whatsapp import (
     list_connected_workspaces as list_connected_company_whatsapp_workspaces,
     load_auth_records as load_company_whatsapp_auth,
     mark_connected as mark_company_whatsapp_connected,
+    mark_runtime_state as mark_company_whatsapp_runtime_state,
     pairing_is_active as company_whatsapp_pairing_is_active,
     sender_digits as company_whatsapp_sender_digits,
     store_auth_record as store_company_whatsapp_auth,
@@ -5848,6 +5849,18 @@ def internal_company_whatsapp_linked():
         return jsonify({"ok": False}), 401
     connected = mark_company_whatsapp_connected(str(payload.get("workspace_id") or ""), payload.get("session_token"), payload.get("identity"))
     return jsonify({"ok": bool(connected)}), (200 if connected else 409)
+
+
+@app.post("/internal/company-whatsapp/runtime-state")
+def internal_company_whatsapp_runtime_state():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    updated = mark_company_whatsapp_runtime_state(
+        str(payload.get("workspace_id") or ""),
+        str(payload.get("state") or ""),
+    )
+    return jsonify({"ok": bool(updated)}), (200 if updated else 400)
 
 
 @app.post("/internal/company-whatsapp/inbound")

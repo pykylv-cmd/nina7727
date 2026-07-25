@@ -1,7 +1,7 @@
 import makeWASocket, {Browsers, BufferJSON, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, initAuthCreds, jidNormalizedUser, makeCacheableSignalKeyStore, proto} from '@whiskeysockets/baileys'
 import pino from 'pino'
 import QRCode from 'qrcode'
-import {clearCompanyAuth, companyInbound, companyLinked, loadCompanyAuth, ninaErrorDetails, storeCompanyAuth} from './nina_api.js'
+import {clearCompanyAuth, companyInbound, companyLinked, companyRuntimeState, loadCompanyAuth, ninaErrorDetails, storeCompanyAuth} from './nina_api.js'
 
 const lifecycle=pino({level:process.env.LOG_LEVEL||'info',base:undefined})
 const quiet=lifecycle.child({component:'baileys-company'},{level:process.env.BAILEYS_LOG_LEVEL||'warn'})
@@ -26,7 +26,8 @@ function mediaOf(message={}){
 }
 const unsupportedChat=jid=>jid==='status@broadcast'||jid.endsWith('@broadcast')||jid.endsWith('@g.us')||jid.endsWith('@newsletter')
 const normalizeStoredKey=(type,value)=>type==='app-state-sync-key'&&value?proto.Message.AppStateSyncKeyData.fromObject(value):value
-function reconnectDelay(code){return[DisconnectReason.loggedOut,DisconnectReason.badSession,DisconnectReason.connectionReplaced,DisconnectReason.multideviceMismatch,DisconnectReason.forbidden].includes(code)?null:(code===DisconnectReason.restartRequired?250:5000)}
+export function reconnectDelay(code){return[DisconnectReason.loggedOut,DisconnectReason.badSession,DisconnectReason.connectionReplaced,DisconnectReason.multideviceMismatch,DisconnectReason.forbidden].includes(code)?null:(code===DisconnectReason.restartRequired?250:5000)}
+export const restoredQrIsInvalid=(restoring,qr)=>Boolean(restoring&&qr)
 function closeDetails(error){const value=Number(error?.output?.statusCode??error?.data?.reason??error?.statusCode);return{status_code:Number.isFinite(value)?value:0,error_class:String(error?.name||'Error').slice(0,80)}}
 async function settle(operation,message,workspaceId){try{await operation}catch(error){lifecycle.error({workspace_id:workspaceId,...ninaErrorDetails(error)},message)}}
 
@@ -75,30 +76,37 @@ async function sendSafeReply(state,socket,remote,text,log){
   try{const sent=await socket.sendMessage(remote,{text}),id=String(sent?.key?.id||'');if(id)state.sent.add(id);log.info({workspace_id:state.workspaceId,reply_sent:true},'company WhatsApp safe media reply sent')}catch(error){log.warn({workspace_id:state.workspaceId,error_class:String(error?.name||'Error').slice(0,80)},'company WhatsApp safe media reply failed')}
 }
 
-async function authState(workspaceId){
-  const saved=await loadCompanyAuth(workspaceId),creds=saved.creds?revive(saved.creds):initAuthCreds()
+export async function createCompanyAuthState(workspaceId,load=loadCompanyAuth,store=storeCompanyAuth){
+  const saved=await load(workspaceId),creds=saved.creds?revive(saved.creds):initAuthCreds()
   let queue=Promise.resolve();const enqueue=job=>{const next=queue.then(job,job);queue=next.catch(()=>{});return next}
-  const keys={get:async(type,ids)=>Object.fromEntries(ids.map(id=>{const stored=saved[`key:${type}:${id}`];return[id,stored===undefined?null:normalizeStoredKey(type,revive(stored))]})),set:async data=>{const writes={};for(const[type,values]of Object.entries(data))for(const[id,value]of Object.entries(values||{})){const key=`key:${type}:${id}`;writes[key]=value===null?null:flatten(value);if(value===null)delete saved[key];else saved[key]=writes[key]}await enqueue(()=>storeCompanyAuth(workspaceId,writes))}}
-  return{state:{creds,keys:makeCacheableSignalKeyStore(keys,quiet)},saveCreds:()=>enqueue(()=>storeCompanyAuth(workspaceId,{creds:flatten(creds)})),flush:()=>queue}
+  const keys={get:async(type,ids)=>Object.fromEntries(ids.map(id=>{const stored=saved[`key:${type}:${id}`];return[id,stored===undefined?null:normalizeStoredKey(type,revive(stored))]})),set:async data=>{const writes={};for(const[type,values]of Object.entries(data))for(const[id,value]of Object.entries(values||{})){const key=`key:${type}:${id}`;writes[key]=value===null?null:flatten(value);if(value===null)delete saved[key];else saved[key]=writes[key]}await enqueue(()=>store(workspaceId,writes))}}
+  return{restored:Boolean(saved.creds),state:{creds,keys:makeCacheableSignalKeyStore(keys,quiet)},saveCreds:()=>enqueue(()=>store(workspaceId,{creds:flatten(creds)})),flush:()=>queue}
 }
 
 export async function startCompanySession(workspaceId,sessionToken,options={}){
   await stopCompanySession(workspaceId,false)
   if(options.resetAuth&&sessionToken)await clearCompanyAuth(workspaceId)
-  const auth=await authState(workspaceId),selected=await fetchLatestBaileysVersion()
+  const auth=await createCompanyAuthState(workspaceId),selected=await fetchLatestBaileysVersion(),restoring=!sessionToken
+  if(restoring&&!auth.restored)throw new Error('company_auth_missing')
   const state={workspaceId,sessionToken,socket:null,qrSvg:'',status:'connecting',sent:new Set(),retryTimer:null,closed:false,qrSequence:0}
   companySessions.set(workspaceId,state);lifecycle.info({workspace_id:workspaceId},'company WhatsApp session started')
+  if(restoring)await companyRuntimeState(workspaceId,'reconnecting')
   const socket=makeWASocket({auth:auth.state,version:selected.version,browser:Browsers.ubuntu('NinaOS Company'),logger:quiet,emitOwnEvents:false,syncFullHistory:false,markOnlineOnConnect:false,shouldIgnoreJid:jid=>unsupportedChat(String(jid||''))})
   state.socket=socket
   socket.ev.on('creds.update',()=>{void settle(auth.saveCreds(),'company WhatsApp credential persistence failed',workspaceId)})
   socket.ev.on('connection.update',update=>{void settle((async()=>{
-    if(update.qr){state.qrSvg=await QRCode.toString(update.qr,{type:'svg',margin:1,width:300});state.qrSequence+=1;lifecycle.info({workspace_id:workspaceId,qr_sequence:state.qrSequence},'company WhatsApp QR generated')}
-    if(update.connection==='open'){state.status='connected';state.qrSvg='';const jid=normalizedJid(socket.user?.id||auth.state.creds.me?.id||''),digits=jid.split(':')[0].split('@')[0],masked=digits.length>4?`${'*'.repeat(Math.min(8,digits.length-4))}${digits.slice(-4)}`:'Linked account';if(sessionToken)await companyLinked(workspaceId,sessionToken,{masked_identity:masked});lifecycle.info({workspace_id:workspaceId},'company WhatsApp connected')}
-    if(update.connection==='close'){const details=closeDetails(update.lastDisconnect?.error),delay=reconnectDelay(details.status_code);state.qrSvg='';state.status=details.status_code===DisconnectReason.loggedOut?'logged_out':'connection_lost';lifecycle.warn({workspace_id:workspaceId,...details,reconnect_delay_ms:delay},'company WhatsApp disconnected');await auth.flush().catch(()=>{});if(delay!==null&&!state.closed&&companySessions.get(workspaceId)===state)state.retryTimer=setTimeout(()=>startCompanySession(workspaceId,sessionToken,{resetAuth:false}).catch(()=>{}),delay)}
+    if(update.qr){if(restoredQrIsInvalid(restoring,update.qr)){state.status='logged_out';state.qrSvg='';state.closed=true;await companyRuntimeState(workspaceId,'invalid');lifecycle.warn({workspace_id:workspaceId},'company WhatsApp restored credentials require new pairing')}else{state.qrSvg=await QRCode.toString(update.qr,{type:'svg',margin:1,width:300});state.qrSequence+=1;lifecycle.info({workspace_id:workspaceId,qr_sequence:state.qrSequence},'company WhatsApp QR generated')}}
+    if(update.connection==='open'){await auth.flush();state.status='connected';state.qrSvg='';const jid=normalizedJid(socket.user?.id||auth.state.creds.me?.id||''),digits=jid.split(':')[0].split('@')[0],masked=digits.length>4?`${'*'.repeat(Math.min(8,digits.length-4))}${digits.slice(-4)}`:'Linked account';if(sessionToken)await companyLinked(workspaceId,sessionToken,{masked_identity:masked});else await companyRuntimeState(workspaceId,'connected');lifecycle.info({workspace_id:workspaceId},'company WhatsApp connected')}
+    if(update.connection==='close'){const details=closeDetails(update.lastDisconnect?.error),delay=reconnectDelay(details.status_code),invalid=delay===null;state.qrSvg='';state.status=invalid?'logged_out':'connecting';lifecycle.warn({workspace_id:workspaceId,...details,reconnect_delay_ms:delay},'company WhatsApp disconnected');await auth.flush().catch(()=>{});if(invalid)await companyRuntimeState(workspaceId,'invalid');else if(!state.closed&&companySessions.get(workspaceId)===state){await companyRuntimeState(workspaceId,'reconnecting');state.retryTimer=setTimeout(()=>startCompanySession(workspaceId,sessionToken,{resetAuth:false}).catch(()=>{}),delay)}}
   })(),'company WhatsApp connection update failed',workspaceId)})
   socket.ev.on('messages.upsert',event=>{void settle(processCompanyMessageUpsert(state,socket,event),'company WhatsApp message processing failed',workspaceId)})
   return publicCompanyStatus(workspaceId)
 }
 export function publicCompanyStatus(workspaceId){const state=companySessions.get(workspaceId);return state?{status:state.status,qr_svg:state.qrSvg}:{status:'disconnected',qr_svg:''}}
 export async function stopCompanySession(workspaceId,logout=true){const state=companySessions.get(workspaceId);companySessions.delete(workspaceId);if(!state?.socket)return;state.closed=true;if(state.retryTimer)clearTimeout(state.retryTimer);try{if(logout)await state.socket.logout();else state.socket.end(undefined)}catch(_){}}
-export async function restoreCompanySessions(workspaceIds=[],starter=startCompanySession){await Promise.all(workspaceIds.map(id=>starter(id,'').catch(error=>lifecycle.error({workspace_id:id,...ninaErrorDetails(error)},'company WhatsApp restore failed'))))}
+export async function restoreCompanySessions(workspaceIds=[],starter=startCompanySession){
+  const results=await Promise.allSettled(workspaceIds.map(id=>starter(id,'')))
+  let failed=false
+  results.forEach((result,index)=>{if(result.status==='rejected'){failed=true;lifecycle.error({workspace_id:workspaceIds[index],...ninaErrorDetails(result.reason)},'company WhatsApp restore failed')}})
+  if(failed)throw new Error('company_restore_incomplete')
+}

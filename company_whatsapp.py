@@ -182,6 +182,24 @@ def mark_connected(workspace_id, session_token, identity):
     return set_connection_for_test(workspace_id, CHANNEL, "connected", safe)
 
 
+def mark_runtime_state(workspace_id, state):
+    if workspace_id != configured_workspace() or state not in {"reconnecting", "connected", "invalid"}:
+        return None
+    current = get_connection(workspace_id, CHANNEL)
+    metadata = dict(current.get("metadata") or {})
+    metadata["mode"] = "company_external"
+    if state == "reconnecting":
+        metadata["runtime_state"] = "reconnecting"
+        status = "pending"
+    elif state == "connected":
+        metadata.pop("runtime_state", None)
+        status = "connected"
+    else:
+        metadata["runtime_state"] = "credentials_invalid"
+        status = "error"
+    return set_connection_for_test(workspace_id, CHANNEL, status, metadata)
+
+
 def sender_digits(sender_jid):
     match = _JID.fullmatch(str(sender_jid or "").strip())
     return match.group(1) if match else ""
@@ -212,4 +230,8 @@ def disconnect_company(workspace_id=None):
 
 def list_connected_workspaces():
     workspace_id = configured_workspace()
-    return [workspace_id] if get_connection(workspace_id, CHANNEL)["status"] == "connected" else []
+    connection = get_connection(workspace_id, CHANNEL)
+    if connection["status"] not in {"connected", "pending"}:
+        return []
+    records = load_auth_records(workspace_id)
+    return [workspace_id] if isinstance(records.get("creds"), dict) else []

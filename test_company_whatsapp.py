@@ -100,6 +100,37 @@ class CompanyWhatsAppTests(unittest.TestCase):
         auth={"Authorization":"Bearer bridge-test"}
         self.assertEqual(self.client.post("/internal/company-whatsapp/auth/load",headers=auth,json={"workspace_id":"other"}).status_code,400)
 
+    def test_saved_auth_is_restorable_and_runtime_state_survives_restart(self):
+        self.company.store_auth_record("ninaos_company", "creds", {"registered": True, "noiseKey": {"private": "encrypted"}})
+        self.company.store_auth_record("ninaos_company", "key:session:one", {"value": "incremental"})
+        pair = self.company.create_pairing_session()
+        self.company.mark_connected("ninaos_company", pair["session_token"], {"masked_identity": "*******4711"})
+
+        self.assertEqual(self.company.list_connected_workspaces(), ["ninaos_company"])
+        auth = {"Authorization": "Bearer bridge-test"}
+        loaded = self.client.post(
+            "/internal/company-whatsapp/auth/load", headers=auth, json={"workspace_id": "ninaos_company"}
+        ).get_json()["records"]
+        self.assertTrue(loaded["creds"]["registered"])
+        self.assertEqual(loaded["key:session:one"]["value"], "incremental")
+
+        reconnecting = self.client.post(
+            "/internal/company-whatsapp/runtime-state",
+            headers=auth,
+            json={"workspace_id": "ninaos_company", "state": "reconnecting"},
+        )
+        self.assertEqual(reconnecting.status_code, 200)
+        self.assertEqual(self.connections.get_connection("ninaos_company", "whatsapp_company")["status"], "pending")
+        self.assertEqual(self.company.list_connected_workspaces(), ["ninaos_company"])
+        invalid = self.client.post(
+            "/internal/company-whatsapp/runtime-state",
+            headers=auth,
+            json={"workspace_id": "ninaos_company", "state": "invalid"},
+        )
+        self.assertEqual(invalid.status_code, 200)
+        self.assertEqual(self.connections.get_connection("ninaos_company", "whatsapp_company")["status"], "error")
+        self.assertEqual(self.company.list_connected_workspaces(), [])
+
 
 if __name__=="__main__":
     unittest.main()

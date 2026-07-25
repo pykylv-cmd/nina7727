@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {companySessions,processCompanyMessageUpsert,publicCompanyStatus,restoreCompanySessions,stopCompanySession} from '../src/company_session_manager.js'
+import {companySessions,createCompanyAuthState,processCompanyMessageUpsert,publicCompanyStatus,reconnectDelay,restoreCompanySessions,restoredQrIsInvalid,stopCompanySession} from '../src/company_session_manager.js'
+import {DisconnectReason} from '@whiskeysockets/baileys'
 import {publicStatus,sessions,stopSession} from '../src/session_manager.js'
 
 const quiet={info(){},warn(){}}
@@ -79,8 +80,29 @@ test('company and personal session registries never collide',async()=>{
 test('company and personal restores are independently invocable',async()=>{
   const restored=[]
   await Promise.all([
-    restoreCompanySessions(['company'],async id=>{restored.push(`company:${id}`)}),
+    restoreCompanySessions(['company'],async(id,token)=>{restored.push(`company:${id}:${token}`)}),
     Promise.resolve().then(()=>restored.push('personal:independent')),
   ])
-  assert.deepEqual(restored.sort(),['company:company','personal:independent'])
+  assert.deepEqual(restored.sort(),['company:company:','personal:independent'])
+})
+test('company auth persists credentials and incremental keys across restart',async()=>{
+  const database={creds:{registered:true},'key:session:old':{value:'old'}},writes=[]
+  const load=async()=>structuredClone(database)
+  const store=async(_workspace,records)=>{writes.push(structuredClone(records));for(const[key,value]of Object.entries(records)){if(value===null)delete database[key];else database[key]=structuredClone(value)}}
+  const first=await createCompanyAuthState('company',load,store)
+  await first.state.keys.set({session:{fresh:{value:'new'}}})
+  first.state.creds.registered=true
+  await first.saveCreds()
+  await first.flush()
+  const restored=await createCompanyAuthState('company',load,store)
+  assert.equal(restored.restored,true)
+  assert.deepEqual(await restored.state.keys.get('session',['old','fresh']),{old:{value:'old'},fresh:{value:'new'}})
+  assert.equal(writes.some(value=>value.creds?.registered===true),true)
+})
+test('ordinary restart never creates a pairing QR while invalid credentials require pairing',()=>{
+  assert.equal(restoredQrIsInvalid(true,'provider-qr'),true)
+  assert.equal(restoredQrIsInvalid(false,'provider-qr'),false)
+  assert.equal(reconnectDelay(DisconnectReason.loggedOut),null)
+  assert.equal(reconnectDelay(DisconnectReason.badSession),null)
+  assert.notEqual(reconnectDelay(DisconnectReason.restartRequired),null)
 })
