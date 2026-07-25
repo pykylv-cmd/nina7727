@@ -7,6 +7,7 @@ import json
 import logging
 import base64
 import binascii
+from functools import wraps
 import os
 import hashlib
 import hmac
@@ -67,6 +68,10 @@ from company_whatsapp import (
     store_auth_record as store_company_whatsapp_auth,
 )
 from nina_media_service import MediaValidationError, process_media_message
+from admin_auth import (
+    ADMIN_COOKIE, ADMIN_ROLE, CLIENT_ROLE, bootstrap_configured,
+    create_admin_session, verify_admin_session, verify_bootstrap_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -4099,6 +4104,8 @@ def page(title, body, active="dashboard"):
         ("analytics", tx("analytics", lang), "/analytics", "⌁"),
         ("exchange", tx("exchange", lang), "/exchange", "◎"),
     ]
+    if current_web_role() == ADMIN_ROLE:
+        nav.append(("admin", "Admin", "/admin/channels", "A"))
     nav_html = ""
     for key, label, href, icon in nav:
         cls = "nav-item active" if key == active else "nav-item"
@@ -5135,6 +5142,27 @@ def current_workspace_id():
     return workspace_id
 
 
+def current_web_role():
+    """Workspace identity is always client unless a separate signed admin session verifies."""
+    if not has_request_context():
+        return CLIENT_ROLE
+    try:
+        if verify_admin_session(request.cookies.get(ADMIN_COOKIE), _workspace_cookie_secret()):
+            return ADMIN_ROLE
+    except RuntimeError:
+        pass
+    return CLIENT_ROLE
+
+
+def platform_admin_required(view):
+    @wraps(view)
+    def protected(*args, **kwargs):
+        if current_web_role() != ADMIN_ROLE:
+            return Response("Forbidden", status=403)
+        return view(*args, **kwargs)
+    return protected
+
+
 @app.after_request
 def persist_workspace_identity(response):
     workspace_id = getattr(g, "nina_workspace_id", "")
@@ -5147,6 +5175,12 @@ def persist_workspace_identity(response):
             secure=request.is_secure or request.headers.get("X-Forwarded-Proto") == "https",
             samesite="Lax",
         )
+    if current_web_role() == ADMIN_ROLE or request.path.startswith("/admin/") or request.path in {
+        "/channels/whatsapp-personal/status",
+        "/channels/whatsapp-company/status",
+    }:
+        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["Pragma"] = "no-cache"
     return response
 
 
@@ -5184,7 +5218,7 @@ def _whatsapp_connect_script():
     if (setup && setup.state) {
       try { await fetch('/channels/whatsapp/attention', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({csrf_token:window.NinaWhatsApp.callbackCsrf,state:setup.state})}); } catch (_) {}
     }
-    window.location.href = '/channels?lang=' + encodeURIComponent(window.NinaWhatsApp.lang) + '&notice=whatsapp_failed';
+    window.location.href = '/admin/channels?lang=' + encodeURIComponent(window.NinaWhatsApp.lang) + '&notice=whatsapp_failed';
   };
   const finish = async () => {
     if (!setup || !signup || !code) return;
@@ -5196,7 +5230,7 @@ def _whatsapp_connect_script():
           business_portfolio_id: signup.business_id || ''})
       });
       if (!response.ok) return fail();
-      window.location.href = '/channels?lang=' + encodeURIComponent(window.NinaWhatsApp.lang);
+      window.location.href = '/admin/channels?lang=' + encodeURIComponent(window.NinaWhatsApp.lang);
     } catch (_) { fail(); }
   };
   window.addEventListener('message', (event) => {
@@ -5252,7 +5286,7 @@ def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
         telegram_action = f"<form method='post' action='/channels/telegram/connect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('telegram_connect')}'><button class='btn primary' type='submit'>{c['connect_telegram']}</button></form>"
     if telegram["status"] in {"connected", "pending", "error"}:
         telegram_action += f"<form method='post' action='/channels/telegram/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('telegram_disconnect')}'><button class='btn' type='submit'>{c['disconnect']}</button></form>"
-    telegram_action += f"<a class='btn' href='/channels?lang={lang}'>{refresh_label}</a>"
+    telegram_action += f"<a class='btn' href='/admin/channels?lang={lang}'>{refresh_label}</a>"
     linked_account = ""
     if telegram["status"] == "connected":
         account_name = str(tmeta.get("telegram_display_name") or tmeta.get("telegram_username") or "").strip()
@@ -5263,14 +5297,14 @@ def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
     whatsapp_help = ""
     if whatsapp["status"] == "disconnected" and whatsapp_view == "prepare":
         whatsapp_help = f"<div class='channel-message'>{html_escape(c['prepare'])}</div>"
-        whatsapp_action = f"<button class='btn primary' id='whatsapp-business-connect' type='button'>{c['already_business']}</button><a class='btn' href='/channels?lang={lang}&whatsapp=switch'>{c['switch_safely']}</a><a class='btn' href='/channels?lang={lang}'>{c['cancel']}</a>"
+        whatsapp_action = f"<button class='btn primary' id='whatsapp-business-connect' type='button'>{c['already_business']}</button><a class='btn' href='/admin/channels?lang={lang}&whatsapp=switch'>{c['switch_safely']}</a><a class='btn' href='/admin/channels?lang={lang}'>{c['cancel']}</a>"
     elif whatsapp["status"] == "disconnected" and whatsapp_view == "switch":
         whatsapp_help = f"<div class='channel-message'>{html_escape(c['backup'])}</div>"
-        whatsapp_action = f"<button class='btn primary' id='whatsapp-business-connect' type='button'>{c['already_business']}</button><a class='btn' href='https://business.whatsapp.com/products/business-app' rel='noopener noreferrer' target='_blank'>{c['switch_safely']}</a><a class='btn' href='/channels?lang={lang}'>{c['cancel']}</a>"
+        whatsapp_action = f"<button class='btn primary' id='whatsapp-business-connect' type='button'>{c['already_business']}</button><a class='btn' href='https://business.whatsapp.com/products/business-app' rel='noopener noreferrer' target='_blank'>{c['switch_safely']}</a><a class='btn' href='/admin/channels?lang={lang}'>{c['cancel']}</a>"
     elif whatsapp["status"] == "disconnected":
-        whatsapp_action = f"<a class='btn primary' href='/channels?lang={lang}&whatsapp=prepare'>{c['connect_whatsapp']}</a>"
+        whatsapp_action = f"<a class='btn primary' href='/admin/channels?lang={lang}&whatsapp=prepare'>{c['connect_whatsapp']}</a>"
     elif whatsapp["status"] == "error":
-        whatsapp_action = f"<a class='btn primary' href='/channels?lang={lang}&whatsapp=prepare'>{c['retry']}</a>"
+        whatsapp_action = f"<a class='btn primary' href='/admin/channels?lang={lang}&whatsapp=prepare'>{c['retry']}</a>"
     if whatsapp["status"] in {"connected", "pending", "error"}:
         whatsapp_action += f"<form method='post' action='/channels/whatsapp/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_disconnect')}'><button class='btn' type='submit'>{c['disconnect']}</button></form>"
     whatsapp_identity = " · ".join(filter(None, [str(wmeta.get("business_display_name") or ""), str(wmeta.get("display_phone_number") or "")]))
@@ -5328,6 +5362,31 @@ def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
         "<script>(()=>{const q=document.getElementById('company-whatsapp-qr'),s=document.getElementById('company-whatsapp-state');if(!q||!s)return;const poll=async()=>{try{const r=await fetch('/channels/whatsapp-company/status',{cache:'no-store'}),d=await r.json();if(d.status==='connected'){location.reload();return}if(d.qr_svg){q.innerHTML=d.qr_svg;q.hidden=false}if(d.status==='connection_lost'||d.status==='logged_out'){s.textContent='Connection lost';s.classList.add('connection-lost');return}}catch(_){}setTimeout(poll,2000)};poll()})()</script>"
     )
 
+
+def client_channels_body():
+    """Product communication choices without private connection controls or state."""
+    lang = current_language()
+    copy = {
+        "en": {"title":"Talk to Nina","sub":"Choose where you want to work with Nina.","web":"Talk to Nina on Web","web_text":"Open your private Nina workspace.","whatsapp":"Talk to Nina on WhatsApp","whatsapp_text":"Use Nina's official company contact.","telegram":"Talk to Nina on Telegram","telegram_text":"Open Nina in Telegram.","open":"Open","available":"Available"},
+        "lv": {"title":"Runāt ar Ninu","sub":"Izvēlies, kur vēlies strādāt ar Ninu.","web":"Runāt ar Ninu tīmeklī","web_text":"Atver savu privāto Ninas darba vidi.","whatsapp":"Runāt ar Ninu WhatsApp","whatsapp_text":"Izmanto Ninas oficiālo uzņēmuma kontaktu.","telegram":"Runāt ar Ninu Telegram","telegram_text":"Atver Ninu Telegram.","open":"Atvērt","available":"Pieejams"},
+        "ru": {"title":"Поговорить с Ниной","sub":"Выберите, где вы хотите работать с Ниной.","web":"Нина в Web","web_text":"Откройте своё личное рабочее пространство.","whatsapp":"Нина в WhatsApp","whatsapp_text":"Используйте официальный контакт Нины.","telegram":"Нина в Telegram","telegram_text":"Откройте Нину в Telegram.","open":"Открыть","available":"Доступно"},
+    }[lang]
+    contact = public_ninaos_contact(primary_ninaos_number()) or {}
+    choices = [
+        (copy["web"], copy["web_text"], f"/nina?lang={lang}", ""),
+        (copy["whatsapp"], copy["whatsapp_text"], str(contact.get("whatsapp_url") or "#"), " target='_blank' rel='noopener noreferrer'"),
+        (copy["telegram"], copy["telegram_text"], f"https://t.me/{_telegram_bot_username()}", " target='_blank' rel='noopener noreferrer'"),
+    ]
+    cards = "".join(
+        "<section class='card card-pad connection-card'>"
+        f"<div class='connection-head'><h2>{html_escape(title)}</h2><span class='connection-status active'>{html_escape(copy['available'])}</span></div>"
+        f"<p class='muted'>{html_escape(text)}</p><div class='connection-actions'><a class='btn primary' href='{html_escape(href)}'{extra}>{html_escape(copy['open'])}</a></div></section>"
+        for title, text, href, extra in choices
+    )
+    return (
+        f"<div class='page-title'><h1>{html_escape(copy['title'])}</h1><p>{html_escape(copy['sub'])}</p></div><br>"
+        f"{nina_contact_html(lang)}<div class='channels-grid'>{cards}</div>"
+    )
 
 
 def _transcribe_web_voice(audio_bytes, filename, mime_type, language_hint):
@@ -5405,14 +5464,107 @@ def nina_voice():
 
 @app.get("/channels")
 def channels():
+    if current_web_role() == ADMIN_ROLE:
+        notice = (request.args.get("notice") or "").strip()
+        notice = notice if notice in {"whatsapp_failed"} else ""
+        whatsapp_view = (request.args.get("whatsapp") or "").strip()
+        whatsapp_view = whatsapp_view if whatsapp_view in {"prepare", "switch"} else ""
+        return Response(page("Admin Channels", _admin_subnav() + channels_body(notice=notice, whatsapp_view=whatsapp_view), active="admin"), mimetype="text/html")
+    current_workspace_id()
+    return Response(page(_channels_copy(current_language())["title"], client_channels_body(), active="channels"), mimetype="text/html")
+
+
+def _admin_subnav():
+    lang = current_language()
+    return (
+        "<div class='console-nav'>"
+        f"<a href='/admin/channels?lang={lang}'>Channels</a>"
+        f"<a href='/admin/clients?lang={lang}'>Clients</a>"
+        f"<a href='/admin/workers?lang={lang}'>Workers</a>"
+        f"<a href='/admin/system?lang={lang}'>System</a>"
+        f"<form method='post' action='/admin/logout?lang={lang}'><button class='btn' type='submit'>Sign out</button></form>"
+        "</div>"
+    )
+
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "POST":
+        if not verify_bootstrap_token(request.form.get("bootstrap_token")):
+            return Response("Forbidden", status=403)
+        response = redirect(q("/admin/channels"))
+        response.set_cookie(
+            ADMIN_COOKIE,
+            create_admin_session(_workspace_cookie_secret()),
+            max_age=8 * 60 * 60,
+            httponly=True,
+            secure=request.is_secure or request.headers.get("X-Forwarded-Proto") == "https",
+            samesite="Strict",
+        )
+        logger.info("Platform admin session issued")
+        return response
+    status = "" if bootstrap_configured() else "<div class='channel-message'>Admin bootstrap is not configured.</div>"
+    body = (
+        "<div class='page-title'><h1>Platform Admin</h1><p>Authorized NinaOS operators only.</p></div><br>"
+        f"{status}<section class='card card-pad'><form method='post' class='channel-form'>"
+        "<label for='bootstrap-token'>Admin access token</label>"
+        "<input id='bootstrap-token' name='bootstrap_token' type='password' required autocomplete='current-password'>"
+        "<button class='btn primary' type='submit'>Continue</button></form></section>"
+    )
+    return Response(page("Platform Admin", body, active="channels"), mimetype="text/html")
+
+
+@app.post("/admin/logout")
+def admin_logout():
+    response = redirect(q("/channels"))
+    response.delete_cookie(ADMIN_COOKIE)
+    return response
+
+
+@app.get("/admin")
+@platform_admin_required
+def admin_home():
+    return redirect(q("/admin/channels"))
+
+
+@app.get("/admin/channels")
+@platform_admin_required
+def admin_channels():
     notice = (request.args.get("notice") or "").strip()
     notice = notice if notice in {"whatsapp_failed"} else ""
     whatsapp_view = (request.args.get("whatsapp") or "").strip()
     whatsapp_view = whatsapp_view if whatsapp_view in {"prepare", "switch"} else ""
-    return Response(page(_channels_copy(current_language())["title"], channels_body(notice=notice, whatsapp_view=whatsapp_view), active="channels"), mimetype="text/html")
+    body = _admin_subnav() + channels_body(notice=notice, whatsapp_view=whatsapp_view)
+    return Response(page("Admin Channels", body, active="admin"), mimetype="text/html")
+
+
+def _admin_placeholder(title, text):
+    return Response(
+        page(title, _admin_subnav() + f"<section class='card card-pad'><div class='page-title'><h1>{html_escape(title)}</h1><p>{html_escape(text)}</p></div></section>", active="admin"),
+        mimetype="text/html",
+    )
+
+
+@app.get("/admin/clients")
+@platform_admin_required
+def admin_clients():
+    return _admin_placeholder("Admin Clients", "Platform client administration.")
+
+
+@app.get("/admin/workers")
+@platform_admin_required
+def admin_workers():
+    return _admin_placeholder("Admin Workers", "Platform worker availability and assignment.")
+
+
+@app.get("/admin/system")
+@platform_admin_required
+def admin_system():
+    return _admin_placeholder("Admin System", "Safe platform service status.")
 
 
 @app.post("/channels/telegram/connect")
+@platform_admin_required
 def channels_telegram_connect():
     if not _valid_channel_csrf("telegram_connect"):
         return Response("Invalid request", status=400)
@@ -5421,20 +5573,24 @@ def channels_telegram_connect():
         setup = create_telegram_token(NINA_WEB_WORKSPACE_ID, bot_username=bot_username)
     except ValueError as exc:
         if str(exc) == "telegram_already_connected":
-            return redirect(q("/channels"))
+            return redirect(q("/admin/channels"))
         raise
-    return Response(page(_channels_copy(current_language())["title"], channels_body(telegram_setup=setup), active="channels"), mimetype="text/html")
+    logger.info("Platform admin channel action=telegram_connect")
+    return Response(page("Admin Channels", _admin_subnav() + channels_body(telegram_setup=setup), active="admin"), mimetype="text/html")
 
 
 @app.post("/channels/telegram/disconnect")
+@platform_admin_required
 def channels_telegram_disconnect():
     if not _valid_channel_csrf("telegram_disconnect"):
         return Response("Invalid request", status=400)
     disconnect_channel(NINA_WEB_WORKSPACE_ID, "telegram")
-    return redirect(q("/channels"))
+    logger.info("Platform admin channel action=telegram_disconnect")
+    return redirect(q("/admin/channels"))
 
 
 @app.post("/channels/whatsapp-personal/connect")
+@platform_admin_required
 def channels_personal_whatsapp_connect():
     if not _valid_channel_csrf("whatsapp_personal_connect"):
         return Response("Invalid request", status=400)
@@ -5446,10 +5602,12 @@ def channels_personal_whatsapp_connect():
         workspace_id = current_workspace_id()
         logger.warning("Personal WhatsApp pairing could not start workspace=%s", workspace_id)
         set_connection_for_test(workspace_id, PERSONAL_WHATSAPP_CHANNEL, "error", {"error_code": "bridge_unavailable"})
-    return redirect(q("/channels"))
+    logger.info("Platform admin channel action=personal_whatsapp_connect")
+    return redirect(q("/admin/channels"))
 
 
 @app.get("/channels/whatsapp-personal/status")
+@platform_admin_required
 def channels_personal_whatsapp_status():
     workspace_id = current_workspace_id()
     connection = get_connection(workspace_id, PERSONAL_WHATSAPP_CHANNEL)
@@ -5469,6 +5627,7 @@ def channels_personal_whatsapp_status():
 
 
 @app.post("/channels/whatsapp-personal/disconnect")
+@platform_admin_required
 def channels_personal_whatsapp_disconnect():
     if not _valid_channel_csrf("whatsapp_personal_disconnect"):
         return Response("Invalid request", status=400)
@@ -5479,10 +5638,12 @@ def channels_personal_whatsapp_disconnect():
         workspace_id = current_workspace_id()
         logger.warning("Personal WhatsApp bridge logout unavailable workspace=%s", workspace_id)
     disconnect_personal_whatsapp(workspace_id)
-    return redirect(q("/channels"))
+    logger.info("Platform admin channel action=personal_whatsapp_disconnect")
+    return redirect(q("/admin/channels"))
 
 
 @app.post("/channels/whatsapp-company/connect")
+@platform_admin_required
 def channels_company_whatsapp_connect():
     if not _valid_channel_csrf("whatsapp_company_connect"):
         return Response("Invalid request", status=400)
@@ -5498,10 +5659,12 @@ def channels_company_whatsapp_connect():
             set_connection_for_test(configured_company_whatsapp_workspace(), COMPANY_WHATSAPP_CHANNEL, "error", {"error_code": "bridge_unavailable"})
         except ValueError:
             pass
-    return redirect(q("/channels"))
+    logger.info("Platform admin channel action=company_whatsapp_connect")
+    return redirect(q("/admin/channels"))
 
 
 @app.get("/channels/whatsapp-company/status")
+@platform_admin_required
 def channels_company_whatsapp_status():
     workspace_id = configured_company_whatsapp_workspace()
     connection = get_connection(workspace_id, COMPANY_WHATSAPP_CHANNEL)
@@ -5521,6 +5684,7 @@ def channels_company_whatsapp_status():
 
 
 @app.post("/channels/whatsapp-company/disconnect")
+@platform_admin_required
 def channels_company_whatsapp_disconnect():
     if not _valid_channel_csrf("whatsapp_company_disconnect"):
         return Response("Invalid request", status=400)
@@ -5530,7 +5694,8 @@ def channels_company_whatsapp_disconnect():
     except Exception:
         logger.warning("Company WhatsApp bridge logout unavailable")
     disconnect_company_whatsapp(workspace_id)
-    return redirect(q("/channels"))
+    logger.info("Platform admin channel action=company_whatsapp_disconnect")
+    return redirect(q("/admin/channels"))
 
 
 def _bridge_json():
@@ -5701,6 +5866,7 @@ def internal_company_whatsapp_inbound():
 
 
 @app.post("/channels/whatsapp/start")
+@platform_admin_required
 def channels_whatsapp_start():
     payload = request.get_json(silent=True) or {}
     if not hmac.compare_digest(str(payload.get("csrf_token") or ""), _channel_csrf("whatsapp_start")):
@@ -5710,10 +5876,12 @@ def channels_whatsapp_start():
         state = create_whatsapp_onboarding_state(NINA_WEB_WORKSPACE_ID)
     except (ValueError, WhatsAppProviderError):
         return jsonify({"ok": False}), 503
+    logger.info("Platform admin channel action=whatsapp_business_start")
     return jsonify({"ok": True, "state": state["state"], "expires_at": state["expires_at"], "app_id": provider["app_id"], "config_id": provider["config_id"], "gv": os.environ.get("WHATSAPP_GRAPH_API_VERSION", "v25.0")})
 
 
 @app.post("/channels/whatsapp/callback")
+@platform_admin_required
 def channels_whatsapp_callback():
     payload = request.get_json(silent=True) or {}
     if not hmac.compare_digest(str(payload.get("csrf_token") or ""), _channel_csrf("whatsapp_callback")):
@@ -5732,10 +5900,12 @@ def channels_whatsapp_callback():
     except WhatsAppProviderError:
         update_whatsapp_verification(workspace_id, False, error_code="onboarding_failed")
         return jsonify({"ok": False}), 400
+    logger.info("Platform admin channel action=whatsapp_business_callback")
     return jsonify({"ok": True})
 
 
 @app.post("/channels/whatsapp/attention")
+@platform_admin_required
 def channels_whatsapp_attention():
     payload = request.get_json(silent=True) or {}
     if not hmac.compare_digest(str(payload.get("csrf_token") or ""), _channel_csrf("whatsapp_callback")):
@@ -5748,11 +5918,13 @@ def channels_whatsapp_attention():
 
 
 @app.post("/channels/whatsapp/disconnect")
+@platform_admin_required
 def channels_whatsapp_disconnect():
     if not _valid_channel_csrf("whatsapp_disconnect"):
         return Response("Invalid request", status=400)
     disconnect_channel(NINA_WEB_WORKSPACE_ID, "whatsapp")
-    return redirect(q("/channels"))
+    logger.info("Platform admin channel action=whatsapp_business_disconnect")
+    return redirect(q("/admin/channels"))
 
 
 @app.get("/webhooks/whatsapp")

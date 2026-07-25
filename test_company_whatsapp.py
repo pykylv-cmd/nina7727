@@ -28,6 +28,10 @@ class CompanyWhatsAppTests(unittest.TestCase):
         cls.web=importlib.reload(web_app)
         cls.web.app.config.update(TESTING=True)
         cls.client=cls.web.app.test_client()
+        cls.client.set_cookie(
+            cls.web.ADMIN_COOKIE,
+            cls.web.create_admin_session(cls.web._workspace_cookie_secret()),
+        )
 
     @classmethod
     def tearDownClass(cls):

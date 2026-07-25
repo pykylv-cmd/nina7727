@@ -25,6 +25,10 @@ class WhatsAppBusinessConnectionTests(unittest.TestCase):
         channel_connections._SCHEMA_READY = False
         web_app.app.config.update(TESTING=True)
         cls.client = web_app.app.test_client()
+        cls.client.set_cookie(
+            web_app.ADMIN_COOKIE,
+            web_app.create_admin_session(web_app._workspace_cookie_secret()),
+        )
 
     @classmethod
     def tearDownClass(cls):

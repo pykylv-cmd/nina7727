@@ -10,6 +10,7 @@ class WebPersonalWhatsAppTests(unittest.TestCase):
         os.environ["NINA_CHANNEL_CREDENTIAL_KEY"]=Fernet.generate_key().decode(); os.environ["NINA_PERSONAL_WHATSAPP_BRIDGE_TOKEN"]="bridge-test"
         import channel_connections, personal_whatsapp, web_app
         cls.c=importlib.reload(channel_connections); cls.p=importlib.reload(personal_whatsapp); cls.web=importlib.reload(web_app); cls.client=cls.web.app.test_client()
+        cls.client.set_cookie(cls.web.ADMIN_COOKIE,cls.web.create_admin_session(cls.web._workspace_cookie_secret()))
     @classmethod
     def tearDownClass(cls): cls.tmp.cleanup()
     def setUp(self):
@@ -49,6 +50,8 @@ class WebPersonalWhatsAppTests(unittest.TestCase):
         self.assertEqual(self.client.post('/internal/personal-whatsapp/auth/load',json={'workspace_id':'x'}).status_code,401)
     def test_two_web_users_connect_status_and_disconnect_independently(self):
         client_a=self.web.app.test_client(); client_b=self.web.app.test_client()
+        for client in (client_a,client_b):
+            client.set_cookie(self.web.ADMIN_COOKIE,self.web.create_admin_session(self.web._workspace_cookie_secret()))
         client_a.get('/channels?lang=en'); client_b.get('/channels?lang=en')
         workspace_a=self.web._verified_workspace_cookie(client_a.get_cookie(self.web._WORKSPACE_COOKIE).value)
         workspace_b=self.web._verified_workspace_cookie(client_b.get_cookie(self.web._WORKSPACE_COOKIE).value)

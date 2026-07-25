@@ -22,6 +22,11 @@ class ChannelConnectionsV1Tests(unittest.TestCase):
         channel_connections._SCHEMA_READY = False
         web_app.app.config.update(TESTING=True)
         cls.client = web_app.app.test_client()
+        cls.public_client = web_app.app.test_client()
+        cls.client.set_cookie(
+            web_app.ADMIN_COOKIE,
+            web_app.create_admin_session(web_app._workspace_cookie_secret()),
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -41,7 +46,7 @@ class ChannelConnectionsV1Tests(unittest.TestCase):
 
     def test_channels_loads_languages_and_web_is_active(self):
         for lang in ("lv", "en", "ru"):
-            response = self.client.get(f"/channels?lang={lang}")
+            response = self.public_client.get(f"/channels?lang={lang}")
             self.assertEqual(response.status_code, 200)
             self.assertIn(b"Web", response.data)
             self.assertIn(b"connection-status active", response.data)
@@ -66,7 +71,7 @@ class ChannelConnectionsV1Tests(unittest.TestCase):
     def test_telegram_provider_secret_never_appears_in_html(self):
         secret = "telegram-provider-secret-never-render"
         with patch.dict(os.environ, {"TELEGRAM_TOKEN": secret, "TELEGRAM_BOT_USERNAME": "Nina7727_bot"}):
-            page = self.client.get("/channels?lang=en").get_data(as_text=True)
+            page = self.public_client.get("/channels?lang=en").get_data(as_text=True)
         self.assertNotIn(secret, page)
 
     def test_telegram_connect_and_disconnect_are_csrf_protected_posts(self):
@@ -119,7 +124,7 @@ class ChannelConnectionsV1Tests(unittest.TestCase):
         self.assertEqual(self.client.get("/clients?lang=en").status_code, 200)
 
     def test_customer_channels_page_has_no_internal_terms(self):
-        page = self.client.get("/channels?lang=en").get_data(as_text=True).lower()
+        page = self.public_client.get("/channels?lang=en").get_data(as_text=True).lower()
         for term in ("one nina", "work objects", "work engine", "web_app.py", "version"):
             self.assertNotIn(term, page)
 
