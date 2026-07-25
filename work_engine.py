@@ -566,6 +566,7 @@ def execute_natural_work_request(
     user_text: str,
     workspace_id: str = "demo_small_business",
     channel: str = "telegram",
+    contact_id: str = "",
 ) -> Optional[Dict[str, Any]]:
     """Execute a natural work command through the same ONE NINA Work Engine.
 
@@ -586,6 +587,7 @@ def execute_natural_work_request(
                 "raw_text": _clean(user_text),
                 "source": "natural_work_request",
                 "intent": "create_task",
+                "contact_id": _clean(contact_id),
             },
         )
         obj = create_work_object(
@@ -597,6 +599,7 @@ def execute_natural_work_request(
             due_date=due_date,
             metadata=metadata,
             origin_channel=_clean(channel) or "unknown",
+            origin_user_id=_clean(contact_id),
         )
         return {
             "ok": True,

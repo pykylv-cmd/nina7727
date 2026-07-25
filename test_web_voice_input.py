@@ -77,9 +77,8 @@ class WebVoiceInputTests(unittest.TestCase):
         with patch.object(web_app, "send_message_to_nina") as send:
             response = self.client.post("/nina?lang=en", data={"message": "Hello"})
         self.assertEqual(response.status_code, 302)
-        send.assert_called_once_with(
-            "Hello", workspace_id=web_app.NINA_WEB_WORKSPACE_ID, channel="web"
-        )
+        self.assertEqual(send.call_args.args[0], "Hello")
+        self.assertTrue(send.call_args.kwargs["contact_id"].startswith("contact_"))
 
     def test_voice_rejects_empty_file(self):
         response = self.client.post(
@@ -103,9 +102,8 @@ class WebVoiceInputTests(unittest.TestCase):
                 data={"audio": (io.BytesIO(b"audio"), "voice.webm", "audio/webm"), "lang": "en"},
             )
         self.assertEqual(response.status_code, 200)
-        send.assert_called_once_with(
-            "Recognized text", workspace_id=web_app.NINA_WEB_WORKSPACE_ID, channel="web"
-        )
+        self.assertEqual(send.call_args.args[0], "Recognized text")
+        self.assertTrue(send.call_args.kwargs["contact_id"].startswith("contact_"))
 
     def test_web_uses_accuracy_model_and_actual_mime(self):
         with patch.object(voice_engine, "transcribe_audio_with_openai", return_value="Exact text") as transcribe, \

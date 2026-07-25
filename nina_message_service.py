@@ -78,6 +78,10 @@ def load_web_conversation(workspace_id: str = WORKSPACE_ID, limit: int = 20) -> 
     return _load_conversation(_conversation_id(workspace_id), limit=limit)
 
 
+def load_channel_conversation(conversation_id: str, limit: int = 20) -> List[Dict[str, str]]:
+    return _load_conversation(str(conversation_id or ""), limit=limit)
+
+
 def _save_turn(workspace_id: str, user_text: str, nina_text: str, conversation_id: str = "", channel: str = "web") -> None:
     _ensure_conversation_store()
     conn = _connect()
@@ -156,7 +160,8 @@ def _customer_safe_text(value: str) -> str:
 
 def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, channel: str = "web",
                          generator: Optional[Callable[[str], str]] = None,
-                         conversation_id: str = "") -> Dict[str, Any]:
+                         conversation_id: str = "", contact_id: str = "",
+                         contact_context: str = "") -> Dict[str, Any]:
     """Route one message through shared work truth and Nina's shared identity."""
     clean = str(user_text or "").strip()
     if not clean:
@@ -165,7 +170,10 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         return {"ok": False, "error": "message_too_long", "text": ""}
 
     try:
-        work_result = execute_natural_work_request(user_text=clean, workspace_id=workspace_id, channel=channel)
+        work_result = execute_natural_work_request(
+            user_text=clean, workspace_id=workspace_id, channel=channel,
+            contact_id=contact_id,
+        )
     except Exception:
         work_result = None
     if work_result and work_result.get("handled") and str(work_result.get("text") or "").strip():
@@ -177,7 +185,11 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
     history_text = "\n".join(
         f"{'Lietotājs' if item['role'] == 'user' else 'Nina'}: {item['text']}" for item in history[-24:]
     )
-    prompt = (
+    contact_prompt = (
+        f"Trusted contact context:\n{str(contact_context or '').strip()[:500] or 'Unavailable.'}\n"
+        f"Opaque contact reference: {str(contact_id or '').strip()[:80] or 'none'}\n\n"
+    )
+    prompt = contact_prompt + (
         f"{NINA_PROMPT}\n\nKanāls: {channel}\nDarba vide: {workspace_id}\n\n"
         f"Aktīvais darba konteksts:\n{_work_context(workspace_id) or 'Nav aktīvu darbu.'}\n\n"
         f"Nesenā saruna:\n{history_text or 'Šī ir sarunas pirmā ziņa.'}\n\n"

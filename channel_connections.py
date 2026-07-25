@@ -5,6 +5,7 @@ send messages, or resolve secret references.
 """
 
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -250,6 +251,36 @@ def consume_telegram_token(
         changed = cur.rowcount == 1
         cur.close()
         return get_connection(row[0], "telegram") if changed else None
+    finally:
+        conn.close()
+
+
+def workspace_for_telegram_identity(telegram_user_id="", telegram_chat_id=""):
+    """Resolve a linked Telegram identity to one workspace without exposing metadata."""
+    user_id = str(telegram_user_id or "").strip()
+    chat_id = str(telegram_chat_id or "").strip()
+    if not user_id and not chat_id:
+        return ""
+    ensure_schema()
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_sql(f"SELECT workspace_id,metadata_json FROM {_TABLE} WHERE channel=%s AND status=%s"),
+                    ("telegram", "connected"))
+        matches = []
+        for workspace_id, metadata_json in cur.fetchall():
+            try:
+                metadata = json.loads(metadata_json or "{}")
+            except Exception:
+                continue
+            if (
+                user_id and hmac.compare_digest(str(metadata.get("telegram_user_id") or ""), user_id)
+            ) or (
+                chat_id and hmac.compare_digest(str(metadata.get("telegram_chat_id") or ""), chat_id)
+            ):
+                matches.append(str(workspace_id))
+        cur.close()
+        return matches[0] if len(set(matches)) == 1 else ""
     finally:
         conn.close()
 

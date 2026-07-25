@@ -22,9 +22,10 @@ except Exception:
 from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
+from contact_identity import compact_contact_context, resolve_contact_identity
 from openai import OpenAI
 from nina_identity import NINA_PROMPT as SHARED_NINA_PROMPT
-from channel_connections import consume_telegram_token, is_telegram_connection_token
+from channel_connections import consume_telegram_token, is_telegram_connection_token, workspace_for_telegram_identity
 
 # ONE NINA Canonical Channel Content + Document Work Intake V1
 # V117.8: channel-content and document-action imports are isolated.
@@ -13592,7 +13593,41 @@ def v1151_vision_smart_reply(user_id, raw_answer, caption=""):
     return v1151_clean_version(answer)
 
 
+def resolve_telegram_contact(update, context=None):
+    user = getattr(update, "effective_user", None)
+    external = str(getattr(user, "id", "") or "")
+    if not external:
+        return None
+    try:
+        chat = getattr(update, "effective_chat", None)
+        workspace_id = workspace_for_telegram_identity(
+            telegram_user_id=external,
+            telegram_chat_id=str(getattr(chat, "id", "") or ""),
+        ) or "demo_small_business"
+        contact = resolve_contact_identity(
+            workspace_id, "telegram", external,
+            {
+                "display_name": str(getattr(user, "full_name", "") or getattr(user, "username", "") or ""),
+                "display_name_quality": 60 if getattr(user, "full_name", "") else 30,
+                "language": str(getattr(user, "language_code", "") or ""),
+                "language_verified": bool(getattr(user, "language_code", "")),
+                "relationship_type": "client",
+            },
+        )
+    except Exception as exc:
+        print("Contact identity resolution unavailable:", type(exc).__name__)
+        return None
+    try:
+        if context is not None:
+            context.chat_data["contact_id"] = contact["contact_id"]
+            context.chat_data["contact_context"] = compact_contact_context(contact)
+    except Exception:
+        pass
+    return contact
+
+
 async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    resolve_telegram_contact(update, context)
     """V114.0: Telegram location support."""
     try:
         user_id = update.effective_user.id if update.effective_user else "unknown"
@@ -13642,6 +13677,7 @@ class VoiceTextUpdateProxy:
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    resolve_telegram_contact(update, context)
     """Voice Intake V1.8.2: Telegram voice/audio -> cleanup routing -> existing reply router via proxy update."""
     try:
         if not update.message:
@@ -13714,6 +13750,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    resolve_telegram_contact(update, context)
     """Telegram adapter -> canonical channel envelope -> shared document intake -> one Work Object."""
     try:
         message = update.message
@@ -14181,6 +14218,7 @@ def nina_is_recent_photo_series_continuation(obj, caption="", max_age_seconds=12
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    resolve_telegram_contact(update, context)
     """ONE NINA Forwarded Photo Series Context V1.
 
     A captioned work photo creates/resolves canonical context. Photos arriving immediately
@@ -16478,6 +16516,7 @@ def nina_save_forwarded_text_to_one_nina(update, user_id, user_text, force_busin
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V117.7 ONE NINA Document Action Terminal Routing V1
     try:
+        resolve_telegram_contact(update, context)
         user_text = update.message.text
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()

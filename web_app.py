@@ -16,7 +16,7 @@ import re
 from datetime import datetime
 from urllib.parse import quote_plus, unquote_plus
 from flask import Flask, Response, g, has_request_context, jsonify, redirect, request
-from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, load_web_conversation, send_message_to_nina
+from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, load_channel_conversation, load_web_conversation, send_message_to_nina
 from voice_engine import transcribe_audio_with_openai
 from channel_connections import claim_channel_message, consume_whatsapp_onboarding_state, create_telegram_token, create_whatsapp_onboarding_state, disconnect as disconnect_channel, get_connection, set_connection_for_test, update_whatsapp_verification
 from whatsapp_channel import (
@@ -72,6 +72,7 @@ from admin_auth import (
     ADMIN_COOKIE, ADMIN_ROLE, CLIENT_ROLE, bootstrap_configured,
     create_admin_session, verify_admin_session, verify_bootstrap_token,
 )
+from contact_identity import compact_contact_context, list_contacts, resolve_contact_identity
 
 logger = logging.getLogger(__name__)
 
@@ -5154,6 +5155,15 @@ def current_web_role():
     return CLIENT_ROLE
 
 
+def current_web_contact():
+    return resolve_contact_identity(
+        NINA_WEB_WORKSPACE_ID,
+        "web",
+        current_workspace_id(),
+        {"relationship_type": "client"},
+    )
+
+
 def platform_admin_required(view):
     @wraps(view)
     def protected(*args, **kwargs):
@@ -5458,7 +5468,12 @@ def nina_voice():
     if not transcript:
         return jsonify({"ok": False, "error": "transcription_unavailable"}), 502
 
-    send_message_to_nina(transcript, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web")
+    contact = current_web_contact()
+    send_message_to_nina(
+        transcript, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web",
+        conversation_id=contact["conversation_id"], contact_id=contact["contact_id"],
+        contact_context=compact_contact_context(contact),
+    )
     return jsonify({"ok": True})
 
 
@@ -5548,7 +5563,24 @@ def _admin_placeholder(title, text):
 @app.get("/admin/clients")
 @platform_admin_required
 def admin_clients():
-    return _admin_placeholder("Admin Clients", "Platform client administration.")
+    try:
+        contacts = list_contacts(limit=200)
+    except Exception:
+        contacts = []
+    rows = "".join(
+        "<div class='row'><div>"
+        f"<b>{html_escape(item.get('preferred_name') or item.get('display_name') or 'Unnamed contact')}</b>"
+        f"<span class='muted'>{html_escape(item.get('contact_id'))} · {html_escape(', '.join(item.get('channels') or []))}"
+        f" · {html_escape(item.get('workspace_id'))}</span></div>"
+        f"<span class='pill'>{html_escape(item.get('relationship_type') or 'contact')} · {html_escape(item.get('status') or 'active')}</span></div>"
+        for item in contacts
+    ) or "<div class='safe-note'>No contacts yet.</div>"
+    body = (
+        _admin_subnav()
+        + "<div class='page-title'><h1>Admin Contacts</h1><p>Tenant-scoped contact identities. Provider identifiers remain hidden.</p></div><br>"
+        + f"<section class='card card-pad'><div class='list'>{rows}</div></section>"
+    )
+    return Response(page("Admin Contacts", body, active="admin"), mimetype="text/html")
 
 
 @app.get("/admin/workers")
@@ -5752,7 +5784,15 @@ def internal_personal_whatsapp_inbound():
     workspace_id = str(payload.get("workspace_id") or "")
     allowed = accept_personal_whatsapp_inbound(workspace_id, payload.get("message_id"), str(payload.get("chat_jid") or ""), payload.get("text"), bool(payload.get("is_group")))
     if not allowed: return jsonify({"ok": True, "accepted": False, "reply": ""})
-    result = send_message_to_nina(str(payload.get("text") or ""), workspace_id=workspace_id, channel=PERSONAL_WHATSAPP_CHANNEL)
+    contact = resolve_contact_identity(
+        workspace_id, "personal_whatsapp", str(payload.get("chat_jid") or ""),
+        {"relationship_type": "owner"},
+    )
+    result = send_message_to_nina(
+        str(payload.get("text") or ""), workspace_id=workspace_id,
+        channel=PERSONAL_WHATSAPP_CHANNEL, conversation_id=contact["conversation_id"],
+        contact_id=contact["contact_id"], contact_context=compact_contact_context(contact),
+    )
     return jsonify({"ok": True, "accepted": True, "reply": str(result.get("text") or "")})
 
 
@@ -5826,6 +5866,10 @@ def internal_company_whatsapp_inbound():
         return jsonify({"ok": True, "accepted": False, "reply": ""})
     sender = company_whatsapp_sender_digits(sender_jid)
     identity = resolve_ninaos_channel_identity(COMPANY_WHATSAPP_CHANNEL, workspace_id, sender)
+    contact = resolve_contact_identity(
+        workspace_id, "company_whatsapp", sender_jid,
+        {"relationship_type": "client"},
+    )
     if media:
         try:
             encoded = str(media.get("data_base64") or "")
@@ -5842,8 +5886,10 @@ def internal_company_whatsapp_inbound():
                 workspace_id=identity["workspace_id"],
                 conversation_id=identity["conversation_id"],
                 channel=COMPANY_WHATSAPP_CHANNEL,
-                origin_user_id=sender,
+                origin_user_id=contact["contact_id"],
                 message_id=str(payload.get("message_id") or ""),
+                contact_id=contact["contact_id"],
+                contact_context=compact_contact_context(contact),
             )
         except (MediaValidationError, ValueError, binascii.Error) as exc:
             error = str(exc)
@@ -5861,6 +5907,8 @@ def internal_company_whatsapp_inbound():
             workspace_id=identity["workspace_id"],
             channel=COMPANY_WHATSAPP_CHANNEL,
             conversation_id=identity["conversation_id"],
+            contact_id=contact["contact_id"],
+            contact_context=compact_contact_context(contact),
         )
     return jsonify({"ok": True, "accepted": True, "reply": str(result.get("text") or "")})
 
@@ -6044,12 +6092,17 @@ def nina_contact_qr():
 @app.route("/nina", methods=["GET", "POST"])
 @app.route("/chat", methods=["GET", "POST"])
 def nina_chat():
+    contact = current_web_contact()
     if request.method == "POST":
         user_text = (request.form.get("message") or "").strip()
         if user_text:
-            send_message_to_nina(user_text, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web")
+            send_message_to_nina(
+                user_text, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web",
+                conversation_id=contact["conversation_id"], contact_id=contact["contact_id"],
+                contact_context=compact_contact_context(contact),
+            )
         return redirect(q("/nina"))
-    messages = load_web_conversation(workspace_id=NINA_WEB_WORKSPACE_ID, limit=30)
+    messages = load_channel_conversation(contact["conversation_id"], limit=30)
     return Response(page(tx("talk_to_nina"), nina_chat_body(messages), active="nina"), mimetype="text/html")
 
 

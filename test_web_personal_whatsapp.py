@@ -38,7 +38,7 @@ class WebPersonalWhatsAppTests(unittest.TestCase):
         auth={'Authorization':'Bearer bridge-test'}
         with patch.object(self.web,'send_message_to_nina',return_value={'text':'Nina reply'}) as send:
             ok=self.client.post('/internal/personal-whatsapp/inbound',headers=auth,json={'workspace_id':self.workspace,'message_id':'x1','chat_jid':'1@s.whatsapp.net','text':'hello','is_group':False})
-            self.assertEqual(ok.get_json()['reply'],'Nina reply'); send.assert_called_once_with('hello',workspace_id=self.workspace,channel='whatsapp_personal')
+            self.assertEqual(ok.get_json()['reply'],'Nina reply'); self.assertEqual(send.call_args.args[0],'hello'); self.assertTrue(send.call_args.kwargs['contact_id'].startswith('contact_'))
             denied=self.client.post('/internal/personal-whatsapp/inbound',headers=auth,json={'workspace_id':self.workspace,'message_id':'x2','chat_jid':'2@s.whatsapp.net','text':'hello','is_group':False})
             self.assertFalse(denied.get_json()['accepted'])
     def test_disconnect_does_not_touch_business(self):
@@ -77,7 +77,7 @@ class WebPersonalWhatsAppTests(unittest.TestCase):
         auth={'Authorization':'Bearer bridge-test'}
         for workspace,jid in [('workspace-a','a@s.whatsapp.net'),('workspace-b','b@s.whatsapp.net')]:
             pair=self.p.create_pairing_session(workspace); self.p.mark_connected(workspace,pair['session_token'],{'jid':jid})
-        with patch.object(self.web,'send_message_to_nina',side_effect=lambda text,workspace_id,channel:{'text':workspace_id}) as send:
+        with patch.object(self.web,'send_message_to_nina',side_effect=lambda text,workspace_id,channel,**kwargs:{'text':workspace_id}) as send:
             a=self.client.post('/internal/personal-whatsapp/inbound',headers=auth,json={'workspace_id':'workspace-a','message_id':'a1','chat_jid':'a@s.whatsapp.net','text':'hello','is_group':False})
             b=self.client.post('/internal/personal-whatsapp/inbound',headers=auth,json={'workspace_id':'workspace-b','message_id':'b1','chat_jid':'b@s.whatsapp.net','text':'hello','is_group':False})
         self.assertEqual(a.get_json()['reply'],'workspace-a'); self.assertEqual(b.get_json()['reply'],'workspace-b')

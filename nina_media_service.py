@@ -73,6 +73,8 @@ def process_media_message(
     channel: str,
     origin_user_id: str,
     message_id: str,
+    contact_id: str = "",
+    contact_context: str = "",
     openai_client: Any = None,
 ) -> Dict[str, Any]:
     mime = validate_media(kind, mime_type, data)
@@ -93,6 +95,7 @@ def process_media_message(
         return send_message_to_nina(
             _context_text(transcript, quoted_text), workspace_id=workspace_id,
             channel=channel, conversation_id=conversation_id,
+            contact_id=contact_id, contact_context=contact_context,
         )
 
     if kind == "image":
