@@ -99,6 +99,13 @@ test('company auth persists credentials and incremental keys across restart',asy
   assert.deepEqual(await restored.state.keys.get('session',['old','fresh']),{old:{value:'old'},fresh:{value:'new'}})
   assert.equal(writes.some(value=>value.creds?.registered===true),true)
 })
+test('restored Company auth creates socket state from stored credentials without pairing data',async()=>{
+  const stored={creds:{registered:true,me:{id:'masked@s.whatsapp.net'}},'key:session:one':{value:'saved'}}
+  const auth=await createCompanyAuthState('company',async()=>structuredClone(stored),async()=>{})
+  assert.equal(auth.restored,true)
+  assert.equal(auth.state.creds.registered,true)
+  assert.deepEqual(await auth.state.keys.get('session',['one']),{one:{value:'saved'}})
+})
 test('ordinary restart never creates a pairing QR while invalid credentials require pairing',()=>{
   assert.equal(restoredQrIsInvalid(true,'provider-qr'),true)
   assert.equal(restoredQrIsInvalid(false,'provider-qr'),false)

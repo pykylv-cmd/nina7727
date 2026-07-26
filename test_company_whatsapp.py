@@ -180,6 +180,38 @@ class CompanyWhatsAppTests(unittest.TestCase):
         logged_out = self.company.mark_runtime_state("ninaos_company", "logged_out")
         self.assertTrue(logged_out["metadata"]["qr_required"])
 
+    def test_persisted_auth_restores_even_after_prior_error_status(self):
+        self.company.store_auth_record("ninaos_company", "creds", {"registered": True})
+        self.company.store_auth_record("ninaos_company", "key:session:one", {"value": "saved"})
+        self.connections.set_connection_for_test(
+            "ninaos_company", "whatsapp_company", "error", {"error_code": "pairing_expired"}
+        )
+        self.assertEqual(self.company.list_connected_workspaces(), ["ninaos_company"])
+        auth = {"Authorization": "Bearer bridge-test"}
+        active = self.client.post("/internal/company-whatsapp/active", headers=auth, json={})
+        self.assertEqual(active.get_json()["workspace_ids"], ["ninaos_company"])
+        loaded = self.client.post(
+            "/internal/company-whatsapp/auth/load", headers=auth, json={"workspace_id": "ninaos_company"}
+        )
+        self.assertEqual(loaded.status_code, 200)
+        self.assertTrue(loaded.get_json()["records"]["creds"]["registered"])
+        self.assertEqual(loaded.get_json()["diagnostics"]["result_class"], "loaded")
+
+    def test_auth_load_outcomes_and_explicit_disconnect_eligibility(self):
+        auth = {"Authorization": "Bearer bridge-test"}
+        missing = self.client.post(
+            "/internal/company-whatsapp/auth/load", headers=auth, json={"workspace_id": "ninaos_company"}
+        )
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(missing.get_json()["error"], "no_auth_records")
+
+        self.company.store_auth_record("ninaos_company", "creds", {"registered": True})
+        self.connections.set_connection_for_test("ninaos_company", "whatsapp_company", "error", {})
+        self.assertEqual(self.company.list_connected_workspaces(), ["ninaos_company"])
+        self.company.disconnect_company("ninaos_company")
+        self.assertEqual(self.company.list_connected_workspaces(), [])
+        self.assertEqual(self.company.load_auth_records("ninaos_company"), {})
+
 
 if __name__=="__main__":
     unittest.main()

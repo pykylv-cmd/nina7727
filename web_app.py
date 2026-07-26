@@ -5841,6 +5841,10 @@ def internal_company_whatsapp_auth_load():
         records, diagnostics = load_company_whatsapp_auth_with_diagnostics(workspace_id)
     except ValueError:
         return jsonify({"ok": False}), 400
+    if diagnostics["result_class"] == "no_auth_records":
+        return jsonify({"ok": False, "error": "no_auth_records", "diagnostics": diagnostics}), 404
+    if diagnostics["result_class"] == "invalid_auth":
+        return jsonify({"ok": False, "error": "invalid_auth", "diagnostics": diagnostics}), 409
     return jsonify({"ok": True, "records": records, "diagnostics": diagnostics})
 
 

@@ -93,7 +93,7 @@ export async function startCompanySession(workspaceId,sessionToken,options={}){
   diag.restore_attempt+=1;diag.restoration_state=restoring?'auth_loading':'pairing';diag.last_error_class=''
   lifecycle.info({workspace_id:workspaceId,restore_attempt:diag.restore_attempt,restoring},'company WhatsApp restore attempt started')
   let auth
-  try{auth=await createCompanyAuthState(workspaceId)}catch(error){diag.restoration_state='backend_unavailable';diag.last_error_class=String(error?.name||'Error').slice(0,80);lifecycle.error({workspace_id:workspaceId,restore_attempt:diag.restore_attempt,...ninaErrorDetails(error),classification:'backend_unavailable'},'company WhatsApp auth load failed');throw error}
+  try{auth=await createCompanyAuthState(workspaceId)}catch(error){const status=Number(error?.status||0),classification=status===404?'no_auth_records':(status===409?'invalid_auth':'backend_unavailable');diag.restoration_state=classification;diag.last_error_class=classification;lifecycle.error({workspace_id:workspaceId,restore_attempt:diag.restore_attempt,...ninaErrorDetails(error),classification},'company WhatsApp auth load failed');throw error}
   const selected=await fetchLatestBaileysVersion()
   if(restoring&&!auth.restored){diag.restoration_state='invalid_auth';diag.last_error_class='company_auth_missing';throw new Error('company_auth_missing')}
   const state={workspaceId,sessionToken,socket:null,qrSvg:'',status:'connecting',sent:new Set(),retryTimer:null,closed:false,qrSequence:0}

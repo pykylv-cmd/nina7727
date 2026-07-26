@@ -57,10 +57,16 @@ export async function activeWorkspaces() {
   return (await ninaRequest('/internal/personal-whatsapp/active', {})).workspace_ids || []
 }
 export async function loadCompanyAuth(workspaceId) {
-  const result=await ninaRequest('/internal/company-whatsapp/auth/load', {workspace_id:workspaceId})
-  const records=result.records || {},diagnostics=result.diagnostics || {}
-  console.info(JSON.stringify({event:'company WhatsApp auth load completed',backend_url:backendDescriptor(),record_count:Object.keys(records).length,stored_record_count:Number(diagnostics.stored_record_count||0),error_class:String(diagnostics.error_class||'none')}))
-  return records
+  try{
+    const result=await ninaRequest('/internal/company-whatsapp/auth/load', {workspace_id:workspaceId})
+    const records=result.records || {},diagnostics=result.diagnostics || {}
+    console.info(JSON.stringify({event:'company WhatsApp auth load completed',backend_url:backendDescriptor(),record_count:Object.keys(records).length,stored_record_count:Number(diagnostics.stored_record_count||0),result_class:String(diagnostics.result_class||'loaded')}))
+    return records
+  }catch(error){
+    const classification=Number(error?.status)===404?'no_auth_records':(Number(error?.status)===409?'invalid_auth':'backend_unavailable')
+    console.error(JSON.stringify({event:'company WhatsApp auth load failed',backend_url:backendDescriptor(),classification,...ninaErrorDetails(error)}))
+    throw error
+  }
 }
 export async function storeCompanyAuth(workspaceId, records) {
   return ninaRequest('/internal/company-whatsapp/auth/store', {workspace_id:workspaceId, records})

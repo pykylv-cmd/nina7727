@@ -179,7 +179,8 @@ def load_auth_records_with_diagnostics(workspace_id):
         "stored_record_count": len(rows),
         "loaded_record_count": len(result),
         "invalid_record_count": invalid,
-        "error_class": "invalid_auth" if invalid else "",
+        "error_class": "no_auth_records" if not rows else ("invalid_auth" if invalid else ""),
+        "result_class": "no_auth_records" if not rows else ("invalid_auth" if invalid else "loaded"),
     }
     logger.info(
         "Company WhatsApp auth load completed backend=%s stored_records=%d loaded_records=%d error_class=%s",
@@ -265,13 +266,24 @@ def list_connected_workspaces():
     workspace_id = configured_workspace()
     logger.info("Company WhatsApp active workspace lookup started backend=%s", "postgresql" if USE_POSTGRES else "sqlite")
     connection = get_connection(workspace_id, CHANNEL)
-    if connection["status"] not in {"connected", "pending"}:
-        logger.info("Company WhatsApp active workspace lookup completed count=0 persisted_status=%s", connection["status"])
+    metadata = connection.get("metadata") or {}
+    runtime_state = str(metadata.get("runtime_state") or "")
+    if runtime_state in {"logged_out", "invalid_auth"}:
+        logger.info(
+            "Company WhatsApp active workspace lookup completed count=0 persisted_status=%s eligibility_reason=explicit_%s",
+            connection["status"], runtime_state,
+        )
         return []
     records, diagnostics = load_auth_records_with_diagnostics(workspace_id)
-    result = [workspace_id] if isinstance(records.get("creds"), dict) and not diagnostics["error_class"] else []
+    has_stored_auth = diagnostics["stored_record_count"] > 0
+    status_eligible = connection["status"] == "connected" or (
+        connection["status"] == "pending" and runtime_state == "reconnecting"
+    )
+    eligible = has_stored_auth or status_eligible
+    reason = "stored_auth_records" if has_stored_auth else ("persisted_status" if status_eligible else "not_eligible")
+    result = [workspace_id] if eligible else []
     logger.info(
-        "Company WhatsApp active workspace lookup completed count=%d persisted_status=%s auth_error=%s",
-        len(result), connection["status"], diagnostics["error_class"] or "none",
+        "Company WhatsApp active workspace lookup completed count=%d persisted_status=%s stored_records=%d eligibility_reason=%s auth_result=%s",
+        len(result), connection["status"], diagnostics["stored_record_count"], reason, diagnostics["result_class"],
     )
     return result
