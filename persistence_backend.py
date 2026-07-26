@@ -18,6 +18,20 @@ class PersistenceConfigurationError(RuntimeError):
 
 
 RUNTIME_ENV = (os.environ.get("NINA_RUNTIME_ENV") or "").strip().lower()
+POSTGRES_URL_ENV_NAMES = (
+    "DATABASE_URL",
+    "POSTGRES_URL",
+    "POSTGRES_PRIVATE_URL",
+    "POSTGRES_PUBLIC_URL",
+    "DATABASE_PRIVATE_URL",
+    "DATABASE_PUBLIC_URL",
+    "PGURL",
+    "PG_URL",
+    "RAILWAY_DATABASE_URL",
+    "RAILWAY_POSTGRES_URL",
+    "POSTGRES_CONNECTION_URL",
+    "DATABASE_CONNECTION_URL",
+)
 _RAILWAY_MARKERS = (
     "RAILWAY_ENVIRONMENT", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_PROJECT_ID",
     "RAILWAY_SERVICE_ID", "RAILWAY_SERVICE_NAME",
@@ -25,7 +39,6 @@ _RAILWAY_MARKERS = (
 HOSTED = RUNTIME_ENV in {"hosted", "railway", "staging", "production"} or any(
     (os.environ.get(name) or "").strip() for name in _RAILWAY_MARKERS
 )
-DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
 DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
 
 
@@ -38,6 +51,16 @@ def _validated_postgres_url(value):
     return value
 
 
+def resolve_postgres_url(environ=None):
+    source = os.environ if environ is None else environ
+    for name in POSTGRES_URL_ENV_NAMES:
+        value = str(source.get(name) or "").strip()
+        if value:
+            return name, value
+    return "", ""
+
+
+DATABASE_URL_SOURCE, DATABASE_URL = resolve_postgres_url()
 DATABASE_URL = _validated_postgres_url(DATABASE_URL)
 if HOSTED and not DATABASE_URL:
     raise PersistenceConfigurationError("nina_persistence_database_url_required_in_hosted_runtime")
@@ -53,7 +76,8 @@ def module_settings():
     """Return the single hosted decision, with explicit local test isolation."""
     if HOSTED:
         return DATABASE_URL, DB_FILE, USE_POSTGRES
-    local_url = _validated_postgres_url((os.environ.get("DATABASE_URL") or "").strip())
+    _, local_url = resolve_postgres_url()
+    local_url = _validated_postgres_url(local_url)
     if local_url and psycopg2 is None:
         raise PersistenceConfigurationError("nina_persistence_psycopg2_required")
     local_file = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
@@ -135,6 +159,7 @@ def safe_backend_diagnostics():
     return {
         "runtime_environment": runtime_environment(),
         "backend": backend_name(),
+        "database_url_source": DATABASE_URL_SOURCE or "none",
         "reachable": reachable,
         "database_fingerprint": database_identity_fingerprint(),
         "error_class": error_class,

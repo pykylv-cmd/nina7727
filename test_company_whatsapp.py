@@ -170,6 +170,7 @@ class CompanyWhatsAppTests(unittest.TestCase):
         self.assertIn("Bridge reachable", page)
         self.assertIn("Runtime environment", page)
         self.assertIn("Persistence backend", page)
+        self.assertIn("PostgreSQL URL source", page)
         self.assertIn("Database reachable", page)
         self.assertIn("Database identity", page)
         self.assertIn("Contact Identity rows", page)

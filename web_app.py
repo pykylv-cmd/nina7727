@@ -5662,6 +5662,7 @@ def admin_system():
     values = (
         ("Runtime environment", persistence["runtime_environment"]),
         ("Persistence backend", persistence["backend"]),
+        ("PostgreSQL URL source", persistence["database_url_source"]),
         ("Database reachable", "Yes" if persistence["reachable"] else "No"),
         ("Database identity", persistence["database_fingerprint"]),
         *tuple(

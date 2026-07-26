@@ -12,13 +12,21 @@ from cryptography.fernet import Fernet
 
 
 ROOT = Path(__file__).resolve().parent
+POSTGRES_ALIASES = (
+    "DATABASE_URL", "POSTGRES_URL", "POSTGRES_PRIVATE_URL", "POSTGRES_PUBLIC_URL",
+    "DATABASE_PRIVATE_URL", "DATABASE_PUBLIC_URL", "PGURL", "PG_URL",
+    "RAILWAY_DATABASE_URL", "RAILWAY_POSTGRES_URL", "POSTGRES_CONNECTION_URL",
+    "DATABASE_CONNECTION_URL",
+)
 
 
 class PersistenceBackendTests(unittest.TestCase):
     def _subprocess(self, code, env_updates, cwd=None):
         env = dict(os.environ)
         env.update(env_updates)
-        for key in ("DATABASE_URL", "NINA_DB_FILE", "NINA_RUNTIME_ENV"):
+        for key in (*POSTGRES_ALIASES, "NINA_DB_FILE", "NINA_RUNTIME_ENV"):
+            if key not in env_updates:
+                env.pop(key, None)
             if env_updates.get(key) is None:
                 env.pop(key, None)
         env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(ROOT), env.get("PYTHONPATH", "")]))
@@ -64,6 +72,44 @@ import persistence_backend
         self.assertIn("psycopg2_required", result.stderr)
         self.assertNotIn("secret", result.stderr)
 
+    def test_database_url_has_highest_priority_and_blank_values_are_skipped(self):
+        code = """
+import persistence_backend as backend
+assert backend.DATABASE_URL_SOURCE == 'DATABASE_URL'
+assert backend.DATABASE_URL.endswith('/primary')
+assert backend.USE_POSTGRES
+"""
+        result = self._subprocess(
+            code,
+            {
+                "NINA_RUNTIME_ENV": "staging",
+                "DATABASE_URL": "postgresql://user:secret@db.internal:5432/primary",
+                "POSTGRES_URL": "postgresql://user:other@db.internal:5432/secondary",
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        blank_result = self._subprocess(
+            "import persistence_backend as b; assert b.DATABASE_URL_SOURCE == 'POSTGRES_URL'; assert b.USE_POSTGRES",
+            {
+                "NINA_RUNTIME_ENV": "staging",
+                "DATABASE_URL": "   ",
+                "POSTGRES_URL": "postgresql://user:secret@db.internal:5432/nina",
+            },
+        )
+        self.assertEqual(blank_result.returncode, 0, blank_result.stderr)
+
+    def test_every_historical_postgres_alias_is_accepted_without_exposure(self):
+        for alias in POSTGRES_ALIASES:
+            with self.subTest(alias=alias):
+                value = f"postgresql://user:unique-secret@db.internal:5432/{alias.lower()}"
+                result = self._subprocess(
+                    "import persistence_backend as b; b.assert_backend_ready=lambda: True; print(b.DATABASE_URL_SOURCE, b.backend_name(), b.safe_backend_diagnostics()['database_url_source'])",
+                    {"NINA_RUNTIME_ENV": "staging", alias: value},
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), f"{alias} postgresql {alias}")
+                self.assertNotIn("unique-secret", result.stdout + result.stderr)
+
     def test_hosted_malformed_database_url_fails_closed(self):
         result = self._subprocess(
             "import persistence_backend",
@@ -71,6 +117,18 @@ import persistence_backend
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("database_url_invalid", result.stderr)
+
+    def test_hosted_sqlite_override_remains_forbidden(self):
+        result = self._subprocess(
+            "import persistence_backend as b; b.connect(database_url='', db_file='nina_memory.db', use_postgres=False)",
+            {
+                "NINA_RUNTIME_ENV": "staging",
+                "POSTGRES_URL": "postgresql://user:secret@db.internal:5432/nina",
+            },
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("hosted_backend_override_forbidden", result.stderr)
+        self.assertNotIn("secret", result.stderr)
 
     def test_hosted_unreachable_database_fails_web_startup(self):
         code = """
