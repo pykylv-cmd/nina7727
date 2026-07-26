@@ -12,7 +12,10 @@ Mērķis:
 Tas ir V1 platformas shēmas, statusa un kontroles slānis.
 """
 
-from dataclasses import dataclass, field, asdict
+import threading
+from collections import OrderedDict
+from dataclasses import dataclass, field, asdict, replace
+from types import MappingProxyType
 from typing import List, Dict, Any
 
 PLATFORM_CORE_VERSION = "NinaOS Platform Core V1"
@@ -559,3 +562,448 @@ def build_platform_answer(text: str) -> str:
             return role_detail_answer(name)
 
     return platform_status_answer()
+
+
+# -----------------------------------------------------------------------------
+# Runtime capability registry
+# -----------------------------------------------------------------------------
+
+CAPABILITY_REGISTRY_VERSION = "1.0"
+
+
+class PlatformCapabilityError(RuntimeError):
+    pass
+
+
+class DuplicateCapabilityError(PlatformCapabilityError):
+    pass
+
+
+class UnknownCapabilityError(PlatformCapabilityError):
+    pass
+
+
+class CapabilityDependencyError(PlatformCapabilityError):
+    pass
+
+
+class CapabilityDependencyCycleError(CapabilityDependencyError):
+    pass
+
+
+class CapabilityStartupOrderError(CapabilityDependencyError):
+    pass
+
+
+class PlatformNotHealthyError(PlatformCapabilityError):
+    pass
+
+
+def _freeze_capability_value(value):
+    if isinstance(value, dict):
+        return MappingProxyType({
+            str(key): _freeze_capability_value(item)
+            for key, item in value.items()
+        })
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_capability_value(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_freeze_capability_value(item) for item in value)
+    return value
+
+
+@dataclass(frozen=True)
+class PlatformCapability:
+    id: str
+    name: str
+    version: str
+    description: str
+    startup_order: int
+    dependencies: tuple
+    healthy: bool
+    enabled: bool
+    metadata: object
+
+
+class PlatformCapabilityRegistry:
+    """Thread-safe capability graph with immutable public snapshots."""
+
+    def __init__(self, version=CAPABILITY_REGISTRY_VERSION):
+        self._version = str(version)
+        self._lock = threading.RLock()
+        self._capabilities = OrderedDict()
+        self._initialized = False
+
+    @property
+    def version(self):
+        return self._version
+
+    @property
+    def initialized(self):
+        with self._lock:
+            return self._initialized
+
+    @staticmethod
+    def _normalize(capability=None, **values):
+        if isinstance(capability, PlatformCapability):
+            if values:
+                raise TypeError("capability_and_values_are_mutually_exclusive")
+            source = {
+                name: getattr(capability, name)
+                for name in PlatformCapability.__dataclass_fields__
+            }
+        elif isinstance(capability, dict):
+            source = dict(capability)
+            source.update(values)
+        elif capability is None:
+            source = dict(values)
+        else:
+            raise TypeError("capability_must_be_mapping_or_platform_capability")
+
+        identifier = str(source.get("id") or "").strip()
+        name = str(source.get("name") or "").strip()
+        version = str(source.get("version") or "").strip()
+        if not identifier or not name or not version:
+            raise ValueError("capability_id_name_version_required")
+        startup_order = source.get("startup_order")
+        if isinstance(startup_order, bool) or not isinstance(startup_order, int):
+            raise ValueError("capability_startup_order_must_be_integer")
+        dependencies = tuple(dict.fromkeys(
+            str(item).strip()
+            for item in (source.get("dependencies") or ())
+            if str(item).strip()
+        ))
+        metadata = dict(source.get("metadata") or {})
+        metadata.setdefault("required", True)
+        return PlatformCapability(
+            id=identifier,
+            name=name,
+            version=version,
+            description=str(source.get("description") or "").strip(),
+            startup_order=startup_order,
+            dependencies=dependencies,
+            healthy=bool(source.get("healthy", False)),
+            enabled=bool(source.get("enabled", True)),
+            metadata=_freeze_capability_value(metadata),
+        )
+
+    @staticmethod
+    def _validate_cycles(capabilities):
+        visiting = set()
+        visited = set()
+
+        def visit(identifier):
+            if identifier in visiting:
+                raise CapabilityDependencyCycleError(
+                    f"platform_capability_dependency_cycle:{identifier}"
+                )
+            if identifier in visited:
+                return
+            visiting.add(identifier)
+            for dependency in capabilities[identifier].dependencies:
+                if dependency in capabilities:
+                    visit(dependency)
+            visiting.remove(identifier)
+            visited.add(identifier)
+
+        for identifier in capabilities:
+            visit(identifier)
+
+    @classmethod
+    def _validate_ordering(cls, capabilities):
+        cls._validate_cycles(capabilities)
+        for capability in capabilities.values():
+            for dependency in capability.dependencies:
+                dependency_capability = capabilities.get(dependency)
+                if (
+                    dependency_capability is not None
+                    and dependency_capability.startup_order
+                    >= capability.startup_order
+                ):
+                    raise CapabilityStartupOrderError(
+                        "platform_capability_startup_order_invalid:"
+                        f"{dependency}->{capability.id}"
+                    )
+
+    def register(self, capability=None, **values):
+        normalized = self._normalize(capability, **values)
+        with self._lock:
+            if normalized.id in self._capabilities:
+                raise DuplicateCapabilityError(
+                    f"platform_capability_duplicate:{normalized.id}"
+                )
+            candidate = OrderedDict(self._capabilities)
+            candidate[normalized.id] = normalized
+            self._validate_ordering(candidate)
+            self._capabilities[normalized.id] = normalized
+            self._initialized = False
+            return normalized
+
+    def unregister(self, capability_id):
+        identifier = str(capability_id or "").strip()
+        with self._lock:
+            if identifier not in self._capabilities:
+                raise UnknownCapabilityError(
+                    f"platform_capability_unknown:{identifier}"
+                )
+            dependents = [
+                capability.id
+                for capability in self._capabilities.values()
+                if identifier in capability.dependencies
+            ]
+            if dependents:
+                raise CapabilityDependencyError(
+                    "platform_capability_dependency_in_use:"
+                    f"{identifier}:{','.join(sorted(dependents))}"
+                )
+            removed = self._capabilities.pop(identifier)
+            self._initialized = False
+            return removed
+
+    def lookup(self, capability_id):
+        identifier = str(capability_id or "").strip()
+        with self._lock:
+            capability = self._capabilities.get(identifier)
+            if capability is None:
+                raise UnknownCapabilityError(
+                    f"platform_capability_unknown:{identifier}"
+                )
+            return capability
+
+    def list_capabilities(self):
+        with self._lock:
+            return tuple(sorted(
+                self._capabilities.values(),
+                key=lambda item: (item.startup_order, item.id),
+            ))
+
+    def startup_order(self):
+        return tuple(item.id for item in self.list_capabilities())
+
+    def set_healthy(self, capability_id, healthy):
+        return self._replace(capability_id, healthy=bool(healthy))
+
+    def enable(self, capability_id):
+        return self._replace(capability_id, enabled=True)
+
+    def disable(self, capability_id):
+        return self._replace(capability_id, enabled=False)
+
+    def _replace(self, capability_id, **changes):
+        identifier = str(capability_id or "").strip()
+        with self._lock:
+            capability = self._capabilities.get(identifier)
+            if capability is None:
+                raise UnknownCapabilityError(
+                    f"platform_capability_unknown:{identifier}"
+                )
+            updated = replace(capability, **changes)
+            self._capabilities[identifier] = updated
+            return updated
+
+    def validate(self):
+        with self._lock:
+            missing = {
+                capability.id: tuple(
+                    dependency
+                    for dependency in capability.dependencies
+                    if dependency not in self._capabilities
+                )
+                for capability in self._capabilities.values()
+            }
+            missing = {
+                identifier: dependencies
+                for identifier, dependencies in missing.items()
+                if dependencies
+            }
+            if missing:
+                detail = ";".join(
+                    f"{identifier}={','.join(dependencies)}"
+                    for identifier, dependencies in sorted(missing.items())
+                )
+                raise CapabilityDependencyError(
+                    f"platform_capability_dependency_missing:{detail}"
+                )
+            self._validate_ordering(self._capabilities)
+            return True
+
+    def mark_initialized(self):
+        with self._lock:
+            self.validate()
+            self._initialized = True
+            return True
+
+    def health_status(self):
+        with self._lock:
+            required = tuple(
+                capability
+                for capability in self._capabilities.values()
+                if bool(capability.metadata.get("required", True))
+            )
+            unhealthy = tuple(
+                capability.id
+                for capability in required
+                if not capability.enabled or not capability.healthy
+            )
+            try:
+                self.validate()
+                graph_valid = True
+            except CapabilityDependencyError:
+                graph_valid = False
+            return MappingProxyType({
+                "ready": bool(
+                    self._initialized
+                    and graph_valid
+                    and required
+                    and not unhealthy
+                ),
+                "initialized": self._initialized,
+                "graph_valid": graph_valid,
+                "required_count": len(required),
+                "unhealthy": unhealthy,
+                "version": self._version,
+            })
+
+    def immutable_snapshot(self):
+        with self._lock:
+            return MappingProxyType({
+                "version": self._version,
+                "initialized": self._initialized,
+                "health": self.health_status(),
+                "startup_order": self.startup_order(),
+                "capabilities": self.list_capabilities(),
+            })
+
+
+_PLATFORM_REGISTRY = PlatformCapabilityRegistry()
+_PLATFORM_INITIALIZATION_LOCK = threading.RLock()
+
+_RUNTIME_CAPABILITIES = (
+    {
+        "id": "persistence_backend",
+        "name": "Persistence Backend",
+        "version": "1",
+        "description": "Authoritative NinaOS persistence backend.",
+        "startup_order": 10,
+        "dependencies": (),
+    },
+    {
+        "id": "deployment_compatibility",
+        "name": "Deployment Compatibility",
+        "version": "1",
+        "description": "Rolling deployment compatibility contract.",
+        "startup_order": 20,
+        "dependencies": ("persistence_backend",),
+    },
+    {
+        "id": "work_objects",
+        "name": "Work Objects",
+        "version": "1",
+        "description": "Canonical persistent work truth.",
+        "startup_order": 30,
+        "dependencies": ("persistence_backend",),
+    },
+    {
+        "id": "contact_identity",
+        "name": "Contact Identity",
+        "version": "1",
+        "description": "Stable cross-channel contact identity.",
+        "startup_order": 40,
+        "dependencies": ("persistence_backend",),
+    },
+    {
+        "id": "message_service",
+        "name": "Message Service",
+        "version": "1",
+        "description": "Shared Nina message processing service.",
+        "startup_order": 50,
+        "dependencies": (
+            "persistence_backend",
+            "work_objects",
+            "contact_identity",
+        ),
+    },
+    {
+        "id": "channel_services",
+        "name": "Channel Services",
+        "version": "1",
+        "description": "Shared channel service boundary.",
+        "startup_order": 60,
+        "dependencies": ("message_service", "contact_identity"),
+    },
+)
+
+
+def _default_capability_health_checks():
+    import channel_connections
+    import contact_identity
+    import nina_message_service
+    import persistence_backend
+    import work_objects
+    from deployment_compatibility import DeploymentCompatibilityContract
+
+    contract = DeploymentCompatibilityContract(
+        application_version=PLATFORM_CORE_VERSION,
+        service_role="platform-core",
+    )
+    return {
+        "persistence_backend": persistence_backend.assert_backend_ready,
+        "deployment_compatibility": contract.assert_compatible,
+        "work_objects": work_objects.persistence_health,
+        "contact_identity": lambda: (
+            callable(contact_identity.resolve_contact_identity)
+            and callable(contact_identity.list_contacts)
+        ),
+        "message_service": lambda: (
+            callable(nina_message_service.send_message_to_nina)
+            and callable(nina_message_service.load_channel_conversation)
+        ),
+        "channel_services": lambda: callable(
+            channel_connections.get_connection
+        ),
+    }
+
+
+def initialize_platform_runtime(health_checks=None):
+    """Register and verify every mandatory runtime capability."""
+    checks = _default_capability_health_checks()
+    if health_checks:
+        checks.update(dict(health_checks))
+    with _PLATFORM_INITIALIZATION_LOCK:
+        registry = get_platform_registry()
+        registered = {
+            capability.id for capability in registry.list_capabilities()
+        }
+        for definition in _RUNTIME_CAPABILITIES:
+            if definition["id"] not in registered:
+                registry.register(definition)
+
+        failures = []
+        for definition in _RUNTIME_CAPABILITIES:
+            identifier = definition["id"]
+            check = checks.get(identifier)
+            try:
+                result = check() if callable(check) else False
+                healthy = (
+                    bool(result.get("ok"))
+                    if isinstance(result, dict)
+                    else result is not False
+                )
+            except Exception:
+                healthy = False
+            registry.set_healthy(identifier, healthy)
+            if not healthy:
+                failures.append(identifier)
+
+        registry.mark_initialized()
+        status = registry.health_status()
+        if failures or not status["ready"]:
+            raise PlatformNotHealthyError(
+                "nina_platform_capabilities_unhealthy:"
+                + ",".join(failures or status["unhealthy"])
+            )
+        return registry
+
+
+def get_platform_registry():
+    return _PLATFORM_REGISTRY

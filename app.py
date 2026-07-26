@@ -30,6 +30,7 @@ from openai import OpenAI
 from nina_identity import NINA_PROMPT as SHARED_NINA_PROMPT
 from channel_connections import consume_telegram_token, is_telegram_connection_token, workspace_for_telegram_identity
 from runtime_readiness import get_runtime_readiness
+from platform_core import initialize_platform_runtime
 
 # ONE NINA Canonical Channel Content + Document Work Intake V1
 # V117.8: channel-content and document-action imports are isolated.
@@ -18595,6 +18596,7 @@ APP_RUNTIME_READINESS.register(
         and callable(workspace_for_telegram_identity)
     ),
 )
+APP_RUNTIME_READINESS.register("platform_core", initialize_platform_runtime)
 
 telegram_app = (
     Application.builder()

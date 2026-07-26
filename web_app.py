@@ -87,6 +87,7 @@ from persistence_backend import (
 )
 from runtime_readiness import get_runtime_readiness
 from deployment_compatibility import DeploymentCompatibilityContract
+from platform_core import initialize_platform_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +231,7 @@ WEB_RUNTIME_READINESS.register(
         and callable(list_connected_company_whatsapp_workspaces)
     ),
 )
+WEB_RUNTIME_READINESS.register("platform_core", initialize_platform_runtime)
 
 
 @app.before_request
