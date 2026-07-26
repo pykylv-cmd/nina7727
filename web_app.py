@@ -85,20 +85,36 @@ from persistence_backend import (
     safe_backend_diagnostics,
     safe_table_count,
 )
+from runtime_readiness import get_runtime_readiness
 
 logger = logging.getLogger(__name__)
 
 _WEB_RUNTIME_INITIALIZED = False
+WEB_RUNTIME_READINESS = get_runtime_readiness("web")
 
 
 def initialize_web_runtime():
-    """Validate mandatory hosted persistence once at Web process startup."""
+    """Validate all mandatory Web capabilities once before serving customers."""
     global _WEB_RUNTIME_INITIALIZED
-    if _WEB_RUNTIME_INITIALIZED:
+    if _WEB_RUNTIME_INITIALIZED and WEB_RUNTIME_READINESS.ready:
         return False
+    WEB_RUNTIME_READINESS.begin_startup()
+    try:
+        WEB_RUNTIME_READINESS.run_checks()
+        WEB_RUNTIME_READINESS.complete_startup()
+    except Exception as exc:
+        WEB_RUNTIME_READINESS.fail_startup(exc)
+        _WEB_RUNTIME_INITIALIZED = False
+        raise
+    _WEB_RUNTIME_INITIALIZED = True
+    return True
+
+
+def _web_persistence_ready():
     if NINA_HOSTED_RUNTIME:
         assert_platform_persistence_ready()
-    _WEB_RUNTIME_INITIALIZED = True
+    else:
+        assert_platform_persistence_ready()
     return True
 
 # ONE NINA V51.3 — shared canonical Work Object read bridge.
@@ -183,6 +199,50 @@ DRAFT_REVIEW_STATES = {}
 DRAFT_REVIEW_STATES_LOADED = False
 TELEGRAM_SEND_PREP_STATES = {}
 TELEGRAM_SEND_PREP_STATES_LOADED = False
+
+WEB_RUNTIME_READINESS.register("persistence_backend", _web_persistence_ready)
+WEB_RUNTIME_READINESS.register(
+    "work_objects",
+    lambda: ONE_NINA_WORK_READ_READY and one_nina_work_persistence_health(),
+)
+WEB_RUNTIME_READINESS.register(
+    "contact_identity",
+    lambda: callable(resolve_contact_identity) and callable(list_contacts),
+)
+WEB_RUNTIME_READINESS.register(
+    "message_service",
+    lambda: callable(send_message_to_nina) and callable(load_channel_conversation),
+)
+WEB_RUNTIME_READINESS.register(
+    "channel_services",
+    lambda: (
+        callable(get_connection)
+        and callable(list_connected_personal_whatsapp_workspaces)
+        and callable(list_connected_company_whatsapp_workspaces)
+    ),
+)
+
+
+@app.before_request
+def require_runtime_readiness():
+    if request.path in {"/live", "/ready"}:
+        return None
+    if not WEB_RUNTIME_READINESS.ready:
+        try:
+            initialize_web_runtime()
+        except Exception:
+            return jsonify({
+                "ok": False,
+                "ready": False,
+                "error": "runtime_not_ready",
+            }), 503
+    if not WEB_RUNTIME_READINESS.ready:
+        return jsonify({
+            "ok": False,
+            "ready": False,
+            "error": "runtime_not_ready",
+        }), 503
+    return None
 TELEGRAM_RECIPIENT_STATES = {}
 TELEGRAM_RECIPIENT_STATES_LOADED = False
 TELEGRAM_CLIENT_CONTACT_MAPPINGS = {}
@@ -6406,6 +6466,18 @@ def exchange():
 @app.route("/diagnostics/telegram-sync")
 def diagnostics_telegram_sync():
     return telegram_bridge_db_diagnostics()
+
+
+@app.route("/live")
+def live():
+    return WEB_RUNTIME_READINESS.liveness(), 200
+
+
+@app.route("/ready")
+def ready():
+    status = WEB_RUNTIME_READINESS.snapshot()
+    return status, 200 if status["ready"] else 503
+
 
 @app.route("/health")
 def health():

@@ -12,6 +12,7 @@ from persistence_backend import (
     DATABASE_URL,
     DB_FILE,
     USE_POSTGRES,
+    assert_backend_ready,
     connect as persistence_connect,
     psycopg2,
 )
@@ -28,6 +29,7 @@ from contact_identity import compact_contact_context, resolve_contact_identity
 from openai import OpenAI
 from nina_identity import NINA_PROMPT as SHARED_NINA_PROMPT
 from channel_connections import consume_telegram_token, is_telegram_connection_token, workspace_for_telegram_identity
+from runtime_readiness import get_runtime_readiness
 
 # ONE NINA Canonical Channel Content + Document Work Intake V1
 # V117.8: channel-content and document-action imports are isolated.
@@ -18534,6 +18536,7 @@ def home():
 
 
 _APP_RUNTIME_INITIALIZED = False
+APP_RUNTIME_READINESS = get_runtime_readiness("telegram_core")
 
 
 def validate_mandatory_startup_components():
@@ -18553,12 +18556,45 @@ def validate_mandatory_startup_components():
 def initialize_app_runtime():
     """Perform Telegram/Core startup work exactly once, never during import."""
     global _APP_RUNTIME_INITIALIZED
-    if _APP_RUNTIME_INITIALIZED:
+    if _APP_RUNTIME_INITIALIZED and APP_RUNTIME_READINESS.ready:
         return False
-    validate_mandatory_startup_components()
-    init_db()
+    APP_RUNTIME_READINESS.begin_startup()
+    try:
+        validate_mandatory_startup_components()
+        init_db()
+        APP_RUNTIME_READINESS.run_checks()
+        APP_RUNTIME_READINESS.complete_startup()
+    except Exception as exc:
+        APP_RUNTIME_READINESS.fail_startup(exc)
+        _APP_RUNTIME_INITIALIZED = False
+        raise
     _APP_RUNTIME_INITIALIZED = True
     return True
+
+
+def _app_message_service_ready():
+    from nina_message_service import send_message_to_nina
+    return callable(send_message_to_nina)
+
+
+APP_RUNTIME_READINESS.register("persistence_backend", assert_backend_ready)
+APP_RUNTIME_READINESS.register(
+    "work_objects",
+    lambda: ONE_NINA_WORK_OBJECTS_READY and work_objects_persistence_health(),
+)
+APP_RUNTIME_READINESS.register(
+    "contact_identity",
+    lambda: callable(resolve_contact_identity) and callable(compact_contact_context),
+)
+APP_RUNTIME_READINESS.register("message_service", _app_message_service_ready)
+APP_RUNTIME_READINESS.register(
+    "channel_services",
+    lambda: (
+        callable(consume_telegram_token)
+        and callable(is_telegram_connection_token)
+        and callable(workspace_for_telegram_identity)
+    ),
+)
 
 telegram_app = (
     Application.builder()
