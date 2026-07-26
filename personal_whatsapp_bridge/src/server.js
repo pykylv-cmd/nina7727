@@ -7,10 +7,18 @@ import {initializeCompanySessions} from './startup.js'
 
 const token=process.env.NINA_PERSONAL_WHATSAPP_BRIDGE_TOKEN || ''
 const port=Number(process.env.PORT || 8080)
+const bridgeCompatibility=()=>({
+  application_version:'personal-whatsapp-bridge@1.0.0',
+  database_compatibility_version:null,
+  internal_api_compatibility_version:1,
+  service_role:'happy-education:whatsapp-bridge',
+  commit_identifier:String(process.env.RAILWAY_GIT_COMMIT_SHA||process.env.NINA_COMMIT_SHA||'unknown').replace(/[^A-Za-z0-9._-]/g,'').slice(0,64)||'unknown'
+})
 function reply(res,status,payload){res.writeHead(status,{'content-type':'application/json','cache-control':'no-store'});res.end(JSON.stringify(payload))}
 const server=http.createServer(async(req,res)=>{
   if(req.url==='/health') return reply(res,200,{ok:true})
   if(!token || req.headers.authorization!==`Bearer ${token}`) return reply(res,401,{ok:false})
+  if(req.method==='GET'&&req.url==='/v1/compatibility') return reply(res,200,{ok:true,runtime:bridgeCompatibility()})
   let body=''; for await(const part of req){body+=part;if(body.length>65536)return reply(res,413,{ok:false})}
   let data={}; try{data=body?JSON.parse(body):{}}catch{return reply(res,400,{ok:false})}
   const workspace=String(data.workspace_id||'')

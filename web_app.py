@@ -86,6 +86,7 @@ from persistence_backend import (
     safe_table_count,
 )
 from runtime_readiness import get_runtime_readiness
+from deployment_compatibility import DeploymentCompatibilityContract
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +173,10 @@ except Exception as e:
         return {"ok": False, "error": "estimate_approval_unavailable"}
 
 WEB_APP_VERSION = "Web App V51.8.1 — ONE NINA Estimate Approval V1 Release-Safe"
+WEB_DEPLOYMENT_COMPATIBILITY = DeploymentCompatibilityContract(
+    application_version=WEB_APP_VERSION,
+    service_role="secure-rebirth:web-core",
+)
 app = Flask(__name__)
 _CHANNEL_CSRF_SECRET = secrets.token_bytes(32)
 _WORKSPACE_COOKIE = "nina_workspace"
@@ -200,6 +205,10 @@ DRAFT_REVIEW_STATES_LOADED = False
 TELEGRAM_SEND_PREP_STATES = {}
 TELEGRAM_SEND_PREP_STATES_LOADED = False
 
+WEB_RUNTIME_READINESS.register(
+    "deployment_compatibility",
+    WEB_DEPLOYMENT_COMPATIBILITY.assert_compatible,
+)
 WEB_RUNTIME_READINESS.register("persistence_backend", _web_persistence_ready)
 WEB_RUNTIME_READINESS.register(
     "work_objects",
@@ -225,7 +234,7 @@ WEB_RUNTIME_READINESS.register(
 
 @app.before_request
 def require_runtime_readiness():
-    if request.path in {"/live", "/ready"}:
+    if request.path in {"/live", "/ready", "/internal/runtime/compatibility"}:
         return None
     if not WEB_RUNTIME_READINESS.ready:
         try:
@@ -5882,6 +5891,21 @@ def _bridge_json():
         return None
     payload = request.get_json(silent=True)
     return payload if isinstance(payload, dict) else None
+
+
+@app.post("/internal/runtime/compatibility")
+def internal_runtime_compatibility():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    return jsonify({
+        "ok": True,
+        "runtime": WEB_DEPLOYMENT_COMPATIBILITY.identity(),
+        "bridge_requirement": {
+            "service_role": "happy-education:whatsapp-bridge",
+            "internal_api_compatibility_version": 1,
+        },
+    })
 
 
 @app.post("/internal/personal-whatsapp/auth/load")
