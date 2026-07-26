@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict'
 import {disconnectDetails,normalizeStoredKey,ownerJids,processMessageUpsert,publicStatus,reconnectDelay,resolveWhatsAppVersion,restoreSessions,sessions,settleNonFatal,stopSession} from '../src/session_manager.js'
-import {clearAuth,ninaErrorDetails,ninaRequest} from '../src/nina_api.js'
+import {clearAuth,clearCompanyAuth,ninaErrorDetails,ninaRequest} from '../src/nina_api.js'
 test('group and workspace identifiers are explicit boundaries',()=>{
   assert.equal('123@g.us'.endsWith('@g.us'),true)
   assert.match('workspace-1',/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/)
@@ -26,6 +26,26 @@ test('fresh pairing clears every persisted auth record without exposing values',
   globalThis.fetch=async(url,options)=>{requests.push({url,body:JSON.parse(options.body)});const payload=requests.length===1?{records:{creds:{registered:false},'key:session:1':{private:'hidden'}}}:{ok:true};return {ok:true,text:async()=>JSON.stringify(payload)}}
   try { assert.equal(await clearAuth('workspace-1'),2) } finally { globalThis.fetch=previousFetch }
   assert.deepEqual(requests[1].body.records,{creds:null,'key:session:1':null})
+})
+test('manual Company pairing treats only missing auth as an already empty store',async()=>{
+  const previousFetch=globalThis.fetch
+  process.env.NINA_WEB_INTERNAL_URL='http://nina.internal';process.env.NINA_PERSONAL_WHATSAPP_BRIDGE_TOKEN='test-token'
+  let requests=0
+  globalThis.fetch=async()=>{requests+=1;return{ok:false,status:404,text:async()=>'{"ok":false,"error":"no_auth_records"}'}}
+  try{assert.equal(await clearCompanyAuth('company'),0);assert.equal(requests,1)}
+  finally{globalThis.fetch=previousFetch}
+})
+test('Company auth clearing never hides invalid auth authorization backend or network failures',async()=>{
+  const previousFetch=globalThis.fetch
+  process.env.NINA_WEB_INTERNAL_URL='http://nina.internal';process.env.NINA_PERSONAL_WHATSAPP_BRIDGE_TOKEN='test-token'
+  try{
+    for(const status of [401,403,409,500]){
+      globalThis.fetch=async()=>({ok:false,status,text:async()=>`{"ok":false,"code":${status}}`})
+      await assert.rejects(clearCompanyAuth('company'),error=>error.status===status)
+    }
+    globalThis.fetch=async()=>{throw new TypeError('network unavailable')}
+    await assert.rejects(clearCompanyAuth('company'),/network unavailable/)
+  }finally{globalThis.fetch=previousFetch}
 })
 test('internal 400 captures endpoint and body without exposing request values',async()=>{
   const previousFetch=globalThis.fetch;process.env.NINA_WEB_INTERNAL_URL='http://nina.internal';process.env.NINA_PERSONAL_WHATSAPP_BRIDGE_TOKEN='test-token'

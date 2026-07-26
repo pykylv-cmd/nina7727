@@ -72,7 +72,9 @@ export async function storeCompanyAuth(workspaceId, records) {
   return ninaRequest('/internal/company-whatsapp/auth/store', {workspace_id:workspaceId, records})
 }
 export async function clearCompanyAuth(workspaceId) {
-  const records = await loadCompanyAuth(workspaceId)
+  let records
+  try{records=await loadCompanyAuth(workspaceId)}
+  catch(error){if(Number(error?.status)===404)return 0;throw error}
   const removals = Object.fromEntries(Object.keys(records).map(key => [key, null]))
   if (Object.keys(removals).length) await storeCompanyAuth(workspaceId, removals)
   return Object.keys(removals).length
