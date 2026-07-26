@@ -376,19 +376,33 @@ At the time of this constitution update, the official checkpoint is:
 
 ## Telegram
 - `app.py`
-- **V116.0 + Core 2.5.2 — Sprint B.2 Safe Reconnect**
+- Separate Telegram/Core runtime remains preserved; Client Bridge V1 does not import or start it from Web.
 
 ## Web
 - `web_app.py`
-- **V42 CLEAN MERGE — V40 Console + V41 Actions**
+- NinaOS Web/Admin with Contact Identity, canonical Work Objects, Company WhatsApp and **ONE NINA Client Bridge V1**.
 
 ## Railway structure
-- Telegram service → `python app.py`
-- Web service → `python web_app.py`
-- Postgres service → connected persistence layer
+- Staging project: `confident-expression`
+- Python Web/Core: `secure-rebirth` → `python web_app.py`
+- Company WhatsApp bridge: `happy-education` → Node bridge startup
+- PostgreSQL → shared persistent identity, channel auth and canonical work truth
+
+## Verified capabilities
+- **Company WhatsApp Persistent Session Restore:** production verified; an ordinary
+  `happy-education` restart restores stored Company credentials without a new QR.
+- **Contact Identity V1:** stable tenant-scoped channel identity, with raw provider
+  identifiers excluded from customer/admin surfaces.
+- **ONE NINA Client Bridge V1:** implemented and regression verified. A persistent
+  tenant-scoped Contact Identity mapping supplies a stable canonical `client_id`
+  to Company WhatsApp-created Work Objects. `nina_work_objects` remains the only
+  work truth; legacy `client_id` values are preserved without destructive rewrite.
+- Client Bridge production success still requires staging deployment and the
+  user-visible validation described by the operational deployment safety rule.
 
 ## Current next target
-- **V43 — Form Save / Workspace Preview / DB Bridge**
+- **ONE NINA Verified Client Merge V1** — only verified evidence may merge multiple
+  channel contacts into one canonical client. No automatic name or phone matching.
 
 ---
 

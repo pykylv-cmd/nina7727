@@ -567,6 +567,7 @@ def execute_natural_work_request(
     workspace_id: str = "demo_small_business",
     channel: str = "telegram",
     contact_id: str = "",
+    canonical_client_id: str = "",
 ) -> Optional[Dict[str, Any]]:
     """Execute a natural work command through the same ONE NINA Work Engine.
 
@@ -577,24 +578,27 @@ def execute_natural_work_request(
     if task:
         title = _clean(task.get("title"))
         due_date = _clean(task.get("deadline"))
+        parsed_client_name = _clean(task.get("client"))
+        work_client_id = _clean(canonical_client_id) or parsed_client_name
         metadata = enrich_canonical_business_metadata(
             raw_text=user_text,
             title=title,
             object_type="task",
-            client_id=_clean(task.get("client")),
+            client_id=parsed_client_name,
             due_date=due_date,
             metadata={
                 "raw_text": _clean(user_text),
                 "source": "natural_work_request",
                 "intent": "create_task",
                 "contact_id": _clean(contact_id),
+                "canonical_client_id": _clean(canonical_client_id),
             },
         )
         obj = create_work_object(
             object_type="task",
             title=title,
             workspace_id=workspace_id,
-            client_id=_clean(task.get("client")),
+            client_id=work_client_id,
             priority=_clean(task.get("priority")) or "normal",
             due_date=due_date,
             metadata=metadata,

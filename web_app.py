@@ -75,6 +75,7 @@ from admin_auth import (
     create_admin_session, verify_admin_session, verify_bootstrap_token,
 )
 from contact_identity import compact_contact_context, list_contacts, resolve_contact_identity
+from client_identity import client_context, get_or_create_client_mapping, list_client_mappings
 
 logger = logging.getLogger(__name__)
 
@@ -175,9 +176,25 @@ def one_nina_canonical_work_objects(limit=200):
     if not ONE_NINA_WORK_READ_READY:
         return []
     try:
-        raw_objects = one_nina_list_work_objects(
-            workspace_id="demo_small_business",
-            limit=max(1, min(int(limit or 200) * 4, 4000)),
+        raw_objects = []
+        workspaces = ["demo_small_business"]
+        try:
+            company_workspace = configured_company_whatsapp_workspace()
+            if company_workspace not in workspaces:
+                workspaces.append(company_workspace)
+        except Exception:
+            pass
+        for workspace_id in workspaces:
+            raw_objects.extend(one_nina_list_work_objects(
+                workspace_id=workspace_id,
+                limit=max(1, min(int(limit or 200) * 4, 4000)),
+            ))
+        raw_objects.sort(
+            key=lambda obj: (
+                str(getattr(obj, "updated_at", "") or ""),
+                str(getattr(obj, "created_at", "") or ""),
+            ),
+            reverse=True,
         )
         production_objects = []
         for obj in raw_objects:
@@ -344,19 +361,24 @@ def one_nina_client_work_map(limit=2000):
     """
     grouped = {}
     for obj in one_nina_canonical_work_objects(limit=limit):
-        client_name = one_nina_normalize_client_name(
+        client_id = one_nina_normalize_client_name(
             getattr(obj, "client_id", "") or ""
         )
-        if not client_name:
+        if not client_id:
             continue
 
-        key = client_name.casefold()
+        key = client_id.casefold()
         if key not in grouped:
+            workspace_id = str(getattr(obj, "workspace_id", "") or "")
+            context = client_context(workspace_id, client_id) or {}
             grouped[key] = {
-                "name": client_name,
+                "client_id": client_id,
+                "name": context.get("display_name") or (
+                    "WhatsApp client" if client_id.startswith("client_") else client_id
+                ),
                 "objects": [],
                 "types": {},
-                "channels": set(),
+                "channels": set(context.get("channels") or []),
             }
 
         entry = grouped[key]
@@ -381,8 +403,8 @@ def one_nina_client_work_map(limit=2000):
     return grouped
 
 
-def one_nina_find_client_profile(client_name):
-    wanted = one_nina_normalize_client_name(client_name).casefold()
+def one_nina_find_client_profile(client_id):
+    wanted = one_nina_normalize_client_name(client_id).casefold()
     return one_nina_client_work_map().get(wanted)
 
 
@@ -418,7 +440,7 @@ def one_nina_client_rows(empty_text="No canonical clients yet."):
             f"<span class='muted'>canonical work: {len(objects)} · {html_escape(type_summary)}</span>"
             f"<span class='muted'>{html_escape(latest_titles or channel_summary)}</span>"
             "</div>"
-            f"<a class='pill' href='{q('/clients/' + _client_profile_slug(profile['name']))}'>Open client profile</a>"
+            f"<a class='pill' href='{q('/clients/' + _client_profile_slug(profile['client_id']))}'>Open client profile</a>"
             "</div>"
         )
     return rows
@@ -5570,11 +5592,23 @@ def admin_clients():
         contacts = list_contacts(limit=200)
     except Exception:
         contacts = []
+    try:
+        mappings = {
+            (mapping["workspace_id"], mapping["contact_id"]): mapping["canonical_client_id"]
+            for mapping in list_client_mappings(limit=500)
+        }
+    except Exception:
+        mappings = {}
+    for item in contacts:
+        item["canonical_client_id"] = mappings.get(
+            (item.get("workspace_id"), item.get("contact_id")), "not linked"
+        )
     rows = "".join(
         "<div class='row'><div>"
         f"<b>{html_escape(item.get('preferred_name') or item.get('display_name') or 'Unnamed contact')}</b>"
         f"<span class='muted'>{html_escape(item.get('contact_id'))} · {html_escape(', '.join(item.get('channels') or []))}"
-        f" · {html_escape(item.get('workspace_id'))}</span></div>"
+        f" · {html_escape(item.get('workspace_id'))}</span>"
+        f"<span class='muted'>canonical client: {html_escape(item.get('canonical_client_id'))}</span></div>"
         f"<span class='pill'>{html_escape(item.get('relationship_type') or 'contact')} · {html_escape(item.get('status') or 'active')}</span></div>"
         for item in contacts
     ) or "<div class='safe-note'>No contacts yet.</div>"
@@ -5919,6 +5953,7 @@ def internal_company_whatsapp_inbound():
         workspace_id, "company_whatsapp", sender_jid,
         {"relationship_type": "client"},
     )
+    mapping = get_or_create_client_mapping(workspace_id, contact["contact_id"])
     if media:
         try:
             encoded = str(media.get("data_base64") or "")
@@ -5939,6 +5974,8 @@ def internal_company_whatsapp_inbound():
                 message_id=str(payload.get("message_id") or ""),
                 contact_id=contact["contact_id"],
                 contact_context=compact_contact_context(contact),
+                canonical_client_id=mapping["canonical_client_id"],
+                canonical_work_workspace_id=workspace_id,
             )
         except (MediaValidationError, ValueError, binascii.Error) as exc:
             error = str(exc)
@@ -5958,6 +5995,8 @@ def internal_company_whatsapp_inbound():
             conversation_id=identity["conversation_id"],
             contact_id=contact["contact_id"],
             contact_context=compact_contact_context(contact),
+            canonical_client_id=mapping["canonical_client_id"],
+            canonical_work_workspace_id=workspace_id,
         )
     return jsonify({"ok": True, "accepted": True, "reply": str(result.get("text") or "")})
 

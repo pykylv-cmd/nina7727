@@ -161,7 +161,8 @@ def _customer_safe_text(value: str) -> str:
 def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, channel: str = "web",
                          generator: Optional[Callable[[str], str]] = None,
                          conversation_id: str = "", contact_id: str = "",
-                         contact_context: str = "") -> Dict[str, Any]:
+                         contact_context: str = "", canonical_client_id: str = "",
+                         canonical_work_workspace_id: str = "") -> Dict[str, Any]:
     """Route one message through shared work truth and Nina's shared identity."""
     clean = str(user_text or "").strip()
     if not clean:
@@ -171,8 +172,9 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
 
     try:
         work_result = execute_natural_work_request(
-            user_text=clean, workspace_id=workspace_id, channel=channel,
-            contact_id=contact_id,
+            user_text=clean, workspace_id=canonical_work_workspace_id or workspace_id,
+            channel=channel, contact_id=contact_id,
+            canonical_client_id=canonical_client_id,
         )
     except Exception:
         work_result = None

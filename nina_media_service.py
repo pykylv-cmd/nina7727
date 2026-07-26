@@ -75,6 +75,8 @@ def process_media_message(
     message_id: str,
     contact_id: str = "",
     contact_context: str = "",
+    canonical_client_id: str = "",
+    canonical_work_workspace_id: str = "",
     openai_client: Any = None,
 ) -> Dict[str, Any]:
     mime = validate_media(kind, mime_type, data)
@@ -96,6 +98,8 @@ def process_media_message(
             _context_text(transcript, quoted_text), workspace_id=workspace_id,
             channel=channel, conversation_id=conversation_id,
             contact_id=contact_id, contact_context=contact_context,
+            canonical_client_id=canonical_client_id,
+            canonical_work_workspace_id=canonical_work_workspace_id,
         )
 
     if kind == "image":
@@ -137,7 +141,8 @@ def process_media_message(
         object_type=str(intake.get("object_type") or "document_case"),
         title=title,
         source_key=f"{channel}:{workspace_id}:{message_id}",
-        workspace_id=workspace_id,
+        workspace_id=canonical_work_workspace_id or workspace_id,
+        client_id=canonical_client_id,
         linked_files=[fingerprint],
         metadata=metadata,
         origin_channel=channel,
