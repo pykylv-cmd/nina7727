@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+.pnpm-store/
+personal_whatsapp_bridge/node_modules/

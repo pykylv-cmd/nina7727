@@ -4,19 +4,35 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from test_runtime_support import (
+    bind_sqlite_database,
+    initialize_ready_web,
+    install_test_environment,
+)
+
+install_test_environment()
+
 
 class ContactIdentityV1Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
-        os.environ.pop("DATABASE_URL", None)
-        os.environ["NINA_DB_FILE"] = os.path.join(cls.tmp.name, "contacts.db")
-        os.environ["NINA_CONTACT_IDENTITY_KEY"] = "contact-test-key-at-least-32-characters"
+        cls.db_file = os.path.join(cls.tmp.name, "contacts.db")
+        cls.env = patch.dict(os.environ, {
+            "DATABASE_URL": "",
+            "NINA_RUNTIME_ENV": "test",
+            "NINA_DB_FILE": cls.db_file,
+            "NINA_CONTACT_IDENTITY_KEY": "contact-test-key-at-least-32-characters",
+        })
+        cls.env.start()
         import contact_identity
         cls.identity = importlib.reload(contact_identity)
+        cls.restore_database = bind_sqlite_database(cls.db_file, cls.identity)
 
     @classmethod
     def tearDownClass(cls):
+        cls.restore_database()
+        cls.env.stop()
         cls.tmp.cleanup()
 
     def test_stable_company_telegram_and_web_resolution(self):
@@ -103,6 +119,7 @@ class ContactIdentityV1Tests(unittest.TestCase):
 
     def test_admin_contact_view_does_not_show_external_identity(self):
         import web_app
+        initialize_ready_web(web_app)
         client = web_app.app.test_client()
         client.set_cookie(web_app.ADMIN_COOKIE, web_app.create_admin_session(web_app._workspace_cookie_secret()))
         with patch.object(web_app, "list_contacts", return_value=[{

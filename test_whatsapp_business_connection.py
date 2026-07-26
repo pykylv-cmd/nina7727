@@ -6,6 +6,14 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from test_runtime_support import (
+    bind_sqlite_database,
+    initialize_ready_web,
+    install_test_environment,
+)
+
+install_test_environment()
+
 import channel_connections
 import web_app
 import whatsapp_channel
@@ -23,6 +31,10 @@ class WhatsAppBusinessConnectionTests(unittest.TestCase):
         channel_connections.DB_FILE = cls.db_file
         channel_connections.USE_POSTGRES = False
         channel_connections._SCHEMA_READY = False
+        cls.restore_database = bind_sqlite_database(
+            cls.db_file, channel_connections
+        )
+        initialize_ready_web(web_app)
         web_app.app.config.update(TESTING=True)
         cls.client = web_app.app.test_client()
         cls.client.set_cookie(
@@ -32,6 +44,7 @@ class WhatsAppBusinessConnectionTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.restore_database()
         channel_connections.DATABASE_URL, channel_connections.DB_FILE, channel_connections.USE_POSTGRES = cls.original_db
         channel_connections._SCHEMA_READY = False
         try:

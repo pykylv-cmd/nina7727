@@ -6,19 +6,31 @@ import unittest
 from unittest.mock import patch
 
 from cryptography.fernet import Fernet
+from test_runtime_support import (
+    bind_sqlite_database,
+    initialize_ready_web,
+    install_test_environment,
+)
+
+install_test_environment()
 
 
 class CompanyWhatsAppTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp=tempfile.TemporaryDirectory()
-        os.environ.pop("DATABASE_URL",None)
-        os.environ["NINA_DB_FILE"]=os.path.join(cls.tmp.name,"company.db")
-        os.environ["NINA_CHANNEL_CREDENTIAL_KEY"]=Fernet.generate_key().decode()
-        os.environ["NINA_PERSONAL_WHATSAPP_BRIDGE_TOKEN"]="bridge-test"
-        os.environ["NINA_COMPANY_WHATSAPP_NUMBER"]="+37120714711"
-        os.environ["NINA_COMPANY_WHATSAPP_WORKSPACE"]="ninaos_company"
-        os.environ["NINAOS_NUMBER_IDENTITY_KEY"]="stable-company-identity-key"
+        cls.db_file=os.path.join(cls.tmp.name,"company.db")
+        cls.env=patch.dict(os.environ,{
+            "DATABASE_URL":"",
+            "NINA_RUNTIME_ENV":"test",
+            "NINA_DB_FILE":cls.db_file,
+            "NINA_CHANNEL_CREDENTIAL_KEY":Fernet.generate_key().decode(),
+            "NINA_PERSONAL_WHATSAPP_BRIDGE_TOKEN":"bridge-test",
+            "NINA_COMPANY_WHATSAPP_NUMBER":"+37120714711",
+            "NINA_COMPANY_WHATSAPP_WORKSPACE":"ninaos_company",
+            "NINAOS_NUMBER_IDENTITY_KEY":"stable-company-identity-key",
+        })
+        cls.env.start()
         import channel_connections, personal_whatsapp, company_whatsapp, nina_message_service, ninaos_number, web_app
         cls.connections=importlib.reload(channel_connections)
         cls.personal=importlib.reload(personal_whatsapp)
@@ -26,6 +38,10 @@ class CompanyWhatsAppTests(unittest.TestCase):
         cls.service=importlib.reload(nina_message_service)
         cls.number=importlib.reload(ninaos_number)
         cls.web=importlib.reload(web_app)
+        cls.restore_database=bind_sqlite_database(
+            cls.db_file, cls.connections, cls.personal, cls.company, cls.service
+        )
+        initialize_ready_web(cls.web)
         cls.web.app.config.update(TESTING=True)
         cls.client=cls.web.app.test_client()
         cls.client.set_cookie(
@@ -35,6 +51,8 @@ class CompanyWhatsAppTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.restore_database()
+        cls.env.stop()
         cls.tmp.cleanup()
 
     def setUp(self):

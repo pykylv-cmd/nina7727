@@ -1,18 +1,30 @@
 import importlib, os, tempfile, unittest
 from unittest.mock import patch
 from cryptography.fernet import Fernet
+from test_runtime_support import (
+    bind_sqlite_database,
+    initialize_ready_web,
+    install_test_environment,
+)
+
+install_test_environment()
 
 
 class WebPersonalWhatsAppTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.tmp=tempfile.TemporaryDirectory(); os.environ.pop("DATABASE_URL",None); os.environ["NINA_DB_FILE"]=os.path.join(cls.tmp.name,"web.db")
-        os.environ["NINA_CHANNEL_CREDENTIAL_KEY"]=Fernet.generate_key().decode(); os.environ["NINA_PERSONAL_WHATSAPP_BRIDGE_TOKEN"]="bridge-test"
+        cls.tmp=tempfile.TemporaryDirectory(); cls.db_file=os.path.join(cls.tmp.name,"web.db")
+        cls.env=patch.dict(os.environ,{"DATABASE_URL":"","NINA_RUNTIME_ENV":"test","NINA_DB_FILE":cls.db_file,
+            "NINA_CHANNEL_CREDENTIAL_KEY":Fernet.generate_key().decode(),"NINA_PERSONAL_WHATSAPP_BRIDGE_TOKEN":"bridge-test"})
+        cls.env.start()
         import channel_connections, personal_whatsapp, web_app
         cls.c=importlib.reload(channel_connections); cls.p=importlib.reload(personal_whatsapp); cls.web=importlib.reload(web_app); cls.client=cls.web.app.test_client()
+        cls.restore_database=bind_sqlite_database(cls.db_file,cls.c,cls.p)
+        initialize_ready_web(cls.web)
         cls.client.set_cookie(cls.web.ADMIN_COOKIE,cls.web.create_admin_session(cls.web._workspace_cookie_secret()))
     @classmethod
-    def tearDownClass(cls): cls.tmp.cleanup()
+    def tearDownClass(cls):
+        cls.restore_database(); cls.env.stop(); cls.tmp.cleanup()
     def setUp(self):
         self.client.get('/channels?lang=en')
         self.workspace=self.web._verified_workspace_cookie(self.client.get_cookie(self.web._WORKSPACE_COOKIE).value)

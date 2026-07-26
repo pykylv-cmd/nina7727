@@ -4,6 +4,14 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from test_runtime_support import (
+    bind_sqlite_database,
+    initialize_ready_web,
+    install_test_environment,
+)
+
+install_test_environment()
+
 import nina_message_service
 import voice_engine
 import web_app
@@ -41,9 +49,14 @@ class WebVoiceInputTests(unittest.TestCase):
         nina_message_service.DATABASE_URL = ""
         nina_message_service.DB_FILE = cls.db_file
         nina_message_service.USE_POSTGRES = False
+        cls.restore_database = bind_sqlite_database(
+            cls.db_file, work_objects, nina_message_service
+        )
+        initialize_ready_web(web_app)
 
     @classmethod
     def tearDownClass(cls):
+        cls.restore_database()
         work_objects.DATABASE_URL, work_objects.DB_FILE, work_objects.USE_POSTGRES = cls.original_work_db
         work_objects._SCHEMA_READY = False
         (

@@ -4,6 +4,13 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
+from test_runtime_support import (
+    bind_sqlite_database,
+    initialize_ready_web,
+    install_test_environment,
+)
+
+install_test_environment()
 
 class CompanyWhatsAppMultimodalTests(unittest.TestCase):
     def test_audio_uses_shared_transcription_then_nina_route(self):
@@ -65,7 +72,13 @@ class CompanyWhatsAppMultimodalTests(unittest.TestCase):
             db_path = handle.name
         os.environ["NINA_DB_FILE"] = db_path
         try:
+            import channel_connections
+            import nina_message_service
             import web_app
+            restore_database = bind_sqlite_database(
+                db_path, channel_connections, nina_message_service
+            )
+            initialize_ready_web(web_app)
             payload = {
                 "workspace_id": "ninaos_company", "message_id": "media-1",
                 "sender_jid": "37120000001@s.whatsapp.net", "text": "",
@@ -84,6 +97,8 @@ class CompanyWhatsAppMultimodalTests(unittest.TestCase):
             self.assertEqual(response.get_json()["reply"], "vision")
             self.assertEqual(process.call_args.kwargs["conversation_id"], "wa:sender-a")
         finally:
+            if "restore_database" in locals():
+                restore_database()
             if old_db is None:
                 os.environ.pop("NINA_DB_FILE", None)
             else:

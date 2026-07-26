@@ -9,6 +9,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cryptography.fernet import Fernet
+from test_runtime_support import (
+    bind_sqlite_database,
+    initialize_ready_web,
+    install_test_environment,
+)
+
+install_test_environment()
 
 
 class NinaOSNumberTests(unittest.TestCase):
@@ -53,11 +60,16 @@ class NinaOSNumberTests(unittest.TestCase):
         cls.service = nina_message_service
         cls.number = importlib.reload(ninaos_number)
         cls.web = web_app
+        cls.restore_database = bind_sqlite_database(
+            cls.db_file, cls.connections, cls.service
+        )
+        initialize_ready_web(cls.web)
         cls.web.app.config.update(TESTING=True)
         cls.client = cls.web.app.test_client()
 
     @classmethod
     def tearDownClass(cls):
+        cls.restore_database()
         cls.connections.DATABASE_URL, cls.connections.DB_FILE, cls.connections.USE_POSTGRES = cls.connection_db
         cls.connections._SCHEMA_READY = False
         cls.service.DATABASE_URL, cls.service.DB_FILE, cls.service.USE_POSTGRES = cls.message_db

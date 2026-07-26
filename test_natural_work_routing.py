@@ -3,6 +3,14 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from test_runtime_support import (
+    bind_sqlite_database,
+    initialize_ready_web,
+    install_test_environment,
+)
+
+install_test_environment()
+
 
 class NaturalWorkRoutingTests(unittest.TestCase):
     @classmethod
@@ -19,12 +27,27 @@ class NaturalWorkRoutingTests(unittest.TestCase):
         cls.work_objects = work_objects
         cls.work_engine = work_engine
         cls.web_app = web_app
+        cls.original_work_db = (
+            work_objects.DATABASE_URL,
+            work_objects.DB_FILE,
+            work_objects.USE_POSTGRES,
+        )
         work_objects.DATABASE_URL = ""
         work_objects.DB_FILE = cls.db_file
         work_objects.USE_POSTGRES = False
+        work_objects._SCHEMA_READY = False
+        cls.restore_database = bind_sqlite_database(cls.db_file, work_objects)
+        initialize_ready_web(web_app)
 
     @classmethod
     def tearDownClass(cls):
+        cls.restore_database()
+        (
+            cls.work_objects.DATABASE_URL,
+            cls.work_objects.DB_FILE,
+            cls.work_objects.USE_POSTGRES,
+        ) = cls.original_work_db
+        cls.work_objects._SCHEMA_READY = False
         cls.env.stop()
         cls.temp_dir.cleanup()
 
