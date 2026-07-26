@@ -18674,7 +18674,8 @@ def release_one_nina_telegram_runtime_lock():
             pass
 
 
-if __name__ == "__main__":
+def run_telegram_core():
+    """Run the existing Telegram/Core startup sequence after all definitions exist."""
     initialize_app_runtime()
 
     try:
@@ -18820,3 +18821,7 @@ def referral_start_code(text):
     except Exception:
         pass
     return ""
+
+
+if __name__ == "__main__":
+    run_telegram_core()
