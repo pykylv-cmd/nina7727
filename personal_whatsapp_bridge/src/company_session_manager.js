@@ -29,6 +29,10 @@ const unsupportedChat=jid=>jid==='status@broadcast'||jid.endsWith('@broadcast')|
 const normalizeStoredKey=(type,value)=>type==='app-state-sync-key'&&value?proto.Message.AppStateSyncKeyData.fromObject(value):value
 export function reconnectDelay(code){return[DisconnectReason.loggedOut,DisconnectReason.badSession,DisconnectReason.connectionReplaced,DisconnectReason.multideviceMismatch,DisconnectReason.forbidden].includes(code)?null:(code===DisconnectReason.restartRequired?250:5000)}
 export const restoredQrIsInvalid=(restoring,qr)=>Boolean(restoring&&qr)
+export async function createCompanyQr(restoring,qr,encoder=QRCode.toString){
+  if(restoredQrIsInvalid(restoring,qr))return{accepted:false,qr_svg:''}
+  return{accepted:true,qr_svg:await encoder(qr,{type:'svg',margin:1,width:300})}
+}
 function closeDetails(error){const value=Number(error?.output?.statusCode??error?.data?.reason??error?.statusCode);return{status_code:Number.isFinite(value)?value:0,error_class:String(error?.name||'Error').slice(0,80)}}
 async function settle(operation,message,workspaceId){try{await operation}catch(error){lifecycle.error({workspace_id:workspaceId,...ninaErrorDetails(error)},message)}}
 const diagnostic=workspaceId=>{if(!companyRestorationDiagnostics.has(workspaceId))companyRestorationDiagnostics.set(workspaceId,{restoration_state:'idle',last_error_class:'',restore_attempt:0,last_connected_at:''});return companyRestorationDiagnostics.get(workspaceId)}
@@ -79,8 +83,11 @@ async function sendSafeReply(state,socket,remote,text,log){
   try{const sent=await socket.sendMessage(remote,{text}),id=String(sent?.key?.id||'');if(id)state.sent.add(id);log.info({workspace_id:state.workspaceId,reply_sent:true},'company WhatsApp safe media reply sent')}catch(error){log.warn({workspace_id:state.workspaceId,error_class:String(error?.name||'Error').slice(0,80)},'company WhatsApp safe media reply failed')}
 }
 
-export async function createCompanyAuthState(workspaceId,load=loadCompanyAuth,store=storeCompanyAuth){
-  const saved=await load(workspaceId),creds=saved.creds?revive(saved.creds):initAuthCreds()
+export async function createCompanyAuthState(workspaceId,load=loadCompanyAuth,store=storeCompanyAuth,options={}){
+  let saved
+  try{saved=await load(workspaceId)}
+  catch(error){if(options.allowMissing&&Number(error?.status)===404)saved={};else throw error}
+  const creds=saved.creds?revive(saved.creds):initAuthCreds()
   let queue=Promise.resolve();const enqueue=job=>{const next=queue.then(job,job);queue=next.catch(()=>{});return next}
   const keys={get:async(type,ids)=>Object.fromEntries(ids.map(id=>{const stored=saved[`key:${type}:${id}`];return[id,stored===undefined?null:normalizeStoredKey(type,revive(stored))]})),set:async data=>{const writes={};for(const[type,values]of Object.entries(data))for(const[id,value]of Object.entries(values||{})){const key=`key:${type}:${id}`;writes[key]=value===null?null:flatten(value);if(value===null)delete saved[key];else saved[key]=writes[key]}await enqueue(()=>store(workspaceId,writes))}}
   return{restored:Boolean(saved.creds),state:{creds,keys:makeCacheableSignalKeyStore(keys,quiet)},saveCreds:()=>enqueue(()=>store(workspaceId,{creds:flatten(creds)})),flush:()=>queue}
@@ -93,7 +100,7 @@ export async function startCompanySession(workspaceId,sessionToken,options={}){
   diag.restore_attempt+=1;diag.restoration_state=restoring?'auth_loading':'pairing';diag.last_error_class=''
   lifecycle.info({workspace_id:workspaceId,restore_attempt:diag.restore_attempt,restoring},'company WhatsApp restore attempt started')
   let auth
-  try{auth=await createCompanyAuthState(workspaceId)}catch(error){const status=Number(error?.status||0),classification=status===404?'no_auth_records':(status===409?'invalid_auth':'backend_unavailable');diag.restoration_state=classification;diag.last_error_class=classification;lifecycle.error({workspace_id:workspaceId,restore_attempt:diag.restore_attempt,...ninaErrorDetails(error),classification},'company WhatsApp auth load failed');throw error}
+  try{auth=await createCompanyAuthState(workspaceId,loadCompanyAuth,storeCompanyAuth,{allowMissing:!restoring})}catch(error){const status=Number(error?.status||0),classification=status===404?'no_auth_records':(status===409?'invalid_auth':'backend_unavailable');diag.restoration_state=classification;diag.last_error_class=classification;lifecycle.error({workspace_id:workspaceId,restore_attempt:diag.restore_attempt,...ninaErrorDetails(error),classification},'company WhatsApp auth load failed');throw error}
   const selected=await fetchLatestBaileysVersion()
   if(restoring&&!auth.restored){diag.restoration_state='invalid_auth';diag.last_error_class='company_auth_missing';throw new Error('company_auth_missing')}
   const state={workspaceId,sessionToken,socket:null,qrSvg:'',status:'connecting',sent:new Set(),retryTimer:null,closed:false,qrSequence:0}
@@ -106,7 +113,7 @@ export async function startCompanySession(workspaceId,sessionToken,options={}){
   socket.ev.on('connection.update',update=>{void settle((async()=>{
     const details=closeDetails(update.lastDisconnect?.error)
     lifecycle.info({workspace_id:workspaceId,connection_state:String(update.connection||'none'),has_qr:Boolean(update.qr),status_code:details.status_code},'company WhatsApp connection update')
-    if(update.qr){if(restoredQrIsInvalid(restoring,update.qr)){state.status='logged_out';state.qrSvg='';state.closed=true;diag.restoration_state='invalid_auth';diag.last_error_class='stored_auth_rejected';await companyRuntimeState(workspaceId,'invalid_auth');lifecycle.warn({workspace_id:workspaceId,classification:'invalid_auth'},'company WhatsApp restored auth rejected without exposing QR')}else{state.qrSvg=await QRCode.toString(update.qr,{type:'svg',margin:1,width:300});state.qrSequence+=1;lifecycle.info({workspace_id:workspaceId,qr_sequence:state.qrSequence},'company WhatsApp QR generated')}}
+    if(update.qr){const qr=await createCompanyQr(restoring,update.qr);if(!qr.accepted){state.status='logged_out';state.qrSvg='';state.closed=true;diag.restoration_state='invalid_auth';diag.last_error_class='stored_auth_rejected';await companyRuntimeState(workspaceId,'invalid_auth');lifecycle.warn({workspace_id:workspaceId,classification:'invalid_auth'},'company WhatsApp restored auth rejected without exposing QR')}else{state.qrSvg=qr.qr_svg;state.qrSequence+=1;lifecycle.info({workspace_id:workspaceId,qr_sequence:state.qrSequence},'company WhatsApp QR generated')}}
     if(update.connection==='open'){await auth.flush();state.status='connected';state.qrSvg='';diag.restoration_state='connected';diag.last_error_class='';diag.last_connected_at=new Date().toISOString();const jid=normalizedJid(socket.user?.id||auth.state.creds.me?.id||''),digits=jid.split(':')[0].split('@')[0],masked=digits.length>4?`${'*'.repeat(Math.min(8,digits.length-4))}${digits.slice(-4)}`:'Linked account';if(sessionToken)await companyLinked(workspaceId,sessionToken,{masked_identity:masked});else await companyRuntimeState(workspaceId,'connected');lifecycle.info({workspace_id:workspaceId,classification:'connected'},'company WhatsApp connected')}
     if(update.connection==='close'){const delay=reconnectDelay(details.status_code),classification=disconnectClassification(details.status_code),terminal=delay===null;state.qrSvg='';state.status=classification==='logged_out'?'logged_out':'connecting';diag.restoration_state=classification;diag.last_error_class=details.error_class;lifecycle.warn({workspace_id:workspaceId,...details,classification,reconnect_delay_ms:delay},'company WhatsApp disconnected');await auth.flush().catch(()=>{});if(terminal)await companyRuntimeState(workspaceId,classification);else if(!state.closed&&companySessions.get(workspaceId)===state){await companyRuntimeState(workspaceId,'reconnecting');lifecycle.info({workspace_id:workspaceId,retry_ms:delay},'company WhatsApp socket retry scheduled');state.retryTimer=setTimeout(()=>startCompanySession(workspaceId,sessionToken,{resetAuth:false}).catch(error=>lifecycle.error({workspace_id:workspaceId,...ninaErrorDetails(error)},'company WhatsApp socket retry failed')),delay)}}
   })(),'company WhatsApp connection update failed',workspaceId)})

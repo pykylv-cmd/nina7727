@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {companyRestorationDiagnostics,companySessions,createCompanyAuthState,processCompanyMessageUpsert,publicCompanyDiagnostics,publicCompanyStatus,reconnectDelay,restoreCompanySessions,restoredQrIsInvalid,stopCompanySession} from '../src/company_session_manager.js'
+import {companyRestorationDiagnostics,companySessions,createCompanyAuthState,createCompanyQr,processCompanyMessageUpsert,publicCompanyDiagnostics,publicCompanyStatus,reconnectDelay,restoreCompanySessions,restoredQrIsInvalid,stopCompanySession} from '../src/company_session_manager.js'
 import {DisconnectReason} from '@whiskeysockets/baileys'
 import {publicStatus,sessions,stopSession} from '../src/session_manager.js'
 
@@ -105,6 +105,21 @@ test('restored Company auth creates socket state from stored credentials without
   assert.equal(auth.restored,true)
   assert.equal(auth.state.creds.registered,true)
   assert.deepEqual(await auth.state.keys.get('session',['one']),{one:{value:'saved'}})
+})
+test('manual Company pairing accepts expected empty auth after reset and initializes fresh credentials',async()=>{
+  const missing=Object.assign(new Error('nina_internal_404'),{status:404})
+  const auth=await createCompanyAuthState('company',async()=>{throw missing},async()=>{},{allowMissing:true})
+  assert.equal(auth.restored,false)
+  assert.equal(typeof auth.state.creds.noiseKey?.private,'object')
+})
+test('intentional manual pairing generates a QR while empty-auth restoration still fails without QR',async()=>{
+  const rendered=await createCompanyQr(false,'provider-qr',async(value,options)=>`<svg data-value="${value}" data-width="${options.width}"></svg>`)
+  assert.equal(rendered.accepted,true)
+  assert.match(rendered.qr_svg,/provider-qr/)
+  const missing=Object.assign(new Error('nina_internal_404'),{status:404})
+  await assert.rejects(createCompanyAuthState('company',async()=>{throw missing},async()=>{}),/nina_internal_404/)
+  const restorationQr=await createCompanyQr(true,'provider-qr',async()=>{throw new Error('must not render')})
+  assert.deepEqual(restorationQr,{accepted:false,qr_svg:''})
 })
 test('ordinary restart never creates a pairing QR while invalid credentials require pairing',()=>{
   assert.equal(restoredQrIsInvalid(true,'provider-qr'),true)
