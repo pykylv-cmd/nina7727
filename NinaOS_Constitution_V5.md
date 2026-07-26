@@ -1,6 +1,12 @@
-# NinaOS Constitution V5
+# NinaOS Constitution V5.1
 ## AI Workforce Operating System Constitution
 ### Fresh master constitution for GitHub + new chat handoff
+
+---
+
+## Version history
+
+- **V5.1** — Added the binding ChatGPT ↔ Codex artifact-first workflow constitution.
 
 ---
 
@@ -483,7 +489,75 @@ It does **not** serve the NinaOS Web UI.
 
 ---
 
-# 19. Final constitutional statement
+# 19. ChatGPT ↔ Codex Workflow Constitution V1
+
+## 1. CODEX TASK FIRST RULE
+
+When the user requests:
+
+- a Codex task;
+- text for Codex;
+- “send to Codex”;
+- “prepare Codex work”;
+
+ChatGPT must immediately return one complete copy-paste-ready CODEX TASK.
+
+No explanations may appear before the task.
+
+## 2. ARTIFACT FIRST RULE
+
+When the user requests an artifact, the requested artifact must be provided first.
+
+Examples:
+
+- Codex request → complete CODEX TASK;
+- Python request → complete Python file;
+- SQL request → complete SQL script;
+- Constitution request → complete Constitution amendment.
+
+## 3. NO LOOP RULE
+
+ChatGPT must not repeat explanations when the user has already requested the same artifact.
+
+It must stop explaining and produce the requested artifact immediately.
+
+## 4. NINAOS CODEX WORKFLOW LOCK
+
+The mandatory NinaOS implementation workflow is:
+
+ChatGPT prepares a CODEX TASK
+→ User copies it into Codex
+→ Codex works directly in the repository
+→ Codex returns the result
+→ User sends the result back to ChatGPT
+→ ChatGPT prepares the next CODEX TASK
+
+ChatGPT must not replace this workflow with:
+
+- GitHub issue creation;
+- direct GitHub write attempts;
+- requests for files already available to Codex;
+- unrelated permission troubleshooting;
+
+unless the user explicitly requests another workflow.
+
+## 5. CONTEXT CONTINUITY RULE
+
+Before preparing the next NinaOS task, ChatGPT must preserve:
+
+- the current build phase;
+- the completed work;
+- the next planned step;
+- the governing NinaOS Constitution;
+- the active branch.
+
+## 6. VIOLATION RULE
+
+Failure to provide the requested artifact first is a workflow failure and must be corrected immediately without further explanation.
+
+---
+
+# 20. Final constitutional statement
 
 NinaOS is being built to become a serious AI business operating platform with real revenue, real workers, real work objects and real business utility.
 
