@@ -26,6 +26,10 @@ def _connect():
 
 def _ensure_conversation_store() -> None:
     """Use the established conversation_state schema, including in local mode."""
+    if persistence_backend.HOSTED:
+        from managed_migrations import assert_required_migrations_complete
+        assert_required_migrations_complete()
+        return
     conn = _connect()
     cur = conn.cursor()
     id_column = "BIGSERIAL PRIMARY KEY" if USE_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"

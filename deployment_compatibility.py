@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import re
 
+import persistence_backend
+
 
 DATABASE_COMPATIBILITY_VERSION = 1
 DATABASE_COMPATIBILITY_MIN = 1
@@ -72,6 +74,9 @@ class DeploymentCompatibilityContract:
                 f"runtime={self.database_min}-{self.database_max}:"
                 f"database={database_version}"
             )
+        from managed_migrations import assert_required_migrations_complete
+        if persistence_backend.HOSTED:
+            assert_required_migrations_complete()
         return True
 
     def identity(self):

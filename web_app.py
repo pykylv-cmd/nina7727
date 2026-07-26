@@ -205,11 +205,11 @@ DRAFT_REVIEW_STATES_LOADED = False
 TELEGRAM_SEND_PREP_STATES = {}
 TELEGRAM_SEND_PREP_STATES_LOADED = False
 
+WEB_RUNTIME_READINESS.register("persistence_backend", _web_persistence_ready)
 WEB_RUNTIME_READINESS.register(
     "deployment_compatibility",
     WEB_DEPLOYMENT_COMPATIBILITY.assert_compatible,
 )
-WEB_RUNTIME_READINESS.register("persistence_backend", _web_persistence_ready)
 WEB_RUNTIME_READINESS.register(
     "work_objects",
     lambda: ONE_NINA_WORK_READ_READY and one_nina_work_persistence_health(),
