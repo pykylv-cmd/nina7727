@@ -392,7 +392,63 @@ At the time of this constitution update, the official checkpoint is:
 
 ---
 
-# 18. Final constitutional statement
+# 18. Railway architecture constitution (mandatory)
+
+The following service topology is the governing Railway architecture for the current NinaOS staging environment.
+
+## Railway scope
+
+- **Project:** `confident-expression`
+- **Environment:** `staging`
+
+These services are parts of one NinaOS project and one operating architecture. They must never be described as separate NinaOS projects.
+
+## Service: `secure-rebirth`
+
+`secure-rebirth` is the Python Web/Core service. It owns:
+
+- NinaOS Web UI;
+- Dashboard;
+- Admin;
+- authentication;
+- Contact Identity;
+- Work Objects and business logic;
+- internal backend APIs.
+
+Public Web URL:
+
+- `https://secure-rebirth-staging.up.railway.app`
+
+## Service: `happy-education`
+
+`happy-education` is the Node Company WhatsApp bridge. It owns:
+
+- Baileys transport;
+- QR pairing;
+- credential and key persistence transport;
+- reconnect and session restoration.
+
+It does **not** serve the NinaOS Web UI.
+
+## Mandatory diagnostic routing
+
+- Web, Admin and API problems must be investigated first in `secure-rebirth`.
+- Company WhatsApp socket, QR and reconnect problems must be investigated first in `happy-education`.
+- Before requesting logs or proposing a fix, always identify the Railway project, environment and service.
+- Never describe `secure-rebirth` and `happy-education` as separate NinaOS projects.
+- Never ask the operator to search unrelated Railway projects or services without repository or production evidence.
+- The operator is not responsible for programming-level diagnosis. Diagnostic requests must be minimized, specific and limited to the evidence needed.
+
+## Operational deployment safety
+
+- Before claiming **SAFE TO REDEPLOY**, state exactly which Railway services must deploy.
+- When a change touches both Python and Node, verify that both services are built from the same target commit.
+- Automated tests alone do not confirm production success.
+- Production success is confirmed only when the requested user-visible behavior works in the deployed environment.
+
+---
+
+# 19. Final constitutional statement
 
 NinaOS is being built to become a serious AI business operating platform with real revenue, real workers, real work objects and real business utility.
 
