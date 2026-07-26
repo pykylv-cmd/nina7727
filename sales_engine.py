@@ -6022,7 +6022,17 @@ def home():
     return "Nina7727 V11.9 Stripe Test Router Fix darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
-init_db()
+_SALES_RUNTIME_INITIALIZED = False
+
+
+def initialize_sales_runtime():
+    """Perform legacy Sales runtime startup work exactly once, never during import."""
+    global _SALES_RUNTIME_INITIALIZED
+    if _SALES_RUNTIME_INITIALIZED:
+        return False
+    init_db()
+    _SALES_RUNTIME_INITIALIZED = True
+    return True
 
 telegram_app = (
     Application.builder()
@@ -6034,6 +6044,7 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
+    initialize_sales_runtime()
     print("Nina7727 V11.9 Stripe Test Router Fix darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
 

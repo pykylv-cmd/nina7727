@@ -16021,7 +16021,17 @@ def home():
     return "Nina7727 V114.0 Premium Sales Text darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
-init_db()
+_DAILY_RUNTIME_INITIALIZED = False
+
+
+def initialize_daily_runtime():
+    """Perform legacy Daily runtime startup work exactly once, never during import."""
+    global _DAILY_RUNTIME_INITIALIZED
+    if _DAILY_RUNTIME_INITIALIZED:
+        return False
+    init_db()
+    _DAILY_RUNTIME_INITIALIZED = True
+    return True
 
 telegram_app = (
     Application.builder()
@@ -16044,6 +16054,7 @@ def run_flask_server():
 
 
 if __name__ == "__main__":
+    initialize_daily_runtime()
     print("Nina7727 V114.0 Premium Sales Text darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
     # Stripe webhook vajag HTTP serveri. Telegram botam vienlaikus vajag polling.

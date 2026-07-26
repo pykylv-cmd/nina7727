@@ -88,9 +88,18 @@ from persistence_backend import (
 
 logger = logging.getLogger(__name__)
 
-# Railway/hosted Web must prove PostgreSQL is reachable before serving traffic.
-if NINA_HOSTED_RUNTIME:
-    assert_platform_persistence_ready()
+_WEB_RUNTIME_INITIALIZED = False
+
+
+def initialize_web_runtime():
+    """Validate mandatory hosted persistence once at Web process startup."""
+    global _WEB_RUNTIME_INITIALIZED
+    if _WEB_RUNTIME_INITIALIZED:
+        return False
+    if NINA_HOSTED_RUNTIME:
+        assert_platform_persistence_ready()
+    _WEB_RUNTIME_INITIALIZED = True
+    return True
 
 # ONE NINA V51.3 — shared canonical Work Object read bridge.
 # Web does not classify Telegram text here. It reads the same persistent
@@ -6432,5 +6441,6 @@ def health():
 
 
 if __name__ == "__main__":
+    initialize_web_runtime()
     port = safe_int(os.environ.get("PORT"), 8080)
     app.run(host="0.0.0.0", port=port)

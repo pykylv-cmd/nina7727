@@ -139,6 +139,7 @@ def unavailable(_url):
 driver.connect = unavailable
 sys.modules['psycopg2'] = driver
 import web_app
+web_app.initialize_web_runtime()
 """
         result = self._subprocess(
             code,

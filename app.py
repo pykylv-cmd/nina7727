@@ -18533,7 +18533,32 @@ def home():
     return "NinaOS Runtime V116.2 — ONE NINA darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
-init_db()
+_APP_RUNTIME_INITIALIZED = False
+
+
+def validate_mandatory_startup_components():
+    """Fail clearly before runtime startup when core Nina capabilities are unavailable."""
+    unavailable = []
+    if not ONE_NINA_WORK_OBJECTS_READY:
+        unavailable.append("work_objects")
+    if not ONE_NINA_DOCUMENT_INTAKE_READY:
+        unavailable.append("document_intake")
+    if unavailable:
+        raise RuntimeError(
+            "nina_mandatory_startup_components_unavailable:" + ",".join(unavailable)
+        )
+    return True
+
+
+def initialize_app_runtime():
+    """Perform Telegram/Core startup work exactly once, never during import."""
+    global _APP_RUNTIME_INITIALIZED
+    if _APP_RUNTIME_INITIALIZED:
+        return False
+    validate_mandatory_startup_components()
+    init_db()
+    _APP_RUNTIME_INITIALIZED = True
+    return True
 
 telegram_app = (
     Application.builder()
@@ -18650,6 +18675,8 @@ def release_one_nina_telegram_runtime_lock():
 
 
 if __name__ == "__main__":
+    initialize_app_runtime()
+
     try:
         mapping_result = migrate_canonical_work_mapping_v2()
         print("ONE NINA Canonical Work Mapping V2:", "updated=" + str(mapping_result.get("updated", 0)))
