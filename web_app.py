@@ -77,7 +77,10 @@ from admin_auth import (
 from contact_identity import compact_contact_context, list_contacts, resolve_contact_identity
 from client_identity import client_context, get_or_create_client_mapping, list_client_mappings
 from persistence_backend import (
+    DATABASE_URL as PLATFORM_DATABASE_URL,
+    DATABASE_URL_SOURCE as PLATFORM_DATABASE_URL_SOURCE,
     HOSTED as NINA_HOSTED_RUNTIME,
+    POSTGRES_URL_ENV_NAMES,
     assert_backend_ready as assert_platform_persistence_ready,
     safe_backend_diagnostics,
     safe_table_count,
@@ -911,7 +914,7 @@ def build_clients_from_objects(objects):
 
 def load_live_objects_from_app_db():
     objects = []
-    database_url = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or ""
+    database_url = PLATFORM_DATABASE_URL
     if not database_url:
         return objects
     try:
@@ -1079,23 +1082,8 @@ def db_url_info():
     a plugin. This helper is intentionally broad and read-only. It never prints
     secret values, only the source key and a masked URL.
     """
-    candidates = [
-        "DATABASE_URL",
-        "POSTGRES_URL",
-        "POSTGRES_PRIVATE_URL",
-        "POSTGRES_PUBLIC_URL",
-        "DATABASE_PRIVATE_URL",
-        "DATABASE_PUBLIC_URL",
-        "PGURL",
-        "PG_URL",
-        "RAILWAY_DATABASE_URL",
-        "RAILWAY_POSTGRES_URL",
-        "POSTGRES_CONNECTION_URL",
-        "DATABASE_CONNECTION_URL",
-    ]
-
     found = []
-    for key in candidates:
+    for key in POSTGRES_URL_ENV_NAMES:
         value = os.environ.get(key)
         if value:
             found.append({"key": key, "safe": mask_db_url(value), "length": len(value)})
@@ -1106,13 +1094,8 @@ def db_url_info():
         if any(token in k.upper() for token in ["DATABASE", "POSTGRES", "PG", "RAILWAY"])
     ])
 
-    url = ""
-    source = ""
-    if found:
-        # Prefer DATABASE_URL when it exists, otherwise use the first available candidate.
-        preferred = next((x for x in found if x["key"] == "DATABASE_URL"), found[0])
-        source = preferred["key"]
-        url = os.environ.get(source) or ""
+    url = PLATFORM_DATABASE_URL
+    source = PLATFORM_DATABASE_URL_SOURCE
 
     return {
         "url": url,

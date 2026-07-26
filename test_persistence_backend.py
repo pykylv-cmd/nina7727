@@ -171,6 +171,24 @@ print('shared-postgresql')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "shared-postgresql")
 
+    def test_all_python_entrypoints_import_shared_persistence_decision(self):
+        root = Path(__file__).resolve().parent
+        for filename in ("app.py", "web_app.py", "daily.py", "sales_engine.py"):
+            source = (root / filename).read_text(encoding="utf-8")
+            self.assertIn("from persistence_backend import", source, filename)
+
+        for filename in ("app.py", "daily.py", "sales_engine.py"):
+            source = (root / filename).read_text(encoding="utf-8")
+            self.assertNotIn('os.environ.get("DATABASE_URL")', source, filename)
+            self.assertNotIn("USE_POSTGRES = bool(", source, filename)
+            self.assertNotIn("sqlite3.connect(", source, filename)
+            self.assertIn("return persistence_connect()", source, filename)
+
+        web_source = (root / "web_app.py").read_text(encoding="utf-8")
+        self.assertIn("database_url = PLATFORM_DATABASE_URL", web_source)
+        self.assertIn("url = PLATFORM_DATABASE_URL", web_source)
+        self.assertIn("source = PLATFORM_DATABASE_URL_SOURCE", web_source)
+
     def test_explicit_local_sqlite_survives_full_python_module_restart(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_file = os.path.join(tmp, "persistent-local-test.db")

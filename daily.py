@@ -1,17 +1,19 @@
 import os
 import re
 import json
-import sqlite3
 import asyncio
 import threading
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from io import BytesIO
 
-try:
-    import psycopg2
-except Exception:
-    psycopg2 = None
+from persistence_backend import (
+    DATABASE_URL,
+    DB_FILE,
+    USE_POSTGRES,
+    connect as persistence_connect,
+    psycopg2,
+)
 
 try:
     import stripe
@@ -5698,9 +5700,6 @@ TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 ADMIN_USER_IDS = os.environ.get("ADMIN_USER_IDS", "")
 
 DEFAULT_TIMEZONE = "Europe/Riga"
-DATABASE_URL = os.environ.get("DATABASE_URL")
-DB_FILE = "nina_memory.db"
-USE_POSTGRES = bool(DATABASE_URL and psycopg2)
 
 FREE_BACKUP_LIMIT = 5
 FREE_REMINDER_LIMIT = 5
@@ -5745,9 +5744,7 @@ def db_execute(cursor, sql, params=None):
 
 
 def get_db():
-    if USE_POSTGRES:
-        return psycopg2.connect(DATABASE_URL)
-    return sqlite3.connect(DB_FILE)
+    return persistence_connect()
 
 
 def init_db():
