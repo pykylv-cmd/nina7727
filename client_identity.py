@@ -5,26 +5,19 @@ from __future__ import annotations
 import os
 import re
 import secrets
-import sqlite3
 from datetime import datetime, timezone
 
-try:
-    import psycopg2
-except Exception:
-    psycopg2 = None
-
 from contact_identity import get_contact
+import persistence_backend
+DATABASE_URL, DB_FILE, USE_POSTGRES = persistence_backend.module_settings()
 
-DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
-DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
-USE_POSTGRES = bool(DATABASE_URL and psycopg2)
 MAPPING_TABLE = "nina_contact_client_mappings"
 _SCOPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _OPAQUE_ID = re.compile(r"^client_[a-f0-9]{32}$")
 
 
 def _connect():
-    return psycopg2.connect(DATABASE_URL) if USE_POSTGRES else sqlite3.connect(DB_FILE)
+    return persistence_backend.connect(DATABASE_URL, DB_FILE, USE_POSTGRES)
 
 
 def _sql(value):

@@ -10,18 +10,10 @@ import json
 import os
 import re
 import secrets
-import sqlite3
 from datetime import datetime, timedelta, timezone
 
-try:
-    import psycopg2
-except Exception:
-    psycopg2 = None
-
-
-DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
-DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
-USE_POSTGRES = bool(DATABASE_URL and psycopg2)
+import persistence_backend
+DATABASE_URL, DB_FILE, USE_POSTGRES = persistence_backend.module_settings()
 _TABLE = "nina_channel_connections"
 _SCHEMA_READY = False
 _SCHEMA_TARGET = ""
@@ -47,7 +39,7 @@ def _sql(statement):
 
 
 def _connect():
-    return psycopg2.connect(DATABASE_URL) if USE_POSTGRES else sqlite3.connect(DB_FILE)
+    return persistence_backend.connect(DATABASE_URL, DB_FILE, USE_POSTGRES)
 
 
 def _validate_workspace(workspace_id):

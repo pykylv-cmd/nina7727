@@ -6,19 +6,16 @@ import logging
 import os
 import re
 import secrets
-import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from channel_connections import (
-    DATABASE_URL, DB_FILE, USE_POSTGRES, _sql, claim_channel_message,
+    _sql, claim_channel_message,
     decrypt_channel_credential, disconnect, encrypt_channel_credential,
     get_connection, set_connection_for_test,
 )
 
-try:
-    import psycopg2
-except Exception:
-    psycopg2 = None
+import persistence_backend
+DATABASE_URL, DB_FILE, USE_POSTGRES = persistence_backend.module_settings()
 
 CHANNEL = "whatsapp_company"
 AUTH_TABLE = "nina_company_whatsapp_auth"
@@ -42,7 +39,7 @@ def configured_number():
 
 
 def _connect():
-    return psycopg2.connect(DATABASE_URL) if USE_POSTGRES else sqlite3.connect(DB_FILE)
+    return persistence_backend.connect(DATABASE_URL, DB_FILE, USE_POSTGRES)
 
 
 def _now():

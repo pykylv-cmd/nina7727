@@ -76,8 +76,18 @@ from admin_auth import (
 )
 from contact_identity import compact_contact_context, list_contacts, resolve_contact_identity
 from client_identity import client_context, get_or_create_client_mapping, list_client_mappings
+from persistence_backend import (
+    HOSTED as NINA_HOSTED_RUNTIME,
+    assert_backend_ready as assert_platform_persistence_ready,
+    safe_backend_diagnostics,
+    safe_table_count,
+)
 
 logger = logging.getLogger(__name__)
+
+# Railway/hosted Web must prove PostgreSQL is reachable before serving traffic.
+if NINA_HOSTED_RUNTIME:
+    assert_platform_persistence_ready()
 
 # ONE NINA V51.3 — shared canonical Work Object read bridge.
 # Web does not classify Telegram text here. It reads the same persistent
@@ -5640,9 +5650,26 @@ def admin_system():
     except Exception:
         restoration = {}
     metadata = connection.get("metadata") or {}
+    persistence = safe_backend_diagnostics()
+    persistence_counts = {
+        "Contact Identity rows": safe_table_count("nina_contacts"),
+        "Client Mapping rows": safe_table_count("nina_contact_client_mappings"),
+        "Company auth rows": safe_table_count(
+            "nina_company_whatsapp_auth", " WHERE workspace_id=%s", (workspace_id,)
+        ),
+        "Work Object rows": safe_table_count("nina_work_objects"),
+    }
     values = (
+        ("Runtime environment", persistence["runtime_environment"]),
+        ("Persistence backend", persistence["backend"]),
+        ("Database reachable", "Yes" if persistence["reachable"] else "No"),
+        ("Database identity", persistence["database_fingerprint"]),
+        *tuple(
+            (label, str(count) if count is not None else "unavailable")
+            for label, count in persistence_counts.items()
+        ),
         ("Bridge reachable", "Yes" if bridge_reachable else "No"),
-        ("Persisted status", str(connection.get("status") or "unknown")),
+        ("Company persisted channel status", str(connection.get("status") or "unknown")),
         ("Stored auth records", str(auth["stored_record_count"])),
         ("Auth state", str(auth["error_class"] or "available")),
         ("Restoration state", str(restoration.get("restoration_state") or metadata.get("runtime_state") or "idle")),

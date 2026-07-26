@@ -400,6 +400,27 @@ At the time of this constitution update, the official checkpoint is:
 - Client Bridge production success still requires staging deployment and the
   user-visible validation described by the operational deployment safety rule.
 
+## Persistence incident checkpoint
+- After the first Client Bridge staging deployment, Python-owned Contact Identity
+  and Company channel state became empty at the same Web restart. The governing
+  code defect was independent, fail-open backend selection in multiple modules:
+  missing `DATABASE_URL` or unavailable `psycopg2` silently selected ephemeral
+  `nina_memory.db`.
+- **PostgreSQL is mandatory in every hosted/Railway NinaOS Python runtime.**
+  Hosted startup must fail clearly when `DATABASE_URL` is missing, malformed or
+  unreachable, or when the PostgreSQL driver is unavailable.
+- SQLite is permitted only for explicit local development and test execution.
+  Hosted code must never create or use `nina_memory.db`.
+- Channel state, Company auth, Contact Identity, Client Identity mappings,
+  conversations and Work Objects must use the same shared persistence decision.
+- Admin System must expose only safe backend identity, reachability and row-count
+  diagnostics; database URLs, credentials and provider identities remain secret.
+- No empty SQLite data is to be copied into PostgreSQL. Existing PostgreSQL rows
+  and encrypted Company credentials must remain untouched.
+- **ONE NINA Client Bridge V1 remains pending staging validation** until persistent
+  contacts, Company connection state and linked Work Objects survive a complete
+  `secure-rebirth` restart on the selected PostgreSQL database.
+
 ## Current next target
 - **ONE NINA Verified Client Merge V1** — only verified evidence may merge multiple
   channel contacts into one canonical client. No automatic name or phone matching.

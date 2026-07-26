@@ -5,32 +5,23 @@ from __future__ import annotations
 import logging
 import os
 import re
-import sqlite3
 from typing import Any, Callable, Dict, List, Optional
 
-try:
-    import psycopg2
-except Exception:
-    psycopg2 = None
-
 from nina_identity import NINA_PROMPT
+import persistence_backend
+DATABASE_URL, DB_FILE, USE_POSTGRES = persistence_backend.module_settings()
 from work_engine import execute_natural_work_request
 from work_objects import list_work_objects
 
 logger = logging.getLogger(__name__)
 
 WORKSPACE_ID = (os.environ.get("NINA_WEB_WORKSPACE_ID") or "demo_small_business").strip()
-DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
-DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
-USE_POSTGRES = bool(DATABASE_URL and psycopg2)
-
-
 def _sql(statement: str) -> str:
     return statement if USE_POSTGRES else statement.replace("%s", "?")
 
 
 def _connect():
-    return psycopg2.connect(DATABASE_URL) if USE_POSTGRES else sqlite3.connect(DB_FILE)
+    return persistence_backend.connect(DATABASE_URL, DB_FILE, USE_POSTGRES)
 
 
 def _ensure_conversation_store() -> None:

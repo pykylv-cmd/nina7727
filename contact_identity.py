@@ -8,17 +8,10 @@ import json
 import os
 import re
 import secrets
-import sqlite3
 from datetime import datetime, timezone
 
-try:
-    import psycopg2
-except Exception:
-    psycopg2 = None
-
-DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
-DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
-USE_POSTGRES = bool(DATABASE_URL and psycopg2)
+import persistence_backend
+DATABASE_URL, DB_FILE, USE_POSTGRES = persistence_backend.module_settings()
 CONTACT_TABLE = "nina_contacts"
 IDENTITY_TABLE = "nina_contact_channel_identities"
 LINK_TABLE = "nina_contact_link_claims"
@@ -27,7 +20,7 @@ _SCOPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
 def _connect():
-    return psycopg2.connect(DATABASE_URL) if USE_POSTGRES else sqlite3.connect(DB_FILE)
+    return persistence_backend.connect(DATABASE_URL, DB_FILE, USE_POSTGRES)
 
 
 def _sql(value):

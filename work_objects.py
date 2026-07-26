@@ -21,25 +21,17 @@ from __future__ import annotations
 import json
 import os
 import re
-import sqlite3
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-try:
-    import psycopg2
-except Exception:
-    psycopg2 = None
-
+import persistence_backend as _persistence_backend
+DATABASE_URL, DB_FILE, USE_POSTGRES = _persistence_backend.module_settings()
 
 WORK_OBJECTS_VERSION = "Persistent Work Objects V2.5 — ONE NINA Client Decision Workflow State V1"
 CLIENT_CONVERSATION_THREAD_VERSION = "ONE_NINA_CLIENT_CONVERSATION_THREAD_V1"
 CLIENT_DECISION_WORKFLOW_VERSION = "ONE_NINA_CLIENT_DECISION_WORKFLOW_V1"
-DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
-DB_FILE = (os.environ.get("NINA_DB_FILE") or "nina_memory.db").strip()
-USE_POSTGRES = bool(DATABASE_URL and psycopg2)
-
 _TABLE_NAME = "nina_work_objects"
 _SCHEMA_READY = False
 
@@ -310,9 +302,7 @@ def _sql(sql: str) -> str:
 
 
 def _connect():
-    if USE_POSTGRES:
-        return psycopg2.connect(DATABASE_URL)
-    return sqlite3.connect(DB_FILE)
+    return _persistence_backend.connect(DATABASE_URL, DB_FILE, USE_POSTGRES)
 
 
 def _execute(cursor, sql: str, params: Tuple[Any, ...] = ()):
