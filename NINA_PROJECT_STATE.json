@@ -1,44 +1,81 @@
 {
   "project": "NinaOS",
+  "checkpoint": {
+    "name": "Platform Foundation V1",
+    "implementation_commit": "fe5dba4839e59daa4b0ad0b7d3f3fb812b2f3e70",
+    "branch": "feature/web-chat-v1",
+    "status": "completed",
+    "next_component": "Agent Assignment V1"
+  },
   "identity": {
-    "company": "NinaOS",
     "platform": "AI Economy Operating System",
     "first_worker": "Nina",
-    "telegram_role": "test and communication channel only"
+    "product_rule": "NinaOS is not a bot builder; customers receive ready AI workers",
+    "channels": "adapters into shared NinaOS capabilities"
   },
-  "current_versions": {
+  "completed_platform_layers": [
+    "Platform Core V1",
+    "RolePack System V1",
+    "Ready Worker Catalog V1"
+  ],
+  "architecture_flow": [
+    "RolePack",
+    "Ready Worker Definition",
+    "future Agent Assignment",
+    "future Knowledge Vault",
+    "future Universal Work ownership and execution"
+  ],
+  "legacy_runtime_context": {
     "blueprint": "1.1",
     "app_router": "V116 Router Priority",
     "core": "2.6.1 Initiative Detector",
     "employee_brain": "Core Evolution 2.6.1",
     "think_engine": "2.6.1",
     "profile": "restored",
-    "premium": "working"
+    "premium": "working",
+    "fixed_bugs": {
+      "BUG-001": "core 2.6.1 routing fixed",
+      "BUG-002": "profile/memory restored with seed and bridge",
+      "BUG-003": "premium responds and uses profile name"
+    }
   },
-  "fixed_bugs": {
-    "BUG-001": "core 2.6.1 routing fixed",
-    "BUG-002": "profile/memory restored with seed and bridge",
-    "BUG-003": "premium responds and uses profile name"
+  "staging": {
+    "project": "confident-expression",
+    "environment": "staging",
+    "web_service": "secure-rebirth",
+    "deployed_commit": "fe5dba4839e59daa4b0ad0b7d3f3fb812b2f3e70",
+    "pre_deploy_command": "python manage_migrations.py expand",
+    "start_command": "python web_app.py",
+    "live": {
+      "alive": true,
+      "runtime": "web"
+    },
+    "ready": true,
+    "failure_class": ""
   },
-  "current_focus": [
-    "Stabilize Nina AI as first worker",
-    "Move routing logic from app.py into router.py",
-    "Keep app.py as adapter only",
-    "Maintain documentation before code changes"
-  ],
-  "next_tests": [
-    "core 2.6.1",
-    "ko tu par mani zini",
-    "premium",
-    "kā mani sauc"
-  ],
+  "test_baseline": {
+    "python": "213/213 passed",
+    "node": "38/38 passed",
+    "focused_platform": "60/60 passed",
+    "deployment_safety": "38/38 passed",
+    "syntax": "passed",
+    "required_imports": "passed",
+    "legacy_ready_worker_compatibility": "passed",
+    "git_diff_check": "passed"
+  },
   "source_of_truth": [
+    "NinaOS_Constitution_V5.md",
     "NINA_START.md",
     "NinaOS_Blueprint_1.1.md",
+    "NINA_ARCHITECTURE_LEDGER.md",
     "NINA_PROJECT_STATE.json",
     "NINA_MANIFEST.json",
     "NINA_BUG_TRACKER.md",
-    "TEST_PROTOCOL.md"
+    "TEST_PROTOCOL.md",
+    "NINA_CONTROL_CENTER.md",
+    "NINA_BLUEPRINT.md",
+    "NinaOS_Managed_Migrations_V1.md",
+    "NINA_NEW_CHAT_START_PACK.md"
   ],
-  "last_updated_utc": "2026-07-01T18:52:52.226606+00:00"
+  "last_updated_utc": "2026-07-27T00:00:00Z"
 }

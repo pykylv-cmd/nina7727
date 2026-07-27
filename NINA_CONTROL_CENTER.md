@@ -1,5 +1,28 @@
 # NINA_CONTROL_CENTER.md
 
+## Platform Foundation V1 — current checkpoint
+
+Implementation commit:
+`fe5dba4839e59daa4b0ad0b7d3f3fb812b2f3e70`
+
+Completed: Platform Core V1 → RolePack System V1 → Ready Worker Catalog V1.
+
+Next: **Agent Assignment V1**. It will persist a stable customer worker
+instance linked to one workspace and one exact Ready Worker version. It will not
+yet execute autonomous work or provision external channels.
+
+Staging: project `confident-expression`, environment `staging`, Web/Core service
+`secure-rebirth`, pre-deploy `python manage_migrations.py expand`, start
+`python web_app.py`, `/live` alive and `/ready` ready.
+
+Baseline: Python 213/213 and Node 38/38 passed.
+
+Do not rebuild completed foundation layers. Preserve PostgreSQL fail-closed
+persistence, managed migrations, readiness, rolling compatibility, restart
+persistence and separate Telegram/Web runtimes.
+
+---
+
 ## NinaOS patiesība
 
 Nina nav Telegram bots.

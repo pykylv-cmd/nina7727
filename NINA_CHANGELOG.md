@@ -2,6 +2,17 @@
 
 # NinaOS Changelog
 
+## 2026-07-27 — Platform Foundation V1 architecture checkpoint
+
+Recorded Platform Core V1, RolePack System V1, Ready Worker Catalog V1,
+verified staging/readiness configuration, and Agent Assignment V1 as the next
+layer. Added `NINA_NEW_CHAT_START_PACK.md`.
+
+Scope: documentation only. No runtime, database, migration, Railway or customer
+behavior changed.
+
+---
+
 ## 2026-07-01 — Documentation Control System
 
 ### Added

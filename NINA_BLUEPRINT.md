@@ -1,6 +1,36 @@
 
 # NinaOS Blueprint 1.0
 
+## Platform Foundation V1 delivery checkpoint
+
+NinaOS is not a generic bot builder. Customers receive reviewed ready AI
+workers.
+
+Implemented:
+
+`Platform Core → RolePack definition → Ready Worker definition`
+
+Next:
+
+`Agent Assignment → Knowledge Vault → Universal Work ownership/execution`
+
+1. Platform Core V1 — completed
+2. RolePack System V1 — completed
+3. Ready Worker Catalog V1 — completed
+4. Agent Assignment V1 — next
+5. Knowledge Vault V1
+6. Universal Work Objects V1
+7. Channel Layer V1
+8. Billing V1
+9. Nina Exchange V1
+10. Mobile and later platform layers
+
+This checkpoint does not replace the Constitution's broader phase plan.
+Existing channel and canonical Work Object implementations remain preserved;
+future layers refer to platform-wide worker ownership and provisioning.
+
+---
+
 ## Vīzija
 
 NinaOS nav čatbots. Tā ir AI operētājsistēma, uz kuras darbojas AI darbinieki, uzņēmumu automatizācija un AI pakalpojumu tirgus.
