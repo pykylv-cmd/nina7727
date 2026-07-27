@@ -7183,6 +7183,13 @@ def live():
 
 @app.route("/ready")
 def ready():
+    if not WEB_RUNTIME_READINESS.ready:
+        try:
+            initialize_web_runtime()
+        except Exception:
+            # The readiness snapshot below reports the failed required check.
+            # Health probes must receive a 503 without crashing the worker.
+            pass
     status = WEB_RUNTIME_READINESS.snapshot()
     return status, 200 if status["ready"] else 503
 

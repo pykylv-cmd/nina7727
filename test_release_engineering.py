@@ -41,6 +41,30 @@ class ReleaseConfigurationTests(unittest.TestCase):
         self.assertEqual(web_app.app.import_name, "web_app")
         self.assertTrue(callable(web_app.app))
 
+    def test_ready_initializes_runtime_for_wsgi_server(self):
+        import web_app
+
+        state = RuntimeReadiness("release-ready-test")
+        state.register("required_web_capability", lambda: True)
+        with (
+            patch.object(web_app, "WEB_RUNTIME_READINESS", state),
+            patch.object(web_app, "_WEB_RUNTIME_INITIALIZED", False),
+        ):
+            response = web_app.app.test_client().get("/ready")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json(),
+            {
+                "ready": True,
+                "runtime": "release-ready-test",
+                "startup_started": True,
+                "startup_completed": True,
+                "checks": {"required_web_capability": True},
+                "failure_class": "",
+            },
+        )
+
 
 class SameOriginMutationTests(unittest.TestCase):
     @classmethod
