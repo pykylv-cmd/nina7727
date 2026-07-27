@@ -10985,6 +10985,7 @@ async def reminder_worker(application):
 async def active_work_object_reminder_worker(application):
     """Deliver due ONE NINA Reminder Work Objects from the Telegram/Core owner."""
     from reminder_delivery import process_due_reminders
+    print("reminder_scheduler=started runtime=telegram_core")
     while True:
         try:
             await process_due_reminders(
@@ -10996,11 +10997,48 @@ async def active_work_object_reminder_worker(application):
         await asyncio.sleep(30)
 
 
+ACTIVE_REMINDER_SCHEDULER_TASK = None
+
+
+def start_active_reminder_scheduler(application):
+    """Start the Core-owned scheduler once for this Application lifecycle."""
+    global ACTIVE_REMINDER_SCHEDULER_TASK
+    if (
+        ACTIVE_REMINDER_SCHEDULER_TASK is not None
+        and not ACTIVE_REMINDER_SCHEDULER_TASK.done()
+    ):
+        return ACTIVE_REMINDER_SCHEDULER_TASK
+    ACTIVE_REMINDER_SCHEDULER_TASK = asyncio.create_task(
+        active_work_object_reminder_worker(application),
+        name="nina-active-reminder-scheduler",
+    )
+    return ACTIVE_REMINDER_SCHEDULER_TASK
+
+
+async def stop_active_reminder_scheduler():
+    """Cancel and join the Core-owned scheduler during graceful shutdown."""
+    global ACTIVE_REMINDER_SCHEDULER_TASK
+    task = ACTIVE_REMINDER_SCHEDULER_TASK
+    ACTIVE_REMINDER_SCHEDULER_TASK = None
+    if task is None or task.done():
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    print("reminder_scheduler=stopped runtime=telegram_core")
+
+
 async def post_init(application):
     init_backup_scheduler()
     asyncio.create_task(reminder_worker(application))
-    asyncio.create_task(active_work_object_reminder_worker(application))
+    start_active_reminder_scheduler(application)
     asyncio.create_task(auto_backup_worker(application))
+
+
+async def post_shutdown(application):
+    await stop_active_reminder_scheduler()
 
 
 
@@ -18624,6 +18662,7 @@ telegram_app = (
     Application.builder()
     .token(TELEGRAM_TOKEN)
     .post_init(post_init)
+    .post_shutdown(post_shutdown)
     .build()
 )
 
@@ -18737,6 +18776,10 @@ def release_one_nina_telegram_runtime_lock():
 def run_telegram_core():
     """Run the existing Telegram/Core startup sequence after all definitions exist."""
     initialize_app_runtime()
+    print(
+        "runtime=telegram_core",
+        "database=ready" if assert_backend_ready() else "database=unavailable",
+    )
 
     try:
         mapping_result = migrate_canonical_work_mapping_v2()

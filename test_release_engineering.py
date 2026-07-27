@@ -23,10 +23,18 @@ class ReleaseConfigurationTests(unittest.TestCase):
                 "python manage_migrations.py preflight",
             ],
         )
-        command = deploy["startCommand"]
+        command = json.loads(
+            (ROOT / "railway.web.json").read_text("utf-8")
+        )["deploy"]["startCommand"]
         self.assertIn("gunicorn web_app:app", command)
         self.assertIn("0.0.0.0:$PORT", command)
         self.assertNotIn("app.py", command)
+        self.assertEqual(
+            json.loads(
+                (ROOT / "railway.core.json").read_text("utf-8")
+            )["deploy"]["startCommand"],
+            "python app.py",
+        )
 
     def test_python_runtime_and_gunicorn_dependency_are_versioned(self):
         self.assertEqual((ROOT / ".python-version").read_text().strip(), "3.12")
