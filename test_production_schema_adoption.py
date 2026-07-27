@@ -118,6 +118,37 @@ class ProductionSchemaAdoptionTests(unittest.TestCase):
             ["classification"],
             adoption.CLASS_PARTIAL,
         )
+        self.assertTrue(result["ok"])
+
+    def test_legacy_optional_work_fields_accept_nullable_columns(self):
+        conn = self.connect()
+        managed_migrations._create_universal_work_objects(conn)
+        optional_columns = {
+            "assigned_agent_id", "client_id", "project_id", "priority",
+            "due_date", "linked_files_json", "metadata_json",
+            "origin_channel", "origin_user_id",
+        }
+        nullable = {
+            row[1]: not bool(row[3] or row[5])
+            for row in conn.execute(
+                "PRAGMA table_info(nina_work_objects)"
+            ).fetchall()
+        }
+        conn.commit()
+        conn.close()
+        self.assertTrue(all(nullable[name] for name in optional_columns))
+        result = self.plan()
+        table_result = (
+            result["migrations"]["0004_universal_work_objects_v1"]
+            ["tables"]["nina_work_objects"]
+        )
+        self.assertNotEqual(
+            table_result["classification"], adoption.CLASS_CONFLICTING
+        )
+        self.assertFalse(any(
+            reason.startswith("nullability_conflict:")
+            for reason in table_result["reasons"]
+        ))
 
     def test_conflicting_column_type_stops_plan(self):
         conn = self.connect()
