@@ -32,6 +32,7 @@ class RailwayRuntimeContractTests(unittest.TestCase):
 
     def test_core_runtime_contract_starts_app_with_one_replica(self):
         self.assertEqual(self.core["deploy"]["startCommand"], "python app.py")
+        self.assertEqual(self.core["deploy"]["healthcheckPath"], "/")
 
     def test_core_post_init_uses_guarded_scheduler_start(self):
         post_init = next(
