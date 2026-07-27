@@ -13,6 +13,12 @@ Daily Planner = saliek darbus saprotamā dienas secībā.
 DAILY_PLANNER_VERSION = "Daily Planner V1.0"
 
 
+def canonical_daily_work(tenant_id, limit=20):
+    """Deterministic planner projection from Universal Work Objects."""
+    from universal_work_objects import planner_projection
+    return planner_projection(tenant_id, limit=limit)
+
+
 def _clean(text):
     return (text or "").strip()
 

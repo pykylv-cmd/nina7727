@@ -452,12 +452,16 @@ decision may do so.
 ## 35. Current completed foundation
 
 The documented completed layers are Platform Core V1, RolePack System V1,
-Ready Worker Catalog V1, Agent Assignment V1, and Knowledge Vault V1.
+Ready Worker Catalog V1, Agent Assignment V1, Knowledge Vault V1, and
+Universal Work Objects V1.
 Knowledge Vault V1 is tenant-owned authorized structured knowledge management
 with version history and basic keyword search. It is not conversation memory,
 worker-specific memory, binary document ingestion, semantic retrieval, RAG,
-or autonomous knowledge execution. Universal Work Objects V1 is the next
-planned architecture layer.
+or autonomous knowledge execution. Universal Work Objects V1 establishes one
+tenant-scoped canonical work registry with governed lifecycle, ownership,
+optional active Agent Assignment references, hierarchy, scheduling, source
+provenance, and audit history. It does not establish autonomous execution.
+Channel Layer V1 is the next planned architecture layer.
 
 ## 36. Documentation truth
 

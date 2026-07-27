@@ -140,6 +140,7 @@ class PlatformCapabilityRegistryTests(unittest.TestCase):
                 "ready_worker_catalog",
                 "agent_assignment",
                 "knowledge_vault",
+                "universal_work_objects",
             )
         }
         registry = initialize_platform_runtime(checks)
@@ -164,6 +165,7 @@ class PlatformCapabilityRegistryTests(unittest.TestCase):
                 "ready_worker_catalog",
                 "agent_assignment",
                 "knowledge_vault",
+                "universal_work_objects",
             )
         }
         checks["message_service"] = lambda: False

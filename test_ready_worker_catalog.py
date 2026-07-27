@@ -25,6 +25,7 @@ CAPABILITIES = (
     "ready_worker_catalog",
     "agent_assignment",
     "knowledge_vault",
+    "universal_work_objects",
 )
 
 

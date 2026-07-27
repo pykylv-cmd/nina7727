@@ -14,6 +14,18 @@ import re
 TASK_ENGINE_VERSION = "Task Engine V1.2"
 
 
+def create_canonical_task(tenant_id, title, **values):
+    """Task Engine adapter: persist only in Universal Work Objects."""
+    from universal_work_objects import create_work_object
+    return create_work_object(
+        tenant_id,
+        object_type="task",
+        title=title,
+        source_type=values.pop("source_type", "nina"),
+        **values,
+    )
+
+
 def _clean(text):
     return (text or "").strip()
 

@@ -122,6 +122,30 @@ from knowledge_vault import (
     list_tenant_knowledge,
     update_draft,
 )
+from universal_work_objects import (
+    DEFAULT_LIST_LIMIT as WORK_DEFAULT_LIST_LIMIT,
+    UniversalWorkConflictError,
+    UniversalWorkError,
+    UniversalWorkNotFoundError,
+    UniversalWorkTransitionError,
+    UniversalWorkValidationError,
+    archive_work_object as archive_universal_work_object,
+    assign_work_object,
+    attach_parent,
+    cancel_work_object,
+    complete_work_object,
+    create_work_object as create_universal_work_object,
+    detach_parent,
+    get_work_object as get_universal_work_object,
+    initialize_universal_work_objects,
+    list_children,
+    list_work_events,
+    list_work_objects as list_universal_work_objects,
+    set_priority,
+    transition_work_object,
+    unassign_work_object,
+    update_work_object as update_universal_work_object,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -274,6 +298,9 @@ WEB_RUNTIME_READINESS.register(
     "agent_assignment", initialize_agent_assignment_service
 )
 WEB_RUNTIME_READINESS.register("knowledge_vault", initialize_knowledge_vault)
+WEB_RUNTIME_READINESS.register(
+    "universal_work_objects", initialize_universal_work_objects
+)
 
 
 @app.before_request
@@ -6239,6 +6266,277 @@ def list_knowledge_versions_api(knowledge_id):
         })
     except KnowledgeVaultError as exc:
         return _knowledge_error_response(exc)
+
+
+def _work_error_response(exc):
+    if isinstance(exc, UniversalWorkNotFoundError):
+        return jsonify({"ok": False, "error": "work_object_not_found"}), 404
+    if isinstance(exc, UniversalWorkTransitionError):
+        return jsonify({"ok": False, "error": "invalid_status_transition"}), 409
+    if isinstance(exc, UniversalWorkConflictError):
+        return jsonify({"ok": False, "error": "work_object_conflict"}), 409
+    if isinstance(exc, UniversalWorkValidationError):
+        code = str(exc).split(":", 1)[0]
+        status = 413 if code in {
+            "work_description_too_large", "work_metadata_too_large",
+        } else 400
+        return jsonify({"ok": False, "error": code}), status
+    logger.error(
+        "Universal Work request failed error_class=%s", type(exc).__name__
+    )
+    return jsonify({"ok": False, "error": "work_objects_unavailable"}), 503
+
+
+def _work_payload(allowed):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise UniversalWorkValidationError("work_json_object_required")
+    unknown = set(payload) - set(allowed)
+    if unknown:
+        raise UniversalWorkValidationError(
+            "work_request_field_forbidden:" + ",".join(sorted(unknown))
+        )
+    return payload
+
+
+def _work_query_integer(name, default):
+    raw = request.args.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as exc:
+        raise UniversalWorkValidationError(f"work_{name}_invalid") from exc
+
+
+@app.post("/work-objects")
+def create_universal_work_object_api():
+    try:
+        payload = _work_payload({
+            "object_type", "title", "description", "priority", "owner_type",
+            "owner_id", "assigned_agent_assignment_id", "client_id",
+            "project_id", "parent_work_object_id", "source_type",
+            "source_reference", "due_at", "metadata",
+        })
+        item = create_universal_work_object(
+            current_workspace_id(),
+            object_type=payload.get("object_type"),
+            title=payload.get("title"),
+            description=payload.get("description", ""),
+            priority=payload.get("priority", "normal"),
+            owner_type=payload.get("owner_type", "tenant"),
+            owner_id=payload.get("owner_id", ""),
+            assigned_agent_assignment_id=payload.get(
+                "assigned_agent_assignment_id", ""
+            ),
+            client_id=payload.get("client_id", ""),
+            project_id=payload.get("project_id", ""),
+            parent_work_object_id=payload.get("parent_work_object_id", ""),
+            source_type=payload.get("source_type", "user"),
+            source_reference=payload.get("source_reference", ""),
+            due_at=payload.get("due_at", ""),
+            metadata=payload.get("metadata"),
+            created_by="workspace_client",
+        )
+        return jsonify({"ok": True, "work_object": item.as_dict()}), 201
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
+
+
+@app.get("/work-objects")
+def list_universal_work_objects_api():
+    try:
+        items = list_universal_work_objects(
+            current_workspace_id(),
+            object_type=request.args.get("object_type"),
+            status=request.args.get("status"),
+            priority=request.args.get("priority"),
+            assigned_agent_assignment_id=request.args.get(
+                "assigned_agent_assignment_id"
+            ),
+            client_id=request.args.get("client_id"),
+            project_id=request.args.get("project_id"),
+            due_before=request.args.get("due_before"),
+            due_after=request.args.get("due_after"),
+            query=request.args.get("query"),
+            limit=_work_query_integer("limit", WORK_DEFAULT_LIST_LIMIT),
+            offset=_work_query_integer("offset", 0),
+        )
+        return jsonify({
+            "ok": True,
+            "work_objects": [item.as_dict() for item in items],
+        })
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
+
+
+@app.get("/work-objects/<work_object_id>")
+def get_universal_work_object_api(work_object_id):
+    try:
+        item = get_universal_work_object(
+            current_workspace_id(), work_object_id
+        )
+        return jsonify({"ok": True, "work_object": item.as_dict()})
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
+
+
+@app.patch("/work-objects/<work_object_id>")
+def update_universal_work_object_api(work_object_id):
+    try:
+        payload = _work_payload({
+            "title", "description", "owner_type", "owner_id", "client_id",
+            "project_id", "due_at", "metadata",
+        })
+        if not payload:
+            raise UniversalWorkValidationError("work_update_required")
+        item = update_universal_work_object(
+            current_workspace_id(), work_object_id,
+            title=payload.get("title") if "title" in payload else None,
+            description=payload.get("description")
+            if "description" in payload else None,
+            owner_type=payload.get("owner_type")
+            if "owner_type" in payload else None,
+            owner_id=payload.get("owner_id") if "owner_id" in payload else None,
+            client_id=payload.get("client_id")
+            if "client_id" in payload else None,
+            project_id=payload.get("project_id")
+            if "project_id" in payload else None,
+            due_at=payload.get("due_at") if "due_at" in payload else None,
+            metadata=payload.get("metadata") if "metadata" in payload else None,
+        )
+        return jsonify({"ok": True, "work_object": item.as_dict()})
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
+
+
+def _work_operation(work_object_id, operation, allowed):
+    try:
+        payload = _work_payload(allowed)
+        item = operation(payload)
+        return jsonify({"ok": True, "work_object": item.as_dict()})
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
+
+
+@app.post("/work-objects/<work_object_id>/transition")
+def transition_universal_work_object_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda payload: transition_work_object(
+            current_workspace_id(), work_object_id, payload.get("status")
+        ),
+        {"status"},
+    )
+
+
+@app.post("/work-objects/<work_object_id>/assign")
+def assign_universal_work_object_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda payload: assign_work_object(
+            current_workspace_id(), work_object_id,
+            payload.get("assigned_agent_assignment_id"),
+        ),
+        {"assigned_agent_assignment_id"},
+    )
+
+
+@app.post("/work-objects/<work_object_id>/unassign")
+def unassign_universal_work_object_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda _payload: unassign_work_object(
+            current_workspace_id(), work_object_id
+        ),
+        set(),
+    )
+
+
+@app.post("/work-objects/<work_object_id>/complete")
+def complete_universal_work_object_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda _payload: complete_work_object(
+            current_workspace_id(), work_object_id
+        ),
+        set(),
+    )
+
+
+@app.post("/work-objects/<work_object_id>/cancel")
+def cancel_universal_work_object_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda _payload: cancel_work_object(
+            current_workspace_id(), work_object_id
+        ),
+        set(),
+    )
+
+
+@app.post("/work-objects/<work_object_id>/archive")
+def archive_universal_work_object_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda _payload: archive_universal_work_object(
+            current_workspace_id(), work_object_id
+        ),
+        set(),
+    )
+
+
+@app.post("/work-objects/<work_object_id>/priority")
+def prioritize_universal_work_object_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda payload: set_priority(
+            current_workspace_id(), work_object_id, payload.get("priority")
+        ),
+        {"priority"},
+    )
+
+
+@app.post("/work-objects/<work_object_id>/parent")
+def attach_universal_work_parent_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda payload: attach_parent(
+            current_workspace_id(), work_object_id,
+            payload.get("parent_work_object_id"),
+        ),
+        {"parent_work_object_id"},
+    )
+
+
+@app.delete("/work-objects/<work_object_id>/parent")
+def detach_universal_work_parent_api(work_object_id):
+    try:
+        item = detach_parent(current_workspace_id(), work_object_id)
+        return jsonify({"ok": True, "work_object": item.as_dict()})
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
+
+
+@app.get("/work-objects/<work_object_id>/children")
+def list_universal_work_children_api(work_object_id):
+    try:
+        items = list_children(current_workspace_id(), work_object_id)
+        return jsonify({
+            "ok": True,
+            "children": [item.as_dict() for item in items],
+        })
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
+
+
+@app.get("/work-objects/<work_object_id>/events")
+def list_universal_work_events_api(work_object_id):
+    try:
+        events = list_work_events(current_workspace_id(), work_object_id)
+        return jsonify({"ok": True, "events": list(events)})
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
 
 
 @app.post("/internal/runtime/compatibility")

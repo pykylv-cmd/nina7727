@@ -1,5 +1,39 @@
 # NINA_ARCHITECTURE_LEDGER.md
 
+## AL-014 — Universal Work Objects V1 implementation
+
+Status: IMPLEMENTED
+
+Universal Work Objects V1 adopts the existing tenant-scoped
+`nina_work_objects` table as the single canonical work registry. It does not
+create a parallel task store. The canonical service adds a closed core type,
+status, priority, ownership, assignment, parent/child, source, scheduling, and
+audit contract while preserving existing Work Engine records and identifiers.
+
+The managed EXPAND migration is `0004_universal_work_objects_v1`. It adds
+nullable/default-compatible columns and indexes to the existing table and
+creates `nina_work_object_events` as audit history, not a second work truth.
+Existing rows are preserved.
+
+Web and Telegram task paths now create or project the same canonical records.
+Legacy task-memory writes are disabled; historical memory data is not deleted.
+Daily planner, client view, task, and follow-up adapters are projections or
+creation adapters over the canonical service. Existing reminder and daily-goal
+stores retain their narrower notification/profile purposes and are not general
+work registries.
+
+Agent Assignment references are optional but, when present, must resolve to an
+active assignment in the same tenant. All reads and mutations are tenant
+scoped. Parent links are same-tenant, cycle-safe, and depth-bounded. Archived
+is terminal. The service enforces closed V1 vocabularies and bounded metadata,
+search, nesting, and pagination.
+
+This implementation is work management and audit infrastructure. It does not
+claim autonomous execution, universal channel completion, provider routing,
+human approval policy completion, deployment, or production verification.
+
+Next planned layer: **Channel Layer V1**.
+
 ## AL-013 — Knowledge Vault V1 implementation
 
 Status: ACTIVE / IMPLEMENTED
@@ -35,7 +69,8 @@ Verified locally: focused Knowledge Vault/foundation tests passed. Full suite
 evidence is recorded in the implementation report. This is implementation and
 local test evidence, not deployment or production verification.
 
-Next planned layer: **Universal Work Objects V1**.
+Universal Work Objects V1 was the next planned layer at this checkpoint and is
+now implemented in AL-014.
 
 ---
 
@@ -137,8 +172,8 @@ are completed. OpenAI integration, existing channels, Work Objects, and
 approval/audit concepts are recorded at their evidenced scope rather than
 promoted to complete future platform layers.
 
-**Current and next:** Agent Assignment V1 and Knowledge Vault V1 are
-implemented. Universal Work Objects V1 is the immediate planned implementation
+**Current and next:** Agent Assignment V1, Knowledge Vault V1, and Universal
+Work Objects V1 are implemented. Channel Layer V1 is the immediate planned implementation
 layer; the agreed build order remains intact.
 
 **Strategic future:** AI Provider Hub, routing/evaluation, consolidated Trust
@@ -234,8 +269,8 @@ This checkpoint refines but does not replace the Constitution's broader roadmap:
 3. Ready Worker Catalog V1 — completed
 4. Agent Assignment V1 — completed in AL-012
 5. Knowledge Vault V1 — completed in AL-013
-6. Universal Work Objects V1 — next
-7. Channel Layer V1
+6. Universal Work Objects V1 — completed in AL-014
+7. Channel Layer V1 — next
 8. Billing V1
 9. Nina Exchange V1
 10. Mobile and later platform layers

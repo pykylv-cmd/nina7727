@@ -58,6 +58,7 @@ class ManagedMigrationTests(unittest.TestCase):
                 "0001_shared_conversation_state",
                 "0002_agent_assignment_v1",
                 "0003_knowledge_vault_v1",
+                "0004_universal_work_objects_v1",
             ],
         )
         self.assertIn(managed_migrations.LEDGER_TABLE, self._tables())
@@ -80,8 +81,48 @@ class ManagedMigrationTests(unittest.TestCase):
                 "0001_shared_conversation_state",
                 "0002_agent_assignment_v1",
                 "0003_knowledge_vault_v1",
+                "0004_universal_work_objects_v1",
             ],
         )
+
+    def test_universal_work_object_expand_preserves_existing_rows(self):
+        conn = sqlite3.connect(self.db_file)
+        conn.execute(
+            """
+            CREATE TABLE nina_work_objects (
+                object_id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                object_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO nina_work_objects "
+            "(object_id,workspace_id,object_type,title,status) "
+            "VALUES (?,?,?,?,?)",
+            ("legacy-1", "tenant-1", "legacy_task", "Preserve me", "active"),
+        )
+        managed_migrations._create_universal_work_objects(conn)
+        row = conn.execute(
+            "SELECT object_id,workspace_id,object_type,title,status "
+            "FROM nina_work_objects WHERE object_id=?",
+            ("legacy-1",),
+        ).fetchone()
+        columns = {
+            item[1]
+            for item in conn.execute(
+                "PRAGMA table_info(nina_work_objects)"
+            ).fetchall()
+        }
+        conn.close()
+        self.assertEqual(
+            row,
+            ("legacy-1", "tenant-1", "legacy_task", "Preserve me", "active"),
+        )
+        self.assertIn("owner_type", columns)
+        self.assertIn("assigned_agent_assignment_id", columns)
 
     def test_ambiguous_existing_schema_fails_closed(self):
         conn = sqlite3.connect(self.db_file)

@@ -29,8 +29,8 @@ Status vocabulary:
 | Ready Worker Layer | Implemented | Reviewed versioned worker definitions |
 | Agent Assignment Layer | Implemented | Tenant-scoped customer worker instances and lifecycle |
 | Knowledge Vault V1 | Implemented | Tenant-owned versioned authorized knowledge items and basic search |
-| Universal Work Objects | Planned — next; limited implementation exists | Platform-wide ownership and execution model |
-| Channel Layer | Planned; limited channel implementations exist | Neutral channel contracts and coherent identity/work |
+| Universal Work Objects V1 | Implemented | One tenant-scoped canonical work registry, lifecycle, assignment, hierarchy, scheduling, and audit |
+| Channel Layer | Planned — next; limited channel implementations exist | Neutral channel contracts and coherent identity/work |
 | Billing | Planned | Entitlements, usage, budgets, charging |
 | Nina Exchange | Planned | Governed worker and service ecosystem |
 | Nina Experience Layer | Long-Term Vision; current surfaces implemented in limited scope | One Nina-centered customer experience |
@@ -60,8 +60,8 @@ replaceable resources through stable contracts.
 3. Ready Worker Catalog V1 — Implemented
 4. Agent Assignment V1 — Implemented
 5. Knowledge Vault V1 — Implemented
-6. Universal Work Objects V1 — Planned, next platform layer
-7. Channel Layer V1 — Planned platform layer
+6. Universal Work Objects V1 — Implemented
+7. Channel Layer V1 — Planned, next platform layer
 8. Billing V1 — Planned
 9. Nina Exchange V1 — Planned
 10. Mobile and extended interfaces — Planned
@@ -70,3 +70,9 @@ Knowledge Vault V1 manages tenant-owned structured knowledge and version
 history only. Its search is keyword-based; binary ingestion, parsing,
 embeddings, semantic retrieval, RAG, and autonomous knowledge use remain
 Planned. The architecture ledger must record any future sequence change.
+
+Universal Work Objects V1 extends the existing `nina_work_objects` registry;
+it does not introduce a competing task database. Its assignment reference is
+optional and tenant-bound to an active Agent Assignment. It manages work
+state, not autonomous worker execution. Specialized reminder and daily-goal
+stores remain bounded supporting domains, not alternative work truth.

@@ -16,6 +16,7 @@ CAPABILITIES = (
     "contact_identity", "message_service", "channel_services",
     "rolepack_system", "ready_worker_catalog", "agent_assignment",
     "knowledge_vault",
+    "universal_work_objects",
 )
 
 

@@ -339,6 +339,19 @@ def _add_missing_columns(conn) -> None:
         "metadata_json": "TEXT DEFAULT '{}'",
         "created_at": "TEXT",
         "updated_at": "TEXT",
+        "description": "TEXT NOT NULL DEFAULT ''",
+        "owner_type": "TEXT NOT NULL DEFAULT 'tenant'",
+        "owner_id": "TEXT NOT NULL DEFAULT ''",
+        "assigned_agent_assignment_id": "TEXT NOT NULL DEFAULT ''",
+        "parent_work_object_id": "TEXT NOT NULL DEFAULT ''",
+        "source_type": "TEXT NOT NULL DEFAULT 'system'",
+        "source_reference": "TEXT NOT NULL DEFAULT ''",
+        "due_at": "TEXT NOT NULL DEFAULT ''",
+        "started_at": "TEXT NOT NULL DEFAULT ''",
+        "completed_at": "TEXT NOT NULL DEFAULT ''",
+        "cancelled_at": "TEXT NOT NULL DEFAULT ''",
+        "archived_at": "TEXT NOT NULL DEFAULT ''",
+        "created_by": "TEXT NOT NULL DEFAULT 'legacy'",
     }
     cur = conn.cursor()
     try:

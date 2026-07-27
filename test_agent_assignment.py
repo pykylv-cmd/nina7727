@@ -37,6 +37,7 @@ class AgentAssignmentV1Tests(unittest.TestCase):
             "ready_worker_catalog",
             "agent_assignment",
             "knowledge_vault",
+            "universal_work_objects",
         )
         initialize_platform_runtime({
             identifier: (lambda: True) for identifier in capability_ids

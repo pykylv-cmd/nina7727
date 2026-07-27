@@ -11,9 +11,9 @@
   "architecture": {
     "checkpoint": "Platform Foundation V1",
     "foundation_implementation_commit": "fe5dba4839e59daa4b0ad0b7d3f3fb812b2f3e70",
-    "completed_layers": ["Platform Core V1", "RolePack System V1", "Ready Worker Catalog V1", "Agent Assignment V1", "Knowledge Vault V1"],
-    "next_layer": "Universal Work Objects V1",
-    "planned_layers": ["Universal Work Objects V1", "Channel Layer V1", "Billing V1", "Nina Exchange V1", "Mobile and extended interfaces"],
+    "completed_layers": ["Platform Core V1", "RolePack System V1", "Ready Worker Catalog V1", "Agent Assignment V1", "Knowledge Vault V1", "Universal Work Objects V1"],
+    "next_layer": "Channel Layer V1",
+    "planned_layers": ["Channel Layer V1", "Billing V1", "Nina Exchange V1", "Mobile and extended interfaces"],
     "strategic_future_layers": ["Nina Experience Layer", "Voice Layer", "AI Provider Hub", "Model Router", "Model Evaluation", "Nina Trust Layer", "Connector Layer", "Human Approval Layer", "Device and Robot Layer", "Fleet Orchestration", "Global Control Plane"]
   },
   "agent_assignment_v1": {
@@ -37,6 +37,15 @@
     "semantic_search": false,
     "rag": false,
     "autonomous_execution": false
+  },
+  "universal_work_objects_v1": {
+    "status": "implemented",
+    "scope": "Single tenant-scoped canonical work registry with governed core lifecycle, ownership, active Agent Assignment references, hierarchy, scheduling, provenance, bounded search, and audit under ONE NINA.",
+    "persistence_table": "nina_work_objects",
+    "audit_table": "nina_work_object_events",
+    "migration": "0004_universal_work_objects_v1",
+    "autonomous_execution": false,
+    "channel_layer_complete": false
   },
   "current_capability_truth": {
     "whatsapp": {

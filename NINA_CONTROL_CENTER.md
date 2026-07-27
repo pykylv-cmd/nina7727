@@ -31,11 +31,11 @@ controllers retain low-level safety.
 ## Current, next, and future
 
 - **Implemented:** Platform Core V1, RolePack System V1, Ready Worker
-  Catalog V1, Agent Assignment V1, and Knowledge Vault V1.
-- **Planned next:** Universal Work Objects V1.
-- **Implemented in limited scope:** existing canonical Work Objects and
-  WhatsApp paths; these precede
-  but do not complete the platform-wide future layers bearing those names.
+  Catalog V1, Agent Assignment V1, Knowledge Vault V1, and Universal Work
+  Objects V1.
+- **Planned next:** Channel Layer V1.
+- **Implemented in limited scope:** existing WhatsApp paths; these precede but
+  do not complete the platform-wide future Channel Layer.
 - **Experimental:** current browser/OpenAI voice input capabilities.
 - **Long-Term Vision:** AI Provider Hub, Model Router/Evaluation, complete
   Voice and Trust layers, connectors, devices/robots, fleet orchestration, and
@@ -88,9 +88,22 @@ create separate Nina identities, or own memory/work truth.
 
 ## Immediate build task
 
-Implement **Universal Work Objects V1** next according to the canonical
-sequence, preserving ONE NINA, tenant isolation, and the separate Agent
-Assignment and Knowledge Vault boundaries.
+Implement **Channel Layer V1** next according to the canonical sequence,
+preserving ONE NINA, tenant isolation, and the established Agent Assignment,
+Knowledge Vault, and Universal Work Object boundaries.
+
+## Universal Work Objects V1 boundary
+
+Universal Work Objects V1 uses the existing `nina_work_objects` table as the
+single tenant-scoped work truth. It provides closed core types, lifecycle,
+priority, ownership, optional same-tenant active Agent Assignment references,
+parent/child work, scheduling, source provenance, bounded search, and audit
+events. Web, Telegram task, planner, client, task, and follow-up paths use or
+project this registry; no new task-memory writes are made.
+
+It does not provide autonomous execution, channel completion, provider
+routing, or a second Nina. Legacy specialized Work Engine values remain
+compatible in the same table, while the V1 service governs new core objects.
 
 ## Knowledge Vault V1 boundary
 

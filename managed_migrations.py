@@ -194,6 +194,118 @@ def _create_knowledge_vault(conn):
     cur.close()
 
 
+def _create_universal_work_objects(conn):
+    """Adopt and expand the existing nina_work_objects canonical truth."""
+    cur = conn.cursor()
+    id_column = (
+        "BIGSERIAL PRIMARY KEY"
+        if persistence_backend.USE_POSTGRES
+        else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    )
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS nina_work_objects (
+            id {id_column},
+            object_id TEXT NOT NULL UNIQUE,
+            workspace_id TEXT NOT NULL,
+            object_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL,
+            assigned_agent_id TEXT DEFAULT '',
+            client_id TEXT DEFAULT '',
+            project_id TEXT DEFAULT '',
+            priority TEXT DEFAULT 'normal',
+            due_date TEXT DEFAULT '',
+            linked_files_json TEXT DEFAULT '[]',
+            metadata_json TEXT DEFAULT '{{}}',
+            origin_channel TEXT DEFAULT '',
+            origin_user_id TEXT DEFAULT '',
+            source_key TEXT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    if persistence_backend.USE_POSTGRES:
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name='nina_work_objects'
+        """)
+        columns = {str(row[0]) for row in (cur.fetchall() or [])}
+    else:
+        cur.execute("PRAGMA table_info(nina_work_objects)")
+        columns = {str(row[1]) for row in (cur.fetchall() or [])}
+    additions = {
+        "object_id": "TEXT NOT NULL DEFAULT ''",
+        "workspace_id": "TEXT NOT NULL DEFAULT ''",
+        "object_type": "TEXT NOT NULL DEFAULT 'task'",
+        "title": "TEXT NOT NULL DEFAULT ''",
+        "status": "TEXT NOT NULL DEFAULT 'draft'",
+        "assigned_agent_id": "TEXT NOT NULL DEFAULT ''",
+        "client_id": "TEXT NOT NULL DEFAULT ''",
+        "project_id": "TEXT NOT NULL DEFAULT ''",
+        "priority": "TEXT NOT NULL DEFAULT 'normal'",
+        "due_date": "TEXT NOT NULL DEFAULT ''",
+        "linked_files_json": "TEXT NOT NULL DEFAULT '[]'",
+        "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+        "origin_channel": "TEXT NOT NULL DEFAULT ''",
+        "origin_user_id": "TEXT NOT NULL DEFAULT ''",
+        "source_key": "TEXT",
+        "created_at": "TEXT NOT NULL DEFAULT ''",
+        "updated_at": "TEXT NOT NULL DEFAULT ''",
+        "description": "TEXT NOT NULL DEFAULT ''",
+        "owner_type": "TEXT NOT NULL DEFAULT 'tenant'",
+        "owner_id": "TEXT NOT NULL DEFAULT ''",
+        "assigned_agent_assignment_id": "TEXT NOT NULL DEFAULT ''",
+        "parent_work_object_id": "TEXT NOT NULL DEFAULT ''",
+        "source_type": "TEXT NOT NULL DEFAULT 'system'",
+        "source_reference": "TEXT NOT NULL DEFAULT ''",
+        "due_at": "TEXT NOT NULL DEFAULT ''",
+        "started_at": "TEXT NOT NULL DEFAULT ''",
+        "completed_at": "TEXT NOT NULL DEFAULT ''",
+        "cancelled_at": "TEXT NOT NULL DEFAULT ''",
+        "archived_at": "TEXT NOT NULL DEFAULT ''",
+        "created_by": "TEXT NOT NULL DEFAULT 'legacy'",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            cur.execute(
+                f"ALTER TABLE nina_work_objects ADD COLUMN {name} {definition}"
+            )
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_work_object_events (
+            event_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            object_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            from_status TEXT NOT NULL DEFAULT '',
+            to_status TEXT NOT NULL DEFAULT '',
+            actor TEXT NOT NULL,
+            details_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        )
+    """)
+    statements = (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_nina_work_objects_workspace_source_key "
+        "ON nina_work_objects (workspace_id, source_key)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_work_objects_workspace_status "
+        "ON nina_work_objects (workspace_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_work_objects_workspace_type "
+        "ON nina_work_objects (workspace_id, object_type)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_work_objects_workspace_priority "
+        "ON nina_work_objects (workspace_id, priority)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_work_objects_workspace_assignment "
+        "ON nina_work_objects (workspace_id, assigned_agent_assignment_id)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_work_objects_workspace_due "
+        "ON nina_work_objects (workspace_id, due_at)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_work_objects_workspace_parent "
+        "ON nina_work_objects (workspace_id, parent_work_object_id)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_work_events_workspace_object "
+        "ON nina_work_object_events (workspace_id, object_id, created_at)",
+    )
+    for statement in statements:
+        cur.execute(statement)
+    cur.close()
+
+
 MIGRATIONS = (
     Migration(
         identifier="0001_shared_conversation_state",
@@ -235,6 +347,22 @@ MIGRATIONS = (
             "parent_version|pk:tenant_knowledge_version|"
             "checks:source_type,status,content_format,version,parent_version|"
             "indexes:tenant,status,tenant_status,tenant_item_version,tenant_source"
+        ),
+    ),
+    Migration(
+        identifier="0004_universal_work_objects_v1",
+        version=4,
+        name="Expand canonical nina_work_objects for Universal Work Objects V1",
+        phase=PHASE_EXPAND,
+        operation=_create_universal_work_objects,
+        checksum_source=(
+            "0004|EXPAND|nina_work_objects+nina_work_object_events|"
+            "adopt-existing-table|description,owner_type,owner_id,"
+            "assigned_agent_assignment_id,parent_work_object_id,source_type,"
+            "source_reference,due_at,started_at,completed_at,cancelled_at,"
+            "archived_at,created_by|audit-events|"
+            "indexes:tenant_status,tenant_type,tenant_priority,"
+            "tenant_assignment,tenant_due,tenant_parent,event_object"
         ),
     ),
 )

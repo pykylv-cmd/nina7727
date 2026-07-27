@@ -963,6 +963,14 @@ _RUNTIME_CAPABILITIES = (
         "startup_order": 100,
         "dependencies": ("persistence_backend",),
     },
+    {
+        "id": "universal_work_objects",
+        "name": "Universal Work Objects",
+        "version": "1",
+        "description": "Canonical tenant-scoped work truth and lifecycle.",
+        "startup_order": 110,
+        "dependencies": ("work_objects", "agent_assignment"),
+    },
 )
 
 
@@ -977,6 +985,7 @@ def _default_capability_health_checks():
     from ready_worker_catalog import initialize_ready_worker_catalog
     from agent_assignment import initialize_agent_assignment_service
     from knowledge_vault import initialize_knowledge_vault
+    from universal_work_objects import initialize_universal_work_objects
 
     contract = DeploymentCompatibilityContract(
         application_version=PLATFORM_CORE_VERSION,
@@ -1001,6 +1010,7 @@ def _default_capability_health_checks():
         "ready_worker_catalog": initialize_ready_worker_catalog,
         "agent_assignment": initialize_agent_assignment_service,
         "knowledge_vault": initialize_knowledge_vault,
+        "universal_work_objects": initialize_universal_work_objects,
     }
 
 

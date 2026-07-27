@@ -2,6 +2,21 @@
 
 # NinaOS Changelog
 
+## 2026-07-27 — Universal Work Objects V1
+
+Implemented Universal Work Objects V1 by adopting the existing
+`nina_work_objects` table as the single tenant-scoped work registry. Added
+governed core type/status/priority vocabularies, ownership, optional active
+same-tenant Agent Assignment links, hierarchy, scheduling, provenance,
+bounded search, lifecycle timestamps, and audit events through managed EXPAND
+migration `0004_universal_work_objects_v1`.
+
+Web and Telegram task paths now create or project canonical work objects.
+Legacy task-memory writes were disabled without deleting historical data.
+Planner, client, task, and follow-up adapters use the same registry. This does
+not claim autonomous execution, deployment, production verification, or a
+complete Channel Layer. Channel Layer V1 becomes the next planned layer.
+
 ## 2026-07-27 — Knowledge Vault V1
 
 Implemented one tenant-owned authorized Knowledge Vault under ONE NINA:

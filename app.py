@@ -14621,69 +14621,71 @@ def nina_task_owner_name(user_id):
 
 
 def nina_save_task_to_memory(user_id, task):
-    """
-    V1.0 safe persistence:
-    saglabā task kā JSON tekstu memory_backups tabulā ar source='task_engine'.
-    Tas dod uzdevumiem pastāvīgu atmiņu bez jaunas DB migrācijas.
-    """
+    """Compatibility adapter over the canonical nina_work_objects truth."""
     if not task:
         return False
 
     try:
-        conn = get_db()
-        c = conn.cursor()
-        import json
-        db_execute(
-            c,
-            """
-            INSERT INTO memory_backups (user_id, backup_text, source)
-            VALUES (%s, %s, %s)
-            """,
-            (str(user_id), json.dumps(task, ensure_ascii=False), "task_engine")
-        )
-        conn.commit()
-        c.close()
-        conn.close()
+        title = nina_task_work_object_title(task)
+        status = str((task or {}).get("status") or "open")
+        match = next((
+            item for item in list_work_objects(
+                workspace_id="demo_small_business", limit=5000
+            )
+            if str(item.origin_user_id) == str(user_id)
+            and str(item.title).strip().casefold() == title.casefold()
+        ), None)
+        if match and status in {"completed", "cancelled"}:
+            from universal_work_objects import transition_work_object
+            target = "completed" if status == "completed" else "cancelled"
+            if match.status != target:
+                transition_work_object(
+                    match.workspace_id,
+                    match.object_id,
+                    target,
+                    actor="telegram_task_adapter",
+                )
         return True
     except Exception as e:
-        print("nina_save_task_to_memory kļūda:", repr(e))
+        print("canonical task adapter update kļūda:", repr(e))
         return False
 
 
 def nina_latest_tasks(user_id, limit=10):
-    tasks = []
+    """Compatibility projection from nina_work_objects; no memory truth."""
     try:
-        conn = get_db()
-        c = conn.cursor()
-        db_execute(
-            c,
-            """
-            SELECT backup_text, created_at
-            FROM memory_backups
-            WHERE user_id = %s AND source = %s
-            ORDER BY id DESC
-            LIMIT %s
-            """,
-            (str(user_id), "task_engine", int(limit or 10))
-        )
-        rows = c.fetchall() or []
-        c.close()
-        conn.close()
-
-        import json
-        for row in rows:
-            if not row or not row[0]:
+        tasks = []
+        for item in list_work_objects(
+            workspace_id="demo_small_business", limit=5000
+        ):
+            if str(item.origin_user_id) != str(user_id):
                 continue
-            try:
-                obj = json.loads(str(row[0]))
-                if isinstance(obj, dict):
-                    tasks.append(obj)
-            except Exception:
-                tasks.append({"title": str(row[0]), "priority": "normal"})
+            if item.object_type not in {"task", "followup_task", "follow_up"}:
+                continue
+            legacy = dict(item.metadata.get("legacy_task") or {})
+            legacy.update({
+                "work_object_id": item.object_id,
+                "title": item.title,
+                "client": item.client_id,
+                "priority": item.priority,
+                "deadline": item.due_date,
+                "status": (
+                    "completed"
+                    if item.status in {"done", "completed"}
+                    else item.status
+                ),
+                "followup": item.object_type in {
+                    "followup_task", "follow_up"
+                },
+                "source": item.origin_channel or "canonical_work",
+            })
+            tasks.append(legacy)
+            if len(tasks) >= max(1, min(int(limit or 10), 500)):
+                break
+        return tasks
     except Exception as e:
-        print("nina_latest_tasks kļūda:", repr(e))
-
-    return tasks
+        print("canonical task projection kļūda:", repr(e))
+        return []
 
 
 def nina_task_source_key(user_id, message_id=None, user_text=""):
@@ -14816,9 +14818,6 @@ def nina_task_answer(user_id, user_text, message_id=None):
         user_text=user_text,
         message_id=message_id,
     )
-
-    # Preserve old memory during migration. No client information is deleted.
-    nina_save_task_to_memory(user_id, task)
 
     if work_object is not None:
         print(
