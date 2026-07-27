@@ -23,7 +23,7 @@ import os
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import persistence_backend as _persistence_backend
@@ -1236,6 +1236,131 @@ def update_work_object(
         conn.close()
 
     return get_work_object(obj.object_id)
+
+
+def claim_due_reminder(worker_id: str, now_iso: str, stale_before_iso: str = "") -> Optional[WorkObject]:
+    """Atomically claim one due Reminder using the existing Work Object row."""
+    ensure_work_objects_schema()
+    candidates = list_work_objects(object_type="reminder", status="active", limit=500)
+    for candidate in candidates:
+        meta = candidate.metadata if isinstance(candidate.metadata, dict) else {}
+        planned_at = _clean(meta.get("planned_at") or meta.get("reminder_at"))
+        next_attempt_at = _clean(meta.get("next_attempt_at"))
+        delivery_status = _clean(meta.get("delivery_status") or "scheduled")
+        stale_claim = delivery_status == "claimed" and stale_before_iso and _clean(meta.get("claimed_at")) <= stale_before_iso
+        try:
+            planned_due = datetime.fromisoformat(planned_at.replace("Z", "+00:00")) <= datetime.fromisoformat(now_iso.replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            planned_due = False
+        retry_ready = not next_attempt_at or next_attempt_at <= now_iso
+        if not planned_due or not retry_ready or (delivery_status not in {"scheduled", "due", "failed"} and not stale_claim):
+            continue
+        conn = _connect()
+        cur = conn.cursor()
+        try:
+            if not USE_POSTGRES:
+                cur.execute("BEGIN IMMEDIATE")
+            _execute(
+                cur,
+                f"SELECT {_SELECT_FIELDS} FROM {_TABLE_NAME} WHERE object_id=%s"
+                + (" FOR UPDATE SKIP LOCKED" if USE_POSTGRES else ""),
+                (candidate.object_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.rollback()
+                continue
+            current = _row_to_work_object(row)
+            current_meta = dict(current.metadata or {})
+            current_status = _clean(current_meta.get("delivery_status") or "scheduled")
+            next_attempt = _clean(current_meta.get("next_attempt_at"))
+            stale_current = current_status == "claimed" and stale_before_iso and _clean(current_meta.get("claimed_at")) <= stale_before_iso
+            planned = _clean(current_meta.get("planned_at") or current_meta.get("reminder_at"))
+            try:
+                current_due = datetime.fromisoformat(planned.replace("Z", "+00:00")) <= datetime.fromisoformat(now_iso.replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                current_due = False
+            if current.status != "active" or not current_due or (next_attempt and next_attempt > now_iso) or (
+                current_status not in {"scheduled", "due", "failed"} and not stale_current
+            ):
+                conn.rollback()
+                continue
+            claim_token = uuid.uuid4().hex
+            current_meta.update({
+                "delivery_status": "claimed",
+                "claimed_at": now_iso,
+                "claimed_by": _clean(worker_id),
+                "claim_token": claim_token,
+                "attempt_count": int(current_meta.get("attempt_count") or 0) + 1,
+                "idempotency_key": current_meta.get("idempotency_key") or f"reminder-delivery:{current.object_id}:{planned}",
+            })
+            _execute(
+                cur,
+                f"UPDATE {_TABLE_NAME} SET metadata_json=%s,updated_at=%s WHERE object_id=%s",
+                (_json_dumps(current_meta), _utc_now(), current.object_id),
+            )
+            conn.commit()
+            current.metadata = current_meta
+            return current
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
+            conn.close()
+    return None
+
+
+def finish_reminder_delivery(
+    object_id: str,
+    claim_token: str,
+    delivery_status: str,
+    *,
+    channel: str = "",
+    error_code: str = "",
+    delivered_at: str = "",
+) -> Optional[WorkObject]:
+    """Complete only the matching claim; stale workers cannot overwrite it."""
+    allowed = {"delivered", "failed", "awaiting_channel", "cancelled", "snoozed"}
+    if delivery_status not in allowed:
+        raise ValueError("Invalid reminder delivery status.")
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        _execute(cur, f"SELECT {_SELECT_FIELDS} FROM {_TABLE_NAME} WHERE object_id=%s", (object_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        obj = _row_to_work_object(row)
+        metadata = dict(obj.metadata or {})
+        if _clean(metadata.get("claim_token")) != _clean(claim_token):
+            return None
+        metadata.update({
+            "delivery_status": delivery_status,
+            "channel": _clean(channel),
+            "error_code": _clean(error_code)[:80],
+        })
+        if delivered_at:
+            metadata["delivered_at"] = delivered_at
+        if delivery_status == "failed":
+            metadata["next_attempt_at"] = (
+                datetime.now(timezone.utc) + timedelta(minutes=5)
+            ).isoformat(timespec="seconds")
+        else:
+            metadata.pop("next_attempt_at", None)
+        metadata.pop("claim_token", None)
+        metadata.pop("claimed_by", None)
+        next_status = "sent" if delivery_status == "delivered" else obj.status
+        _execute(
+            cur,
+            f"UPDATE {_TABLE_NAME} SET status=%s,metadata_json=%s,updated_at=%s WHERE object_id=%s",
+            (next_status, _json_dumps(metadata), _utc_now(), object_id),
+        )
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+    return get_work_object(object_id)
 
 
 

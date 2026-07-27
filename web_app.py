@@ -13,7 +13,7 @@ import hashlib
 import hmac
 import secrets
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote_plus, unquote_plus
 from flask import Flask, Response, g, has_request_context, jsonify, redirect, request
 from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, load_channel_conversation, load_web_conversation, send_message_to_nina
@@ -343,6 +343,7 @@ def _expected_request_origin():
         str(request.headers.get("X-Forwarded-Proto") or request.scheme)
         .split(",", 1)[0].strip().lower()
     )
+    from reminder_delivery import complete_reminder, snooze_reminder
     return f"{scheme}://{request.host}".rstrip("/")
 
 
@@ -4445,6 +4446,45 @@ def dashboard_body(data):
         + "</div></section>"
     )
     one_nina_surface += today_panel
+    try:
+        notification_owner = current_web_contact()["contact_id"]
+        reminders = [
+            item for item in one_nina_list_work_objects(
+                workspace_id=NINA_WEB_WORKSPACE_ID, object_type="reminder", limit=50,
+            )
+            if item.origin_user_id == notification_owner
+        ]
+    except Exception:
+        reminders = []
+    reminder_rows = ""
+    for item in reminders[:8]:
+        metadata = item.metadata if isinstance(item.metadata, dict) else {}
+        delivery_status = str(metadata.get("delivery_status") or "scheduled")
+        planned_at = str(metadata.get("planned_at") or metadata.get("reminder_at") or item.due_date)
+        actions = ""
+        if item.status != "cancelled":
+            done_action = f"reminder:done:{item.object_id}"
+            snooze_action = f"reminder:snooze:{item.object_id}"
+            actions = (
+                f"<form method='post' action='/reminders/{item.object_id}/done' style='display:inline'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(done_action)}'>"
+                "<button class='btn' type='submit'>Mark done</button></form>"
+                f"<form method='post' action='/reminders/{item.object_id}/snooze' style='display:inline'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(snooze_action)}'>"
+                "<button class='btn' type='submit'>Snooze 1 hour</button></form>"
+            )
+        reminder_rows += (
+            "<div class='row'><div><b>" + html_escape(item.title) + "</b>"
+            f"<span class='muted'>{html_escape(planned_at)} · {html_escape(delivery_status)}</span>"
+            f"<div class='form-actions'>{actions}</div></div>"
+            f"<span class='pill'>{html_escape('Unread' if metadata.get('unread') else delivery_status)}</span></div>"
+        )
+    if not reminder_rows:
+        reminder_rows = "<div class='row'><div><span class='muted'>No reminders yet.</span></div></div>"
+    one_nina_surface += (
+        "<section class='card card-pad'><div class='section-title'>Notifications / Reminders</div>"
+        "<div class='list'>" + reminder_rows + "</div></section>"
+    )
     kpis = (
         "<div class='kpis'>"
         + kpi_card(tx("tasks_today", lang), c["tasks_today"], {"text": tx("open_work_label", lang), "href": "/tasks"})
@@ -7019,6 +7059,29 @@ def home():
 def dashboard():
     data = load_workspace_data()
     return Response(page(tx("dashboard"), dashboard_body(data), active="dashboard"), mimetype="text/html")
+
+
+@app.post("/reminders/<object_id>/done")
+def reminder_done(object_id):
+    action = f"reminder:done:{object_id}"
+    if not _valid_channel_csrf(action):
+        return Response("Forbidden", status=403)
+    contact = current_web_contact()
+    if not complete_reminder(object_id, contact["contact_id"]):
+        return Response("Not found", status=404)
+    return redirect(q("/dashboard"))
+
+
+@app.post("/reminders/<object_id>/snooze")
+def reminder_snooze(object_id):
+    action = f"reminder:snooze:{object_id}"
+    if not _valid_channel_csrf(action):
+        return Response("Forbidden", status=403)
+    contact = current_web_contact()
+    planned_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(timespec="seconds")
+    if not snooze_reminder(object_id, contact["contact_id"], planned_at):
+        return Response("Not found", status=404)
+    return redirect(q("/dashboard"))
 
 
 @app.route("/inbox", methods=["GET", "POST"])

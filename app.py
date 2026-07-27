@@ -10982,9 +10982,24 @@ async def reminder_worker(application):
         await asyncio.sleep(30)
 
 
+async def active_work_object_reminder_worker(application):
+    """Deliver due ONE NINA Reminder Work Objects from the Telegram/Core owner."""
+    from reminder_delivery import process_due_reminders
+    while True:
+        try:
+            await process_due_reminders(
+                telegram_sender=application.bot.send_message,
+                worker_id="telegram-core",
+            )
+        except Exception as exc:
+            print("Active reminder worker error:", type(exc).__name__)
+        await asyncio.sleep(30)
+
+
 async def post_init(application):
     init_backup_scheduler()
     asyncio.create_task(reminder_worker(application))
+    asyncio.create_task(active_work_object_reminder_worker(application))
     asyncio.create_task(auto_backup_worker(application))
 
 
@@ -14769,6 +14784,8 @@ def nina_save_task_to_one_nina(
         "legacy_task": task if isinstance(task, dict) else {"raw": str(task)},
         "raw_text": str(user_text or "").strip(),
         "one_nina_bridge": "telegram_detect_task_v1",
+        "reminder_at": str(task.get("reminder_at") or "") if isinstance(task, dict) else "",
+        "reminder_state": "scheduled" if isinstance(task, dict) and task.get("reminder_at") else "",
     }
 
     try:

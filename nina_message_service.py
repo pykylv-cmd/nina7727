@@ -238,6 +238,10 @@ def daily_work_summary(workspace_id: str, now=None, owner_id: str = ""):
     for obj in objects:
         if obj.object_id in reminder_sources:
             continue
+        if getattr(obj, "object_type", "") == "reminder" and str(
+            (getattr(obj, "metadata", {}) or {}).get("delivery_status") or ""
+        ) in {"delivered", "cancelled"}:
+            continue
         if str(getattr(obj, "status", "")).lower() in {
             "completed", "done", "archived", "cancelled", "rejected",
         }:
@@ -287,6 +291,10 @@ def materialize_due_reminders(workspace_id: str, now=None, owner_id: str = ""):
                 "source": "follow_up_engine",
                 "source_work_object_id": obj.object_id,
                 "reminder_at": metadata.get("reminder_at", ""),
+                "planned_at": metadata.get("reminder_at", ""),
+                "delivery_status": "scheduled",
+                "attempt_count": 0,
+                "unread": False,
             },
             origin_channel=obj.origin_channel,
             origin_user_id=obj.origin_user_id,
