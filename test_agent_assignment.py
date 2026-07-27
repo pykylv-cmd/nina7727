@@ -36,6 +36,7 @@ class AgentAssignmentV1Tests(unittest.TestCase):
             "rolepack_system",
             "ready_worker_catalog",
             "agent_assignment",
+            "knowledge_vault",
         )
         initialize_platform_runtime({
             identifier: (lambda: True) for identifier in capability_ids

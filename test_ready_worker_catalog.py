@@ -24,6 +24,7 @@ CAPABILITIES = (
     "rolepack_system",
     "ready_worker_catalog",
     "agent_assignment",
+    "knowledge_vault",
 )
 
 

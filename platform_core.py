@@ -955,6 +955,14 @@ _RUNTIME_CAPABILITIES = (
         "startup_order": 90,
         "dependencies": ("persistence_backend", "ready_worker_catalog"),
     },
+    {
+        "id": "knowledge_vault",
+        "name": "Knowledge Vault",
+        "version": "1",
+        "description": "Tenant-scoped, versioned authorized knowledge items.",
+        "startup_order": 100,
+        "dependencies": ("persistence_backend",),
+    },
 )
 
 
@@ -968,6 +976,7 @@ def _default_capability_health_checks():
     from rolepack_system import initialize_rolepack_system
     from ready_worker_catalog import initialize_ready_worker_catalog
     from agent_assignment import initialize_agent_assignment_service
+    from knowledge_vault import initialize_knowledge_vault
 
     contract = DeploymentCompatibilityContract(
         application_version=PLATFORM_CORE_VERSION,
@@ -991,6 +1000,7 @@ def _default_capability_health_checks():
         "rolepack_system": initialize_rolepack_system,
         "ready_worker_catalog": initialize_ready_worker_catalog,
         "agent_assignment": initialize_agent_assignment_service,
+        "knowledge_vault": initialize_knowledge_vault,
     }
 
 

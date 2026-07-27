@@ -57,6 +57,7 @@ class ManagedMigrationTests(unittest.TestCase):
             [
                 "0001_shared_conversation_state",
                 "0002_agent_assignment_v1",
+                "0003_knowledge_vault_v1",
             ],
         )
         self.assertIn(managed_migrations.LEDGER_TABLE, self._tables())
@@ -78,6 +79,7 @@ class ManagedMigrationTests(unittest.TestCase):
                 managed_migrations.BASELINE_ID,
                 "0001_shared_conversation_state",
                 "0002_agent_assignment_v1",
+                "0003_knowledge_vault_v1",
             ],
         )
 

@@ -105,6 +105,23 @@ from agent_assignment import (
     suspend_assignment,
     update_assignment,
 )
+from knowledge_vault import (
+    DEFAULT_LIST_LIMIT,
+    KnowledgeVaultConflictError,
+    KnowledgeVaultError,
+    KnowledgeVaultNotFoundError,
+    KnowledgeVaultTransitionError,
+    KnowledgeVaultValidationError,
+    activate_knowledge_item,
+    archive_knowledge_item,
+    create_knowledge_item,
+    create_knowledge_version,
+    get_knowledge_item,
+    initialize_knowledge_vault,
+    list_knowledge_versions,
+    list_tenant_knowledge,
+    update_draft,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +273,7 @@ WEB_RUNTIME_READINESS.register(
 WEB_RUNTIME_READINESS.register(
     "agent_assignment", initialize_agent_assignment_service
 )
+WEB_RUNTIME_READINESS.register("knowledge_vault", initialize_knowledge_vault)
 
 
 @app.before_request
@@ -6047,6 +6065,180 @@ def suspend_agent_assignment_api(assignment_id):
 @app.post("/agent-assignments/<assignment_id>/archive")
 def archive_agent_assignment_api(assignment_id):
     return _transition_agent_assignment_api(assignment_id, archive_assignment)
+
+
+def _knowledge_error_response(exc):
+    if isinstance(exc, KnowledgeVaultNotFoundError):
+        return jsonify({"ok": False, "error": "knowledge_item_not_found"}), 404
+    if isinstance(exc, KnowledgeVaultTransitionError):
+        return jsonify({"ok": False, "error": "invalid_status_transition"}), 409
+    if isinstance(exc, KnowledgeVaultConflictError):
+        return jsonify({"ok": False, "error": "knowledge_conflict"}), 409
+    if isinstance(exc, KnowledgeVaultValidationError):
+        code = str(exc).split(":", 1)[0]
+        status = 413 if code in {
+            "knowledge_content_too_large", "knowledge_metadata_too_large",
+        } else 400
+        return jsonify({"ok": False, "error": code}), status
+    logger.error(
+        "Knowledge Vault request failed error_class=%s", type(exc).__name__
+    )
+    return jsonify({"ok": False, "error": "knowledge_vault_unavailable"}), 503
+
+
+def _knowledge_payload(allowed):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise KnowledgeVaultValidationError("knowledge_json_object_required")
+    unknown = set(payload) - set(allowed)
+    if unknown:
+        raise KnowledgeVaultValidationError(
+            "knowledge_request_field_forbidden:" + ",".join(sorted(unknown))
+        )
+    return payload
+
+
+def _knowledge_query_integer(name, default):
+    raw = request.args.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as exc:
+        raise KnowledgeVaultValidationError(
+            f"knowledge_{name}_invalid"
+        ) from exc
+
+
+@app.post("/knowledge-vault/items")
+def create_knowledge_item_api():
+    try:
+        payload = _knowledge_payload({
+            "title", "source_type", "content", "content_format",
+            "source_name", "metadata",
+        })
+        item = create_knowledge_item(
+            current_workspace_id(),
+            title=payload.get("title"),
+            source_type=payload.get("source_type"),
+            content=payload.get("content"),
+            content_format=payload.get("content_format"),
+            source_name=payload.get("source_name", ""),
+            metadata=payload.get("metadata"),
+            created_by="workspace_client",
+        )
+        return jsonify({"ok": True, "item": item.as_dict()}), 201
+    except KnowledgeVaultError as exc:
+        return _knowledge_error_response(exc)
+
+
+@app.get("/knowledge-vault/items")
+def list_knowledge_items_api():
+    try:
+        items = list_tenant_knowledge(
+            current_workspace_id(),
+            status=request.args.get("status"),
+            source_type=request.args.get("source_type"),
+            query=request.args.get("query"),
+            limit=_knowledge_query_integer("limit", DEFAULT_LIST_LIMIT),
+            offset=_knowledge_query_integer("offset", 0),
+        )
+        return jsonify({
+            "ok": True,
+            "items": [item.as_dict(include_content=False) for item in items],
+        })
+    except KnowledgeVaultError as exc:
+        return _knowledge_error_response(exc)
+
+
+@app.get("/knowledge-vault/items/<knowledge_id>")
+def get_knowledge_item_api(knowledge_id):
+    try:
+        item = get_knowledge_item(current_workspace_id(), knowledge_id)
+        return jsonify({"ok": True, "item": item.as_dict()})
+    except KnowledgeVaultError as exc:
+        return _knowledge_error_response(exc)
+
+
+@app.patch("/knowledge-vault/items/<knowledge_id>")
+def update_knowledge_item_api(knowledge_id):
+    try:
+        payload = _knowledge_payload({
+            "title", "source_type", "content", "content_format",
+            "source_name", "metadata",
+        })
+        if not payload:
+            raise KnowledgeVaultValidationError("knowledge_update_required")
+        item = update_draft(
+            current_workspace_id(), knowledge_id,
+            title=payload.get("title") if "title" in payload else None,
+            source_type=payload.get("source_type")
+            if "source_type" in payload else None,
+            content=payload.get("content") if "content" in payload else None,
+            content_format=payload.get("content_format")
+            if "content_format" in payload else None,
+            source_name=payload.get("source_name")
+            if "source_name" in payload else None,
+            metadata=payload.get("metadata") if "metadata" in payload else None,
+        )
+        return jsonify({"ok": True, "item": item.as_dict()})
+    except KnowledgeVaultError as exc:
+        return _knowledge_error_response(exc)
+
+
+def _knowledge_transition_api(knowledge_id, operation):
+    try:
+        _knowledge_payload(set())
+        item = operation(current_workspace_id(), knowledge_id)
+        return jsonify({"ok": True, "item": item.as_dict()})
+    except KnowledgeVaultError as exc:
+        return _knowledge_error_response(exc)
+
+
+@app.post("/knowledge-vault/items/<knowledge_id>/activate")
+def activate_knowledge_item_api(knowledge_id):
+    return _knowledge_transition_api(knowledge_id, activate_knowledge_item)
+
+
+@app.post("/knowledge-vault/items/<knowledge_id>/archive")
+def archive_knowledge_item_api(knowledge_id):
+    return _knowledge_transition_api(knowledge_id, archive_knowledge_item)
+
+
+@app.post("/knowledge-vault/items/<knowledge_id>/versions")
+def create_knowledge_version_api(knowledge_id):
+    try:
+        payload = _knowledge_payload({
+            "title", "source_type", "content", "content_format",
+            "source_name", "metadata",
+        })
+        item = create_knowledge_version(
+            current_workspace_id(), knowledge_id,
+            title=payload.get("title"),
+            source_type=payload.get("source_type"),
+            content=payload.get("content"),
+            content_format=payload.get("content_format"),
+            source_name=payload.get("source_name"),
+            metadata=payload.get("metadata"),
+            created_by="workspace_client",
+        )
+        return jsonify({"ok": True, "item": item.as_dict()}), 201
+    except KnowledgeVaultError as exc:
+        return _knowledge_error_response(exc)
+
+
+@app.get("/knowledge-vault/items/<knowledge_id>/versions")
+def list_knowledge_versions_api(knowledge_id):
+    try:
+        versions = list_knowledge_versions(
+            current_workspace_id(), knowledge_id
+        )
+        return jsonify({
+            "ok": True,
+            "versions": [item.as_dict() for item in versions],
+        })
+    except KnowledgeVaultError as exc:
+        return _knowledge_error_response(exc)
 
 
 @app.post("/internal/runtime/compatibility")

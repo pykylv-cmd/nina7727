@@ -139,6 +139,7 @@ class PlatformCapabilityRegistryTests(unittest.TestCase):
                 "rolepack_system",
                 "ready_worker_catalog",
                 "agent_assignment",
+                "knowledge_vault",
             )
         }
         registry = initialize_platform_runtime(checks)
@@ -162,6 +163,7 @@ class PlatformCapabilityRegistryTests(unittest.TestCase):
                 "rolepack_system",
                 "ready_worker_catalog",
                 "agent_assignment",
+                "knowledge_vault",
             )
         }
         checks["message_service"] = lambda: False

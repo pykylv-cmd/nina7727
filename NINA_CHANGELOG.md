@@ -2,6 +2,26 @@
 
 # NinaOS Changelog
 
+## 2026-07-27 — Knowledge Vault V1
+
+Implemented one tenant-owned authorized Knowledge Vault under ONE NINA:
+
+- versioned `KnowledgeItem` records with provenance and SHA-256 checksums;
+- managed EXPAND migration `0003_knowledge_vault_v1`;
+- controlled `draft`, `active`, terminal `archived` lifecycle;
+- immutable history when active authoritative content changes;
+- tenant-isolated CRUD, version-history, lifecycle, and keyword search APIs;
+- bounded content, metadata, filters, pagination, and sensitive-field checks;
+- Platform Core capability registration and regression tests.
+
+V1 stores authorized structured text and document/URL reference records. It
+does not upload binaries, parse PDF/DOCX, fetch URLs, create embeddings,
+provide semantic search/RAG, create worker/channel memory, or autonomously
+execute stored instructions. Universal Work Objects V1 becomes the next
+planned layer.
+
+---
+
 ## 2026-07-27 — Agent Assignment V1
 
 Implemented tenant-scoped Agent Assignment management under ONE NINA:

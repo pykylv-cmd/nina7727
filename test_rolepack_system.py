@@ -23,6 +23,8 @@ CAPABILITY_IDS = (
     "channel_services",
     "rolepack_system",
     "ready_worker_catalog",
+    "agent_assignment",
+    "knowledge_vault",
 )
 
 

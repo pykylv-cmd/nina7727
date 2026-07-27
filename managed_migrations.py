@@ -138,6 +138,62 @@ def _create_agent_assignments(conn):
     cur.close()
 
 
+def _create_knowledge_vault(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_knowledge_items (
+            knowledge_id TEXT NOT NULL,
+            tenant_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            source_type TEXT NOT NULL CHECK (
+                source_type IN (
+                    'text','note','document','url_reference','structured_data'
+                )
+            ),
+            status TEXT NOT NULL CHECK (
+                status IN ('draft','active','archived')
+            ),
+            content TEXT NOT NULL,
+            content_format TEXT NOT NULL CHECK (
+                content_format IN ('plain_text','markdown','json')
+            ),
+            source_name TEXT NOT NULL DEFAULT '',
+            version INTEGER NOT NULL CHECK (version >= 1),
+            checksum TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            activated_at TEXT NOT NULL DEFAULT '',
+            archived_at TEXT NOT NULL DEFAULT '',
+            parent_version INTEGER,
+            PRIMARY KEY (tenant_id, knowledge_id, version),
+            CHECK (parent_version IS NULL OR parent_version < version)
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_knowledge_tenant
+        ON nina_knowledge_items (tenant_id)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_knowledge_status
+        ON nina_knowledge_items (status)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_knowledge_tenant_status
+        ON nina_knowledge_items (tenant_id, status)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_knowledge_tenant_item_version
+        ON nina_knowledge_items (tenant_id, knowledge_id, version DESC)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_knowledge_tenant_source
+        ON nina_knowledge_items (tenant_id, source_type)
+    """)
+    cur.close()
+
+
 MIGRATIONS = (
     Migration(
         identifier="0001_shared_conversation_state",
@@ -163,6 +219,22 @@ MIGRATIONS = (
             "configuration_json,permissions_json,assigned_by,created_at,"
             "updated_at,activated_at,suspended_at,archived_at|"
             "indexes:tenant,definition,status,tenant_status,tenant_definition"
+        ),
+    ),
+    Migration(
+        identifier="0003_knowledge_vault_v1",
+        version=3,
+        name="Create tenant-scoped Knowledge Vault V1",
+        phase=PHASE_EXPAND,
+        operation=_create_knowledge_vault,
+        checksum_source=(
+            "0003|EXPAND|nina_knowledge_items|"
+            "knowledge_id,tenant_id,title,source_type,status,content,"
+            "content_format,source_name,version,checksum,metadata_json,"
+            "created_by,created_at,updated_at,activated_at,archived_at,"
+            "parent_version|pk:tenant_knowledge_version|"
+            "checks:source_type,status,content_format,version,parent_version|"
+            "indexes:tenant,status,tenant_status,tenant_item_version,tenant_source"
         ),
     ),
 )

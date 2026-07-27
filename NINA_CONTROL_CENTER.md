@@ -31,8 +31,8 @@ controllers retain low-level safety.
 ## Current, next, and future
 
 - **Implemented:** Platform Core V1, RolePack System V1, Ready Worker
-  Catalog V1, and Agent Assignment V1.
-- **Planned next:** Knowledge Vault V1.
+  Catalog V1, Agent Assignment V1, and Knowledge Vault V1.
+- **Planned next:** Universal Work Objects V1.
 - **Implemented in limited scope:** existing canonical Work Objects and
   WhatsApp paths; these precede
   but do not complete the platform-wide future layers bearing those names.
@@ -88,5 +88,17 @@ create separate Nina identities, or own memory/work truth.
 
 ## Immediate build task
 
-Implement **Knowledge Vault V1** next, preserving ONE NINA, tenant isolation,
-and the Agent Assignment boundary.
+Implement **Universal Work Objects V1** next according to the canonical
+sequence, preserving ONE NINA, tenant isolation, and the separate Agent
+Assignment and Knowledge Vault boundaries.
+
+## Knowledge Vault V1 boundary
+
+Knowledge Vault V1 provides tenant-owned `KnowledgeItem` CRUD, controlled
+activation/archive lifecycle, immutable active-content version history,
+checksums, provenance, bounded metadata, and tenant-scoped keyword search.
+
+It is not conversation memory, a customer profile, worker/channel memory,
+binary file storage, PDF/DOCX ingestion, semantic retrieval, RAG, a prompt
+library, or a secrets manager. Stored client instructions remain inert data
+until a separately governed future workflow uses them.

@@ -1,5 +1,44 @@
 # NINA_ARCHITECTURE_LEDGER.md
 
+## AL-013 — Knowledge Vault V1 implementation
+
+Status: ACTIVE / IMPLEMENTED
+
+Knowledge Vault V1 is one Nina's tenant-owned, authorized knowledge source. It
+stores versioned `KnowledgeItem` records in shared persistence; it is not
+conversation memory, a customer profile, a Work Object, worker memory, channel
+storage, a prompt library, or a secrets store.
+
+The managed EXPAND migration `0003_knowledge_vault_v1` creates
+`nina_knowledge_items`. Its composite identity is tenant, knowledge ID, and
+version. It validates closed source types and content formats, enforces the
+`draft -> active -> archived` lifecycle, stores SHA-256 content checksums,
+origin, metadata, actors, timestamps, and parent-version links, and provides
+tenant/status/source/version indexes.
+
+Drafts may be edited in place. Changing active authoritative content creates a
+new active version and archives the previous immutable version in one
+transaction. Archived versions are terminal. All reads, mutations, searches,
+and version-history operations include the server-authenticated tenant.
+
+Implemented search is bounded, deterministic SQL keyword matching over title,
+source name, content, and metadata. It is not semantic search. V1 supports
+authorized text, notes, structured JSON, and document/URL reference records;
+it does not upload binaries, fetch URLs, parse PDF/DOCX, create embeddings,
+run RAG, or autonomously approve or execute stored content.
+
+Knowledge Vault depends on shared persistence, not Agent Assignment, channels,
+workers, or an AI provider. This preserves ONE NINA and prevents worker- or
+channel-specific memory forks.
+
+Verified locally: focused Knowledge Vault/foundation tests passed. Full suite
+evidence is recorded in the implementation report. This is implementation and
+local test evidence, not deployment or production verification.
+
+Next planned layer: **Universal Work Objects V1**.
+
+---
+
 ## AL-012 — Agent Assignment V1 implementation
 
 Status: ACTIVE / IMPLEMENTED
@@ -34,7 +73,8 @@ route, or channel connection.
 Verified locally: Python 233/233 and Node 38/38 passed. This is implementation
 and test evidence, not deployment or production verification.
 
-Next planned layer: **Knowledge Vault V1**.
+Knowledge Vault V1 was the next planned layer at this checkpoint and is now
+implemented in AL-013.
 
 ---
 
@@ -97,9 +137,9 @@ are completed. OpenAI integration, existing channels, Work Objects, and
 approval/audit concepts are recorded at their evidenced scope rather than
 promoted to complete future platform layers.
 
-**Current and next:** Agent Assignment V1 is implemented. Knowledge Vault V1
-is the immediate planned implementation layer; the agreed build order remains
-intact.
+**Current and next:** Agent Assignment V1 and Knowledge Vault V1 are
+implemented. Universal Work Objects V1 is the immediate planned implementation
+layer; the agreed build order remains intact.
 
 **Strategic future:** AI Provider Hub, routing/evaluation, consolidated Trust
 and Voice layers, connectors, human approval, devices/robots, fleet
@@ -193,8 +233,8 @@ This checkpoint refines but does not replace the Constitution's broader roadmap:
 2. RolePack System V1 — completed
 3. Ready Worker Catalog V1 — completed
 4. Agent Assignment V1 — completed in AL-012
-5. Knowledge Vault V1 — next
-6. Universal Work Objects V1
+5. Knowledge Vault V1 — completed in AL-013
+6. Universal Work Objects V1 — next
 7. Channel Layer V1
 8. Billing V1
 9. Nina Exchange V1

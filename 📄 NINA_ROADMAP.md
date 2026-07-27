@@ -12,7 +12,8 @@ they are not required to build bots.
 
 The immediate architecture sequence is Platform Core V1 (Implemented),
 RolePack System V1 (Implemented), Ready Worker Catalog V1 (Implemented), Agent
-Assignment V1 (Implemented), then **Knowledge Vault V1 (Planned, next)**. The
+Assignment V1 (Implemented), Knowledge Vault V1 (Implemented), then
+**Universal Work Objects V1 (Planned, next)**. The
 older phase roadmap below is retained as
 historical product context where it does not conflict with that sequence.
 
@@ -40,8 +41,11 @@ Roadmap status language is constitutional:
 - **Long-Term Vision** means strategic direction, not current functionality.
 
 Agent Assignment V1 is **Implemented** as tenant-scoped management and
-lifecycle, not autonomous worker execution. The current immediate item is
-**Planned: Knowledge Vault V1**. Provider Hub,
+lifecycle, not autonomous worker execution. Knowledge Vault V1 is
+**Implemented** for versioned authorized structured knowledge and bounded
+keyword search. Binary ingestion, parsing, embeddings, semantic retrieval,
+RAG, and autonomous knowledge use remain Planned. The current immediate item
+is **Planned: Universal Work Objects V1**. Provider Hub,
 complete Voice, robots/humanoids, fleet orchestration, and global control are
 **Long-Term Vision**. Existing WhatsApp and OpenAI paths remain limited current
 implementation evidence and must not be generalized into complete layers.

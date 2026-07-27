@@ -28,8 +28,8 @@ Status vocabulary:
 | RolePack System V1 | Implemented | Versioned jobs, boundaries, permissions |
 | Ready Worker Layer | Implemented | Reviewed versioned worker definitions |
 | Agent Assignment Layer | Implemented | Tenant-scoped customer worker instances and lifecycle |
-| Knowledge Vault | Planned — next | Governed customer/worker knowledge |
-| Universal Work Objects | Planned; limited implementation exists | Platform-wide ownership and execution model |
+| Knowledge Vault V1 | Implemented | Tenant-owned versioned authorized knowledge items and basic search |
+| Universal Work Objects | Planned — next; limited implementation exists | Platform-wide ownership and execution model |
 | Channel Layer | Planned; limited channel implementations exist | Neutral channel contracts and coherent identity/work |
 | Billing | Planned | Entitlements, usage, budgets, charging |
 | Nina Exchange | Planned | Governed worker and service ecosystem |
@@ -59,14 +59,14 @@ replaceable resources through stable contracts.
 2. RolePack System V1 — Implemented
 3. Ready Worker Catalog V1 — Implemented
 4. Agent Assignment V1 — Implemented
-5. Knowledge Vault V1 — Planned, next
-6. Universal Work Objects V1 — Planned platform layer
+5. Knowledge Vault V1 — Implemented
+6. Universal Work Objects V1 — Planned, next platform layer
 7. Channel Layer V1 — Planned platform layer
 8. Billing V1 — Planned
 9. Nina Exchange V1 — Planned
 10. Mobile and extended interfaces — Planned
 
-Agent Assignment V1 manages assignments only; it does not execute workers,
-provision channels, or create worker-specific memory. Strategic layers do not
-displace Knowledge Vault V1. The architecture ledger must record any future
-sequence change.
+Knowledge Vault V1 manages tenant-owned structured knowledge and version
+history only. Its search is keyword-based; binary ingestion, parsing,
+embeddings, semantic retrieval, RAG, and autonomous knowledge use remain
+Planned. The architecture ledger must record any future sequence change.

@@ -34,9 +34,9 @@ model, and the experience remains Nina-centered.
   still current.
 
 Implemented: Platform Core V1, RolePack System V1, Ready Worker Catalog V1,
-and Agent Assignment V1.
+Agent Assignment V1, and Knowledge Vault V1.
 
-Next exact task: **Knowledge Vault V1**. Do not rebuild completed layers.
+Next exact task: **Universal Work Objects V1**. Do not rebuild completed layers.
 
 ## Present truth versus direction
 
@@ -57,7 +57,7 @@ Next exact task: **Knowledge Vault V1**. Do not rebuild completed layers.
 
 ## Architecture boundary
 
-`RolePack -> Ready Worker Definition -> Agent Assignment (implemented) -> Knowledge Vault (next) -> Universal Work ownership/execution`
+`RolePack -> Ready Worker Definition -> Agent Assignment (implemented) -> Knowledge Vault (implemented) -> Universal Work ownership/execution (next)`
 
 Definitions are not customer-owned worker instances. Channels and providers are
 adapters, not identity or work truth.
@@ -66,6 +66,13 @@ Agent Assignment V1 is management only: exact Ready Worker version,
 tenant-owned assignment ID, validated configuration and narrowed permissions,
 and a controlled lifecycle. It has no autonomous execution, separate Nina,
 separate memory, separate task truth, provider routing, or channel provisioning.
+
+Knowledge Vault V1 is one tenant-owned authorized knowledge source under Nina:
+versioned structured text/reference records, provenance, checksums, lifecycle,
+and bounded keyword search. It is separate from conversation memory, customer
+profiles, Work Objects, workers, and channels. Binary uploads, document
+parsing, embeddings, semantic search, RAG, external-source synchronization,
+and autonomous knowledge use are not implemented.
 
 ## Required safety
 
@@ -85,11 +92,11 @@ Project `confident-expression`, environment `staging`, Web/Core
 `secure-rebirth`, Company WhatsApp bridge `happy-education`. The recorded
 deployed commit is `fe5dba4...`; verify externally before relying on it.
 
-## Files to inspect before Knowledge Vault
+## Files to inspect before Universal Work Objects V1
 
 `NinaOS_Constitution_V6.md`, `NINA_ARCHITECTURE_LEDGER.md`,
 `NINA_PROJECT_STATE.json`, `platform_core.py`, `rolepack_system.py`,
 `ready_worker_registry.py`, `ready_worker_catalog.py`,
-`agent_assignment.py`,
+`agent_assignment.py`, `knowledge_vault.py`,
 `runtime_readiness.py`, `persistence_backend.py`, `managed_migrations.py`,
 `web_app.py`, and the corresponding tests.
