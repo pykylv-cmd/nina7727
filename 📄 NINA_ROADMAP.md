@@ -3,6 +3,25 @@
 
 # NinaOS Roadmap
 
+## Constitution V6 alignment
+
+The authoritative direction is `NinaOS_Constitution_V6.md`: customers speak
+with Nina, and Nina coordinates permitted ready workers, providers, systems,
+channels, people, and future physical workers. Customers receive ready workers;
+they are not required to build bots.
+
+The immediate architecture sequence is Platform Core V1 (implemented),
+RolePack System V1 (implemented), Ready Worker Catalog V1 (implemented), then
+**Agent Assignment V1 (next)**. The older phase roadmap below is retained as
+historical product context where it does not conflict with that sequence.
+
+WhatsApp is no longer merely future: Meta Cloud API and Personal/Company
+WhatsApp paths exist at partial status. The complete provider-neutral Channel
+Layer remains planned. OpenAI is the evidenced runtime AI provider; the
+multi-provider Hub is strategic. Voice is experimental/partial. Robot and
+humanoid orchestration is strategic future architecture with no current
+physical-control implementation.
+
 Version: 1.0
 Status: Active
 

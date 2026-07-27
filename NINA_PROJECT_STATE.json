@@ -1,81 +1,50 @@
 {
   "project": "NinaOS",
-  "checkpoint": {
-    "name": "Platform Foundation V1",
+  "repository": "pykylv-cmd/nina7727",
+  "branch": "feature/web-chat-v1",
+  "constitution": {
+    "version": 6,
+    "status": "authoritative",
+    "file": "NinaOS_Constitution_V6.md",
+    "governing_vision": "Universal AI workforce operating system: the customer defines the result and Nina coordinates the permitted people, AI workers, providers, systems, channels, devices, and future robots."
+  },
+  "architecture": {
+    "checkpoint": "Platform Foundation V1",
     "implementation_commit": "fe5dba4839e59daa4b0ad0b7d3f3fb812b2f3e70",
-    "branch": "feature/web-chat-v1",
-    "status": "completed",
-    "next_component": "Agent Assignment V1"
+    "completed_layers": ["Platform Core V1", "RolePack System V1", "Ready Worker Catalog V1"],
+    "next_layer": "Agent Assignment V1",
+    "planned_layers": ["Knowledge Vault V1", "Universal Work Objects V1", "Channel Layer V1", "Billing V1", "Nina Exchange V1", "Mobile and extended interfaces"],
+    "strategic_future_layers": ["Nina Experience Layer", "Voice Layer", "AI Provider Hub", "Model Router", "Model Evaluation", "Nina Trust Layer", "Connector Layer", "Human Approval Layer", "Device and Robot Layer", "Fleet Orchestration", "Global Control Plane"]
   },
-  "identity": {
-    "platform": "AI Economy Operating System",
-    "first_worker": "Nina",
-    "product_rule": "NinaOS is not a bot builder; customers receive ready AI workers",
-    "channels": "adapters into shared NinaOS capabilities"
-  },
-  "completed_platform_layers": [
-    "Platform Core V1",
-    "RolePack System V1",
-    "Ready Worker Catalog V1"
-  ],
-  "architecture_flow": [
-    "RolePack",
-    "Ready Worker Definition",
-    "future Agent Assignment",
-    "future Knowledge Vault",
-    "future Universal Work ownership and execution"
-  ],
-  "legacy_runtime_context": {
-    "blueprint": "1.1",
-    "app_router": "V116 Router Priority",
-    "core": "2.6.1 Initiative Detector",
-    "employee_brain": "Core Evolution 2.6.1",
-    "think_engine": "2.6.1",
-    "profile": "restored",
-    "premium": "working",
-    "fixed_bugs": {
-      "BUG-001": "core 2.6.1 routing fixed",
-      "BUG-002": "profile/memory restored with seed and bridge",
-      "BUG-003": "premium responds and uses profile name"
+  "current_capability_truth": {
+    "whatsapp": {
+      "status": "partial",
+      "evidence": "Meta Cloud API adapter plus Personal and Company WhatsApp Baileys bridge paths, persistence, web endpoints, and tests exist; platform-wide Channel Layer and universal production status are not established."
+    },
+    "ai_providers": {
+      "status": "partial",
+      "active_runtime_integrations": ["OpenAI"],
+      "not_evidenced_as_runtime_integrations": ["Anthropic", "Google Gemini", "xAI", "Mistral", "Ollama", "other local models"],
+      "strategic_target": "Provider-neutral AI Provider Hub with adapter-based routing and evaluation."
+    },
+    "voice": {
+      "status": "experimental",
+      "present": ["browser audio capture/input", "OpenAI audio transcription", "voice-related engine and tests"],
+      "not_established": ["provider-neutral text-to-speech", "full duplex streaming conversation", "telephony", "interrupt handling", "persistent voice selection or voice memory"]
+    },
+    "robots_and_humanoids": {
+      "status": "strategic future",
+      "physical_control_implemented": false,
+      "requirements": ["device identity", "fleet assignment", "telemetry", "authorization", "local certified safety controllers"]
     }
   },
   "staging": {
     "project": "confident-expression",
     "environment": "staging",
     "web_service": "secure-rebirth",
-    "deployed_commit": "fe5dba4839e59daa4b0ad0b7d3f3fb812b2f3e70",
-    "pre_deploy_command": "python manage_migrations.py expand",
-    "start_command": "python web_app.py",
-    "live": {
-      "alive": true,
-      "runtime": "web"
-    },
-    "ready": true,
-    "failure_class": ""
+    "whatsapp_bridge_service": "happy-education",
+    "deployed_commit": "fe5dba4839e59daa4b0ad0b7d3f3fb812b2f3e70"
   },
-  "test_baseline": {
-    "python": "213/213 passed",
-    "node": "38/38 passed",
-    "focused_platform": "60/60 passed",
-    "deployment_safety": "38/38 passed",
-    "syntax": "passed",
-    "required_imports": "passed",
-    "legacy_ready_worker_compatibility": "passed",
-    "git_diff_check": "passed"
-  },
-  "source_of_truth": [
-    "NinaOS_Constitution_V5.md",
-    "NINA_START.md",
-    "NinaOS_Blueprint_1.1.md",
-    "NINA_ARCHITECTURE_LEDGER.md",
-    "NINA_PROJECT_STATE.json",
-    "NINA_MANIFEST.json",
-    "NINA_BUG_TRACKER.md",
-    "TEST_PROTOCOL.md",
-    "NINA_CONTROL_CENTER.md",
-    "NINA_BLUEPRINT.md",
-    "NinaOS_Managed_Migrations_V1.md",
-    "NINA_NEW_CHAT_START_PACK.md"
-  ],
+  "source_of_truth": ["NinaOS_Constitution_V6.md", "NINA_ARCHITECTURE_LEDGER.md", "NINA_PROJECT_STATE.json", "NINA_CONTROL_CENTER.md", "NINA_BLUEPRINT.md", "NINA_NEW_CHAT_START_PACK.md"],
   "last_updated_utc": "2026-07-27T00:00:00Z"
 }

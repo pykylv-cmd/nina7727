@@ -1,5 +1,55 @@
 # NINA_ARCHITECTURE_LEDGER.md
 
+## AL-010 — Constitution V6: universal AI workforce operating system
+
+Status: ACTIVE
+Governing document: `NinaOS_Constitution_V6.md`
+
+V6 expands V5.1 from an AI workforce/business platform into a durable universal
+coordination constitution without weakening V5.1's platform, safety,
+persistence, deployment, or workflow rules.
+
+### Decision
+
+- The customer speaks with Nina; Nina is the identity and orchestration layer,
+  not an AI provider.
+- Provider neutrality is mandatory. The AI Provider Hub, stable provider
+  adapters, Model Router, and Model Evaluation are strategic architecture.
+- The Nina Trust Layer governs every current and future layer.
+- Voice is core experience infrastructure; current input experiments do not
+  constitute the complete Voice Layer.
+- Physical machines, robots, and humanoids are future worker types. NinaOS may
+  coordinate work and policy, but certified local controllers retain low-level
+  motion and safety.
+- A visible AI brand area may show only genuinely connected and permitted
+  providers. It remains secondary to the Nina-centered experience.
+- Future vision must never be documented as implemented, tested, deployed, or
+  production-verified functionality.
+
+### Architecture horizons
+
+**Current:** Platform Core V1, RolePack System V1, and Ready Worker Catalog V1
+are completed. OpenAI integration, existing channels, Work Objects, and
+approval/audit concepts are recorded at their evidenced scope rather than
+promoted to complete future platform layers.
+
+**Next:** Agent Assignment V1 remains the immediate implementation layer. V6
+does not change the agreed build order.
+
+**Strategic future:** AI Provider Hub, routing/evaluation, consolidated Trust
+and Voice layers, connectors, human approval, devices/robots, fleet
+orchestration, and Global Control Plane.
+
+### Reason
+
+The repository already contains valuable business, worker, channel, voice, and
+durability foundations, but earlier documents blurred current implementation
+with ambition and centered some flows on individual channels/providers. V6
+establishes stable boundaries so new technology attaches to NinaOS instead of
+redefining it.
+
+---
+
 ## AL-009 — Platform Foundation V1 checkpoint
 Status: ACTIVE
 Implementation checkpoint: `fe5dba4839e59daa4b0ad0b7d3f3fb812b2f3e70`

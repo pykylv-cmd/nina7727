@@ -1,117 +1,72 @@
-# NinaOS new chat start pack — Platform Foundation V1
+# NinaOS New Chat Start Pack — Constitution V6
 
-Paste this package into a new ChatGPT conversation before continuing NinaOS.
+## Governing law
 
-## Governing direction
+Read `NinaOS_Constitution_V6.md` first. It is authoritative; V5.1 is historical.
 
-Follow `NinaOS_Constitution_V5.md` (V5.1).
-
-NinaOS is not a bot builder. Customers receive reviewed ready AI workers.
-Telegram, Web and WhatsApp are channels into shared NinaOS capabilities, not
-separate brains.
+NinaOS is a universal AI workforce operating system. The customer tells Nina
+the desired result. Nina coordinates the best permitted people, ready workers,
+AI providers, systems, channels, devices, and future robots. Nina is not one
+model, and the experience remains Nina-centered.
 
 ## Repository checkpoint
 
 - Repository: `pykylv-cmd/nina7727`
 - Branch: `feature/web-chat-v1`
-- Platform implementation checkpoint:
+- Architecture checkpoint before V6: `a9c639df62c65098fcbb6fb69fdb334398848593`
+- Latest documented deployed functional commit:
   `fe5dba4839e59daa4b0ad0b7d3f3fb812b2f3e70`
-- Architecture checkpoint: this document's commit; verify with
-  `git log -1 --oneline`
+- Always verify current Git and deployment state; do not assume either hash is
+  still current.
 
-Completed layers:
+Implemented: Platform Core V1, RolePack System V1, Ready Worker Catalog V1.
 
-1. Platform Core V1
-2. RolePack System V1
-3. Ready Worker Catalog V1
+Next exact task: **Agent Assignment V1**. Do not rebuild completed layers.
 
-Do not rebuild or replace these layers.
+## Present truth versus direction
 
-## Current architecture
+- WhatsApp: partial. Meta Cloud API plus Personal and Company/Baileys paths,
+  persistence, endpoints, and tests exist. The universal Channel Layer is not
+  complete.
+- AI providers: OpenAI runtime integration is evidenced. A provider-neutral AI
+  Provider Hub, other providers, model routing, and evaluation are strategic.
+- Voice: experimental/partial browser audio input and OpenAI transcription.
+  Complete provider-neutral STT/TTS, telephony, interruption, and voice
+  continuity are not established.
+- Robots/humanoids: strategic future only. No physical control is implemented;
+  local safety controllers remain authoritative.
+- Nina Trust Layer: mandatory governing rule across every current and future
+  layer, even before it becomes one consolidated implementation layer.
 
-`RolePack → Ready Worker Definition → Agent Assignment (next) → Knowledge Vault → Universal Work ownership/execution`
+## Architecture boundary
 
-- RolePacks define versioned jobs, permissions and operating boundaries.
-- Ready Workers bind exact RolePack versions and immutable provisioning defaults.
-- Neither object is a customer-owned worker instance.
+`RolePack -> Ready Worker Definition -> Agent Assignment (next) -> Knowledge Vault -> Universal Work ownership/execution`
 
-## Next exact task
+Definitions are not customer-owned worker instances. Channels and providers are
+adapters, not identity or work truth.
 
-Implement **Agent Assignment V1**.
+## Required safety
 
-It must connect:
+- PostgreSQL is authoritative hosted persistence and hosted startup fails
+  closed.
+- Preserve EXPAND-first managed migrations, rolling compatibility, restart
+  persistence, request gating, tenant isolation, and liveness/readiness split.
+- Preserve separate Telegram/Core (`app.py`) and Web (`web_app.py`) runtimes.
+- Never expose credentials, tokens, keys, provider identities, or database URLs.
+- Capabilities and permissions are separate; use least privilege and approval.
+- Distinguish planned, implemented, tested, deployed, and production-verified.
+- Do not deploy or change Railway without explicit authorization.
 
-- one customer workspace;
-- one exact Ready Worker version;
-- one stable worker instance ID;
-- lifecycle and provisioning state;
-- customer-specific language, timezone and permissions;
-- PostgreSQL persistence.
+## Railway staging record
 
-Agent Assignment V1 must not yet execute autonomous work or provision external
-channels.
+Project `confident-expression`, environment `staging`, Web/Core
+`secure-rebirth`, Company WhatsApp bridge `happy-education`. The recorded
+deployed commit is `fe5dba4...`; verify externally before relying on it.
 
-## Railway staging
+## Files to inspect before Agent Assignment
 
-- Project: `confident-expression`
-- Environment: `staging`
-- Web/Core service: `secure-rebirth`
-- Deployed commit: `fe5dba4839e59daa4b0ad0b7d3f3fb812b2f3e70`
-- Public Web URL: `https://secure-rebirth-staging.up.railway.app`
-- Pre-deploy: `python manage_migrations.py expand`
-- Start: `python web_app.py`
-- `/live`: `{"alive":true,"runtime":"web"}`
-- `/ready`: `ready=true`
-
-The Node Company WhatsApp bridge remains `happy-education`; it does not serve the
-Web UI.
-
-Never expose database URLs, tokens, encryption keys or credentials.
-
-## Verified test baseline
-
-- Python: 213/213 passed
-- Node: 38/38 passed
-- Focused catalog/RolePack/Platform/readiness: 60/60 passed
-- Deployment-safety regression group: 38/38 passed
-- Syntax, required imports, legacy Ready Worker compatibility and
-  `git diff --check`: passed
-
-## Inspect these files first
-
-1. `NinaOS_Constitution_V5.md`
-2. `NINA_ARCHITECTURE_LEDGER.md`
-3. `NINA_PROJECT_STATE.json`
-4. `platform_core.py`
-5. `rolepack_system.py`
-6. `ready_worker_registry.py`
-7. `ready_worker_catalog.py`
-8. `runtime_readiness.py`
-9. `persistence_backend.py`
-10. `managed_migrations.py`
-11. `web_app.py`
-12. `app.py`
-13. `test_platform_core.py`
-14. `test_rolepack_system.py`
-15. `test_ready_worker_catalog.py`
-
-## Safety constraints
-
-- Preserve PostgreSQL fail-closed behavior in hosted runtimes.
-- Preserve managed EXPAND migrations and migration ledger validation.
-- Preserve liveness/readiness separation and request gating.
-- Preserve rolling-deploy compatibility and restart-persistence guarantees.
-- Preserve separate `app.py` Telegram/Core and `web_app.py` Web runtimes.
-- Do not import `app.py` into `web_app.py`.
-- Do not create duplicate memory, routing, work, identity or channel systems.
-- Do not change Railway or deploy without explicit approval.
-
-## Known limitations and deferred work
-
-- No Agent Assignment or customer worker instances yet.
-- No worker provisioning or runtime multi-role routing.
-- No RolePack or Ready Worker database persistence in V1.
-- No catalog UI, billing or entitlement system.
-- Knowledge Vault, platform-wide Universal Work ownership, Channel Layer,
-  Billing, Nina Exchange and later Mobile layers remain deferred.
-- Existing legacy Ready Worker command APIs are intentionally preserved.
+`NinaOS_Constitution_V6.md`, `NINA_ARCHITECTURE_LEDGER.md`,
+`NINA_PROJECT_STATE.json`, `platform_core.py`, `rolepack_system.py`,
+`ready_worker_registry.py`, `ready_worker_catalog.py`,
+`runtime_readiness.py`, `persistence_backend.py`, `managed_migrations.py`,
+`web_app.py`, and the corresponding tests.

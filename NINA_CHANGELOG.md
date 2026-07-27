@@ -2,6 +2,23 @@
 
 # NinaOS Changelog
 
+## 2026-07-27 — Constitution V6
+
+Adopted `NinaOS_Constitution_V6.md` as the authoritative governing document.
+Aligned the architecture ledger, structured project state, control center,
+blueprint, roadmap, and new-chat handoff.
+
+V6 defines NinaOS as a universal, provider-neutral AI workforce operating
+system; makes the Nina Trust Layer mandatory; establishes AI Provider Hub,
+Voice, connectors, and robot/fleet layers as strategic architecture; preserves
+Agent Assignment V1 as next; and records current WhatsApp, OpenAI, voice, and
+robot truth without presenting future vision as implemented.
+
+Scope: documentation and project-state JSON only. No runtime, migration,
+environment, Railway, product behavior, push, or deployment change.
+
+---
+
 ## 2026-07-27 — Platform Foundation V1 architecture checkpoint
 
 Recorded Platform Core V1, RolePack System V1, Ready Worker Catalog V1,
