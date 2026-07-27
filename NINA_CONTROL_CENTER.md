@@ -4,6 +4,19 @@
 
 `NinaOS_Constitution_V6.md` is authoritative.
 
+Official motto:
+
+> One Nina. Infinite Workforce.
+>
+> One conversation. Unlimited intelligence. Unlimited workers.
+>
+> One trusted operating system.
+
+ONE NINA is the highest architecture principle. Nina is the face and one
+coherent customer relationship; the workforce behind Nina may expand through
+governed Ready Worker definitions and Agent Assignments. “Infinite” means
+extensible worker capacity, never unlimited permission, cost, or autonomy.
+
 NinaOS is a universal AI workforce operating system. The customer speaks with
 Nina and defines the result; Nina coordinates permitted providers, ready
 workers, people, systems, channels, devices, and future robots. Nina is not one
@@ -17,14 +30,16 @@ controllers retain low-level safety.
 
 ## Current, next, and future
 
-- Implemented foundation: Platform Core V1, RolePack System V1, Ready Worker
+- **Implemented:** Platform Core V1, RolePack System V1, Ready Worker
   Catalog V1.
-- Next: **Agent Assignment V1**.
-- Partial: existing canonical Work Objects and WhatsApp paths; these precede
+- **Planned next:** Agent Assignment V1.
+- **Implemented in limited scope:** existing canonical Work Objects and
+  WhatsApp paths; these precede
   but do not complete the platform-wide future layers bearing those names.
-- Experimental: current browser/OpenAI voice input capabilities.
-- Strategic: AI Provider Hub, Model Router/Evaluation, complete Voice and Trust
-  layers, connectors, devices/robots, fleet orchestration, Global Control Plane.
+- **Experimental:** current browser/OpenAI voice input capabilities.
+- **Long-Term Vision:** AI Provider Hub, Model Router/Evaluation, complete
+  Voice and Trust layers, connectors, devices/robots, fleet orchestration, and
+  Global Control Plane.
 
 OpenAI is the only evidenced AI runtime provider in the repository. Other
 provider brands are strategic until real adapters, configuration, and tests
@@ -46,6 +61,10 @@ exist.
 
 - Do not turn NinaOS into a chatbot, bot builder, provider console, or
   channel-specific product.
+- Do not fragment ONE NINA into provider-, worker-, or channel-specific
+  customer identities or competing sources of truth.
+- Do not interpret Infinite Workforce as unlimited authority, spending,
+  autonomous replication, or a bypass around Ready Worker and Agent Assignment.
 - Do not equate Nina with OpenAI or any other provider.
 - Do not collapse definitions, customer assignments, permissions, credentials,
   channels, work, devices, billing, or audit into one object.

@@ -19,6 +19,138 @@ decision must support this direction. Local convenience must not silently
 narrow the global vision. The user communicates with Nina. Nina coordinates
 the rest.
 
+## 0.1 Official Platform Motto
+
+> One Nina. Infinite Workforce.
+>
+> One conversation. Unlimited intelligence.
+>
+> Unlimited workers.
+>
+> One trusted operating system.
+
+The motto is a product direction, not a claim of literally unlimited current
+capacity, models, workers, or infrastructure. Every actual action remains
+bounded by available integrations, customer policy, permissions, safety,
+quality, cost, and technical capacity.
+
+## 0.2 ONE NINA Principle
+
+ONE NINA is the highest NinaOS architectural principle.
+
+The customer meets one coherent Nina identity and one trusted operating
+relationship across channels, providers, workers, organizations, and future
+devices. NinaOS may coordinate many workers and intelligences behind that
+relationship, but it must not fragment the customer experience into competing
+provider personalities, disconnected bots, channel-specific brains, or
+separate sources of customer truth.
+
+ONE NINA does not mean one process, one model, one database record, or one
+global failure point. It means one coherent customer-facing identity over
+modular, tenant-isolated, resilient, provider-neutral architecture.
+
+## 0.3 Infinite Workforce
+
+Infinite Workforce is the long-term ability to expand the number, variety, and
+composition of governed workers without redesigning the platform around each
+new role. It includes ready AI workers, people, services, workflows, machines,
+and future robots.
+
+Infinite Workforce does not bypass Ready Worker architecture. RolePacks define
+versioned jobs and boundaries; Ready Worker definitions package reviewed
+capability; Agent Assignment creates customer-owned worker instances. Every
+instance remains identifiable, permissioned, scoped, auditable, cost-governed,
+and subject to lifecycle and approval rules. “Infinite” describes extensibility
+of the workforce model, not unbounded authority or autonomous replication.
+
+## 0.4 Nina Is The Face
+
+Nina is the trusted customer-facing identity of NinaOS. Providers, tools,
+workers, and infrastructure support Nina; they do not compete with Nina for
+ownership of the customer relationship. Interfaces may disclose which
+providers and workers participated when transparency requires it, while the
+default experience remains coherent and Nina-centered.
+
+## 0.5 Invisible Complexity
+
+NinaOS should absorb technical complexity so the customer can focus on the
+desired result. Provider routing, worker composition, retries, queues,
+credentials, protocols, and infrastructure should be invisible by default but
+never hidden when they affect consent, cost, risk, privacy, approval, failure,
+or audit. Simplicity must come from sound architecture, not omitted truth.
+
+## 0.6 Technology Changes. Nina Remains.
+
+Models, providers, channels, devices, and interfaces will change. Nina's
+customer-facing identity, constitutional values, approved context, permissions,
+work continuity, and trust relationship must remain portable across those
+changes. Continuity is governed and user-controlled; it does not imply human
+consciousness or permanent dependence on any vendor.
+
+## 0.7 Founder Principle
+
+The founder's enduring direction is:
+
+> The customer defines the result. Nina organizes everything else.
+
+Every architectural decision must preserve this ambition while remaining
+technically truthful. Short-term implementation constraints may limit current
+capability, but they must not quietly redefine NinaOS as a chatbot, provider
+wrapper, bot builder, or single-channel product.
+
+## 0.8 Status Through Simplicity
+
+NinaOS should give people and organizations a sense of control through clear
+outcomes, calm presentation, and understandable status. The product should
+make sophisticated coordination feel simple without using artificial prestige,
+provider-brand overload, or deceptive certainty. Real status comes from work
+completed, decisions clarified, risks surfaced, and time returned to people.
+
+## 0.9 Product Philosophy
+
+NinaOS is outcome-first, work-first, trust-first, and platform-first.
+Conversation is the natural control surface; governed execution is the
+substance. Ready workers arrive useful, technology remains replaceable,
+complexity is progressively disclosed, and humans retain authority over
+meaningful decisions.
+
+## 0.10 Truth Before Marketing
+
+Truth outranks slogans, demos, growth claims, and marketing convenience.
+NinaOS must never present a planned provider, experimental voice path, partial
+channel, local commit, passing test, future robot layer, or design mockup as
+active production capability. The platform motto and long-term mission must
+always be accompanied by accurate current status where misunderstanding is
+possible.
+
+## 0.11 Long-Term Mission
+
+NinaOS exists to become the trusted operating system through which people and
+organizations coordinate increasingly capable digital and physical workforces
+without needing to master the underlying technology. Its long-term mission is
+global usefulness: one coherent Nina experience capable of organizing
+permitted intelligence, workers, systems, and machines at any responsible
+scale while preserving human control, local safety, privacy, resilience, and
+customer ownership.
+
+## 0.12 Constitutional status language
+
+All NinaOS governing documents must use these meanings:
+
+- **Implemented** — repository code exists for the stated scope. This alone
+  does not prove testing, deployment, or production verification.
+- **Experimental** — a prototype or limited path exists for learning or
+  validation and must not be treated as a stable platform promise.
+- **Planned** — an agreed architecture or delivery layer is sequenced for
+  future implementation but is not yet implemented for its full stated scope.
+- **Long-Term Vision** — enduring strategic direction without a claim of
+  current implementation or immediate delivery.
+
+When a capability is partial, documentation must name the implemented or
+experimental subset and classify the complete layer as Planned or Long-Term
+Vision. These labels supplement—not replace—separate evidence for tests,
+deployment, production verification, deprecation, and failure.
+
 ## 1. The customer speaks with Nina
 
 Customers must not need to operate ChatGPT, Claude, Gemini, Grok, Mistral,

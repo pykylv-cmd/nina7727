@@ -4,6 +4,20 @@
 
 Read `NinaOS_Constitution_V6.md` first. It is authoritative; V5.1 is historical.
 
+Official motto:
+
+> One Nina. Infinite Workforce.
+>
+> One conversation. Unlimited intelligence. Unlimited workers.
+>
+> One trusted operating system.
+
+ONE NINA is the highest architecture principle. Nina is the single coherent
+customer-facing identity over modular providers, workers, channels, and future
+devices. Infinite Workforce means extensibility through RolePacks, Ready Worker
+definitions, and Agent Assignments; it never means unlimited permission,
+spending, autonomous replication, or bypassing governance.
+
 NinaOS is a universal AI workforce operating system. The customer tells Nina
 the desired result. Nina coordinates the best permitted people, ready workers,
 AI providers, systems, channels, devices, and future robots. Nina is not one
@@ -25,15 +39,17 @@ Next exact task: **Agent Assignment V1**. Do not rebuild completed layers.
 
 ## Present truth versus direction
 
-- WhatsApp: partial. Meta Cloud API plus Personal and Company/Baileys paths,
+- **Implemented in limited scope:** Meta Cloud API plus Personal and
+  Company/Baileys WhatsApp paths,
   persistence, endpoints, and tests exist. The universal Channel Layer is not
-  complete.
-- AI providers: OpenAI runtime integration is evidenced. A provider-neutral AI
-  Provider Hub, other providers, model routing, and evaluation are strategic.
-- Voice: experimental/partial browser audio input and OpenAI transcription.
+  complete and remains Planned.
+- **Implemented in limited scope:** OpenAI runtime integration is evidenced.
+  The provider-neutral AI Provider Hub, other providers, model routing, and
+  evaluation are Long-Term Vision.
+- **Experimental:** browser audio input and OpenAI transcription.
   Complete provider-neutral STT/TTS, telephony, interruption, and voice
-  continuity are not established.
-- Robots/humanoids: strategic future only. No physical control is implemented;
+  continuity are Long-Term Vision and are not established.
+- **Long-Term Vision:** robots/humanoids. No physical control is implemented;
   local safety controllers remain authoritative.
 - Nina Trust Layer: mandatory governing rule across every current and future
   layer, even before it becomes one consolidated implementation layer.

@@ -22,6 +22,27 @@ multi-provider Hub is strategic. Voice is experimental/partial. Robot and
 humanoid orchestration is strategic future architecture with no current
 physical-control implementation.
 
+## ONE NINA North Star
+
+> One Nina. Infinite Workforce.
+
+ONE NINA is the highest principle. The roadmap grows one coherent Nina
+experience over many governed workers and technologies. Infinite Workforce is
+delivered through the Ready Worker architecture and customer-owned Agent
+Assignments—not by making uncontrolled bots.
+
+Roadmap status language is constitutional:
+
+- **Implemented** means code exists for the stated scope.
+- **Experimental** means a limited validation path exists.
+- **Planned** means an agreed future delivery layer.
+- **Long-Term Vision** means strategic direction, not current functionality.
+
+The current immediate item is **Planned: Agent Assignment V1**. Provider Hub,
+complete Voice, robots/humanoids, fleet orchestration, and global control are
+**Long-Term Vision**. Existing WhatsApp and OpenAI paths remain limited current
+implementation evidence and must not be generalized into complete layers.
+
 Version: 1.0
 Status: Active
 

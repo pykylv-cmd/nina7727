@@ -1,5 +1,30 @@
 # NINA_ARCHITECTURE_LEDGER.md
 
+## AL-011 — ONE NINA and Infinite Workforce
+
+Status: ACTIVE
+
+ONE NINA is the highest architecture principle. It requires one coherent
+customer-facing Nina identity and operating relationship across many modular
+workers, providers, channels, and future devices. It does not require one
+model, process, datastore, region, or failure domain.
+
+Infinite Workforce is compatible with the existing worker chain:
+
+`RolePack -> Ready Worker Definition -> Agent Assignment -> governed worker instance`
+
+The principle permits extensible worker types and large workforce composition;
+it does not permit unreviewed bot generation, unlimited authority, autonomous
+replication, or bypassing identity, permissions, lifecycle, cost, approval, and
+audit. Agent Assignment V1 therefore remains the next implementation layer.
+
+Documentation uses four constitutional statuses: **Implemented**,
+**Experimental**, **Planned**, and **Long-Term Vision**. Partial capability must
+be described by its evidenced subset and must not promote a complete future
+layer to Implemented.
+
+---
+
 ## AL-010 — Constitution V6: universal AI workforce operating system
 
 Status: ACTIVE
