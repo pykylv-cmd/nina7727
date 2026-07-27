@@ -3,6 +3,28 @@
 Production release remains pending manual environment and database preflight
 verification. Channel Layer V1 remains Planned.
 
+## Production Legacy Schema Adoption
+
+Legacy adoption is schema evidence, not a data migration. It must never change
+business data or mark a migration complete without proving its entire final
+schema contract.
+
+1. Run `python manage_migrations.py inspect-production-schema`.
+2. Review `production_schema_adoption_report.json` and
+   `NINA_PRODUCTION_SCHEMA_ADOPTION_REPORT.md`.
+3. Run `python manage_migrations.py adopt-baseline --plan`.
+4. Only on PASS, run `python manage_migrations.py adopt-baseline --apply
+   --fingerprint <reviewed-fingerprint>`.
+5. Run `python manage_migrations.py preflight`.
+6. Only on preflight PASS, run `python manage_migrations.py expand`.
+7. Deploy the Web service.
+8. Verify health endpoints and production smoke tests.
+
+Adoption may create the migration ledger and record only migrations whose
+complete contracts are already satisfied. It does not create or alter business
+tables. Any schema, duplicate-key, referential, nullability, identity, or
+fingerprint conflict stops the release.
+
 1. Run `git fetch origin`, verify `git status --short`, and require
    `git rev-list --left-right --count HEAD...@{upstream}` to report no remote
    commits on the right before push.
