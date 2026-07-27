@@ -931,6 +931,14 @@ _RUNTIME_CAPABILITIES = (
         "startup_order": 60,
         "dependencies": ("message_service", "contact_identity"),
     },
+    {
+        "id": "rolepack_system",
+        "name": "RolePack System",
+        "version": "1",
+        "description": "Authoritative ready-worker role definition registry.",
+        "startup_order": 70,
+        "dependencies": ("work_objects", "channel_services"),
+    },
 )
 
 
@@ -941,6 +949,7 @@ def _default_capability_health_checks():
     import persistence_backend
     import work_objects
     from deployment_compatibility import DeploymentCompatibilityContract
+    from rolepack_system import initialize_rolepack_system
 
     contract = DeploymentCompatibilityContract(
         application_version=PLATFORM_CORE_VERSION,
@@ -961,6 +970,7 @@ def _default_capability_health_checks():
         "channel_services": lambda: callable(
             channel_connections.get_connection
         ),
+        "rolepack_system": initialize_rolepack_system,
     }
 
 
