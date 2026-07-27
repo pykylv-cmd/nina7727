@@ -56,6 +56,11 @@ class RailwayRuntimeContractTests(unittest.TestCase):
         self.assertNotIn("active_work_object_reminder_worker", source)
         self.assertNotIn("start_active_reminder_scheduler", source)
 
+    def test_web_reminder_actions_are_bound_at_module_scope(self):
+        import web_app
+        self.assertTrue(callable(web_app.snooze_reminder))
+        self.assertTrue(callable(web_app.complete_reminder))
+
 
 class SchedulerLifecycleTests(unittest.IsolatedAsyncioTestCase):
     @classmethod

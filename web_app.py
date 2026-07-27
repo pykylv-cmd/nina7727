@@ -86,6 +86,7 @@ from persistence_backend import (
     safe_table_count,
 )
 from runtime_readiness import get_runtime_readiness
+from reminder_delivery import complete_reminder, snooze_reminder
 from deployment_compatibility import DeploymentCompatibilityContract
 from platform_core import initialize_platform_runtime
 from rolepack_system import initialize_rolepack_system
@@ -343,7 +344,6 @@ def _expected_request_origin():
         str(request.headers.get("X-Forwarded-Proto") or request.scheme)
         .split(",", 1)[0].strip().lower()
     )
-    from reminder_delivery import complete_reminder, snooze_reminder
     return f"{scheme}://{request.host}".rstrip("/")
 
 
