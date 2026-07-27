@@ -939,6 +939,14 @@ _RUNTIME_CAPABILITIES = (
         "startup_order": 70,
         "dependencies": ("work_objects", "channel_services"),
     },
+    {
+        "id": "ready_worker_catalog",
+        "name": "Ready Worker Catalog",
+        "version": "1",
+        "description": "Authoritative deployable worker definition registry.",
+        "startup_order": 80,
+        "dependencies": ("rolepack_system",),
+    },
 )
 
 
@@ -950,6 +958,7 @@ def _default_capability_health_checks():
     import work_objects
     from deployment_compatibility import DeploymentCompatibilityContract
     from rolepack_system import initialize_rolepack_system
+    from ready_worker_catalog import initialize_ready_worker_catalog
 
     contract = DeploymentCompatibilityContract(
         application_version=PLATFORM_CORE_VERSION,
@@ -971,6 +980,7 @@ def _default_capability_health_checks():
             channel_connections.get_connection
         ),
         "rolepack_system": initialize_rolepack_system,
+        "ready_worker_catalog": initialize_ready_worker_catalog,
     }
 
 

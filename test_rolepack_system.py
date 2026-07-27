@@ -22,6 +22,7 @@ CAPABILITY_IDS = (
     "message_service",
     "channel_services",
     "rolepack_system",
+    "ready_worker_catalog",
 )
 
 

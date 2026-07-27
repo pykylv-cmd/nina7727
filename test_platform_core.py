@@ -137,6 +137,7 @@ class PlatformCapabilityRegistryTests(unittest.TestCase):
                 "deployment_compatibility",
                 "work_objects",
                 "rolepack_system",
+                "ready_worker_catalog",
             )
         }
         registry = initialize_platform_runtime(checks)
@@ -158,6 +159,7 @@ class PlatformCapabilityRegistryTests(unittest.TestCase):
                 "deployment_compatibility",
                 "work_objects",
                 "rolepack_system",
+                "ready_worker_catalog",
             )
         }
         checks["message_service"] = lambda: False

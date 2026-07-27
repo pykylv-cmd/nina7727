@@ -533,3 +533,24 @@ def build_ready_worker_answer(text):
     if worker:
         return worker_detail_answer(worker)
     return workers_catalog_answer()
+
+
+# Additive deployable-definition API. The legacy customer command catalog above
+# remains unchanged and continues to serve its existing public interface.
+from ready_worker_registry import (  # noqa: E402,F401
+    READY_WORKER_DEFINITION_REGISTRY_VERSION,
+    DuplicateReadyWorkerError,
+    ReadyWorkerCatalog,
+    ReadyWorkerCatalogError,
+    ReadyWorkerCatalogNotHealthyError,
+    ReadyWorkerDefinition,
+    ReadyWorkerNotFoundError,
+    ReadyWorkerValidationError,
+    ReadyWorkerVersionConflictError,
+    RolePackBinding,
+    compare_ready_worker_versions,
+    get_ready_worker,
+    get_ready_worker_catalog,
+    initialize_ready_worker_catalog,
+    list_ready_workers,
+)

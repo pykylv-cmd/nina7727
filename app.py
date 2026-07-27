@@ -32,6 +32,7 @@ from channel_connections import consume_telegram_token, is_telegram_connection_t
 from runtime_readiness import get_runtime_readiness
 from platform_core import initialize_platform_runtime
 from rolepack_system import initialize_rolepack_system
+from ready_worker_catalog import initialize_ready_worker_catalog
 
 # ONE NINA Canonical Channel Content + Document Work Intake V1
 # V117.8: channel-content and document-action imports are isolated.
@@ -18599,6 +18600,9 @@ APP_RUNTIME_READINESS.register(
 )
 APP_RUNTIME_READINESS.register("platform_core", initialize_platform_runtime)
 APP_RUNTIME_READINESS.register("rolepack_system", initialize_rolepack_system)
+APP_RUNTIME_READINESS.register(
+    "ready_worker_catalog", initialize_ready_worker_catalog
+)
 
 telegram_app = (
     Application.builder()

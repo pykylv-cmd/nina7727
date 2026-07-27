@@ -89,6 +89,7 @@ from runtime_readiness import get_runtime_readiness
 from deployment_compatibility import DeploymentCompatibilityContract
 from platform_core import initialize_platform_runtime
 from rolepack_system import initialize_rolepack_system
+from ready_worker_catalog import initialize_ready_worker_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +235,9 @@ WEB_RUNTIME_READINESS.register(
 )
 WEB_RUNTIME_READINESS.register("platform_core", initialize_platform_runtime)
 WEB_RUNTIME_READINESS.register("rolepack_system", initialize_rolepack_system)
+WEB_RUNTIME_READINESS.register(
+    "ready_worker_catalog", initialize_ready_worker_catalog
+)
 
 
 @app.before_request
