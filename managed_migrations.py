@@ -90,6 +90,54 @@ def _create_conversation_state(conn):
     cur.close()
 
 
+def _create_agent_assignments(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_agent_assignments (
+            assignment_id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            ready_worker_definition_id TEXT NOT NULL,
+            definition_version TEXT NOT NULL,
+            primary_rolepack_id TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (
+                status IN ('draft','active','suspended','archived')
+            ),
+            configuration_json TEXT NOT NULL DEFAULT '{}',
+            permissions_json TEXT NOT NULL DEFAULT '{}',
+            assigned_by TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            activated_at TEXT NOT NULL DEFAULT '',
+            suspended_at TEXT NOT NULL DEFAULT '',
+            archived_at TEXT NOT NULL DEFAULT ''
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_agent_assignments_tenant
+        ON nina_agent_assignments (tenant_id)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_agent_assignments_definition
+        ON nina_agent_assignments (ready_worker_definition_id)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_agent_assignments_status
+        ON nina_agent_assignments (status)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_agent_assignments_tenant_status
+        ON nina_agent_assignments (tenant_id, status)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_agent_assignments_tenant_definition
+        ON nina_agent_assignments (
+            tenant_id, ready_worker_definition_id, definition_version
+        )
+    """)
+    cur.close()
+
+
 MIGRATIONS = (
     Migration(
         identifier="0001_shared_conversation_state",
@@ -100,6 +148,21 @@ MIGRATIONS = (
         checksum_source=(
             "0001|EXPAND|conversation_state|"
             "id,user_id,user_text,nina_text,intent,emotion,topic,created_at"
+        ),
+    ),
+    Migration(
+        identifier="0002_agent_assignment_v1",
+        version=2,
+        name="Create tenant-scoped Agent Assignment V1",
+        phase=PHASE_EXPAND,
+        operation=_create_agent_assignments,
+        checksum_source=(
+            "0002|EXPAND|nina_agent_assignments|"
+            "assignment_id,tenant_id,ready_worker_definition_id,"
+            "definition_version,primary_rolepack_id,display_name,status,"
+            "configuration_json,permissions_json,assigned_by,created_at,"
+            "updated_at,activated_at,suspended_at,archived_at|"
+            "indexes:tenant,definition,status,tenant_status,tenant_definition"
         ),
     ),
 )

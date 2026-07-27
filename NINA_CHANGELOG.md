@@ -2,6 +2,24 @@
 
 # NinaOS Changelog
 
+## 2026-07-27 — Agent Assignment V1
+
+Implemented tenant-scoped Agent Assignment management under ONE NINA:
+
+- exact Ready Worker definition/version and primary RolePack references;
+- managed EXPAND migration `0002_agent_assignment_v1`;
+- validated assignment configuration and least-privilege permission narrowing;
+- controlled `draft`, `active`, `suspended`, `archived` lifecycle;
+- tenant-isolated create/get/list/update/transition service operations;
+- tenant-derived Web JSON API endpoints;
+- Platform Core capability registration and full regression tests.
+
+This does not implement autonomous worker execution, separate memory/work
+truth, provider routing, channel provisioning, Knowledge Vault, billing, or UI
+rebuild. Knowledge Vault V1 becomes the next planned layer.
+
+---
+
 ## 2026-07-27 — Constitution V6
 
 Adopted `NinaOS_Constitution_V6.md` as the authoritative governing document.

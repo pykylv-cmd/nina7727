@@ -947,6 +947,14 @@ _RUNTIME_CAPABILITIES = (
         "startup_order": 80,
         "dependencies": ("rolepack_system",),
     },
+    {
+        "id": "agent_assignment",
+        "name": "Agent Assignment",
+        "version": "1",
+        "description": "Tenant-scoped Ready Worker assignment lifecycle.",
+        "startup_order": 90,
+        "dependencies": ("persistence_backend", "ready_worker_catalog"),
+    },
 )
 
 
@@ -959,6 +967,7 @@ def _default_capability_health_checks():
     from deployment_compatibility import DeploymentCompatibilityContract
     from rolepack_system import initialize_rolepack_system
     from ready_worker_catalog import initialize_ready_worker_catalog
+    from agent_assignment import initialize_agent_assignment_service
 
     contract = DeploymentCompatibilityContract(
         application_version=PLATFORM_CORE_VERSION,
@@ -981,6 +990,7 @@ def _default_capability_health_checks():
         ),
         "rolepack_system": initialize_rolepack_system,
         "ready_worker_catalog": initialize_ready_worker_catalog,
+        "agent_assignment": initialize_agent_assignment_service,
     }
 
 

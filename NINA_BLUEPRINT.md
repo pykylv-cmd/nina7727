@@ -27,8 +27,8 @@ Status vocabulary:
 | Platform Core V1 | Implemented | Capability graph, initialization, readiness |
 | RolePack System V1 | Implemented | Versioned jobs, boundaries, permissions |
 | Ready Worker Layer | Implemented | Reviewed versioned worker definitions |
-| Agent Assignment Layer | Planned — next | Customer-owned worker instances |
-| Knowledge Vault | Planned | Governed customer/worker knowledge |
+| Agent Assignment Layer | Implemented | Tenant-scoped customer worker instances and lifecycle |
+| Knowledge Vault | Planned — next | Governed customer/worker knowledge |
 | Universal Work Objects | Planned; limited implementation exists | Platform-wide ownership and execution model |
 | Channel Layer | Planned; limited channel implementations exist | Neutral channel contracts and coherent identity/work |
 | Billing | Planned | Entitlements, usage, budgets, charging |
@@ -58,13 +58,15 @@ replaceable resources through stable contracts.
 1. Platform Core V1 — Implemented
 2. RolePack System V1 — Implemented
 3. Ready Worker Catalog V1 — Implemented
-4. Agent Assignment V1 — Planned, next
-5. Knowledge Vault V1 — Planned
+4. Agent Assignment V1 — Implemented
+5. Knowledge Vault V1 — Planned, next
 6. Universal Work Objects V1 — Planned platform layer
 7. Channel Layer V1 — Planned platform layer
 8. Billing V1 — Planned
 9. Nina Exchange V1 — Planned
 10. Mobile and extended interfaces — Planned
 
-Strategic layers do not displace Agent Assignment V1. The architecture ledger
-must record any future sequence change.
+Agent Assignment V1 manages assignments only; it does not execute workers,
+provision channels, or create worker-specific memory. Strategic layers do not
+displace Knowledge Vault V1. The architecture ledger must record any future
+sequence change.

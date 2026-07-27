@@ -31,8 +31,8 @@ controllers retain low-level safety.
 ## Current, next, and future
 
 - **Implemented:** Platform Core V1, RolePack System V1, Ready Worker
-  Catalog V1.
-- **Planned next:** Agent Assignment V1.
+  Catalog V1, and Agent Assignment V1.
+- **Planned next:** Knowledge Vault V1.
 - **Implemented in limited scope:** existing canonical Work Objects and
   WhatsApp paths; these precede
   but do not complete the platform-wide future layers bearing those names.
@@ -75,10 +75,18 @@ exist.
   exist.
 - Do not rebuild completed foundation layers.
 
+## Agent Assignment V1 boundary
+
+Agent Assignment V1 now binds one authenticated tenant to one exact Ready
+Worker version and stable assignment ID. It provides validated configuration,
+least-privilege permission narrowing, and `draft`, `active`, `suspended`, and
+terminal `archived` lifecycle management through shared persistence and
+tenant-scoped APIs.
+
+It does not execute autonomous work, provision channels, route providers,
+create separate Nina identities, or own memory/work truth.
+
 ## Immediate build task
 
-Implement **Agent Assignment V1** only in the next task. It must bind one
-workspace to one exact Ready Worker version and a stable customer worker
-instance, with lifecycle/provisioning state and customer language, timezone,
-and permission configuration in PostgreSQL. It must not yet execute autonomous
-work or provision external channels.
+Implement **Knowledge Vault V1** next, preserving ONE NINA, tenant isolation,
+and the Agent Assignment boundary.

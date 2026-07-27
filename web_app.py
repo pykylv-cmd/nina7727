@@ -90,6 +90,21 @@ from deployment_compatibility import DeploymentCompatibilityContract
 from platform_core import initialize_platform_runtime
 from rolepack_system import initialize_rolepack_system
 from ready_worker_catalog import initialize_ready_worker_catalog
+from agent_assignment import (
+    AgentAssignmentConflictError,
+    AgentAssignmentError,
+    AgentAssignmentNotFoundError,
+    AgentAssignmentTransitionError,
+    AgentAssignmentValidationError,
+    activate_assignment,
+    archive_assignment,
+    create_assignment,
+    get_assignment,
+    initialize_agent_assignment_service,
+    list_tenant_assignments,
+    suspend_assignment,
+    update_assignment,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +252,9 @@ WEB_RUNTIME_READINESS.register("platform_core", initialize_platform_runtime)
 WEB_RUNTIME_READINESS.register("rolepack_system", initialize_rolepack_system)
 WEB_RUNTIME_READINESS.register(
     "ready_worker_catalog", initialize_ready_worker_catalog
+)
+WEB_RUNTIME_READINESS.register(
+    "agent_assignment", initialize_agent_assignment_service
 )
 
 
@@ -5899,6 +5917,136 @@ def _bridge_json():
         return None
     payload = request.get_json(silent=True)
     return payload if isinstance(payload, dict) else None
+
+
+def _agent_assignment_error_response(exc):
+    if isinstance(exc, AgentAssignmentNotFoundError):
+        return jsonify({"ok": False, "error": "agent_assignment_not_found"}), 404
+    if isinstance(exc, AgentAssignmentTransitionError):
+        return jsonify({"ok": False, "error": "invalid_status_transition"}), 409
+    if isinstance(exc, AgentAssignmentConflictError):
+        return jsonify({"ok": False, "error": "assignment_conflict"}), 409
+    if isinstance(exc, AgentAssignmentValidationError):
+        code = str(exc).split(":", 1)[0]
+        return jsonify({"ok": False, "error": code}), 400
+    logger.error(
+        "Agent Assignment request failed error_class=%s",
+        type(exc).__name__,
+    )
+    return jsonify({"ok": False, "error": "agent_assignment_unavailable"}), 503
+
+
+def _assignment_payload(allowed):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise AgentAssignmentValidationError(
+            "agent_assignment_json_object_required"
+        )
+    unknown = set(payload) - set(allowed)
+    if unknown:
+        raise AgentAssignmentValidationError(
+            "agent_assignment_request_field_forbidden:"
+            + sorted(unknown)[0]
+        )
+    return payload
+
+
+@app.post("/agent-assignments")
+def create_agent_assignment_api():
+    try:
+        payload = _assignment_payload({
+            "ready_worker_definition_id",
+            "definition_version",
+            "display_name",
+            "configuration",
+            "permissions",
+        })
+        assignment = create_assignment(
+            current_workspace_id(),
+            payload.get("ready_worker_definition_id"),
+            payload.get("definition_version"),
+            payload.get("display_name"),
+            payload.get("configuration"),
+            payload.get("permissions"),
+            assigned_by="workspace_client",
+        )
+        return jsonify({"ok": True, "assignment": assignment.as_dict()}), 201
+    except AgentAssignmentError as exc:
+        return _agent_assignment_error_response(exc)
+
+
+@app.get("/agent-assignments")
+def list_agent_assignments_api():
+    try:
+        assignments = list_tenant_assignments(
+            current_workspace_id(),
+            status=request.args.get("status"),
+            limit=request.args.get("limit", 200),
+        )
+        return jsonify({
+            "ok": True,
+            "assignments": [item.as_dict() for item in assignments],
+        })
+    except AgentAssignmentError as exc:
+        return _agent_assignment_error_response(exc)
+
+
+@app.get("/agent-assignments/<assignment_id>")
+def get_agent_assignment_api(assignment_id):
+    try:
+        assignment = get_assignment(current_workspace_id(), assignment_id)
+        return jsonify({"ok": True, "assignment": assignment.as_dict()})
+    except AgentAssignmentError as exc:
+        return _agent_assignment_error_response(exc)
+
+
+@app.patch("/agent-assignments/<assignment_id>")
+def update_agent_assignment_api(assignment_id):
+    try:
+        payload = _assignment_payload({
+            "display_name", "configuration", "permissions",
+        })
+        if not payload:
+            raise AgentAssignmentValidationError(
+                "agent_assignment_update_required"
+            )
+        assignment = update_assignment(
+            current_workspace_id(),
+            assignment_id,
+            display_name=payload.get("display_name")
+            if "display_name" in payload else None,
+            configuration=payload.get("configuration")
+            if "configuration" in payload else None,
+            permissions=payload.get("permissions")
+            if "permissions" in payload else None,
+        )
+        return jsonify({"ok": True, "assignment": assignment.as_dict()})
+    except AgentAssignmentError as exc:
+        return _agent_assignment_error_response(exc)
+
+
+def _transition_agent_assignment_api(assignment_id, operation):
+    try:
+        _assignment_payload(set())
+        assignment = operation(current_workspace_id(), assignment_id)
+        return jsonify({"ok": True, "assignment": assignment.as_dict()})
+    except AgentAssignmentError as exc:
+        return _agent_assignment_error_response(exc)
+
+
+@app.post("/agent-assignments/<assignment_id>/activate")
+def activate_agent_assignment_api(assignment_id):
+    return _transition_agent_assignment_api(assignment_id, activate_assignment)
+
+
+@app.post("/agent-assignments/<assignment_id>/suspend")
+def suspend_agent_assignment_api(assignment_id):
+    return _transition_agent_assignment_api(assignment_id, suspend_assignment)
+
+
+@app.post("/agent-assignments/<assignment_id>/archive")
+def archive_agent_assignment_api(assignment_id):
+    return _transition_agent_assignment_api(assignment_id, archive_assignment)
 
 
 @app.post("/internal/runtime/compatibility")

@@ -10,9 +10,10 @@ with Nina, and Nina coordinates permitted ready workers, providers, systems,
 channels, people, and future physical workers. Customers receive ready workers;
 they are not required to build bots.
 
-The immediate architecture sequence is Platform Core V1 (implemented),
-RolePack System V1 (implemented), Ready Worker Catalog V1 (implemented), then
-**Agent Assignment V1 (next)**. The older phase roadmap below is retained as
+The immediate architecture sequence is Platform Core V1 (Implemented),
+RolePack System V1 (Implemented), Ready Worker Catalog V1 (Implemented), Agent
+Assignment V1 (Implemented), then **Knowledge Vault V1 (Planned, next)**. The
+older phase roadmap below is retained as
 historical product context where it does not conflict with that sequence.
 
 WhatsApp is no longer merely future: Meta Cloud API and Personal/Company
@@ -38,7 +39,9 @@ Roadmap status language is constitutional:
 - **Planned** means an agreed future delivery layer.
 - **Long-Term Vision** means strategic direction, not current functionality.
 
-The current immediate item is **Planned: Agent Assignment V1**. Provider Hub,
+Agent Assignment V1 is **Implemented** as tenant-scoped management and
+lifecycle, not autonomous worker execution. The current immediate item is
+**Planned: Knowledge Vault V1**. Provider Hub,
 complete Voice, robots/humanoids, fleet orchestration, and global control are
 **Long-Term Vision**. Existing WhatsApp and OpenAI paths remain limited current
 implementation evidence and must not be generalized into complete layers.

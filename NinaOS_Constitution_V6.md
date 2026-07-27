@@ -451,9 +451,11 @@ decision may do so.
 
 ## 35. Current completed foundation
 
-The documented completed layers are Platform Core V1, RolePack System V1, and
-Ready Worker Catalog V1. Agent Assignment V1 remains next. It must not be
-called complete without implementation and passing tests.
+The documented completed layers are Platform Core V1, RolePack System V1,
+Ready Worker Catalog V1, and Agent Assignment V1. Agent Assignment provides
+tenant-scoped worker instance management and lifecycle only; it does not
+execute autonomous work, create separate memory, or provision channels.
+Knowledge Vault V1 is the next planned architecture layer.
 
 ## 36. Documentation truth
 

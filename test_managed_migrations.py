@@ -52,7 +52,13 @@ class ManagedMigrationTests(unittest.TestCase):
     def test_empty_database_initializes_ledger_and_expand_migration(self):
         result = managed_migrations.run_migrations()
         self.assertEqual(result["adoption"], "empty-database")
-        self.assertEqual(result["applied"], ["0001_shared_conversation_state"])
+        self.assertEqual(
+            result["applied"],
+            [
+                "0001_shared_conversation_state",
+                "0002_agent_assignment_v1",
+            ],
+        )
         self.assertIn(managed_migrations.LEDGER_TABLE, self._tables())
         self.assertIn("conversation_state", self._tables())
         self.assertEqual(self._ledger()[0][2], 1)
@@ -68,7 +74,11 @@ class ManagedMigrationTests(unittest.TestCase):
         identifiers = [row[0] for row in self._ledger()]
         self.assertEqual(
             identifiers,
-            [managed_migrations.BASELINE_ID, "0001_shared_conversation_state"],
+            [
+                managed_migrations.BASELINE_ID,
+                "0001_shared_conversation_state",
+                "0002_agent_assignment_v1",
+            ],
         )
 
     def test_ambiguous_existing_schema_fails_closed(self):
