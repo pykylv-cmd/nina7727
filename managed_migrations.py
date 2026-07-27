@@ -54,6 +54,10 @@ class ContractMigrationForbidden(MigrationError):
     pass
 
 
+class MigrationPreflightError(MigrationError):
+    pass
+
+
 @dataclass(frozen=True)
 class Migration:
     identifier: str
@@ -224,15 +228,13 @@ def _create_universal_work_objects(conn):
             updated_at TEXT NOT NULL
         )
     """)
-    if persistence_backend.USE_POSTGRES:
-        cur.execute("""
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name='nina_work_objects'
-        """)
-        columns = {str(row[0]) for row in (cur.fetchall() or [])}
-    else:
-        cur.execute("PRAGMA table_info(nina_work_objects)")
-        columns = {str(row[1]) for row in (cur.fetchall() or [])}
+    columns = set(_column_contract(conn, "nina_work_objects"))
+    _assert_compatible_columns(
+        "nina_work_objects",
+        _column_contract(conn, "nina_work_objects"),
+        _WORK_OBJECT_BASE_CONTRACT,
+        allow_missing=True,
+    )
     additions = {
         "object_id": "TEXT NOT NULL DEFAULT ''",
         "workspace_id": "TEXT NOT NULL DEFAULT ''",
@@ -270,6 +272,17 @@ def _create_universal_work_objects(conn):
             cur.execute(
                 f"ALTER TABLE nina_work_objects ADD COLUMN {name} {definition}"
             )
+    _assert_compatible_columns(
+        "nina_work_objects",
+        _column_contract(conn, "nina_work_objects"),
+        _WORK_OBJECT_BASE_CONTRACT,
+    )
+    duplicate_count = _duplicate_source_key_count(conn)
+    if duplicate_count:
+        raise MigrationPreflightError(
+            "nina_work_objects_duplicate_workspace_source_key:"
+            f"count={duplicate_count}"
+        )
     cur.execute("""
         CREATE TABLE IF NOT EXISTS nina_work_object_events (
             event_id TEXT PRIMARY KEY,
@@ -356,7 +369,7 @@ MIGRATIONS = (
         phase=PHASE_EXPAND,
         operation=_create_universal_work_objects,
         checksum_source=(
-            "0004|EXPAND|nina_work_objects+nina_work_object_events|"
+            "0004-safety-v2|EXPAND|nina_work_objects+nina_work_object_events|"
             "adopt-existing-table|description,owner_type,owner_id,"
             "assigned_agent_assignment_id,parent_work_object_id,source_type,"
             "source_reference,due_at,started_at,completed_at,cancelled_at,"
@@ -366,6 +379,199 @@ MIGRATIONS = (
         ),
     ),
 )
+
+
+_TEXT_TYPES = {
+    "text", "character varying", "character", "varchar", "char",
+}
+_WORK_OBJECT_BASE_CONTRACT = {
+    "object_id": (_TEXT_TYPES, False),
+    "workspace_id": (_TEXT_TYPES, False),
+    "object_type": (_TEXT_TYPES, False),
+    "title": (_TEXT_TYPES, False),
+    "status": (_TEXT_TYPES, False),
+    "source_key": (_TEXT_TYPES, True),
+}
+_WORK_OBJECT_V1_CONTRACT = {
+    "description": (_TEXT_TYPES, False),
+    "owner_type": (_TEXT_TYPES, False),
+    "owner_id": (_TEXT_TYPES, False),
+    "assigned_agent_assignment_id": (_TEXT_TYPES, False),
+    "parent_work_object_id": (_TEXT_TYPES, False),
+    "source_type": (_TEXT_TYPES, False),
+    "source_reference": (_TEXT_TYPES, False),
+    "due_at": (_TEXT_TYPES, False),
+    "started_at": (_TEXT_TYPES, False),
+    "completed_at": (_TEXT_TYPES, False),
+    "cancelled_at": (_TEXT_TYPES, False),
+    "archived_at": (_TEXT_TYPES, False),
+    "created_by": (_TEXT_TYPES, False),
+}
+_WORK_EVENT_CONTRACT = {
+    name: (_TEXT_TYPES, False)
+    for name in (
+        "event_id", "workspace_id", "object_id", "event_type",
+        "from_status", "to_status", "actor", "details_json", "created_at",
+    )
+}
+
+
+def _column_contract(conn, table_name):
+    cur = conn.cursor()
+    try:
+        if persistence_backend.USE_POSTGRES:
+            cur.execute(
+                """
+                SELECT column_name,data_type,is_nullable
+                FROM information_schema.columns
+                WHERE table_schema=current_schema() AND table_name=%s
+                """,
+                (table_name,),
+            )
+            return {
+                str(row[0]): {
+                    "type": str(row[1]).lower(),
+                    "nullable": str(row[2]).upper() == "YES",
+                }
+                for row in (cur.fetchall() or [])
+            }
+        cur.execute(f"PRAGMA table_info({table_name})")
+        return {
+            str(row[1]): {
+                "type": str(row[2] or "").lower(),
+                "nullable": not bool(row[3] or row[5]),
+            }
+            for row in (cur.fetchall() or [])
+        }
+    finally:
+        cur.close()
+
+
+def _assert_compatible_columns(
+    table_name, actual, expected, *, allow_missing=False
+):
+    for name, (allowed_types, nullable) in expected.items():
+        column = actual.get(name)
+        if column is None:
+            if allow_missing:
+                continue
+            raise MigrationPreflightError(
+                f"nina_migration_schema_column_missing:{table_name}:{name}"
+            )
+        if column["type"] not in allowed_types:
+            raise MigrationPreflightError(
+                f"nina_migration_schema_type_conflict:{table_name}:{name}"
+            )
+        if not nullable and column["nullable"]:
+            raise MigrationPreflightError(
+                f"nina_migration_schema_nullability_conflict:{table_name}:{name}"
+            )
+
+
+def _duplicate_source_key_count(conn):
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT COUNT(*) FROM (
+                SELECT workspace_id,source_key
+                FROM nina_work_objects
+                WHERE source_key IS NOT NULL AND source_key <> ''
+                GROUP BY workspace_id,source_key
+                HAVING COUNT(*) > 1
+            ) duplicate_keys
+        """)
+        return int((cur.fetchone() or [0])[0] or 0)
+    finally:
+        cur.close()
+
+
+def preflight_release(require_postgres=True):
+    """Read-only release gate; never creates, alters, indexes, or writes."""
+    if require_postgres and (
+        not persistence_backend.HOSTED or not persistence_backend.USE_POSTGRES
+    ):
+        raise MigrationPreflightError(
+            "nina_migration_preflight_requires_hosted_postgresql"
+        )
+    conn = persistence_backend.connect()
+    try:
+        tables = _table_names(conn)
+        required_tables = {LEDGER_TABLE, "nina_work_objects"}
+        missing_tables = sorted(required_tables - tables)
+        if missing_tables:
+            raise MigrationPreflightError(
+                "nina_migration_preflight_table_missing:"
+                + ",".join(missing_tables)
+            )
+        ledger = _ledger_rows(conn)
+        pending = []
+        for migration in MIGRATIONS:
+            row = ledger.get(migration.identifier)
+            if row is None:
+                pending.append(migration.identifier)
+                continue
+            if not row["success"]:
+                raise MigrationPreflightError(
+                    "nina_migration_preflight_prior_incomplete:"
+                    + migration.identifier
+                )
+            if row["checksum"] != migration.checksum:
+                raise MigrationPreflightError(
+                    "nina_migration_preflight_prior_checksum:"
+                    + migration.identifier
+                )
+        if MIGRATIONS[0].identifier in pending:
+            raise MigrationPreflightError(
+                "nina_migration_preflight_foundation_missing:"
+                + MIGRATIONS[0].identifier
+            )
+        work_columns = _column_contract(conn, "nina_work_objects")
+        _assert_compatible_columns(
+            "nina_work_objects", work_columns, _WORK_OBJECT_BASE_CONTRACT
+        )
+        present_v1 = set(work_columns).intersection(_WORK_OBJECT_V1_CONTRACT)
+        if present_v1 and present_v1 != set(_WORK_OBJECT_V1_CONTRACT):
+            raise MigrationPreflightError(
+                "nina_migration_preflight_partial_0004_columns"
+            )
+        if present_v1:
+            _assert_compatible_columns(
+                "nina_work_objects", work_columns, _WORK_OBJECT_V1_CONTRACT
+            )
+        duplicate_count = _duplicate_source_key_count(conn)
+        if duplicate_count:
+            raise MigrationPreflightError(
+                "nina_work_objects_duplicate_workspace_source_key:"
+                f"count={duplicate_count}"
+            )
+        if "nina_work_object_events" in tables:
+            _assert_compatible_columns(
+                "nina_work_object_events",
+                _column_contract(conn, "nina_work_object_events"),
+                _WORK_EVENT_CONTRACT,
+            )
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT COUNT(*) FROM nina_work_objects")
+            row_count = int((cur.fetchone() or [0])[0] or 0)
+        finally:
+            cur.close()
+        conn.rollback()
+        return {
+            "ok": True,
+            "backend": persistence_backend.backend_name(),
+            "ledger_entries": len(ledger),
+            "work_object_rows": row_count,
+            "duplicate_source_keys": duplicate_count,
+            "events_table": "present" if "nina_work_object_events" in tables
+            else "absent",
+            "pending_migrations": pending,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def _ledger_ddl():

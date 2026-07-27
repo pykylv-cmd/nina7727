@@ -2,6 +2,17 @@
 
 # NinaOS Changelog
 
+## 2026-07-27 — Railway Release Engineering Minimum
+
+Added a minimal controlled Web release path: Python 3.12, Gunicorn, Railway
+Railpack/start/pre-deploy/readiness configuration, read-only migration
+preflight, stronger 0004 schema and duplicate safety, scoped same-origin
+protection, tests, and an operator runbook.
+
+Production release remains pending manual Railway environment and PostgreSQL
+preflight verification. No deploy, Railway change, production connection, or
+production migration is claimed.
+
 ## 2026-07-27 — Universal Work Objects V1
 
 Implemented Universal Work Objects V1 by adopting the existing

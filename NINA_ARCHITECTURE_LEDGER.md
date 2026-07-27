@@ -1,5 +1,24 @@
 # NINA_ARCHITECTURE_LEDGER.md
 
+## AL-015 — Railway Release Engineering Minimum
+
+Status: IMPLEMENTED LOCALLY; PRODUCTION RELEASE PENDING MANUAL VERIFICATION
+
+The Web release path uses Railpack, Python 3.12, Gunicorn `web_app:app`, managed
+pre-deploy preflight and EXPAND migrations, and `/ready` deployment gating.
+The preflight is read-only and validates the migration ledger, canonical Work
+Object schema, duplicate source keys, row count, and any existing audit table
+without logging customer data.
+
+Cookie-auth JSON mutations for Agent Assignment, Knowledge Vault, and
+Universal Work Objects enforce a same-origin boundary. Signed bridge,
+token-auth, and webhook endpoints retain their dedicated authentication.
+
+This entry proves repository implementation and local tests only. Railway
+environment values, the live PostgreSQL preflight, build, migration, startup,
+and production verification remain pending. Channel Layer V1 remains Planned
+after a successful controlled release.
+
 ## AL-014 — Universal Work Objects V1 implementation
 
 Status: IMPLEMENTED

@@ -322,7 +322,45 @@ def require_runtime_readiness():
             "ready": False,
             "error": "runtime_not_ready",
         }), 503
+
+
+_COOKIE_MUTATION_PREFIXES = (
+    "/agent-assignments",
+    "/knowledge-vault/items",
+    "/work-objects",
+)
+
+
+def _request_origin():
+    origin = str(request.headers.get("Origin") or "").strip().rstrip("/")
+    if not origin:
+        return ""
+    return origin
+
+
+def _expected_request_origin():
+    scheme = (
+        str(request.headers.get("X-Forwarded-Proto") or request.scheme)
+        .split(",", 1)[0].strip().lower()
+    )
+    return f"{scheme}://{request.host}".rstrip("/")
+
+
+@app.before_request
+def protect_cookie_json_mutations():
+    if request.method not in {"POST", "PATCH", "PUT", "DELETE"}:
+        return None
+    if not request.path.startswith(_COOKIE_MUTATION_PREFIXES):
+        return None
+    fetch_site = str(request.headers.get("Sec-Fetch-Site") or "").lower()
+    if fetch_site in {"cross-site", "same-site"}:
+        return jsonify({"ok": False, "error": "cross_origin_forbidden"}), 403
+    origin = _request_origin()
+    if origin and not hmac.compare_digest(origin, _expected_request_origin()):
+        return jsonify({"ok": False, "error": "cross_origin_forbidden"}), 403
     return None
+
+
 TELEGRAM_RECIPIENT_STATES = {}
 TELEGRAM_RECIPIENT_STATES_LOADED = False
 TELEGRAM_CLIENT_CONTACT_MAPPINGS = {}

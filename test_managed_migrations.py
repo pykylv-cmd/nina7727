@@ -124,6 +124,99 @@ class ManagedMigrationTests(unittest.TestCase):
         self.assertIn("owner_type", columns)
         self.assertIn("assigned_agent_assignment_id", columns)
 
+    def test_release_preflight_is_read_only_and_accepts_complete_schema(self):
+        managed_migrations.run_migrations()
+        conn = sqlite3.connect(self.db_file)
+        before = "\n".join(conn.iterdump())
+        conn.close()
+        result = managed_migrations.preflight_release(require_postgres=False)
+        conn = sqlite3.connect(self.db_file)
+        after = "\n".join(conn.iterdump())
+        conn.close()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["backend"], "sqlite")
+        self.assertEqual(result["duplicate_source_keys"], 0)
+        self.assertEqual(result["pending_migrations"], [])
+        self.assertEqual(before, after)
+
+    def test_release_preflight_allows_registered_pending_expands(self):
+        managed_migrations.run_migrations(
+            migrations=managed_migrations.MIGRATIONS[:1]
+        )
+        conn = sqlite3.connect(self.db_file)
+        conn.execute(
+            """
+            CREATE TABLE nina_work_objects (
+                object_id TEXT NOT NULL UNIQUE,
+                workspace_id TEXT NOT NULL,
+                object_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source_key TEXT
+            )
+            """
+        )
+        conn.commit()
+        conn.close()
+        result = managed_migrations.preflight_release(require_postgres=False)
+        self.assertEqual(
+            result["pending_migrations"],
+            [
+                "0002_agent_assignment_v1",
+                "0003_knowledge_vault_v1",
+                "0004_universal_work_objects_v1",
+            ],
+        )
+
+    def test_0004_fails_clearly_before_unique_index_on_duplicates(self):
+        conn = sqlite3.connect(self.db_file)
+        conn.execute(
+            """
+            CREATE TABLE nina_work_objects (
+                object_id TEXT NOT NULL UNIQUE,
+                workspace_id TEXT NOT NULL,
+                object_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source_key TEXT
+            )
+            """
+        )
+        for object_id in ("one", "two"):
+            conn.execute(
+                "INSERT INTO nina_work_objects "
+                "(object_id,workspace_id,object_type,title,status,source_key) "
+                "VALUES (?,?,?,?,?,?)",
+                (object_id, "tenant", "task", object_id, "open", "same"),
+            )
+        with self.assertRaisesRegex(
+            managed_migrations.MigrationPreflightError,
+            "duplicate_workspace_source_key",
+        ):
+            managed_migrations._create_universal_work_objects(conn)
+        conn.close()
+
+    def test_0004_rejects_incompatible_existing_core_column(self):
+        conn = sqlite3.connect(self.db_file)
+        conn.execute(
+            """
+            CREATE TABLE nina_work_objects (
+                object_id INTEGER NOT NULL,
+                workspace_id TEXT NOT NULL,
+                object_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source_key TEXT
+            )
+            """
+        )
+        with self.assertRaisesRegex(
+            managed_migrations.MigrationPreflightError,
+            "schema_type_conflict",
+        ):
+            managed_migrations._create_universal_work_objects(conn)
+        conn.close()
+
     def test_ambiguous_existing_schema_fails_closed(self):
         conn = sqlite3.connect(self.db_file)
         conn.execute("CREATE TABLE nina_contacts (id TEXT)")

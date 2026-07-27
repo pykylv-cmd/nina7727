@@ -16,6 +16,14 @@
     "planned_layers": ["Channel Layer V1", "Billing V1", "Nina Exchange V1", "Mobile and extended interfaces"],
     "strategic_future_layers": ["Nina Experience Layer", "Voice Layer", "AI Provider Hub", "Model Router", "Model Evaluation", "Nina Trust Layer", "Connector Layer", "Human Approval Layer", "Device and Robot Layer", "Fleet Orchestration", "Global Control Plane"]
   },
+  "railway_release_engineering_minimum": {
+    "status": "implemented_locally",
+    "production_release": "pending_manual_environment_and_preflight_verification",
+    "runtime": "Python 3.12",
+    "server": "Gunicorn web_app:app",
+    "predeploy": ["python manage_migrations.py preflight", "python manage_migrations.py expand"],
+    "healthcheck": "/ready"
+  },
   "agent_assignment_v1": {
     "status": "implemented",
     "scope": "Tenant-scoped assignment management and lifecycle for exact Ready Worker versions under ONE NINA.",
