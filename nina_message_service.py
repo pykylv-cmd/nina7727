@@ -5,13 +5,15 @@ from __future__ import annotations
 import logging
 import os
 import re
+from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from nina_identity import NINA_PROMPT
 import persistence_backend
 DATABASE_URL, DB_FILE, USE_POSTGRES = persistence_backend.module_settings()
 from work_engine import execute_natural_work_request
-from work_objects import list_work_objects
+from work_objects import create_work_object, list_work_objects
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,88 @@ def _ensure_conversation_store() -> None:
     conn.commit()
     cur.close()
     conn.close()
+
+
+def _ensure_memory_store() -> None:
+    """Use the established natural-memory table; never create a parallel store."""
+    if persistence_backend.HOSTED:
+        from managed_migrations import assert_required_migrations_complete
+        assert_required_migrations_complete()
+        return
+    conn = _connect()
+    cur = conn.cursor()
+    id_column = "BIGSERIAL PRIMARY KEY" if USE_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS memory_backups (
+            id {id_column}, user_id TEXT, backup_text TEXT,
+            source TEXT DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def _memory_candidate(user_text: str) -> str:
+    clean = str(user_text or "").strip()
+    if not clean or "?" in clean:
+        return ""
+    explicit = re.sub(
+        r"^(?:nina[, ]*)?atceries[, ]*(?:ka)?\s*",
+        "",
+        clean,
+        flags=re.IGNORECASE,
+    ).strip()
+    if explicit != clean and explicit:
+        return explicit
+    if re.match(
+        r"^(?:mana|mans|man)\s+.{1,100}\s+(?:ir|patīk|patik)\s+.+",
+        clean,
+        re.IGNORECASE,
+    ):
+        return clean
+    return ""
+
+
+def _save_natural_memory(owner_id: str, memory_text: str) -> bool:
+    owner = str(owner_id or "").strip()
+    memory = str(memory_text or "").strip()
+    if not owner or not memory:
+        return False
+    _ensure_memory_store()
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute(_sql("""
+        INSERT INTO memory_backups (user_id, backup_text, source)
+        VALUES (%s, %s, %s)
+    """), (owner, memory, "natural_memory"))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return True
+
+
+def _memory_context(owner_id: str, limit: int = 8) -> str:
+    owner = str(owner_id or "").strip()
+    if not owner:
+        return ""
+    _ensure_memory_store()
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute(_sql("""
+        SELECT backup_text FROM memory_backups
+        WHERE user_id = %s AND source = %s
+        ORDER BY id DESC LIMIT %s
+    """), (owner, "natural_memory", max(1, min(int(limit or 8), 20))))
+    rows = cur.fetchall() or []
+    cur.close()
+    conn.close()
+    memories = []
+    for row in rows:
+        value = str(row[0] or "").strip()
+        if value and value not in memories:
+            memories.append(value)
+    return "\n".join(f"- {value}" for value in memories)
 
 
 def _conversation_id(workspace_id: str) -> str:
@@ -115,6 +199,156 @@ def _work_context(workspace_id: str, limit: int = 12) -> str:
     return "\n".join(lines)
 
 
+def _daily_item_time(obj, now):
+    metadata = getattr(obj, "metadata", {}) or {}
+    raw = str(metadata.get("reminder_at") or getattr(obj, "due_date", "") or "").strip()
+    if raw in {"today", "tomorrow"}:
+        days = 0 if raw == "today" else 1
+        return datetime.combine(now.date() + timedelta(days=days), datetime.min.time(), tzinfo=now.tzinfo)
+    weekdays = {
+        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+        "friday": 4, "saturday": 5, "sunday": 6,
+    }
+    if raw in weekdays:
+        days = (weekdays[raw] - now.weekday()) % 7
+        return datetime.combine(now.date() + timedelta(days=days), datetime.min.time(), tzinfo=now.tzinfo)
+    try:
+        value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return value if value.tzinfo else value.replace(tzinfo=now.tzinfo)
+    except (TypeError, ValueError):
+        return None
+
+
+def daily_work_summary(workspace_id: str, now=None, owner_id: str = ""):
+    """Project existing Work Objects into Today, Overdue and Upcoming."""
+    current = now or datetime.now(ZoneInfo("Europe/Riga"))
+    materialize_due_reminders(workspace_id, now=current, owner_id=owner_id)
+    objects = list_work_objects(workspace_id=workspace_id, limit=200)
+    if owner_id:
+        objects = [
+            obj for obj in objects
+            if not str(getattr(obj, "origin_user_id", "") or "").strip()
+            or str(getattr(obj, "origin_user_id", "") or "").strip() == owner_id
+        ]
+    reminder_sources = {
+        str((getattr(obj, "metadata", {}) or {}).get("source_work_object_id") or "")
+        for obj in objects if getattr(obj, "object_type", "") == "reminder"
+    }
+    buckets = {"today": [], "overdue": [], "upcoming": []}
+    for obj in objects:
+        if obj.object_id in reminder_sources:
+            continue
+        if str(getattr(obj, "status", "")).lower() in {
+            "completed", "done", "archived", "cancelled", "rejected",
+        }:
+            continue
+        due = _daily_item_time(obj, current)
+        if due is None:
+            continue
+        if due.date() < current.date():
+            buckets["overdue"].append(obj)
+        elif due.date() == current.date():
+            buckets["today"].append(obj)
+        else:
+            buckets["upcoming"].append(obj)
+    rank = {"high": 0, "normal": 1, "low": 2}
+    for items in buckets.values():
+        items.sort(key=lambda obj: (
+            rank.get(str(getattr(obj, "priority", "normal")), 1),
+            _daily_item_time(obj, current) or datetime.max.replace(tzinfo=current.tzinfo),
+        ))
+    return buckets
+
+
+def materialize_due_reminders(workspace_id: str, now=None, owner_id: str = ""):
+    """Let the existing follow-up timing become a visible Reminder Work Object."""
+    current = now or datetime.now(ZoneInfo("Europe/Riga"))
+    created = []
+    for obj in list_work_objects(workspace_id=workspace_id, limit=200):
+        object_owner = str(getattr(obj, "origin_user_id", "") or "").strip()
+        if owner_id and object_owner and object_owner != owner_id:
+            continue
+        metadata = getattr(obj, "metadata", {}) or {}
+        if metadata.get("reminder_state") != "scheduled":
+            continue
+        due = _daily_item_time(obj, current)
+        if due is None or due > current:
+            continue
+        reminder = create_work_object(
+            object_type="reminder",
+            title=f"Atgādinājums: {obj.title}",
+            workspace_id=workspace_id,
+            assigned_agent_id=obj.assigned_agent_id,
+            client_id=obj.client_id,
+            project_id=obj.project_id,
+            priority=obj.priority,
+            due_date=obj.due_date,
+            metadata={
+                "source": "follow_up_engine",
+                "source_work_object_id": obj.object_id,
+                "reminder_at": metadata.get("reminder_at", ""),
+            },
+            origin_channel=obj.origin_channel,
+            origin_user_id=obj.origin_user_id,
+            source_key=f"daily-reminder:{obj.object_id}",
+        )
+        created.append(reminder)
+    return created
+
+
+def _daily_plan_answer(workspace_id: str, tomorrow=False, owner_id: str = "") -> str:
+    current = datetime.now(ZoneInfo("Europe/Riga"))
+    buckets = daily_work_summary(workspace_id, now=current, owner_id=owner_id)
+    if tomorrow:
+        from daily_planner import build_daily_plan
+        target = current.date() + timedelta(days=1)
+        tasks = []
+        for obj in buckets["upcoming"]:
+            due = _daily_item_time(obj, current)
+            if due and due.date() == target:
+                tasks.append({
+                    "title": obj.title, "status": obj.status, "priority": obj.priority,
+                    "deadline": "tomorrow", "deadline_label": "rīt", "client": obj.client_id,
+                })
+        return build_daily_plan(tasks)
+    lines = ["Šodienas prioritātes:"]
+    number = 1
+    for label, items in (
+        ("Nokavēts", buckets["overdue"]),
+        ("Šodien", buckets["today"]),
+        ("Tuvākie", buckets["upcoming"][:3]),
+    ):
+        if not items:
+            continue
+        lines.append(f"\n{label}:")
+        for obj in items[:6]:
+            lines.append(f"{number}. {obj.title}")
+            number += 1
+    if number == 1:
+        lines.append("\nNav termiņotu aktīvu darbu.")
+    return "\n".join(lines)
+
+
+def _daily_assistant_answer(clean: str, workspace_id: str, memory_owner_id: str) -> str:
+    lower = clean.casefold()
+    if any(phrase in lower for phrase in (
+        "kas man šodien jādara", "kas man sodien jadara", "kas man jādara",
+        "kas man jadara", "ko man darīt šodien", "ko man darit sodien",
+    )):
+        return _daily_plan_answer(workspace_id, owner_id=memory_owner_id)
+    if any(phrase in lower for phrase in (
+        "kas man rīt jādara", "kas man rit jadara", "ko man darīt rīt", "ko man darit rit",
+    )):
+        return _daily_plan_answer(workspace_id, tomorrow=True, owner_id=memory_owner_id)
+    if any(phrase in lower for phrase in (
+        "ko es tev lūdzu atcerēties", "ko es tev ludzu atcereties",
+        "ko tu par mani atceries", "ko tu par mani atcer",
+    )):
+        memories = _memory_context(memory_owner_id)
+        return f"Es atceros:\n{memories}" if memories else "Tu vēl neesi lūdzis man neko saglabāt atmiņā."
+    return ""
+
+
 def _openai_generate(prompt: str) -> str:
     api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
     if not api_key:
@@ -165,6 +399,30 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
     if len(clean) > 4000:
         return {"ok": False, "error": "message_too_long", "text": ""}
 
+    memory_owner_id = str(
+        contact_id or conversation_id or _conversation_id(workspace_id)
+    ).strip()
+    memory_candidate = _memory_candidate(clean)
+    if memory_candidate:
+        try:
+            _save_natural_memory(memory_owner_id, memory_candidate)
+        except Exception as exc:
+            logger.error(
+                "Nina memory save failed: exception=%s",
+                type(exc).__name__,
+            )
+
+    try:
+        daily_answer = _daily_assistant_answer(
+            clean, canonical_work_workspace_id or workspace_id, memory_owner_id,
+        )
+    except Exception:
+        daily_answer = ""
+    if daily_answer:
+        answer = _customer_safe_text(daily_answer)
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+        return {"ok": True, "text": answer, "source": "daily_assistant", "channel": channel}
+
     try:
         work_result = execute_natural_work_request(
             user_text=clean, workspace_id=canonical_work_workspace_id or workspace_id,
@@ -186,8 +444,17 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         f"Trusted contact context:\n{str(contact_context or '').strip()[:500] or 'Unavailable.'}\n"
         f"Opaque contact reference: {str(contact_id or '').strip()[:80] or 'none'}\n\n"
     )
+    try:
+        memory_context = _memory_context(memory_owner_id)
+    except Exception as exc:
+        logger.error(
+            "Nina memory retrieval failed: exception=%s",
+            type(exc).__name__,
+        )
+        memory_context = ""
     prompt = contact_prompt + (
         f"{NINA_PROMPT}\n\nKanāls: {channel}\nDarba vide: {workspace_id}\n\n"
+        f"Saglabātā lietotāja atmiņa:\n{memory_context or 'Nav saglabātu faktu.'}\n\n"
         f"Aktīvais darba konteksts:\n{_work_context(workspace_id) or 'Nav aktīvu darbu.'}\n\n"
         f"Nesenā saruna:\n{history_text or 'Šī ir sarunas pirmā ziņa.'}\n\n"
         f"Lietotāja jaunā ziņa:\n{clean}\n\n"

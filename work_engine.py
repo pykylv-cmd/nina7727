@@ -592,6 +592,8 @@ def execute_natural_work_request(
                 "intent": "create_task",
                 "contact_id": _clean(contact_id),
                 "canonical_client_id": _clean(canonical_client_id),
+                "reminder_at": _clean(task.get("reminder_at")),
+                "reminder_state": "scheduled" if _clean(task.get("reminder_at")) else "",
             },
         )
         obj = create_work_object(
@@ -612,6 +614,7 @@ def execute_natural_work_request(
             "object_id": obj.object_id,
             "channel": _clean(channel) or "unknown",
             "text": f"Uzdevums izveidots: {obj.title}",
+            "reminder_at": _clean(task.get("reminder_at")),
         }
 
     resolved = resolve_canonical_estimate_for_request(user_text, workspace_id=workspace_id)

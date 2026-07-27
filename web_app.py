@@ -4417,6 +4417,34 @@ def dashboard_body(data):
     lang = current_language()
     c = data["counts"]
     one_nina_surface = one_nina_work_surface_html(limit=6)
+    try:
+        from nina_message_service import daily_work_summary
+        today = daily_work_summary(
+            NINA_WEB_WORKSPACE_ID, owner_id=current_web_contact()["contact_id"],
+        )
+    except Exception:
+        today = {"today": [], "overdue": [], "upcoming": []}
+
+    def today_rows(items, empty):
+        if not items:
+            return f"<div class='row'><div><span class='muted'>{html_escape(empty)}</span></div></div>"
+        return "".join(
+            f"<div class='row'><div><b>{html_escape(getattr(item, 'title', ''))}</b>"
+            f"<span class='muted'>{html_escape(getattr(item, 'priority', 'normal'))}</span></div></div>"
+            for item in items[:4]
+        )
+
+    today_panel = (
+        "<section class='card card-pad'><div class='section-title'>Today</div>"
+        "<div class='two-col'><div><b>Today's Tasks</b><div class='list'>"
+        + today_rows(today["today"], "No tasks due today.")
+        + "</div></div><div><b>Overdue</b><div class='list'>"
+        + today_rows(today["overdue"], "Nothing overdue.")
+        + "</div></div></div><br><b>Upcoming</b><div class='list'>"
+        + today_rows(today["upcoming"], "No upcoming tasks.")
+        + "</div></section>"
+    )
+    one_nina_surface += today_panel
     kpis = (
         "<div class='kpis'>"
         + kpi_card(tx("tasks_today", lang), c["tasks_today"], {"text": tx("open_work_label", lang), "href": "/tasks"})
