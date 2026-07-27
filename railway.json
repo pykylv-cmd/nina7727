@@ -5,7 +5,7 @@
   },
   "deploy": {
     "preDeployCommand": [
-      "python manage_migrations.py preflight && python manage_migrations.py expand"
+      "python manage_migrations.py preflight"
     ],
     "startCommand": "gunicorn web_app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 180 --access-logfile - --error-logfile -",
     "healthcheckPath": "/ready",

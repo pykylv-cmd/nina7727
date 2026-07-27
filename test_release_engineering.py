@@ -20,8 +20,7 @@ class ReleaseConfigurationTests(unittest.TestCase):
         self.assertEqual(
             deploy["preDeployCommand"],
             [
-                "python manage_migrations.py preflight && "
-                "python manage_migrations.py expand",
+                "python manage_migrations.py preflight",
             ],
         )
         command = deploy["startCommand"]
