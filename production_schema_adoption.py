@@ -149,6 +149,32 @@ CONTRACTS = {
             "indexes": {"idx_nina_work_events_workspace_object"},
         },
     },
+    "0005_approval_layer_v1": {
+        "nina_approvals": {
+            "columns": {
+                name: (TEXT_TYPES, False)
+                for name in (
+                    "approval_id", "workspace_id", "initiative_id",
+                    "reply_id", "work_object_id", "decision", "status",
+                    "snoozed_until", "created_at", "updated_at",
+                    "decided_at", "decided_by", "decision_reason",
+                )
+            },
+            "primary_key": ("approval_id",),
+            "indexes": {"idx_nina_approvals_workspace_status"},
+        },
+        "nina_approval_events": {
+            "columns": {
+                name: (TEXT_TYPES, False)
+                for name in (
+                    "event_id", "approval_id", "workspace_id", "action",
+                    "actor", "reason", "created_at",
+                )
+            },
+            "primary_key": ("event_id",),
+            "indexes": {"idx_nina_approval_events_workspace"},
+        },
+    },
 }
 
 

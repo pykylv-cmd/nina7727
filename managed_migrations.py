@@ -319,6 +319,54 @@ def _create_universal_work_objects(conn):
     cur.close()
 
 
+def _create_approval_layer(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_approvals (
+            approval_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            initiative_id TEXT NOT NULL,
+            reply_id TEXT NOT NULL,
+            work_object_id TEXT NOT NULL,
+            decision TEXT NOT NULL DEFAULT '' CHECK (
+                decision IN ('','approved','dismissed','snoozed')
+            ),
+            status TEXT NOT NULL CHECK (
+                status IN ('pending','approved','dismissed','snoozed')
+            ),
+            snoozed_until TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            decided_at TEXT NOT NULL DEFAULT '',
+            decided_by TEXT NOT NULL DEFAULT '',
+            decision_reason TEXT NOT NULL DEFAULT '',
+            UNIQUE (workspace_id, initiative_id, reply_id)
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_approval_events (
+            event_id TEXT PRIMARY KEY,
+            approval_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
+            action TEXT NOT NULL CHECK (
+                action IN ('created','approved','dismissed','snoozed','woken')
+            ),
+            actor TEXT NOT NULL DEFAULT '',
+            reason TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_approvals_workspace_status
+        ON nina_approvals (workspace_id, status, updated_at)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_approval_events_workspace
+        ON nina_approval_events (workspace_id, created_at)
+    """)
+    cur.close()
+
+
 MIGRATIONS = (
     Migration(
         identifier="0001_shared_conversation_state",
@@ -376,6 +424,19 @@ MIGRATIONS = (
             "archived_at,created_by|audit-events|"
             "indexes:tenant_status,tenant_type,tenant_priority,"
             "tenant_assignment,tenant_due,tenant_parent,event_object"
+        ),
+    ),
+    Migration(
+        identifier="0005_approval_layer_v1",
+        version=5,
+        name="Create tenant-scoped Approval Layer V1",
+        phase=PHASE_EXPAND,
+        operation=_create_approval_layer,
+        checksum_source=(
+            "0005|EXPAND|nina_approvals+nina_approval_events|"
+            "decision-only-no-draft-copy|unique:workspace_initiative_reply|"
+            "decisions:approved,dismissed,snoozed|"
+            "statuses:pending,approved,dismissed,snoozed|audit-events"
         ),
     ),
 )

@@ -151,6 +151,16 @@ from universal_work_objects import (
 )
 from initiative_engine import initiative_queue
 from reply_builder import build_reply_queue
+from approval_layer import (
+    ApprovalError,
+    ApprovalValidationError,
+    decide as decide_approval,
+    ensure_approval,
+    list_approvals,
+    snooze_one_hour,
+    snooze_tomorrow,
+    wake_expired,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -4499,10 +4509,24 @@ def dashboard_body(data):
         + "</div></section>"
     )
     try:
+        wake_expired(NINA_WEB_WORKSPACE_ID)
         reply_drafts = build_reply_queue(initiatives)
+        approval_by_reply = {
+            reply.reply_id: ensure_approval(
+                reply.workspace_id, reply.initiative_id, reply.reply_id,
+                reply.work_object_id,
+            )
+            for reply in reply_drafts
+        }
     except Exception:
         reply_drafts = ()
-    if reply_drafts:
+        approval_by_reply = {}
+    pending_replies = [
+        reply for reply in reply_drafts
+        if approval_by_reply.get(reply.reply_id)
+        and approval_by_reply[reply.reply_id].status == "pending"
+    ]
+    if pending_replies:
         reply_rows = "".join(
             "<div class='row'><div><b>"
             + html_escape(reply.title)
@@ -4512,10 +4536,25 @@ def dashboard_body(data):
             + html_escape(reply.suggested_action)
             + "</span><span class='muted'>Draft Message: "
             + html_escape(reply.draft_message)
-            + "</span></div><span class='pill'>"
+            + "</span><span class='muted'>Approval status: Pending</span>"
+            + "<div class='form-actions'>"
+            + "".join(
+                "<form method='post' action='/approvals/decision'>"
+                + f"<input type='hidden' name='initiative_id' value='{html_escape(reply.initiative_id)}'>"
+                + f"<input type='hidden' name='reply_id' value='{html_escape(reply.reply_id)}'>"
+                + f"<input type='hidden' name='decision' value='{decision}'>"
+                + f"<input type='hidden' name='csrf_token' value='{_channel_csrf(f'approval:{decision}:{reply.reply_id}')}'>"
+                + f"<button class='btn' type='submit'>{label}</button></form>"
+                for decision, label in (
+                    ("approved", "Approve"), ("dismissed", "Dismiss"),
+                    ("snoozed_1h", "Snooze 1 hour"),
+                    ("snoozed_tomorrow", "Snooze until tomorrow"),
+                )
+            )
+            + "</div></div><span class='pill'>"
             + f"{reply.confidence:.0%}"
             + "</span></div>"
-            for reply in reply_drafts
+            for reply in pending_replies
         )
     else:
         reply_rows = (
@@ -4528,6 +4567,46 @@ def dashboard_body(data):
         "Reply Builder</div><p class='muted'>Read-only drafts. Nothing is "
         "sent or changed automatically.</p><div class='list'>"
         + reply_rows
+        + "</div></section>"
+    )
+    try:
+        approval_history = list_approvals(
+            NINA_WEB_WORKSPACE_ID,
+            statuses=("approved", "dismissed", "snoozed"),
+            limit=12,
+        )
+    except Exception:
+        approval_history = ()
+    if approval_history:
+        history_rows = "".join(
+            "<div class='row'><div><b>"
+            + html_escape(item.decision.title())
+            + "</b><span class='muted'>Status: "
+            + html_escape(item.status)
+            + " · Work Object "
+            + html_escape(item.work_object_id)
+            + "</span><span class='muted'>Decision time: "
+            + html_escape(item.decided_at)
+            + " · By "
+            + html_escape(item.decided_by or "—")
+            + "</span></div></div>"
+            for item in approval_history
+        )
+    else:
+        history_rows = (
+            "<div class='row'><div><span class='muted'>"
+            "No approval decisions yet.</span></div></div>"
+        )
+    notice = request.args.get("approval_status", "")
+    notice_html = (
+        f"<div class='safe-note'>{html_escape(notice)}</div>" if notice else ""
+    )
+    one_nina_surface += (
+        "<section class='card card-pad'><div class='section-title'>"
+        "Approval History</div>"
+        + notice_html
+        + "<div class='list'>"
+        + history_rows
         + "</div></section>"
     )
     try:
@@ -7158,6 +7237,56 @@ def home():
 def dashboard():
     data = load_workspace_data()
     return Response(page(tx("dashboard"), dashboard_body(data), active="dashboard"), mimetype="text/html")
+
+
+@app.post("/approvals/decision")
+def approval_decision():
+    workspace_id = current_workspace_id()
+    initiative_id = str(request.form.get("initiative_id") or "").strip()
+    reply_id = str(request.form.get("reply_id") or "").strip()
+    requested = str(request.form.get("decision") or "").strip()
+    decision = "snoozed" if requested.startswith("snoozed_") else requested
+    csrf_action = f"approval:{requested}:{reply_id}"
+    if not _valid_channel_csrf(csrf_action):
+        return Response("approval_csrf_invalid", status=403)
+    try:
+        initiatives = initiative_queue(workspace_id, limit=100)
+        initiative = next(
+            (item for item in initiatives if item.initiative_id == initiative_id),
+            None,
+        )
+        if initiative is None:
+            raise ApprovalValidationError("approval_initiative_invalid_or_stale")
+        reply = next(
+            (
+                item for item in build_reply_queue((initiative,))
+                if item.reply_id == reply_id
+            ),
+            None,
+        )
+        if reply is None or reply.workspace_id != workspace_id:
+            raise ApprovalValidationError("approval_reply_invalid")
+        ensure_approval(
+            workspace_id, initiative.initiative_id, reply.reply_id,
+            initiative.work_object_id,
+        )
+        snoozed_until = ""
+        if requested == "snoozed_1h":
+            snoozed_until = snooze_one_hour()
+        elif requested == "snoozed_tomorrow":
+            snoozed_until = snooze_tomorrow()
+        elif decision not in {"approved", "dismissed"}:
+            raise ApprovalValidationError("approval_decision_invalid")
+        decide_approval(
+            workspace_id, initiative.initiative_id, reply.reply_id, decision,
+            decided_by=current_web_contact()["contact_id"],
+            decision_reason="dashboard_owner_decision",
+            snoozed_until=snoozed_until,
+        )
+        status = decision
+    except ApprovalError as exc:
+        status = str(exc)
+    return redirect(q("/dashboard") + "&approval_status=" + quote_plus(status))
 
 
 @app.post("/reminders/<object_id>/done")
