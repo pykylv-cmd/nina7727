@@ -149,6 +149,7 @@ from universal_work_objects import (
     unassign_work_object,
     update_work_object as update_universal_work_object,
 )
+from initiative_engine import initiative_queue
 
 logger = logging.getLogger(__name__)
 
@@ -4465,6 +4466,37 @@ def dashboard_body(data):
         + "</div></section>"
     )
     one_nina_surface += today_panel
+    try:
+        initiatives = initiative_queue(NINA_WEB_WORKSPACE_ID, limit=6)
+    except Exception:
+        initiatives = ()
+
+    if initiatives:
+        initiative_rows = "".join(
+            "<div class='row'><div><b>"
+            + html_escape(item.reason)
+            + "</b><span class='muted'>"
+            + html_escape(item.type.replace("_", " ").title())
+            + " · Work Object "
+            + html_escape(item.work_object_id)
+            + "</span></div><span class='pill'>"
+            + str(item.score)
+            + "</span></div>"
+            for item in initiatives
+        )
+    else:
+        initiative_rows = (
+            "<div class='row'><div><span class='muted'>"
+            "No initiative candidates right now."
+            "</span></div></div>"
+        )
+    one_nina_surface += (
+        "<section class='card card-pad'><div class='section-title'>"
+        "Initiative</div><p class='muted'>Read-only suggestions from Nina. "
+        "No action is taken automatically.</p><div class='list'>"
+        + initiative_rows
+        + "</div></section>"
+    )
     try:
         notification_owner = current_web_contact()["contact_id"]
         reminders = [
