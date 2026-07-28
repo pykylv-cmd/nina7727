@@ -7241,7 +7241,11 @@ def dashboard():
 
 @app.post("/approvals/decision")
 def approval_decision():
-    workspace_id = current_workspace_id()
+    # The Dashboard renders its canonical Initiative/Reply queue for the
+    # server-configured ONE NINA workspace. Validate and persist the decision
+    # against that same server authority; never derive it from form input or a
+    # newly issued browser workspace cookie.
+    workspace_id = NINA_WEB_WORKSPACE_ID
     initiative_id = str(request.form.get("initiative_id") or "").strip()
     reply_id = str(request.form.get("reply_id") or "").strip()
     requested = str(request.form.get("decision") or "").strip()

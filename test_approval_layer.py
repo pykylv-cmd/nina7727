@@ -230,7 +230,8 @@ class ApprovalLayerV1Tests(unittest.TestCase):
     def test_20_post_redirect_get(self):
         _, initiative, reply, _ = self.candidate()
         action = f"approval:approved:{reply.reply_id}"
-        response = self.web.app.test_client().post(
+        client = self.web.app.test_client()
+        response = client.post(
             "/approvals/decision",
             data={
                 "initiative_id": initiative.initiative_id,
@@ -241,6 +242,10 @@ class ApprovalLayerV1Tests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertIn("/dashboard", response.headers["Location"])
+        saved = self.approval.get_approval(
+            self.workspace, initiative.initiative_id, reply.reply_id,
+        )
+        self.assertEqual(saved.status, "approved")
 
     def test_21_initiative_regression(self):
         item, *_ = self.candidate()
