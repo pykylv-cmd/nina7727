@@ -17,6 +17,11 @@ class RailwayRuntimeContractTests(unittest.TestCase):
         cls.shared = json.loads((ROOT / "railway.json").read_text(encoding="utf-8"))
         cls.web = json.loads((ROOT / "railway.web.json").read_text(encoding="utf-8"))
         cls.core = json.loads((ROOT / "railway.core.json").read_text(encoding="utf-8"))
+        cls.whatsapp_bridge = json.loads(
+            (ROOT / "personal_whatsapp_bridge" / "railway.json").read_text(
+                encoding="utf-8"
+            )
+        )
         cls.app_tree = ast.parse((ROOT / "app.py").read_text(encoding="utf-8"))
 
     def test_service_configs_override_shared_start_command(self):
@@ -33,6 +38,14 @@ class RailwayRuntimeContractTests(unittest.TestCase):
     def test_core_runtime_contract_starts_app_with_one_replica(self):
         self.assertEqual(self.core["deploy"]["startCommand"], "python app.py")
         self.assertEqual(self.core["deploy"]["healthcheckPath"], "/")
+
+    def test_whatsapp_bridge_runtime_contract_starts_only_node(self):
+        deploy = self.whatsapp_bridge["deploy"]
+        self.assertEqual(deploy["startCommand"], "pnpm start")
+        self.assertEqual(deploy["healthcheckPath"], "/health")
+        self.assertNotIn("preDeployCommand", deploy)
+        self.assertNotIn("gunicorn", deploy["startCommand"])
+        self.assertNotIn("python app.py", deploy["startCommand"])
 
     def test_core_post_init_uses_guarded_scheduler_start(self):
         post_init = next(
