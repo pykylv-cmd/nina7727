@@ -150,6 +150,7 @@ from universal_work_objects import (
     update_work_object as update_universal_work_object,
 )
 from initiative_engine import initiative_queue
+from reply_builder import build_reply_queue
 
 logger = logging.getLogger(__name__)
 
@@ -4495,6 +4496,38 @@ def dashboard_body(data):
         "Initiative</div><p class='muted'>Read-only suggestions from Nina. "
         "No action is taken automatically.</p><div class='list'>"
         + initiative_rows
+        + "</div></section>"
+    )
+    try:
+        reply_drafts = build_reply_queue(initiatives)
+    except Exception:
+        reply_drafts = ()
+    if reply_drafts:
+        reply_rows = "".join(
+            "<div class='row'><div><b>"
+            + html_escape(reply.title)
+            + "</b><span class='muted'>Initiative: "
+            + html_escape(reply.initiative_id)
+            + "</span><span class='muted'>Suggested Action: "
+            + html_escape(reply.suggested_action)
+            + "</span><span class='muted'>Draft Message: "
+            + html_escape(reply.draft_message)
+            + "</span></div><span class='pill'>"
+            + f"{reply.confidence:.0%}"
+            + "</span></div>"
+            for reply in reply_drafts
+        )
+    else:
+        reply_rows = (
+            "<div class='row'><div><span class='muted'>"
+            "No reply drafts right now."
+            "</span></div></div>"
+        )
+    one_nina_surface += (
+        "<section class='card card-pad'><div class='section-title'>"
+        "Reply Builder</div><p class='muted'>Read-only drafts. Nothing is "
+        "sent or changed automatically.</p><div class='list'>"
+        + reply_rows
         + "</div></section>"
     )
     try:
