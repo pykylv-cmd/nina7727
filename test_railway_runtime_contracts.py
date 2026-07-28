@@ -61,6 +61,22 @@ class RailwayRuntimeContractTests(unittest.TestCase):
         self.assertTrue(callable(web_app.snooze_reminder))
         self.assertTrue(callable(web_app.complete_reminder))
 
+    def test_channel_csrf_key_is_stable_across_workers(self):
+        import web_app
+        with patch.dict(
+            os.environ,
+            {"NINA_WEB_WORKSPACE_COOKIE_SECRET": "stable-test-secret"},
+        ):
+            first = web_app._channel_csrf_key()
+            second = web_app._channel_csrf_key()
+        self.assertEqual(first, second)
+        self.assertEqual(len(first), 32)
+
+    def test_reminder_panel_maps_terminal_and_snoozed_states(self):
+        source = (ROOT / "web_app.py").read_text(encoding="utf-8")
+        self.assertIn('display_status = "Done"', source)
+        self.assertIn('display_status = "Snoozed"', source)
+
 
 class SchedulerLifecycleTests(unittest.IsolatedAsyncioTestCase):
     @classmethod

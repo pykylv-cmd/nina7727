@@ -167,7 +167,7 @@ print("RESTART_RESULT=" + json.dumps({{
             self.assertTrue(runtime_b["auth_loaded"])
             self.assertEqual(runtime_b["connection_status"], "connected")
 
-    def test_process_local_web_state_is_not_durable_product_truth(self):
+    def test_process_local_web_state_resets_while_csrf_stays_worker_safe(self):
         with tempfile.TemporaryDirectory() as tmp:
             env = self._environment(
                 Path(tmp) / "transient-boundaries.sqlite",
@@ -194,7 +194,7 @@ print("RESTART_RESULT=" + json.dumps(snapshot, sort_keys=True))
             self.assertEqual(runtime_b["workflow_states"], 0)
             self.assertEqual(runtime_a["object_cache"], 0)
             self.assertEqual(runtime_b["object_cache"], 0)
-            self.assertNotEqual(
+            self.assertEqual(
                 runtime_a["csrf_fingerprint"], runtime_b["csrf_fingerprint"]
             )
 

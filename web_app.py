@@ -238,7 +238,24 @@ WEB_DEPLOYMENT_COMPATIBILITY = DeploymentCompatibilityContract(
     service_role="secure-rebirth:web-core",
 )
 app = Flask(__name__)
-_CHANNEL_CSRF_SECRET = secrets.token_bytes(32)
+
+
+def _channel_csrf_key():
+    seed = (
+        os.environ.get("NINA_WEB_WORKSPACE_COOKIE_SECRET")
+        or os.environ.get("NINA_CHANNEL_CREDENTIAL_KEY")
+        or ""
+    ).strip()
+    if not seed:
+        return secrets.token_bytes(32)
+    return hmac.new(
+        seed.encode(),
+        b"nina-web-channel-csrf-v1",
+        hashlib.sha256,
+    ).digest()
+
+
+_CHANNEL_CSRF_SECRET = _channel_csrf_key()
 _WORKSPACE_COOKIE = "nina_workspace"
 _WORKSPACE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
 WEB_VOICE_MAX_BYTES = 10 * 1024 * 1024
@@ -4460,6 +4477,12 @@ def dashboard_body(data):
     for item in reminders[:8]:
         metadata = item.metadata if isinstance(item.metadata, dict) else {}
         delivery_status = str(metadata.get("delivery_status") or "scheduled")
+        if item.status == "cancelled":
+            display_status = "Done"
+        elif delivery_status == "scheduled" and metadata.get("delivery_history"):
+            display_status = "Snoozed"
+        else:
+            display_status = delivery_status.capitalize()
         planned_at = str(metadata.get("planned_at") or metadata.get("reminder_at") or item.due_date)
         actions = ""
         if item.status != "cancelled":
@@ -4475,9 +4498,9 @@ def dashboard_body(data):
             )
         reminder_rows += (
             "<div class='row'><div><b>" + html_escape(item.title) + "</b>"
-            f"<span class='muted'>{html_escape(planned_at)} · {html_escape(delivery_status)}</span>"
+            f"<span class='muted'>{html_escape(planned_at)} · {html_escape(display_status)}</span>"
             f"<div class='form-actions'>{actions}</div></div>"
-            f"<span class='pill'>{html_escape('Unread' if metadata.get('unread') else delivery_status)}</span></div>"
+            f"<span class='pill'>{html_escape('Unread' if metadata.get('unread') else display_status)}</span></div>"
         )
     if not reminder_rows:
         reminder_rows = "<div class='row'><div><span class='muted'>No reminders yet.</span></div></div>"
