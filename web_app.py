@@ -39,7 +39,9 @@ from personal_whatsapp import (
     list_connected_workspaces as list_connected_personal_whatsapp_workspaces,
     mark_connected as mark_personal_whatsapp_connected,
     pairing_is_active as personal_whatsapp_pairing_is_active,
+    record_outbound_receipt as record_personal_whatsapp_outbound_receipt,
     store_auth_record as store_personal_whatsapp_auth,
+    store_auth_records as store_personal_whatsapp_auth_records,
 )
 from ninaos_number import (
     CHANNEL as NINAOS_NUMBER_CHANNEL,
@@ -6707,12 +6709,11 @@ def internal_personal_whatsapp_auth_store():
     workspace_id, records = str(payload.get("workspace_id") or ""), payload.get("records")
     if not isinstance(records, dict) or len(records) > 1000: return jsonify({"ok": False}), 400
     try:
-        for key, value in records.items():
-            if value is None: delete_personal_whatsapp_auth(workspace_id, key)
-            elif len(json.dumps(value)) <= 1024 * 1024: store_personal_whatsapp_auth(workspace_id, key, value)
-            else: return jsonify({"ok": False}), 413
+        if any(value is not None and len(json.dumps(value)) > 1024 * 1024 for value in records.values()):
+            return jsonify({"ok": False}), 413
+        stored = store_personal_whatsapp_auth_records(workspace_id, records)
     except ValueError: return jsonify({"ok": False}), 400
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "auth_record_count": stored})
 
 
 @app.post("/internal/personal-whatsapp/linked")
@@ -6740,6 +6741,16 @@ def internal_personal_whatsapp_inbound():
         contact_id=contact["contact_id"], contact_context=compact_contact_context(contact),
     )
     return jsonify({"ok": True, "accepted": True, "reply": str(result.get("text") or "")})
+
+
+@app.post("/internal/personal-whatsapp/outbound-receipt")
+def internal_personal_whatsapp_outbound_receipt():
+    payload = _bridge_json()
+    if payload is None: return jsonify({"ok": False}), 401
+    accepted = record_personal_whatsapp_outbound_receipt(
+        str(payload.get("workspace_id") or ""), payload.get("message_id")
+    )
+    return jsonify({"ok": True, "accepted": accepted})
 
 
 @app.post("/internal/company-whatsapp/auth/load")

@@ -53,6 +53,9 @@ export async function linked(workspaceId, sessionToken, identity) {
 export async function inbound(payload) {
   return ninaRequest('/internal/personal-whatsapp/inbound', payload)
 }
+export async function outboundReceipt(payload) {
+  return ninaRequest('/internal/personal-whatsapp/outbound-receipt', payload)
+}
 export async function activeWorkspaces() {
   return (await ninaRequest('/internal/personal-whatsapp/active', {})).workspace_ids || []
 }

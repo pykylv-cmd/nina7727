@@ -53,6 +53,28 @@ class WebPersonalWhatsAppTests(unittest.TestCase):
             self.assertEqual(ok.get_json()['reply'],'Nina reply'); self.assertEqual(send.call_args.args[0],'hello'); self.assertTrue(send.call_args.kwargs['contact_id'].startswith('contact_'))
             denied=self.client.post('/internal/personal-whatsapp/inbound',headers=auth,json={'workspace_id':self.workspace,'message_id':'x2','chat_jid':'2@s.whatsapp.net','text':'hello','is_group':False})
             self.assertFalse(denied.get_json()['accepted'])
+    def test_auth_batch_and_incoming_outgoing_receipts_persist(self):
+        auth={'Authorization':'Bearer bridge-test'}
+        stored=self.client.post('/internal/personal-whatsapp/auth/store',headers=auth,json={
+            'workspace_id':self.workspace,
+            'records':{'creds':{'registered':True},'key:session:one':{'value':'saved'}},
+        })
+        self.assertEqual(stored.status_code,200)
+        self.assertEqual(stored.get_json()['auth_record_count'],2)
+        self.assertEqual(len(self.p.load_auth_records(self.workspace)),2)
+        pair=self.p.create_pairing_session(self.workspace)
+        self.p.mark_connected(self.workspace,pair['session_token'],{'jid':'1@s.whatsapp.net'})
+        with patch.object(self.web,'send_message_to_nina',return_value={'text':'reply'}):
+            incoming=self.client.post('/internal/personal-whatsapp/inbound',headers=auth,json={
+                'workspace_id':self.workspace,'message_id':'incoming-1',
+                'chat_jid':'1@s.whatsapp.net','text':'hello','is_group':False,
+            })
+        outgoing=self.client.post('/internal/personal-whatsapp/outbound-receipt',headers=auth,json={
+            'workspace_id':self.workspace,'message_id':'outgoing-1',
+        })
+        self.assertTrue(incoming.get_json()['accepted'])
+        self.assertTrue(outgoing.get_json()['accepted'])
+        self.assertFalse(self.p.record_outbound_receipt(self.workspace,'outgoing-1'))
     def test_disconnect_does_not_touch_business(self):
         self.c.set_connection_for_test(self.workspace,'whatsapp','connected',{'business_display_name':'Biz'})
         with patch.object(self.web,'personal_whatsapp_bridge_request',return_value={'ok':True}):

@@ -105,6 +105,49 @@ def store_auth_record(workspace_id, auth_key, value):
     finally: conn.close()
 
 
+def store_auth_records(workspace_id, records):
+    workspace_id = str(workspace_id or "")
+    if not workspace_id or not isinstance(records, dict):
+        raise ValueError("invalid_auth_records")
+    prepared = []
+    for auth_key, value in records.items():
+        key = str(auth_key or "")[:180]
+        if not key:
+            raise ValueError("invalid_auth_record")
+        encrypted = None if value is None else encrypt_channel_credential(
+            json.dumps(value, separators=(",", ":"))
+        )
+        prepared.append((key, encrypted))
+    ensure_personal_whatsapp_schema()
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        try:
+            for key, encrypted in prepared:
+                cur.execute(
+                    _sql(f"DELETE FROM {AUTH_TABLE} WHERE workspace_id=%s AND auth_key=%s"),
+                    (workspace_id, key),
+                )
+                if encrypted is not None:
+                    cur.execute(
+                        _sql(
+                            f"INSERT INTO {AUTH_TABLE} "
+                            "(workspace_id,auth_key,encrypted_value,updated_at) "
+                            "VALUES (%s,%s,%s,%s)"
+                        ),
+                        (workspace_id, key, encrypted, _iso(_now())),
+                    )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+    return len(prepared)
+
+
 def delete_auth_record(workspace_id, auth_key):
     ensure_personal_whatsapp_schema(); conn = _connect()
     try:
@@ -172,3 +215,7 @@ def accept_inbound(workspace_id, message_id, chat_jid, text, is_group=False):
     own_jid = str((connection.get("metadata") or {}).get("jid") or "")
     if connection["status"] != "connected" or is_group or not own_jid or chat_jid != own_jid: return False
     return bool(str(text or "").strip()) and claim_channel_message(workspace_id, CHANNEL, message_id)
+
+
+def record_outbound_receipt(workspace_id, message_id):
+    return claim_channel_message(workspace_id, CHANNEL, message_id)

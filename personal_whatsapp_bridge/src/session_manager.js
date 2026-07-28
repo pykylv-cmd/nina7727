@@ -1,7 +1,7 @@
 import makeWASocket, {Browsers, BufferJSON, DisconnectReason, fetchLatestBaileysVersion, initAuthCreds, jidNormalizedUser, makeCacheableSignalKeyStore, proto} from '@whiskeysockets/baileys'
 import pino from 'pino'
 import QRCode from 'qrcode'
-import {clearAuth, inbound, linked, loadAuth, ninaErrorDetails, storeAuth} from './nina_api.js'
+import {clearAuth, inbound, linked, loadAuth, ninaErrorDetails, outboundReceipt, storeAuth} from './nina_api.js'
 
 const lifecycle = pino({level:process.env.LOG_LEVEL || 'info',base:undefined})
 const quiet = lifecycle.child({component:'baileys'},{level:process.env.BAILEYS_LOG_LEVEL || 'warn'})
@@ -25,6 +25,10 @@ export function reconnectDelay(statusCode) {
   if ([DisconnectReason.loggedOut,DisconnectReason.badSession,DisconnectReason.connectionReplaced,DisconnectReason.multideviceMismatch,DisconnectReason.forbidden].includes(statusCode)) return null
   return statusCode === DisconnectReason.restartRequired ? 250 : 5000
 }
+export function personalStatusAfterClose(statusCode,opened=false) {
+  if (statusCode === DisconnectReason.loggedOut) return 'logged_out'
+  return opened ? 'connecting' : 'connection_lost'
+}
 export async function resolveWhatsAppVersion(fetcher=fetchLatestBaileysVersion) {
   const result=await fetcher()
   return {version:result.version,isLatest:Boolean(result.isLatest)}
@@ -34,7 +38,7 @@ export async function settleNonFatal(operation,onError=()=>{}) {
 }
 function logInternalFailure(error,message) { lifecycle.error(ninaErrorDetails(error),message) }
 
-export async function processMessageUpsert(state,socket,event,api=inbound,log=lifecycle) {
+export async function processMessageUpsert(state,socket,event,api=inbound,log=lifecycle,receiptApi=outboundReceipt) {
   const type=String(event?.type || '')
   if (type !== 'notify') { log.info({workspace_id:state.workspaceId,upsert_type:type,ignored_reason:'not_live_notify'},'personal WhatsApp message ignored'); return 0 }
   if (state.status !== 'connected') { log.info({workspace_id:state.workspaceId,upsert_type:type,ignored_reason:'not_connected'},'personal WhatsApp message ignored'); return 0 }
@@ -61,14 +65,15 @@ export async function processMessageUpsert(state,socket,event,api=inbound,log=li
     try {
       const sent=await socket.sendMessage(remote,{text:reply});const sentId=String(sent?.key?.id || '')
       if(sentId) { state.sent.add(sentId);if(state.sent.size>200) state.sent.delete(state.sent.values().next().value) }
+      if(sentId) await receiptApi({workspace_id:state.workspaceId,message_id:sentId})
       log.info({workspace_id:state.workspaceId,reply_sent:true},'personal WhatsApp reply sent');processed+=1
     } catch(error) { log.warn({workspace_id:state.workspaceId,error_class:String(error?.name || 'Error').slice(0,80)},'personal WhatsApp reply send failed') }
   }
   return processed
 }
 
-async function authState(workspaceId) {
-  const saved = await loadAuth(workspaceId)
+export async function createPersonalAuthState(workspaceId,load=loadAuth,store=storeAuth) {
+  const saved = await load(workspaceId)
   const creds = saved.creds ? revive(saved.creds) : initAuthCreds()
   let writeQueue=Promise.resolve()
   const enqueue=job=>{const next=writeQueue.then(job,job);writeQueue=next.catch(()=>{});return next}
@@ -83,11 +88,24 @@ async function authState(workspaceId) {
         const key=`key:${type}:${id}`; writes[key] = value === null ? null : flatten(value)
         if(value === null) delete saved[key]; else saved[key]=writes[key]
       }
-      await enqueue(()=>storeAuth(workspaceId,writes))
+      await enqueue(()=>store(workspaceId,writes))
     }
   }
   lifecycle.info({workspace_id:workspaceId,auth_records:Object.keys(saved).length,registered:Boolean(creds.registered)},'personal WhatsApp auth loaded')
-  return {state:{creds,keys:makeCacheableSignalKeyStore(keys,quiet)},saveCreds:()=>enqueue(()=>storeAuth(workspaceId,{creds:flatten(creds)})),flush:()=>writeQueue}
+  return {state:{creds,keys:makeCacheableSignalKeyStore(keys,quiet)},saveCreds:()=>enqueue(()=>store(workspaceId,{creds:flatten(creds)})),flush:()=>writeQueue}
+}
+
+export async function persistCredentialUpdate(auth,update,log=lifecycle,workspaceId='') {
+  Object.assign(auth.state.creds,update || {})
+  log.info({workspace_id:workspaceId,auth_update_received:true,auth_write_started:true},'personal WhatsApp credential update received')
+  try {
+    await auth.saveCreds()
+    log.info({workspace_id:workspaceId,auth_write_success:true,auth_record_count:1},'personal WhatsApp credential persistence completed')
+    return true
+  } catch(error) {
+    log.error({workspace_id:workspaceId,auth_write_success:false,...ninaErrorDetails(error)},'personal WhatsApp credential persistence failed')
+    throw error
+  }
 }
 
 export async function startSession(workspaceId, sessionToken, options={}) {
@@ -96,34 +114,36 @@ export async function startSession(workspaceId, sessionToken, options={}) {
     const cleared=await clearAuth(workspaceId)
     lifecycle.info({workspace_id:workspaceId,records_cleared:cleared},'personal WhatsApp fresh pairing auth reset')
   }
-  const auth = await authState(workspaceId)
+  const auth = await createPersonalAuthState(workspaceId)
   const selected=await resolveWhatsAppVersion()
   lifecycle.info({workspace_id:workspaceId,wa_version:selected.version.join('.'),latest_version:selected.isLatest},'personal WhatsApp socket starting')
-  const state = {workspaceId,sessionToken,socket:null,qrSvg:'',status:'connecting',primaryJid:'',ownJids:new Set(),sent:new Set(),retryTimer:null,closed:false,qrSequence:0}
+  const state = {workspaceId,sessionToken,socket:null,qrSvg:'',status:'connecting',primaryJid:'',ownJids:new Set(),sent:new Set(),retryTimer:null,closed:false,opened:false,qrSequence:0}
   sessions.set(workspaceId, state)
   const socket = makeWASocket({auth:auth.state,version:selected.version,browser:Browsers.ubuntu('NinaOS'),logger:quiet,emitOwnEvents:false,syncFullHistory:false,markOnlineOnConnect:false,shouldIgnoreJid:jid=>jid.endsWith('@g.us')})
   state.socket = socket
-  socket.ev.on('creds.update',()=>{void settleNonFatal(auth.saveCreds(),error=>logInternalFailure(error,'personal WhatsApp credential persistence failed'))})
+  socket.ev.on('creds.update',update=>{void settleNonFatal(persistCredentialUpdate(auth,update,lifecycle,workspaceId),()=>{})})
   socket.ev.on('connection.update',update=>{void settleNonFatal((async()=>{
     if (update.qr) {
       state.qrSvg=await QRCode.toString(update.qr,{type:'svg',margin:1,width:300});state.qrSequence+=1
       lifecycle.info({workspace_id:workspaceId,qr_sequence:state.qrSequence,registered:Boolean(auth.state.creds.registered)},'personal WhatsApp QR generated')
     }
     if (update.connection === 'open') {
-      state.status='connected';state.qrSvg='';state.primaryJid=normalizedJid(socket.user?.id || auth.state.creds.me?.id || '');state.ownJids=ownerJids(socket.user || {},auth.state.creds.me || {})
+      await auth.saveCreds();await auth.flush()
+      state.qrSvg='';state.primaryJid=normalizedJid(socket.user?.id || auth.state.creds.me?.id || '');state.ownJids=ownerJids(socket.user || {},auth.state.creds.me || {})
       const digits=state.primaryJid.split(':')[0].split('@')[0]; const masked=digits.length>4?`${'*'.repeat(Math.min(8,digits.length-4))}${digits.slice(-4)}`:'Linked account'
-      if(sessionToken) await linked(workspaceId,sessionToken,{jid:state.primaryJid,display_name:socket.user?.name || '',masked_identity:masked})
+      if(state.sessionToken) { await linked(workspaceId,state.sessionToken,{jid:state.primaryJid,display_name:socket.user?.name || '',masked_identity:masked});state.sessionToken='' }
+      state.opened=true;state.status='connected'
       lifecycle.info({workspace_id:workspaceId},'personal WhatsApp connected')
     }
     if (update.connection === 'close') {
       const details=disconnectDetails(update.lastDisconnect?.error)
       const delay=reconnectDelay(details.statusCode)
       state.qrSvg=''
-      state.status=details.statusCode === DisconnectReason.restartRequired ? 'connecting' : (details.statusCode === DisconnectReason.loggedOut ? 'logged_out' : 'connection_lost')
+      state.status=personalStatusAfterClose(details.statusCode,state.opened)
       lifecycle.warn({workspace_id:workspaceId,status_code:details.statusCode,error_class:details.errorClass,error_message:details.message,reconnect_delay_ms:delay},'personal WhatsApp connection closed')
       await auth.flush().catch(()=>lifecycle.error({workspace_id:workspaceId},'personal WhatsApp auth flush failed'))
       if (delay !== null && !state.closed && sessions.get(workspaceId) === state) {
-        state.retryTimer=setTimeout(()=>startSession(workspaceId,sessionToken,{resetAuth:false}).catch(error=>lifecycle.error({workspace_id:workspaceId,error_class:String(error?.name || 'Error').slice(0,80),error_message:String(error?.message || 'restart failed').slice(0,180)},'personal WhatsApp restart failed')),delay)
+        state.retryTimer=setTimeout(()=>startSession(workspaceId,state.sessionToken,{resetAuth:false}).catch(error=>lifecycle.error({workspace_id:workspaceId,error_class:String(error?.name || 'Error').slice(0,80),error_message:String(error?.message || 'restart failed').slice(0,180)},'personal WhatsApp restart failed')),delay)
       }
     }
   })(),error=>logInternalFailure(error,'personal WhatsApp connection update failed'))})
