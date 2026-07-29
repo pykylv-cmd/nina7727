@@ -317,6 +317,57 @@ CONTRACTS = {
             },
         },
     },
+    "0011_knowledge_vault_v1": {
+        "nina_knowledge_items": {
+            "columns": {
+                name: (TEXT_TYPES, nullable)
+                for name, nullable in {
+                    "workspace_id": True,
+                    "knowledge_type": True,
+                    "source_reference": False,
+                    "tags_json": False,
+                    "content_checksum": True,
+                    "updated_by": False,
+                }.items()
+            },
+            "indexes": {
+                "idx_nina_knowledge_workspace_status",
+                "idx_nina_knowledge_workspace_type",
+            },
+        },
+        "nina_knowledge_versions": {
+            "columns": {
+                **{
+                    name: (TEXT_TYPES, False)
+                    for name in (
+                        "version_id", "workspace_id", "knowledge_id", "title",
+                        "content", "knowledge_type", "source_type",
+                        "source_reference", "tags_json", "content_checksum",
+                        "created_by", "created_at",
+                    )
+                },
+                "version": (INTEGER_TYPES, False),
+            },
+            "primary_key": ("version_id",),
+            "indexes": {"idx_nina_knowledge_versions_workspace"},
+        },
+        "nina_knowledge_events": {
+            "columns": {
+                name: (TEXT_TYPES, nullable)
+                for name, nullable in {
+                    "event_id": False, "workspace_id": False,
+                    "knowledge_id": False, "event_type": False,
+                    "actor": False, "safe_metadata": False,
+                    "created_at": False,
+                }.items()
+            } | {
+                "old_version": (INTEGER_TYPES, True),
+                "new_version": (INTEGER_TYPES, True),
+            },
+            "primary_key": ("event_id",),
+            "indexes": {"idx_nina_knowledge_events_workspace"},
+        },
+    },
 }
 
 

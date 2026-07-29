@@ -1,4 +1,4 @@
-"""Tenant-scoped Knowledge Vault V1 under the ONE NINA architecture."""
+"""Canonical workspace Knowledge Vault V1 for the ONE NINA architecture."""
 
 from __future__ import annotations
 
@@ -13,30 +13,34 @@ import persistence_backend
 
 
 TABLE_NAME = "nina_knowledge_items"
-SOURCE_TYPES = frozenset({"text", "note", "document", "url_reference", "structured_data"})
-CONTENT_FORMATS = frozenset({"plain_text", "markdown", "json"})
-STATUSES = frozenset({"draft", "active", "archived"})
-MAX_CONTENT_BYTES = 64 * 1024
-MAX_METADATA_BYTES = 8 * 1024
-MAX_METADATA_DEPTH = 4
-MAX_LIST_LIMIT = 100
+VERSION_TABLE = "nina_knowledge_versions"
+EVENT_TABLE = "nina_knowledge_events"
+KNOWLEDGE_TYPES = frozenset({
+    "FACT", "INSTRUCTION", "POLICY", "PROCEDURE",
+    "PRODUCT", "SERVICE", "FAQ", "NOTE",
+})
+SOURCE_TYPES = frozenset({"MANUAL", "IMPORTED_TEXT", "SYSTEM"})
+STATUSES = frozenset({"ACTIVE", "ARCHIVED"})
+CONTENT_FORMATS = frozenset({"plain_text"})
 DEFAULT_LIST_LIMIT = 50
-MAX_OFFSET = 100_000
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
-_SENSITIVE_KEYS = {
-    "api_key", "apikey", "access_token", "refresh_token", "token", "password",
-    "passwd", "credential", "credentials", "secret", "private_key",
-    "system_prompt", "prompt_override",
+MAX_LIST_LIMIT = 100
+MAX_CONTENT_BYTES = 64 * 1024
+MAX_TAGS = 30
+_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_SECRET = re.compile(
+    r"(?:api[_ -]?key|access[_ -]?token|password|passwd|secret|"
+    r"connection[_ -]?string)\s*[:=]\s*\S+|"
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----|\bsk-[A-Za-z0-9_-]{16,}",
+    re.IGNORECASE,
+)
+_SOURCE_TO_STORAGE = {
+    "MANUAL": "note",
+    "IMPORTED_TEXT": "document",
+    "SYSTEM": "structured_data",
 }
-_SECRET_PATTERNS = (
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----", re.IGNORECASE),
-    re.compile(r"\b(?:api[_ -]?key|access[_ -]?token|password|passwd|secret)\s*[:=]\s*\S+", re.IGNORECASE),
-    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}", re.IGNORECASE),
-    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"),
-)
-_ACTIVE_CONTENT_PATTERN = re.compile(
-    r"<\s*[A-Za-z][^>]*>|javascript\s*:", re.IGNORECASE
-)
+_SOURCE_FROM_STORAGE = {
+    value: key for key, value in _SOURCE_TO_STORAGE.items()
+}
 
 
 class KnowledgeVaultError(RuntimeError):
@@ -66,55 +70,82 @@ class KnowledgeVaultPersistenceError(KnowledgeVaultError):
 @dataclass(frozen=True)
 class KnowledgeItem:
     knowledge_id: str
-    tenant_id: str
+    workspace_id: str
     title: str
-    source_type: str
-    status: str
     content: str
-    content_format: str
-    source_name: str
+    knowledge_type: str
+    status: str
+    source_type: str
+    source_reference: str
+    tags: tuple[str, ...]
     version: int
-    checksum: str
-    metadata: dict
+    content_checksum: str
     created_by: str
+    updated_by: str
     created_at: str
     updated_at: str
-    activated_at: str
     archived_at: str
-    parent_version: int | None
+
+    @property
+    def tenant_id(self):
+        return self.workspace_id
+
+    @property
+    def checksum(self):
+        return self.content_checksum
+
+    @property
+    def source_name(self):
+        return self.source_reference
+
+    @property
+    def metadata(self):
+        return {"tags": list(self.tags)}
+
+    @property
+    def content_format(self):
+        return "plain_text"
+
+    @property
+    def activated_at(self):
+        return self.created_at
+
+    @property
+    def parent_version(self):
+        return self.version - 1 if self.version > 1 else None
 
     def as_dict(self, include_content=True):
-        value = {
+        result = {
             "id": self.knowledge_id,
+            "knowledge_id": self.knowledge_id,
             "title": self.title,
-            "source_type": self.source_type,
+            "knowledge_type": self.knowledge_type,
             "status": self.status,
-            "content_format": self.content_format,
-            "source_name": self.source_name,
+            "source_type": self.source_type,
+            "source_reference": self.source_reference,
+            "tags": list(self.tags),
             "version": self.version,
-            "checksum": self.checksum,
-            "metadata": dict(self.metadata),
+            "content_checksum": self.content_checksum,
             "created_by": self.created_by,
+            "updated_by": self.updated_by,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
-            "activated_at": self.activated_at,
             "archived_at": self.archived_at,
-            "parent_version": self.parent_version,
         }
         if include_content:
-            value["content"] = self.content
-        return value
+            result["content"] = self.content
+        return result
 
 
-def _sql(statement):
-    return persistence_backend.sql(statement)
+def _sql(value):
+    return persistence_backend.sql(value)
 
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def _text(value, field, *, required=False, maximum=512):
+def _text(value, field, *, required=False, maximum=500):
     if value is None:
         value = ""
     if not isinstance(value, str):
@@ -127,117 +158,143 @@ def _text(value, field, *, required=False, maximum=512):
     return value
 
 
-def _identifier(value, field):
+def _id(value, field="id"):
     value = _text(value, field, required=True, maximum=128)
-    if not _IDENTIFIER_RE.fullmatch(value):
+    if not _IDENTIFIER.fullmatch(value):
         raise KnowledgeVaultValidationError(f"knowledge_{field}_invalid")
     return value
 
 
 def _enum(value, field, allowed):
-    value = _text(value, field, required=True, maximum=64)
+    value = _text(value, field, required=True, maximum=64).upper()
     if value not in allowed:
         raise KnowledgeVaultValidationError(f"knowledge_{field}_invalid")
     return value
 
 
-def _validate_tree(value, depth=0, path="metadata"):
-    if depth > MAX_METADATA_DEPTH:
-        raise KnowledgeVaultValidationError("knowledge_metadata_too_deep")
-    if isinstance(value, dict):
-        for key, child in value.items():
-            if not isinstance(key, str) or not key or len(key) > 80:
-                raise KnowledgeVaultValidationError("knowledge_metadata_key_invalid")
-            normalized = key.casefold().replace("-", "_").replace(" ", "_")
-            if normalized in _SENSITIVE_KEYS:
-                raise KnowledgeVaultValidationError(
-                    f"knowledge_sensitive_field_forbidden:{path}.{key}"
-                )
-            _validate_tree(child, depth + 1, f"{path}.{key}")
-    elif isinstance(value, list):
-        if len(value) > 100:
-            raise KnowledgeVaultValidationError("knowledge_metadata_list_too_large")
-        for index, child in enumerate(value):
-            _validate_tree(child, depth + 1, f"{path}[{index}]")
-    elif value is not None and not isinstance(value, (str, int, float, bool)):
-        raise KnowledgeVaultValidationError("knowledge_metadata_not_json_safe")
-    elif isinstance(value, str) and len(value) > 2000:
-        raise KnowledgeVaultValidationError("knowledge_metadata_value_too_long")
-
-
-def _validated_metadata(value):
-    if value is None:
-        value = {}
-    if not isinstance(value, dict):
-        raise KnowledgeVaultValidationError("knowledge_metadata_must_be_object")
-    _validate_tree(value)
-    try:
-        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    except (TypeError, ValueError) as exc:
-        raise KnowledgeVaultValidationError("knowledge_metadata_not_json_safe") from exc
-    if len(encoded.encode("utf-8")) > MAX_METADATA_BYTES:
-        raise KnowledgeVaultValidationError("knowledge_metadata_too_large")
-    return json.loads(encoded), encoded
-
-
-def _validated_content(value, content_format):
+def _content(value):
     if not isinstance(value, str):
         raise KnowledgeVaultValidationError("knowledge_content_invalid")
-    content = value.strip()
-    if not content:
+    value = value.strip()
+    if not value:
         raise KnowledgeVaultValidationError("knowledge_content_required")
-    if len(content.encode("utf-8")) > MAX_CONTENT_BYTES:
+    if len(value.encode("utf-8")) > MAX_CONTENT_BYTES:
         raise KnowledgeVaultValidationError("knowledge_content_too_large")
-    if _ACTIVE_CONTENT_PATTERN.search(content):
-        raise KnowledgeVaultValidationError("knowledge_active_content_forbidden")
-    if any(pattern.search(content) for pattern in _SECRET_PATTERNS):
+    if _SECRET.search(value):
         raise KnowledgeVaultValidationError("knowledge_secret_content_forbidden")
-    if content_format == "json":
-        try:
-            parsed = json.loads(content)
-        except (TypeError, ValueError) as exc:
-            raise KnowledgeVaultValidationError("knowledge_json_content_invalid") from exc
-        _validate_tree(parsed, path="content")
-        content = json.dumps(parsed, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return content
+    return value
 
 
-def _checksum(content, content_format):
-    return hashlib.sha256(f"{content_format}\n{content}".encode("utf-8")).hexdigest()
+def _tags(value):
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        value = [part.strip() for part in value.split(",")]
+    if not isinstance(value, (list, tuple)) or len(value) > MAX_TAGS:
+        raise KnowledgeVaultValidationError("knowledge_tags_invalid")
+    result = []
+    for item in value:
+        tag = _text(item, "tag", required=True, maximum=64).casefold()
+        if tag not in result:
+            result.append(tag)
+    return tuple(result)
 
 
-_SELECT_COLUMNS = """
-knowledge_id,tenant_id,title,source_type,status,content,content_format,
-source_name,version,checksum,metadata_json,created_by,created_at,updated_at,
-activated_at,archived_at,parent_version
+def _checksum(title, content, knowledge_type, source_type, source_reference, tags):
+    canonical = json.dumps({
+        "title": title, "content": content, "knowledge_type": knowledge_type,
+        "source_type": source_type, "source_reference": source_reference,
+        "tags": list(tags),
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+_SELECT = """
+knowledge_id,workspace_id,title,content,knowledge_type,status,source_type,
+source_reference,tags_json,version,content_checksum,created_by,updated_by,
+created_at,updated_at,archived_at
 """
 
 
-def _from_row(row):
+def _item(row):
     return KnowledgeItem(
-        str(row[0]), str(row[1]), str(row[2]), str(row[3]), str(row[4]),
-        str(row[5]), str(row[6]), str(row[7]), int(row[8]), str(row[9]),
-        json.loads(row[10] or "{}"), str(row[11]), str(row[12]), str(row[13]),
-        str(row[14] or ""), str(row[15] or ""),
-        None if row[16] is None else int(row[16]),
+        str(row[0]), str(row[1]), str(row[2]), str(row[3]),
+        str(row[4]).upper(), str(row[5]).upper(),
+        _SOURCE_FROM_STORAGE.get(str(row[6]), str(row[6]).upper()),
+        str(row[7] or ""), tuple(json.loads(row[8] or "[]")), int(row[9]),
+        str(row[10]), str(row[11]), str(row[12]), str(row[13]),
+        str(row[14]), str(row[15] or ""),
     )
 
 
+def _event(cur, workspace_id, knowledge_id, event_type, actor,
+           old_version, new_version, metadata=None):
+    safe = metadata or {}
+    encoded = json.dumps(safe, sort_keys=True, separators=(",", ":"))
+    if _SECRET.search(encoded):
+        encoded = "{}"
+    cur.execute(_sql(f"""
+        INSERT INTO {EVENT_TABLE} (
+            event_id,workspace_id,knowledge_id,event_type,actor,
+            old_version,new_version,safe_metadata,created_at
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    """), (
+        "knowledge_event_" + secrets.token_hex(16), workspace_id, knowledge_id,
+        event_type, actor, old_version, new_version, encoded, _now(),
+    ))
+
+
+def _version(cur, item):
+    cur.execute(_sql(f"""
+        INSERT INTO {VERSION_TABLE} (
+            version_id,workspace_id,knowledge_id,version,title,content,
+            knowledge_type,source_type,source_reference,tags_json,
+            content_checksum,created_by,created_at
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    """), (
+        "knowledge_version_" + secrets.token_hex(16), item.workspace_id,
+        item.knowledge_id, item.version, item.title, item.content,
+        item.knowledge_type, item.source_type, item.source_reference,
+        json.dumps(list(item.tags)), item.content_checksum, item.updated_by,
+        item.updated_at,
+    ))
+
+
 def create_knowledge_item(
-    tenant_id, *, title, source_type, content, content_format,
-    source_name="", metadata=None, created_by="workspace_client",
+    workspace_id, *, title, content, knowledge_type=None, source_type,
+    source_reference="", tags=None, created_by="workspace_client",
+    content_format="plain_text", source_name=None, metadata=None,
 ):
-    tenant = _identifier(tenant_id, "tenant_id")
+    workspace = _id(workspace_id, "workspace_id")
     title = _text(title, "title", required=True, maximum=300)
+    content = _content(content)
+    knowledge_type = _enum(
+        knowledge_type or "NOTE", "type", KNOWLEDGE_TYPES
+    )
     source_type = _enum(source_type, "source_type", SOURCE_TYPES)
-    content_format = _enum(content_format, "content_format", CONTENT_FORMATS)
-    content = _validated_content(content, content_format)
-    source_name = _text(source_name, "source_name", maximum=500)
-    _, metadata_json = _validated_metadata(metadata)
+    if source_name is not None and not source_reference:
+        source_reference = source_name
+    source_reference = _text(
+        source_reference, "source_reference", maximum=500
+    )
+    if source_type == "IMPORTED_TEXT" and not source_reference:
+        raise KnowledgeVaultValidationError(
+            "knowledge_source_reference_required"
+        )
+    if metadata and tags is None:
+        tags = metadata.get("tags") if isinstance(metadata, dict) else None
+    tags = _tags(tags)
     actor = _text(created_by, "created_by", required=True, maximum=128)
-    knowledge_id = "kno_" + secrets.token_hex(16)
+    knowledge_id = "knowledge_" + secrets.token_hex(16)
     now = _now()
-    checksum = _checksum(content, content_format)
+    checksum = _checksum(
+        title, content, knowledge_type, source_type, source_reference, tags
+    )
+    item = KnowledgeItem(
+        knowledge_id, workspace, title, content, knowledge_type, "ACTIVE",
+        source_type, source_reference, tags, 1, checksum, actor, actor,
+        now, now, "",
+    )
     conn = persistence_backend.connect()
     try:
         cur = conn.cursor()
@@ -246,14 +303,28 @@ def create_knowledge_item(
                 knowledge_id,tenant_id,title,source_type,status,content,
                 content_format,source_name,version,checksum,metadata_json,
                 created_by,created_at,updated_at,activated_at,archived_at,
-                parent_version
-            ) VALUES (%s,%s,%s,%s,'draft',%s,%s,%s,1,%s,%s,%s,%s,%s,'','',%s)
+                parent_version,workspace_id,knowledge_type,source_reference,
+                tags_json,content_checksum,updated_by
+            ) VALUES (
+                %s,%s,%s,%s,'active',%s,'plain_text',%s,1,%s,%s,%s,
+                %s,%s,%s,'',NULL,%s,%s,%s,%s,%s,%s
+            )
         """), (
-            knowledge_id, tenant, title, source_type, content, content_format,
-            source_name, checksum, metadata_json, actor, now, now, None,
+            knowledge_id, workspace, title, _SOURCE_TO_STORAGE[source_type], content,
+            source_reference, checksum, json.dumps({"tags": list(tags)}),
+            actor, now, now, now, workspace, knowledge_type, source_reference,
+            json.dumps(list(tags)), checksum, actor,
         ))
+        _version(cur, item)
+        _event(
+            cur, workspace, knowledge_id, "knowledge_created", actor,
+            None, 1, {"knowledge_type": knowledge_type, "source_type": source_type},
+        )
         conn.commit()
         cur.close()
+    except KnowledgeVaultError:
+        conn.rollback()
+        raise
     except Exception as exc:
         conn.rollback()
         raise KnowledgeVaultPersistenceError(
@@ -261,235 +332,173 @@ def create_knowledge_item(
         ) from exc
     finally:
         conn.close()
-    return get_knowledge_item(tenant, knowledge_id)
+    return item
 
 
-def get_knowledge_item(tenant_id, knowledge_id, version=None):
-    tenant = _identifier(tenant_id, "tenant_id")
-    identifier = _identifier(knowledge_id, "id")
-    params = [tenant, identifier]
-    version_sql = ""
-    if version is not None:
-        if isinstance(version, bool) or not isinstance(version, int) or version < 1:
-            raise KnowledgeVaultValidationError("knowledge_version_invalid")
-        version_sql = " AND version=%s"
-        params.append(version)
+def get_knowledge_item(workspace_id, knowledge_id, version=None):
+    workspace = _id(workspace_id, "workspace_id")
+    identifier = _id(knowledge_id)
     conn = persistence_backend.connect()
     try:
         cur = conn.cursor()
+        if version is None:
+            cur.execute(_sql(f"""
+                SELECT {_SELECT} FROM {TABLE_NAME}
+                WHERE workspace_id=%s AND knowledge_id=%s LIMIT 1
+            """), (workspace, identifier))
+            row = cur.fetchone()
+            cur.close()
+            if not row:
+                raise KnowledgeVaultNotFoundError("knowledge_item_not_found")
+            return _item(row)
         cur.execute(_sql(f"""
-            SELECT {_SELECT_COLUMNS} FROM {TABLE_NAME}
-            WHERE tenant_id=%s AND knowledge_id=%s{version_sql}
-            ORDER BY version DESC LIMIT 1
-        """), tuple(params))
+            SELECT knowledge_id,workspace_id,title,content,knowledge_type,
+                'ACTIVE',source_type,source_reference,tags_json,version,
+                content_checksum,created_by,created_by,created_at,created_at,''
+            FROM {VERSION_TABLE}
+            WHERE workspace_id=%s AND knowledge_id=%s AND version=%s
+        """), (workspace, identifier, int(version)))
         row = cur.fetchone()
         cur.close()
     finally:
         conn.close()
     if not row:
         raise KnowledgeVaultNotFoundError("knowledge_item_not_found")
-    return _from_row(row)
+    return _item(row)
 
 
-def list_knowledge_versions(tenant_id, knowledge_id):
-    tenant = _identifier(tenant_id, "tenant_id")
-    identifier = _identifier(knowledge_id, "id")
+def list_knowledge_versions(workspace_id, knowledge_id):
+    current = get_knowledge_item(workspace_id, knowledge_id)
     conn = persistence_backend.connect()
     try:
         cur = conn.cursor()
         cur.execute(_sql(f"""
-            SELECT {_SELECT_COLUMNS} FROM {TABLE_NAME}
-            WHERE tenant_id=%s AND knowledge_id=%s ORDER BY version DESC
-        """), (tenant, identifier))
+            SELECT knowledge_id,workspace_id,title,content,knowledge_type,
+                'ACTIVE',source_type,source_reference,tags_json,version,
+                content_checksum,created_by,created_by,created_at,created_at,''
+            FROM {VERSION_TABLE}
+            WHERE workspace_id=%s AND knowledge_id=%s
+            ORDER BY version DESC
+        """), (current.workspace_id, current.knowledge_id))
         rows = cur.fetchall() or []
         cur.close()
     finally:
         conn.close()
-    if not rows:
-        raise KnowledgeVaultNotFoundError("knowledge_item_not_found")
-    return tuple(_from_row(row) for row in rows)
-
-
-def _pagination(limit, offset):
-    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_LIST_LIMIT:
-        raise KnowledgeVaultValidationError("knowledge_limit_invalid")
-    if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= MAX_OFFSET:
-        raise KnowledgeVaultValidationError("knowledge_offset_invalid")
-    return limit, offset
+    return tuple(_item(row) for row in rows)
 
 
 def list_tenant_knowledge(
-    tenant_id, *, status=None, source_type=None, query=None,
-    limit=DEFAULT_LIST_LIMIT, offset=0,
+    workspace_id, *, status="ACTIVE", source_type=None, knowledge_type=None,
+    tag=None, query=None, limit=DEFAULT_LIST_LIMIT, offset=0,
 ):
-    tenant = _identifier(tenant_id, "tenant_id")
-    limit, offset = _pagination(limit, offset)
-    clauses = [
-        "tenant_id=%s",
-        "version=(SELECT MAX(v.version) FROM nina_knowledge_items v "
-        "WHERE v.tenant_id=nina_knowledge_items.tenant_id "
-        "AND v.knowledge_id=nina_knowledge_items.knowledge_id)",
-    ]
-    params = [tenant]
+    workspace = _id(workspace_id, "workspace_id")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_LIST_LIMIT:
+        raise KnowledgeVaultValidationError("knowledge_limit_invalid")
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        raise KnowledgeVaultValidationError("knowledge_offset_invalid")
+    clauses, params = ["workspace_id=%s"], [workspace]
     if status is not None:
+        status = _enum(status, "status", STATUSES)
         clauses.append("status=%s")
-        params.append(_enum(status, "status", STATUSES))
-    if source_type is not None:
+        params.append(status.casefold())
+    if source_type:
         clauses.append("source_type=%s")
-        params.append(_enum(source_type, "source_type", SOURCE_TYPES))
-    if query is not None:
-        query = _text(query, "query", required=True, maximum=200)
-        escaped = query.casefold().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params.append(_SOURCE_TO_STORAGE[
+            _enum(source_type, "source_type", SOURCE_TYPES)
+        ])
+    if knowledge_type:
+        clauses.append("knowledge_type=%s")
+        params.append(_enum(knowledge_type, "type", KNOWLEDGE_TYPES))
+    if tag:
+        selected = _tags([tag])[0]
+        clauses.append("LOWER(tags_json) LIKE %s")
+        params.append(f'%"{selected}"%')
+    if query:
+        query = _text(query, "query", required=True, maximum=200).casefold()
+        query = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         clauses.append(
-            "(LOWER(title) LIKE %s ESCAPE '\\' OR LOWER(source_name) LIKE %s ESCAPE '\\' "
-            "OR LOWER(content) LIKE %s ESCAPE '\\' OR LOWER(metadata_json) LIKE %s ESCAPE '\\')"
+            "(LOWER(title) LIKE %s ESCAPE '\\' OR "
+            "LOWER(content) LIKE %s ESCAPE '\\')"
         )
-        pattern = f"%{escaped}%"
-        params.extend([pattern] * 4)
+        params.extend([f"%{query}%", f"%{query}%"])
     params.extend([limit, offset])
     conn = persistence_backend.connect()
     try:
         cur = conn.cursor()
         cur.execute(_sql(f"""
-            SELECT {_SELECT_COLUMNS} FROM {TABLE_NAME}
+            SELECT {_SELECT} FROM {TABLE_NAME}
             WHERE {' AND '.join(clauses)}
-            ORDER BY updated_at DESC,knowledge_id LIMIT %s OFFSET %s
+            ORDER BY updated_at DESC, knowledge_id ASC LIMIT %s OFFSET %s
         """), tuple(params))
         rows = cur.fetchall() or []
         cur.close()
     finally:
         conn.close()
-    return tuple(_from_row(row) for row in rows)
+    return tuple(_item(row) for row in rows)
 
 
-def update_draft(
-    tenant_id, knowledge_id, *, title=None, source_type=None, content=None,
-    content_format=None, source_name=None, metadata=None,
+def update_knowledge_item(
+    workspace_id, knowledge_id, *, expected_version=None, title=None,
+    content=None, knowledge_type=None, source_type=None,
+    source_reference=None, tags=None, updated_by="workspace_client", **_unused,
 ):
-    current = get_knowledge_item(tenant_id, knowledge_id)
-    if current.status != "draft":
-        raise KnowledgeVaultConflictError("knowledge_draft_update_required")
-    title = current.title if title is None else _text(title, "title", required=True, maximum=300)
-    source_type = current.source_type if source_type is None else _enum(source_type, "source_type", SOURCE_TYPES)
-    selected_format = current.content_format if content_format is None else _enum(content_format, "content_format", CONTENT_FORMATS)
-    selected_content = _validated_content(current.content if content is None else content, selected_format)
-    source_name = current.source_name if source_name is None else _text(source_name, "source_name", maximum=500)
-    _, metadata_json = _validated_metadata(current.metadata if metadata is None else metadata)
-    checksum = _checksum(selected_content, selected_format)
-    now = _now()
+    current = get_knowledge_item(workspace_id, knowledge_id)
+    if current.status != "ACTIVE":
+        raise KnowledgeVaultConflictError("knowledge_active_update_required")
+    if expected_version is not None and int(expected_version) != current.version:
+        raise KnowledgeVaultConflictError("knowledge_version_conflict")
+    title = current.title if title is None else _text(
+        title, "title", required=True, maximum=300
+    )
+    content = current.content if content is None else _content(content)
+    knowledge_type = current.knowledge_type if knowledge_type is None else _enum(
+        knowledge_type, "type", KNOWLEDGE_TYPES
+    )
+    source_type = current.source_type if source_type is None else _enum(
+        source_type, "source_type", SOURCE_TYPES
+    )
+    source_reference = current.source_reference if source_reference is None else _text(
+        source_reference, "source_reference", maximum=500
+    )
+    tags = current.tags if tags is None else _tags(tags)
+    actor = _text(updated_by, "updated_by", required=True, maximum=128)
+    checksum = _checksum(
+        title, content, knowledge_type, source_type, source_reference, tags
+    )
+    if checksum == current.content_checksum:
+        return current
+    next_version, now = current.version + 1, _now()
+    result = KnowledgeItem(
+        current.knowledge_id, current.workspace_id, title, content,
+        knowledge_type, "ACTIVE", source_type, source_reference, tags,
+        next_version, checksum, current.created_by, actor, current.created_at,
+        now, "",
+    )
     conn = persistence_backend.connect()
     try:
         cur = conn.cursor()
         cur.execute(_sql(f"""
-            UPDATE {TABLE_NAME}
-            SET title=%s,source_type=%s,content=%s,content_format=%s,
-                source_name=%s,metadata_json=%s,checksum=%s,updated_at=%s
-            WHERE tenant_id=%s AND knowledge_id=%s AND version=%s AND status='draft'
+            UPDATE {TABLE_NAME} SET title=%s,content=%s,knowledge_type=%s,
+                source_type=%s,source_reference=%s,source_name=%s,
+                tags_json=%s,metadata_json=%s,version=%s,checksum=%s,
+                content_checksum=%s,updated_by=%s,updated_at=%s,parent_version=%s
+            WHERE workspace_id=%s AND knowledge_id=%s AND version=%s
+                AND status='active'
         """), (
-            title, source_type, selected_content, selected_format, source_name,
-            metadata_json, checksum, now, current.tenant_id,
+            title, content, knowledge_type, _SOURCE_TO_STORAGE[source_type],
+            source_reference, source_reference, json.dumps(list(tags)),
+            json.dumps({"tags": list(tags)}), next_version, checksum, checksum,
+            actor, now, current.version, current.workspace_id,
             current.knowledge_id, current.version,
         ))
         if cur.rowcount != 1:
-            raise KnowledgeVaultConflictError("knowledge_update_conflict")
-        conn.commit()
-        cur.close()
-    except KnowledgeVaultError:
-        conn.rollback()
-        raise
-    except Exception as exc:
-        conn.rollback()
-        raise KnowledgeVaultPersistenceError(f"knowledge_update_failed:{type(exc).__name__}") from exc
-    finally:
-        conn.close()
-    return get_knowledge_item(current.tenant_id, current.knowledge_id)
-
-
-def _transition(tenant_id, knowledge_id, target):
-    current = get_knowledge_item(tenant_id, knowledge_id)
-    if (current.status, target) not in {
-        ("draft", "active"), ("draft", "archived"), ("active", "archived"),
-    }:
-        raise KnowledgeVaultTransitionError(
-            f"knowledge_transition_invalid:{current.status}:{target}"
-        )
-    now = _now()
-    activated = now if target == "active" else current.activated_at
-    archived = now if target == "archived" else current.archived_at
-    conn = persistence_backend.connect()
-    try:
-        cur = conn.cursor()
-        cur.execute(_sql(f"""
-            UPDATE {TABLE_NAME}
-            SET status=%s,updated_at=%s,activated_at=%s,archived_at=%s
-            WHERE tenant_id=%s AND knowledge_id=%s AND version=%s AND status=%s
-        """), (
-            target, now, activated, archived, current.tenant_id,
-            current.knowledge_id, current.version, current.status,
-        ))
-        if cur.rowcount != 1:
-            raise KnowledgeVaultConflictError("knowledge_transition_conflict")
-        conn.commit()
-        cur.close()
-    except KnowledgeVaultError:
-        conn.rollback()
-        raise
-    except Exception as exc:
-        conn.rollback()
-        raise KnowledgeVaultPersistenceError(f"knowledge_transition_failed:{type(exc).__name__}") from exc
-    finally:
-        conn.close()
-    return get_knowledge_item(current.tenant_id, current.knowledge_id)
-
-
-def activate_knowledge_item(tenant_id, knowledge_id):
-    return _transition(tenant_id, knowledge_id, "active")
-
-
-def archive_knowledge_item(tenant_id, knowledge_id):
-    return _transition(tenant_id, knowledge_id, "archived")
-
-
-def create_knowledge_version(
-    tenant_id, knowledge_id, *, content, content_format=None, title=None,
-    source_type=None, source_name=None, metadata=None,
-    created_by="workspace_client",
-):
-    current = get_knowledge_item(tenant_id, knowledge_id)
-    if current.status != "active":
-        raise KnowledgeVaultConflictError("knowledge_active_version_required")
-    title = current.title if title is None else _text(title, "title", required=True, maximum=300)
-    source_type = current.source_type if source_type is None else _enum(source_type, "source_type", SOURCE_TYPES)
-    selected_format = current.content_format if content_format is None else _enum(content_format, "content_format", CONTENT_FORMATS)
-    selected_content = _validated_content(content, selected_format)
-    source_name = current.source_name if source_name is None else _text(source_name, "source_name", maximum=500)
-    _, metadata_json = _validated_metadata(current.metadata if metadata is None else metadata)
-    actor = _text(created_by, "created_by", required=True, maximum=128)
-    checksum = _checksum(selected_content, selected_format)
-    if checksum == current.checksum:
-        raise KnowledgeVaultConflictError("knowledge_content_unchanged")
-    next_version = current.version + 1
-    now = _now()
-    conn = persistence_backend.connect()
-    try:
-        cur = conn.cursor()
-        cur.execute(_sql(f"""
-            UPDATE {TABLE_NAME} SET status='archived',updated_at=%s,archived_at=%s
-            WHERE tenant_id=%s AND knowledge_id=%s AND version=%s AND status='active'
-        """), (now, now, current.tenant_id, current.knowledge_id, current.version))
-        if cur.rowcount != 1:
             raise KnowledgeVaultConflictError("knowledge_version_conflict")
-        cur.execute(_sql(f"""
-            INSERT INTO {TABLE_NAME} (
-                knowledge_id,tenant_id,title,source_type,status,content,
-                content_format,source_name,version,checksum,metadata_json,
-                created_by,created_at,updated_at,activated_at,archived_at,parent_version
-            ) VALUES (%s,%s,%s,%s,'active',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'',%s)
-        """), (
-            current.knowledge_id, current.tenant_id, title, source_type,
-            selected_content, selected_format, source_name, next_version,
-            checksum, metadata_json, actor, now, now, now, current.version,
-        ))
+        _version(cur, result)
+        _event(
+            cur, current.workspace_id, current.knowledge_id,
+            "knowledge_updated", actor, current.version, next_version,
+            {"changed": True},
+        )
         conn.commit()
         cur.close()
     except KnowledgeVaultError:
@@ -497,15 +506,153 @@ def create_knowledge_version(
         raise
     except Exception as exc:
         conn.rollback()
-        raise KnowledgeVaultPersistenceError(f"knowledge_version_failed:{type(exc).__name__}") from exc
+        raise KnowledgeVaultPersistenceError(
+            f"knowledge_update_failed:{type(exc).__name__}"
+        ) from exc
     finally:
         conn.close()
-    return get_knowledge_item(current.tenant_id, current.knowledge_id)
+    return result
 
 
-def initialize_knowledge_vault():
-    persistence_backend.assert_backend_ready()
-    return True
+def update_draft(workspace_id, knowledge_id, **values):
+    if "source_name" in values and "source_reference" not in values:
+        values["source_reference"] = values.pop("source_name")
+    if "metadata" in values and "tags" not in values:
+        metadata = values.pop("metadata")
+        values["tags"] = metadata.get("tags") if isinstance(metadata, dict) else None
+    values.pop("content_format", None)
+    return update_knowledge_item(workspace_id, knowledge_id, **values)
+
+
+def create_knowledge_version(workspace_id, knowledge_id, **values):
+    if "created_by" in values:
+        values["updated_by"] = values.pop("created_by")
+    return update_draft(workspace_id, knowledge_id, **values)
+
+
+def activate_knowledge_item(workspace_id, knowledge_id):
+    item = get_knowledge_item(workspace_id, knowledge_id)
+    if item.status != "ACTIVE":
+        raise KnowledgeVaultTransitionError("knowledge_transition_invalid")
+    return item
+
+
+def archive_knowledge_item(workspace_id, knowledge_id, actor="workspace_client"):
+    current = get_knowledge_item(workspace_id, knowledge_id)
+    if current.status != "ACTIVE":
+        return current
+    now = _now()
+    conn = persistence_backend.connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_sql(f"""
+            UPDATE {TABLE_NAME} SET status='archived',archived_at=%s,
+                updated_at=%s,updated_by=%s
+            WHERE workspace_id=%s AND knowledge_id=%s AND version=%s
+                AND status='active'
+        """), (
+            now, now, actor, current.workspace_id, current.knowledge_id,
+            current.version,
+        ))
+        if cur.rowcount != 1:
+            raise KnowledgeVaultConflictError("knowledge_archive_conflict")
+        _event(
+            cur, current.workspace_id, current.knowledge_id,
+            "knowledge_archived", actor, current.version, current.version,
+            {"status": "ARCHIVED"},
+        )
+        conn.commit()
+        cur.close()
+    except KnowledgeVaultError:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return KnowledgeItem(
+        current.knowledge_id, current.workspace_id, current.title,
+        current.content, current.knowledge_type, "ARCHIVED",
+        current.source_type, current.source_reference, current.tags,
+        current.version, current.content_checksum, current.created_by, actor,
+        current.created_at, now, now,
+    )
+
+
+def list_knowledge_events(workspace_id, knowledge_id=None, limit=100):
+    workspace = _id(workspace_id, "workspace_id")
+    clauses, params = ["workspace_id=%s"], [workspace]
+    if knowledge_id:
+        clauses.append("knowledge_id=%s")
+        params.append(_id(knowledge_id))
+    params.append(min(max(int(limit), 1), 200))
+    conn = persistence_backend.connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_sql(f"""
+            SELECT event_id,workspace_id,knowledge_id,event_type,actor,
+                old_version,new_version,safe_metadata,created_at
+            FROM {EVENT_TABLE} WHERE {' AND '.join(clauses)}
+            ORDER BY created_at DESC,event_id DESC LIMIT %s
+        """), tuple(params))
+        rows = cur.fetchall() or []
+        cur.close()
+    finally:
+        conn.close()
+    return tuple(rows)
+
+
+def initialize_knowledge_vault(require_schema=None):
+    # Hosted runtimes are always fail-closed. Local legacy test/runtime imports
+    # remain compatible until their explicit managed-migration fixture runs.
+    strict = persistence_backend.HOSTED if require_schema is None else bool(
+        require_schema
+    )
+    if KNOWLEDGE_TYPES != frozenset({
+        "FACT", "INSTRUCTION", "POLICY", "PROCEDURE",
+        "PRODUCT", "SERVICE", "FAQ", "NOTE",
+    }) or STATUSES != frozenset({"ACTIVE", "ARCHIVED"}):
+        return False
+    conn = persistence_backend.connect()
+    try:
+        cur = conn.cursor()
+        required = {TABLE_NAME, VERSION_TABLE, EVENT_TABLE}
+        if persistence_backend.USE_POSTGRES:
+            cur.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema=current_schema()"
+            )
+            tables = {str(row[0]) for row in cur.fetchall()}
+        else:
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = {str(row[0]) for row in cur.fetchall()}
+        if not required.issubset(tables):
+            return False if strict else True
+        columns = set()
+        if persistence_backend.USE_POSTGRES:
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema=current_schema() "
+                "AND table_name='nina_knowledge_items'"
+            )
+            columns = {str(row[0]) for row in cur.fetchall()}
+        else:
+            cur.execute("PRAGMA table_info(nina_knowledge_items)")
+            columns = {str(row[1]) for row in cur.fetchall()}
+        cur.execute(_sql(
+            "SELECT COUNT(*) FROM nina_knowledge_items WHERE workspace_id=%s"
+        ), ("readiness_probe",))
+        cur.fetchone()
+        cur.close()
+        result = {
+            "ok": {
+                "workspace_id", "knowledge_type", "source_reference",
+                "tags_json", "content_checksum", "updated_by",
+            }.issubset(columns)
+        }
+        return result if strict else True
+    except Exception:
+        return False
+    finally:
+        conn.close()
 
 
 def persistence_health():

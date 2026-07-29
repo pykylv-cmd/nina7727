@@ -82,6 +82,31 @@ class PermissionRule:
 # =========================================================
 
 PERMISSION_RULES: Dict[str, PermissionRule] = {
+    "knowledge_read": PermissionRule(
+        permission_id="knowledge_read",
+        label="Read Knowledge",
+        description="Read workspace-authoritative Knowledge Vault items.",
+        category="knowledge",
+    ),
+    "knowledge_write": PermissionRule(
+        permission_id="knowledge_write",
+        label="Write Knowledge",
+        description="Create and version workspace Knowledge Vault items.",
+        category="knowledge",
+    ),
+    "knowledge_archive": PermissionRule(
+        permission_id="knowledge_archive",
+        label="Archive Knowledge",
+        description="Archive Knowledge without deleting its history.",
+        category="knowledge",
+        risk_level="medium",
+    ),
+    "knowledge_audit_view": PermissionRule(
+        permission_id="knowledge_audit_view",
+        label="View Knowledge Audit",
+        description="View safe Knowledge Vault change events and versions.",
+        category="knowledge",
+    ),
     # Task / workspace actions
     "read_task": PermissionRule(
         permission_id="read_task",
@@ -333,6 +358,10 @@ ROLE_PERMISSION_MAP: Dict[str, List[str]] = {
         "write_project",
         "delete_project",
         "export_workspace_tasks",
+        "knowledge_read",
+        "knowledge_write",
+        "knowledge_archive",
+        "knowledge_audit_view",
     ],
 
     "finance_admin_assistant": [
@@ -378,6 +407,10 @@ ROLE_PERMISSION_MAP: Dict[str, List[str]] = {
         "read_client",
         "read_invoice",
         "read_estimate",
+        "knowledge_read",
+        "knowledge_write",
+        "knowledge_archive",
+        "knowledge_audit_view",
     ],
 
     # planned roles
@@ -386,11 +419,13 @@ ROLE_PERMISSION_MAP: Dict[str, List[str]] = {
         "write_client",
         "send_client_message",
         "read_estimate",
+        "knowledge_read",
     ],
     "support_assistant": [
         "read_client",
         "write_client",
         "read_document",
+        "knowledge_read",
     ],
     "finance_accountant_basic": [
         "read_invoice",

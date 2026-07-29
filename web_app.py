@@ -93,6 +93,7 @@ from deployment_compatibility import DeploymentCompatibilityContract
 from platform_core import initialize_platform_runtime
 from rolepack_system import initialize_rolepack_system
 from ready_worker_catalog import initialize_ready_worker_catalog
+from permission_engine import get_permission_rule
 from agent_assignment import (
     AgentAssignmentConflictError,
     AgentAssignmentError,
@@ -123,8 +124,10 @@ from knowledge_vault import (
     create_knowledge_version,
     get_knowledge_item,
     initialize_knowledge_vault,
+    list_knowledge_events,
     list_knowledge_versions,
     list_tenant_knowledge,
+    update_knowledge_item,
     update_draft,
 )
 from universal_work_objects import (
@@ -4476,6 +4479,92 @@ def nina_contact_html(lang=None):
     )
 
 
+def _knowledge_permission(permission_id):
+    """Use the canonical registry; authenticated workspace clients own their Vault."""
+    return (
+        get_permission_rule(permission_id) is not None
+        and current_web_role() in {CLIENT_ROLE, ADMIN_ROLE}
+    )
+
+
+def knowledge_vault_html():
+    workspace_id = current_workspace_id()
+    query = (request.args.get("knowledge_query") or "").strip()
+    items = list_tenant_knowledge(
+        workspace_id, query=query or None, limit=50, offset=0
+    )
+    notice = (request.args.get("knowledge_status") or "").strip()
+    rows = []
+    for item in items:
+        history = list_knowledge_versions(workspace_id, item.knowledge_id)
+        history_text = ", ".join(f"v{entry.version}" for entry in history)
+        action = f"knowledge:archive:{item.knowledge_id}"
+        update_action = f"knowledge:update:{item.knowledge_id}"
+        rows.append(
+            "<div class='row'><div><b>"
+            + html_escape(item.title)
+            + "</b><span class='muted'>"
+            + html_escape(item.knowledge_type)
+            + " · "
+            + html_escape(", ".join(item.tags) or "no tags")
+            + " · "
+            + html_escape(item.source_type)
+            + " · v"
+            + html_escape(str(item.version))
+            + " · "
+            + html_escape(item.updated_at)
+            + " · "
+            + html_escape(item.status)
+            + "</span><details><summary>View history</summary><span class='muted'>"
+            + html_escape(history_text)
+            + "</span></details>"
+            + "<details><summary>Edit</summary>"
+            + f"<form method='post' action='/knowledge-vault/{html_escape(item.knowledge_id)}/update'>"
+            + f"<input type='hidden' name='csrf_token' value='{_channel_csrf(update_action)}'>"
+            + f"<input type='hidden' name='expected_version' value='{item.version}'>"
+            + f"<input name='title' value='{html_escape(item.title)}' required>"
+            + "<textarea name='content' required>"
+            + html_escape(item.content)
+            + "</textarea><button class='btn' type='submit'>Save version</button></form>"
+            + "</details></div>"
+            + f"<form method='post' action='/knowledge-vault/{html_escape(item.knowledge_id)}/archive'>"
+            + f"<input type='hidden' name='csrf_token' value='{_channel_csrf(action)}'>"
+            + "<button class='btn' type='submit'>Archive</button></form></div>"
+        )
+    row_html = "".join(rows) or (
+        "<div class='row'><span class='muted'>No active knowledge items.</span></div>"
+    )
+    type_options = "".join(
+        f"<option value='{value}'>{value}</option>"
+        for value in (
+            "FACT", "INSTRUCTION", "POLICY", "PROCEDURE",
+            "PRODUCT", "SERVICE", "FAQ", "NOTE",
+        )
+    )
+    return (
+        "<section class='card card-pad'><div class='section-title'>Knowledge Vault</div>"
+        "<p class='muted'>Canonical workspace knowledge. Conversation Memory remains separate.</p>"
+        + (f"<div class='safe-note'>{html_escape(notice)}</div>" if notice else "")
+        + f"<div class='safe-note'><b>{len(items)}</b> ACTIVE items</div>"
+        + "<form method='get' action='/dashboard'><div class='field'>"
+        + f"<input name='knowledge_query' value='{html_escape(query)}' placeholder='Search title or content'>"
+        + "</div><button class='btn' type='submit'>Search</button></form>"
+        + "<details><summary>Create Knowledge</summary>"
+        + "<form method='post' action='/knowledge-vault/create'>"
+        + f"<input type='hidden' name='csrf_token' value='{_channel_csrf('knowledge:create')}'>"
+        + "<div class='field'><label>Title</label><input name='title' required></div>"
+        + "<div class='field'><label>Content</label><textarea name='content' required></textarea></div>"
+        + f"<div class='field'><label>Type</label><select name='knowledge_type'>{type_options}</select></div>"
+        + "<div class='field'><label>Tags</label><input name='tags' placeholder='support, policy'></div>"
+        + "<div class='field'><label>Source</label><select name='source_type'>"
+        + "<option>MANUAL</option><option>IMPORTED_TEXT</option><option>SYSTEM</option>"
+        + "</select></div><div class='field'><label>Source reference</label>"
+        + "<input name='source_reference'></div>"
+        + "<button class='btn primary' type='submit'>Create Knowledge</button></form></details>"
+        + "<div class='list'>" + row_html + "</div></section>"
+    )
+
+
 def dashboard_body(data):
     lang = current_language()
     c = data["counts"]
@@ -4616,6 +4705,14 @@ def dashboard_body(data):
             "<section class='card card-pad'><div class='section-title'>"
             "Workspace Settings</div><div class='safe-note'>"
             "AI Worker profile unavailable.</div></section>"
+        )
+    try:
+        one_nina_surface += knowledge_vault_html()
+    except Exception:
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "Knowledge Vault</div><div class='safe-note'>"
+            "Knowledge Vault unavailable.</div></section>"
         )
     try:
         rolepack_selection = get_workspace_rolepack(
@@ -6729,19 +6826,21 @@ def _knowledge_query_integer(name, default):
 
 @app.post("/knowledge-vault/items")
 def create_knowledge_item_api():
+    if not _knowledge_permission("knowledge_write"):
+        return jsonify({"ok": False, "error": "knowledge_permission_denied"}), 403
     try:
         payload = _knowledge_payload({
-            "title", "source_type", "content", "content_format",
-            "source_name", "metadata",
+            "title", "content", "knowledge_type", "source_type",
+            "source_reference", "tags",
         })
         item = create_knowledge_item(
             current_workspace_id(),
             title=payload.get("title"),
-            source_type=payload.get("source_type"),
             content=payload.get("content"),
-            content_format=payload.get("content_format"),
-            source_name=payload.get("source_name", ""),
-            metadata=payload.get("metadata"),
+            knowledge_type=payload.get("knowledge_type"),
+            source_type=payload.get("source_type"),
+            source_reference=payload.get("source_reference", ""),
+            tags=payload.get("tags"),
             created_by="workspace_client",
         )
         return jsonify({"ok": True, "item": item.as_dict()}), 201
@@ -6751,11 +6850,15 @@ def create_knowledge_item_api():
 
 @app.get("/knowledge-vault/items")
 def list_knowledge_items_api():
+    if not _knowledge_permission("knowledge_read"):
+        return jsonify({"ok": False, "error": "knowledge_permission_denied"}), 403
     try:
         items = list_tenant_knowledge(
             current_workspace_id(),
-            status=request.args.get("status"),
+            status=request.args.get("status") or "ACTIVE",
             source_type=request.args.get("source_type"),
+            knowledge_type=request.args.get("knowledge_type"),
+            tag=request.args.get("tag"),
             query=request.args.get("query"),
             limit=_knowledge_query_integer("limit", DEFAULT_LIST_LIMIT),
             offset=_knowledge_query_integer("offset", 0),
@@ -6770,6 +6873,8 @@ def list_knowledge_items_api():
 
 @app.get("/knowledge-vault/items/<knowledge_id>")
 def get_knowledge_item_api(knowledge_id):
+    if not _knowledge_permission("knowledge_read"):
+        return jsonify({"ok": False, "error": "knowledge_permission_denied"}), 403
     try:
         item = get_knowledge_item(current_workspace_id(), knowledge_id)
         return jsonify({"ok": True, "item": item.as_dict()})
@@ -6779,31 +6884,37 @@ def get_knowledge_item_api(knowledge_id):
 
 @app.patch("/knowledge-vault/items/<knowledge_id>")
 def update_knowledge_item_api(knowledge_id):
+    if not _knowledge_permission("knowledge_write"):
+        return jsonify({"ok": False, "error": "knowledge_permission_denied"}), 403
     try:
         payload = _knowledge_payload({
-            "title", "source_type", "content", "content_format",
-            "source_name", "metadata",
+            "title", "content", "knowledge_type", "source_type",
+            "source_reference", "tags", "expected_version",
         })
         if not payload:
             raise KnowledgeVaultValidationError("knowledge_update_required")
-        item = update_draft(
+        item = update_knowledge_item(
             current_workspace_id(), knowledge_id,
             title=payload.get("title") if "title" in payload else None,
+            content=payload.get("content") if "content" in payload else None,
+            knowledge_type=payload.get("knowledge_type")
+            if "knowledge_type" in payload else None,
             source_type=payload.get("source_type")
             if "source_type" in payload else None,
-            content=payload.get("content") if "content" in payload else None,
-            content_format=payload.get("content_format")
-            if "content_format" in payload else None,
-            source_name=payload.get("source_name")
-            if "source_name" in payload else None,
-            metadata=payload.get("metadata") if "metadata" in payload else None,
+            source_reference=payload.get("source_reference")
+            if "source_reference" in payload else None,
+            tags=payload.get("tags") if "tags" in payload else None,
+            expected_version=payload.get("expected_version"),
+            updated_by="workspace_client",
         )
         return jsonify({"ok": True, "item": item.as_dict()})
     except KnowledgeVaultError as exc:
         return _knowledge_error_response(exc)
 
 
-def _knowledge_transition_api(knowledge_id, operation):
+def _knowledge_transition_api(knowledge_id, operation, permission):
+    if not _knowledge_permission(permission):
+        return jsonify({"ok": False, "error": "knowledge_permission_denied"}), 403
     try:
         _knowledge_payload(set())
         item = operation(current_workspace_id(), knowledge_id)
@@ -6814,29 +6925,36 @@ def _knowledge_transition_api(knowledge_id, operation):
 
 @app.post("/knowledge-vault/items/<knowledge_id>/activate")
 def activate_knowledge_item_api(knowledge_id):
-    return _knowledge_transition_api(knowledge_id, activate_knowledge_item)
+    return _knowledge_transition_api(
+        knowledge_id, activate_knowledge_item, "knowledge_write"
+    )
 
 
 @app.post("/knowledge-vault/items/<knowledge_id>/archive")
 def archive_knowledge_item_api(knowledge_id):
-    return _knowledge_transition_api(knowledge_id, archive_knowledge_item)
+    return _knowledge_transition_api(
+        knowledge_id, archive_knowledge_item, "knowledge_archive"
+    )
 
 
 @app.post("/knowledge-vault/items/<knowledge_id>/versions")
 def create_knowledge_version_api(knowledge_id):
+    if not _knowledge_permission("knowledge_write"):
+        return jsonify({"ok": False, "error": "knowledge_permission_denied"}), 403
     try:
         payload = _knowledge_payload({
-            "title", "source_type", "content", "content_format",
-            "source_name", "metadata",
+            "title", "content", "knowledge_type", "source_type",
+            "source_reference", "tags", "expected_version",
         })
         item = create_knowledge_version(
             current_workspace_id(), knowledge_id,
             title=payload.get("title"),
-            source_type=payload.get("source_type"),
             content=payload.get("content"),
-            content_format=payload.get("content_format"),
-            source_name=payload.get("source_name"),
-            metadata=payload.get("metadata"),
+            knowledge_type=payload.get("knowledge_type"),
+            source_type=payload.get("source_type"),
+            source_reference=payload.get("source_reference"),
+            tags=payload.get("tags"),
+            expected_version=payload.get("expected_version"),
             created_by="workspace_client",
         )
         return jsonify({"ok": True, "item": item.as_dict()}), 201
@@ -6846,6 +6964,8 @@ def create_knowledge_version_api(knowledge_id):
 
 @app.get("/knowledge-vault/items/<knowledge_id>/versions")
 def list_knowledge_versions_api(knowledge_id):
+    if not _knowledge_permission("knowledge_audit_view"):
+        return jsonify({"ok": False, "error": "knowledge_permission_denied"}), 403
     try:
         versions = list_knowledge_versions(
             current_workspace_id(), knowledge_id
@@ -6856,6 +6976,66 @@ def list_knowledge_versions_api(knowledge_id):
         })
     except KnowledgeVaultError as exc:
         return _knowledge_error_response(exc)
+
+
+@app.post("/knowledge-vault/create")
+def create_knowledge_form():
+    if not _knowledge_permission("knowledge_write"):
+        return Response("knowledge_permission_denied", status=403)
+    if not _valid_channel_csrf("knowledge:create"):
+        return Response("knowledge_csrf_invalid", status=403)
+    try:
+        create_knowledge_item(
+            current_workspace_id(),
+            title=request.form.get("title"),
+            content=request.form.get("content"),
+            knowledge_type=request.form.get("knowledge_type"),
+            tags=request.form.get("tags"),
+            source_type=request.form.get("source_type"),
+            source_reference=request.form.get("source_reference", ""),
+            created_by=current_web_contact()["contact_id"],
+        )
+        status = "Knowledge created"
+    except KnowledgeVaultError:
+        status = "Knowledge validation failed"
+    return redirect(q("/dashboard") + "&knowledge_status=" + quote_plus(status))
+
+
+@app.post("/knowledge-vault/<knowledge_id>/update")
+def update_knowledge_form(knowledge_id):
+    if not _knowledge_permission("knowledge_write"):
+        return Response("knowledge_permission_denied", status=403)
+    if not _valid_channel_csrf(f"knowledge:update:{knowledge_id}"):
+        return Response("knowledge_csrf_invalid", status=403)
+    try:
+        update_knowledge_item(
+            current_workspace_id(), knowledge_id,
+            title=request.form.get("title"),
+            content=request.form.get("content"),
+            expected_version=request.form.get("expected_version"),
+            updated_by=current_web_contact()["contact_id"],
+        )
+        status = "Knowledge updated"
+    except KnowledgeVaultError:
+        status = "Knowledge update failed"
+    return redirect(q("/dashboard") + "&knowledge_status=" + quote_plus(status))
+
+
+@app.post("/knowledge-vault/<knowledge_id>/archive")
+def archive_knowledge_form(knowledge_id):
+    if not _knowledge_permission("knowledge_archive"):
+        return Response("knowledge_permission_denied", status=403)
+    if not _valid_channel_csrf(f"knowledge:archive:{knowledge_id}"):
+        return Response("knowledge_csrf_invalid", status=403)
+    try:
+        archive_knowledge_item(
+            current_workspace_id(), knowledge_id,
+            actor=current_web_contact()["contact_id"],
+        )
+        status = "Knowledge archived"
+    except KnowledgeVaultError:
+        status = "Knowledge archive failed"
+    return redirect(q("/dashboard") + "&knowledge_status=" + quote_plus(status))
 
 
 def _work_error_response(exc):

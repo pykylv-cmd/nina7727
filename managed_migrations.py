@@ -613,6 +613,79 @@ def _create_agent_assignment_workspace_v1(conn):
     cur.close()
 
 
+def _create_knowledge_vault_workspace_v1(conn):
+    """Add the canonical workspace Vault, immutable versions and safe audit."""
+    cur = conn.cursor()
+    existing = set(_column_contract(conn, "nina_knowledge_items"))
+    additions = (
+        ("workspace_id", "TEXT"),
+        ("knowledge_type", "TEXT"),
+        ("source_reference", "TEXT NOT NULL DEFAULT ''"),
+        ("tags_json", "TEXT NOT NULL DEFAULT '[]'"),
+        ("content_checksum", "TEXT"),
+        ("updated_by", "TEXT NOT NULL DEFAULT ''"),
+    )
+    for name, definition in additions:
+        if name not in existing:
+            cur.execute(
+                f"ALTER TABLE nina_knowledge_items "
+                f"ADD COLUMN {name} {definition}"
+            )
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_knowledge_workspace_status
+        ON nina_knowledge_items (workspace_id, status, updated_at)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_knowledge_workspace_type
+        ON nina_knowledge_items (workspace_id, knowledge_type)
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_knowledge_versions (
+            version_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            knowledge_id TEXT NOT NULL,
+            version INTEGER NOT NULL CHECK (version >= 1),
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            knowledge_type TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            source_reference TEXT NOT NULL DEFAULT '',
+            tags_json TEXT NOT NULL DEFAULT '[]',
+            content_checksum TEXT NOT NULL,
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE (workspace_id, knowledge_id, version)
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_knowledge_versions_workspace
+        ON nina_knowledge_versions (workspace_id, knowledge_id, version)
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_knowledge_events (
+            event_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            knowledge_id TEXT NOT NULL,
+            event_type TEXT NOT NULL CHECK (
+                event_type IN (
+                    'knowledge_created','knowledge_updated',
+                    'knowledge_archived','knowledge_restored'
+                )
+            ),
+            actor TEXT NOT NULL,
+            old_version INTEGER,
+            new_version INTEGER,
+            safe_metadata TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_knowledge_events_workspace
+        ON nina_knowledge_events (workspace_id, created_at)
+    """)
+    cur.close()
+
+
 MIGRATIONS = (
     Migration(
         identifier="0001_shared_conversation_state",
@@ -749,6 +822,21 @@ MIGRATIONS = (
             "stable-worker-instance|single-active-per-workspace|"
             "statuses:provisioning,active,suspended,archived|"
             "audit:create,update,activate,suspend,archive"
+        ),
+    ),
+    Migration(
+        identifier="0011_knowledge_vault_v1",
+        version=11,
+        name="Expand Knowledge Vault into canonical workspace knowledge",
+        phase=PHASE_EXPAND,
+        operation=_create_knowledge_vault_workspace_v1,
+        checksum_source=(
+            "0011|EXPAND|nina_knowledge_items+"
+            "nina_knowledge_versions+nina_knowledge_events|"
+            "workspace-canonical|types:FACT,INSTRUCTION,POLICY,PROCEDURE,"
+            "PRODUCT,SERVICE,FAQ,NOTE|statuses:ACTIVE,ARCHIVED|"
+            "provenance:MANUAL,IMPORTED_TEXT,SYSTEM|"
+            "immutable-versions|safe-audit|deterministic-search"
         ),
     ),
 )

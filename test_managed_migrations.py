@@ -65,6 +65,7 @@ class ManagedMigrationTests(unittest.TestCase):
                 "0008_rolepack_system_v1",
                 "0009_ready_worker_catalog_v1",
                 "0010_agent_assignment_v1",
+                "0011_knowledge_vault_v1",
             ],
         )
         self.assertIn(managed_migrations.LEDGER_TABLE, self._tables())
@@ -94,6 +95,7 @@ class ManagedMigrationTests(unittest.TestCase):
                 "0008_rolepack_system_v1",
                 "0009_ready_worker_catalog_v1",
                 "0010_agent_assignment_v1",
+                "0011_knowledge_vault_v1",
             ],
         )
 
@@ -183,6 +185,7 @@ class ManagedMigrationTests(unittest.TestCase):
                 "0008_rolepack_system_v1",
                 "0009_ready_worker_catalog_v1",
                 "0010_agent_assignment_v1",
+                "0011_knowledge_vault_v1",
             ],
         )
 
