@@ -70,6 +70,7 @@ class ReleaseConfigurationTests(unittest.TestCase):
                 "startup_completed": True,
                 "checks": {"required_web_capability": True},
                 "failure_class": "",
+                "failure_component": "",
             },
         )
 

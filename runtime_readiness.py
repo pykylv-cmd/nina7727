@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections import OrderedDict
+
+
+logger = logging.getLogger(__name__)
 
 
 class RuntimeReadiness:
@@ -19,6 +23,7 @@ class RuntimeReadiness:
             self._startup_started = False
             self._startup_completed = False
             self._failure_class = ""
+            self._failure_component = ""
             self._check_results = OrderedDict()
 
     def register(self, name, check):
@@ -33,7 +38,12 @@ class RuntimeReadiness:
             self._startup_started = True
             self._startup_completed = False
             self._failure_class = ""
-            self._check_results = OrderedDict()
+            self._failure_component = ""
+            # A readiness response must account for every required component,
+            # including checks not reached after a fail-closed dependency.
+            self._check_results = OrderedDict(
+                (name, False) for name in self._checks
+            )
 
     @staticmethod
     def _check_succeeded(result):
@@ -49,12 +59,24 @@ class RuntimeReadiness:
                     raise RuntimeError(f"readiness_check_failed:{name}")
                 with self._lock:
                     self._check_results[name] = True
+                logger.info(
+                    "readiness_component runtime=%s component=%s ready=true",
+                    self.runtime_name, name,
+                )
             except Exception as exc:
                 with self._lock:
                     self._check_results[name] = False
                     self._failure_class = type(exc).__name__
+                    self._failure_component = name
                     self._ready = False
                     self._startup_completed = False
+                    component_results = dict(self._check_results)
+                logger.error(
+                    "readiness_component runtime=%s component=%s "
+                    "ready=false failure_class=%s checks=%s",
+                    self.runtime_name, name, type(exc).__name__,
+                    component_results,
+                )
                 raise
         return True
 
@@ -69,6 +91,12 @@ class RuntimeReadiness:
             self._startup_completed = True
             self._ready = True
             self._failure_class = ""
+            self._failure_component = ""
+            component_results = dict(self._check_results)
+        logger.info(
+            "readiness_complete runtime=%s ready=true checks=%s",
+            self.runtime_name, component_results,
+        )
 
     def fail_startup(self, exc):
         with self._lock:
@@ -96,6 +124,7 @@ class RuntimeReadiness:
                 "startup_completed": bool(self._startup_completed),
                 "checks": dict(self._check_results),
                 "failure_class": self._failure_class,
+                "failure_component": self._failure_component,
             }
 
 
