@@ -224,26 +224,19 @@ class RolePackWorkspaceV1Tests(unittest.TestCase):
             'frozenset({"REMIND", "NO_ACTION"})', source,
         )
 
-    def test_16_dashboard_renders_rolepack_dropdown(self):
+    def test_16_dashboard_renders_rolepack_read_only(self):
         self.select("client_manager")
         body = self.web.app.test_client().get(
             "/dashboard",
         ).get_data(as_text=True)
-        self.assertIn("Save RolePack", body)
-        self.assertRegex(
-            body, r"value='client_manager' selected",
-        )
-        self.assertIn("Office Manager", body)
-        self.assertIn("Personal Assistant", body)
+        self.assertIn("Active RolePack", body)
+        self.assertIn("Active: Client Manager", body)
+        self.assertNotIn("Save RolePack", body)
+        self.assertNotIn("action='/settings/rolepack'", body)
 
     def test_17_rolepack_post_uses_prg_and_persists(self):
         client = self.web.app.test_client()
-        body = client.get("/dashboard").get_data(as_text=True)
-        token = re.search(
-            r"action='/settings/rolepack'.*?"
-            r"name='csrf_token' value='([^']+)'",
-            body, re.S,
-        ).group(1)
+        token = self.web._channel_csrf("rolepack:change")
         response = client.post(
             "/settings/rolepack",
             data={

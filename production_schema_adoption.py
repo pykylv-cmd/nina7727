@@ -258,6 +258,30 @@ CONTRACTS = {
             "indexes": {"idx_nina_rolepack_events_workspace"},
         },
     },
+    "0009_ready_worker_catalog_v1": {
+        "nina_workspace_workers": {
+            "columns": {
+                name: (TEXT_TYPES, False)
+                for name in (
+                    "workspace_id", "worker_id", "worker_version",
+                    "updated_by", "created_at", "updated_at",
+                )
+            },
+            "primary_key": ("workspace_id",),
+            "indexes": set(),
+        },
+        "nina_worker_events": {
+            "columns": {
+                name: (TEXT_TYPES, False)
+                for name in (
+                    "event_id", "workspace_id", "event_type",
+                    "old_worker", "new_worker", "actor", "created_at",
+                )
+            },
+            "primary_key": ("event_id",),
+            "indexes": {"idx_nina_worker_events_workspace"},
+        },
+    },
 }
 
 

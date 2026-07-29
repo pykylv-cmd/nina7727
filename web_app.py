@@ -182,6 +182,14 @@ from rolepack_system import (
     list_workspace_rolepack_events,
     set_workspace_rolepack,
 )
+from worker_catalog import (
+    WorkerCatalogError,
+    active_worker,
+    get_workspace_worker,
+    list_workers,
+    list_workspace_worker_events,
+    set_workspace_worker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -4525,6 +4533,71 @@ def dashboard_body(data):
             "Autonomy profile unavailable.</div></section>"
         )
     try:
+        worker_selection = get_workspace_worker(
+            NINA_WEB_WORKSPACE_ID, actor="system",
+        )
+        worker = active_worker(NINA_WEB_WORKSPACE_ID)
+        worker_events = list_workspace_worker_events(
+            NINA_WEB_WORKSPACE_ID, limit=5,
+        )
+        worker_options = "".join(
+            f"<option value='{item.worker_id}'"
+            + (
+                " selected"
+                if item.worker_id == worker_selection.worker_id else ""
+            )
+            + f">{html_escape(item.display_name)}</option>"
+            for item in list_workers()
+        )
+        worker_event_rows = "".join(
+            "<div class='row'><div><b>AI Worker changed</b>"
+            + "<span class='muted'>"
+            + html_escape(event[3] or "not configured")
+            + " to "
+            + html_escape(event[4])
+            + " by "
+            + html_escape(event[5])
+            + " at "
+            + html_escape(event[6])
+            + "</span></div></div>"
+            for event in worker_events
+        ) or (
+            "<div class='row'><span class='muted'>"
+            "No AI Worker changes.</span></div>"
+        )
+        worker_notice = request.args.get("worker_status", "")
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "Workspace Settings</div><p class='muted'>Choose a ready AI "
+            "Worker. There is still only one Nina; the Worker selects her "
+            "professional RolePack composition.</p>"
+            + (
+                f"<div class='safe-note'>{html_escape(worker_notice)}</div>"
+                if worker_notice else ""
+            )
+            + "<form method='post' action='/settings/worker'>"
+            + "<div class='field'><label for='worker-id'>AI Worker</label>"
+            + f"<select id='worker-id' name='worker_id'>{worker_options}</select></div>"
+            + f"<input type='hidden' name='csrf_token' value='{_channel_csrf('worker:change')}'>"
+            + "<div class='form-actions'><button class='btn' type='submit'>"
+            + "Save AI Worker</button></div></form>"
+            + "<div class='safe-note'><b>"
+            + html_escape(worker.display_name)
+            + "</b> В· "
+            + html_escape(worker.description)
+            + "<br>RolePack composition: "
+            + html_escape(" + ".join(worker.rolepacks))
+            + "</div><div class='list'>"
+            + worker_event_rows
+            + "</div></section>"
+        )
+    except Exception:
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "Workspace Settings</div><div class='safe-note'>"
+            "AI Worker profile unavailable.</div></section>"
+        )
+    try:
         rolepack_selection = get_workspace_rolepack(
             NINA_WEB_WORKSPACE_ID, actor="system",
         )
@@ -4568,20 +4641,16 @@ def dashboard_body(data):
         rolepack_notice = request.args.get("rolepack_status", "")
         one_nina_surface += (
             "<section class='card card-pad'><div class='section-title'>"
-            "RolePack</div><p class='muted'>One Nina, configured for the "
-            "selected professional role. The canonical execution chain does "
-            "not change.</p>"
+            "Active RolePack</div><p class='muted'>Read-only composition "
+            "detail managed by the selected AI Worker. The canonical "
+            "execution chain does not change.</p>"
             + (
                 f"<div class='safe-note'>{html_escape(rolepack_notice)}</div>"
                 if rolepack_notice else ""
             )
-            + "<form method='post' action='/settings/rolepack'>"
-            + "<div class='field'><label for='rolepack-id'>RolePack</label>"
-            + f"<select id='rolepack-id' name='rolepack_id'>{rolepack_options}</select></div>"
-            + f"<input type='hidden' name='csrf_token' value='{_channel_csrf('rolepack:change')}'>"
-            + "<div class='form-actions'><button class='btn' type='submit'>"
-            + "Save RolePack</button></div></form>"
-            + "<div class='safe-note'>Capabilities: "
+            + "<div class='safe-note'>Active: "
+            + html_escape(rolepack.display_name)
+            + "<br>Capabilities: "
             + html_escape(", ".join(rolepack.capabilities))
             + "</div><div class='list'>"
             + rolepack_event_rows
@@ -7573,6 +7642,24 @@ def rolepack_update():
         status = str(exc)
     return redirect(
         q("/dashboard") + "&rolepack_status=" + quote_plus(status)
+    )
+
+
+@app.post("/settings/worker")
+def worker_update():
+    if not _valid_channel_csrf("worker:change"):
+        return Response("worker_csrf_invalid", status=403)
+    worker_id = str(request.form.get("worker_id") or "").strip()
+    try:
+        selection = set_workspace_worker(
+            NINA_WEB_WORKSPACE_ID, worker_id,
+            updated_by=current_web_contact()["contact_id"],
+        )
+        status = selection.worker_id
+    except WorkerCatalogError as exc:
+        status = str(exc)
+    return redirect(
+        q("/dashboard") + "&worker_status=" + quote_plus(status)
     )
 
 

@@ -496,6 +496,38 @@ def _create_workspace_rolepacks(conn):
     cur.close()
 
 
+def _create_workspace_workers(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_workspace_workers (
+            workspace_id TEXT PRIMARY KEY,
+            worker_id TEXT NOT NULL,
+            worker_version TEXT NOT NULL,
+            updated_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_worker_events (
+            event_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            event_type TEXT NOT NULL CHECK (
+                event_type='worker_changed'
+            ),
+            old_worker TEXT NOT NULL DEFAULT '',
+            new_worker TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_worker_events_workspace
+        ON nina_worker_events (workspace_id, created_at)
+    """)
+    cur.close()
+
+
 MIGRATIONS = (
     Migration(
         identifier="0001_shared_conversation_state",
@@ -606,6 +638,18 @@ MIGRATIONS = (
             "single-active-primary-rolepack-per-workspace|"
             "action-registry:REMIND,NO_ACTION,FOLLOW_UP,CHECK_IN,"
             "ASK_FOR_UPDATE|audit:rolepack_changed"
+        ),
+    ),
+    Migration(
+        identifier="0009_ready_worker_catalog_v1",
+        version=9,
+        name="Create tenant-scoped Ready Worker Catalog V1",
+        phase=PHASE_EXPAND,
+        operation=_create_workspace_workers,
+        checksum_source=(
+            "0009|EXPAND|nina_workspace_workers+nina_worker_events|"
+            "single-active-worker-per-workspace|"
+            "worker-composes-rolepacks|audit:worker_changed"
         ),
     ),
 )
