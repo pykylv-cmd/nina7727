@@ -10,6 +10,13 @@ from test_runtime_support import bind_sqlite_database, initialize_ready_web, ins
 install_test_environment()
 
 
+class FixedRigaDateTime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        fixed = cls(2026, 7, 27, 12, 0, tzinfo=ZoneInfo("Europe/Riga"))
+        return fixed if tz is None else fixed.astimezone(tz)
+
+
 class NinaDailyAssistantTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -79,7 +86,7 @@ class NinaDailyAssistantTests(unittest.TestCase):
         self.assertTrue(obj.metadata["reminder_at"])
 
     def test_today_and_overdue_summary(self):
-        now = datetime.now(ZoneInfo("Europe/Riga"))
+        now = FixedRigaDateTime.now(ZoneInfo("Europe/Riga"))
         for title, due in (
             ("Nokavētais", now - timedelta(days=1)),
             ("Šodienas", now + timedelta(hours=1)),
@@ -93,7 +100,10 @@ class NinaDailyAssistantTests(unittest.TestCase):
         self.assertEqual([x.title for x in buckets["overdue"]], ["Nokavētais"])
         self.assertEqual([x.title for x in buckets["today"]], ["Šodienas"])
         self.assertEqual([x.title for x in buckets["upcoming"]], ["Tuvākais"])
-        answer = self.service._daily_assistant_answer("Kas man šodien jādara?", "daily", "contact-1")
+        with patch.object(self.service, "datetime", FixedRigaDateTime):
+            answer = self.service._daily_assistant_answer(
+                "Kas man šodien jādara?", "daily", "contact-1"
+            )
         self.assertIn("Nokavēts", answer)
         self.assertIn("Šodienas", answer)
 
@@ -113,7 +123,7 @@ class NinaDailyAssistantTests(unittest.TestCase):
         self.assertEqual(first[0].object_id, second[0].object_id)
 
     def test_daily_summary_does_not_cross_contact_boundary(self):
-        now = datetime.now(ZoneInfo("Europe/Riga"))
+        now = FixedRigaDateTime.now(ZoneInfo("Europe/Riga"))
         for owner in ("contact-1", "contact-2"):
             self.work_objects.create_work_object(
                 object_type="task", title=f"Darbs {owner}", workspace_id="daily",
