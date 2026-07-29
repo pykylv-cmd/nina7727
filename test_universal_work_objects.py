@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,6 +10,7 @@ import client_work_view
 import daily_planner
 import followup_engine
 import managed_migrations
+import knowledge_vault
 import persistence_backend
 import task_engine
 import universal_work_objects as work
@@ -112,7 +114,6 @@ class UniversalWorkDomainTests(UniversalWorkFixture):
         self.assertTrue(valid.due_at.endswith("+00:00"))
         invalid = (
             {"object_type": "channel_task"},
-            {"priority": "critical"},
             {"source_type": "email"},
             {"due_at": "tomorrow"},
             {"due_at": "2026-08-01T10:00:00"},
@@ -269,8 +270,42 @@ class UniversalWorkDomainTests(UniversalWorkFixture):
         events = work.list_work_events("tenant_a", item.work_object_id)
         self.assertEqual(
             [event["event_type"] for event in events],
-            ["created", "transition", "assigned"],
+            ["work_object_created", "updated", "assigned"],
         )
+
+    def test_workspace_contract_knowledge_and_assignment_references(self):
+        assignment = self.active_assignment()
+        knowledge = knowledge_vault.create_knowledge_item(
+            "tenant_a",
+            title="Service policy",
+            content="Respond within one business day.",
+            knowledge_type="POLICY",
+            source_type="MANUAL",
+            created_by="owner",
+        )
+        item = self.create(
+            object_type="CLIENT_REQUEST",
+            priority="CRITICAL",
+            owner_assignment_id=assignment.assignment_id,
+            worker_instance_id="worker_instance_sales",
+            knowledge_refs=[knowledge.knowledge_id],
+            source_channel="web",
+        )
+        self.assertEqual(item.object_type, "request")
+        self.assertEqual(item.priority, "critical")
+        self.assertEqual(item.owner_assignment_id, assignment.assignment_id)
+        self.assertEqual(item.worker_instance_id, "worker_instance_sales")
+        self.assertEqual(item.knowledge_refs, (knowledge.knowledge_id,))
+        self.assertEqual(item.source_channel, "web")
+        self.assertEqual(item.updated_by, "owner")
+        with self.assertRaises(work.UniversalWorkNotFoundError):
+            self.create(knowledge_refs=["knowledge_missing"])
+        with self.assertRaises(work.UniversalWorkNotFoundError):
+            self.create(
+                owner_assignment_id=self.active_assignment(
+                    "tenant_b"
+                ).assignment_id
+            )
 
     def test_existing_modules_are_canonical_adapters(self):
         task = task_engine.create_canonical_task("tenant_a", "Task adapter")
@@ -315,6 +350,9 @@ class UniversalWorkDomainTests(UniversalWorkFixture):
             "assigned_agent_assignment_id", "parent_work_object_id",
             "description", "owner_type", "source_type", "due_at",
             "completed_at", "archived_at", "created_by",
+            "owner_assignment_id", "worker_instance_id",
+            "knowledge_refs_json", "source_channel", "updated_by",
+            "closed_at",
         }.issubset(columns))
         self.assertTrue({
             "idx_nina_work_objects_workspace_status",
@@ -322,8 +360,33 @@ class UniversalWorkDomainTests(UniversalWorkFixture):
             "idx_nina_work_objects_workspace_assignment",
             "idx_nina_work_objects_workspace_due",
             "idx_nina_work_objects_workspace_parent",
+            "idx_nina_work_objects_workspace_owner",
+            "idx_nina_work_objects_workspace_created",
+            "idx_nina_work_objects_workspace_worker",
         }.issubset(indexes))
         self.assertIn("nina_work_object_events", tables)
+        self.assertTrue(work.initialize_universal_work_objects(require_schema=True))
+
+    def test_readiness_fails_closed_without_0012_schema(self):
+        incomplete = str(Path(self.temp_dir.name) / "incomplete.sqlite")
+        conn = sqlite3.connect(incomplete)
+        conn.execute(
+            "CREATE TABLE nina_work_objects "
+            "(object_id TEXT, workspace_id TEXT, object_type TEXT, "
+            "title TEXT, status TEXT)"
+        )
+        conn.commit()
+        conn.close()
+        with patch.multiple(
+            persistence_backend,
+            HOSTED=False,
+            USE_POSTGRES=False,
+            DATABASE_URL="",
+            DB_FILE=incomplete,
+        ):
+            self.assertFalse(
+                work.initialize_universal_work_objects(require_schema=True)
+            )
 
 
 class UniversalWorkApiTests(UniversalWorkFixture):
@@ -351,6 +414,62 @@ class UniversalWorkApiTests(UniversalWorkFixture):
         self.env_patch.stop()
         self.readiness_patch.stop()
         super().tearDown()
+
+    def test_dashboard_work_objects_csrf_prg_and_rendering(self):
+        page = self.client_a.get("/dashboard")
+        body = page.get_data(as_text=True)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Work Objects", body)
+        self.assertIn("Create Work Object", body)
+        self.assertEqual(
+            self.client_a.post(
+                "/work-objects/create-form",
+                data={"title": "No CSRF", "object_type": "TASK"},
+            ).status_code,
+            403,
+        )
+        with patch.object(
+            self.web_app,
+            "current_web_contact",
+            return_value={"contact_id": "contact_owner"},
+        ):
+            created = self.client_a.post(
+                "/work-objects/create-form",
+                data={
+                    "csrf_token": self.web_app._channel_csrf("work:create"),
+                    "title": "Dashboard canonical work",
+                    "description": "Created through PRG.",
+                    "object_type": "TASK",
+                    "priority": "HIGH",
+                },
+            )
+        self.assertEqual(created.status_code, 302)
+        dashboard = self.client_a.get("/dashboard").get_data(as_text=True)
+        self.assertIn("Dashboard canonical work", dashboard)
+        self.assertIn(">Edit</summary>", dashboard)
+        object_id = re.search(
+            r"/work-objects/(wo_[A-Za-z0-9]+)/update-form", dashboard
+        ).group(1)
+        with patch.object(
+            self.web_app,
+            "current_web_contact",
+            return_value={"contact_id": "contact_owner"},
+        ):
+            updated = self.client_a.post(
+                f"/work-objects/{object_id}/update-form",
+                data={
+                    "csrf_token": self.web_app._channel_csrf(
+                        f"work:update:{object_id}"
+                    ),
+                    "title": "Dashboard edited work",
+                    "description": "Edited through PRG.",
+                },
+            )
+        self.assertEqual(updated.status_code, 302)
+        self.assertIn(
+            "Dashboard edited work",
+            self.client_a.get("/dashboard").get_data(as_text=True),
+        )
 
     def api_create(self, client=None, **values):
         payload = {

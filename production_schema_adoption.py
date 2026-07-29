@@ -368,6 +368,34 @@ CONTRACTS = {
             "indexes": {"idx_nina_knowledge_events_workspace"},
         },
     },
+    "0012_universal_work_objects_v1": {
+        "nina_work_objects": {
+            "columns": {
+                name: (TEXT_TYPES, False)
+                for name in (
+                    "owner_assignment_id", "worker_instance_id",
+                    "knowledge_refs_json", "source_channel", "updated_by",
+                    "closed_at",
+                )
+            },
+            "indexes": {
+                "idx_nina_work_objects_workspace_owner",
+                "idx_nina_work_objects_workspace_created",
+                "idx_nina_work_objects_workspace_worker",
+            },
+        },
+        "nina_work_object_events": {
+            "columns": {
+                name: (TEXT_TYPES, False)
+                for name in (
+                    "event_id", "workspace_id", "object_id", "event_type",
+                    "from_status", "to_status", "actor", "details_json",
+                    "created_at",
+                )
+            },
+            "indexes": {"idx_nina_work_events_workspace_object"},
+        },
+    },
 }
 
 

@@ -319,6 +319,36 @@ def _create_universal_work_objects(conn):
     cur.close()
 
 
+def _expand_universal_work_objects_workspace_v1(conn):
+    """Add the Constitution V6 workspace contract to the canonical table."""
+    cur = conn.cursor()
+    columns = set(_column_contract(conn, "nina_work_objects"))
+    additions = {
+        "owner_assignment_id": "TEXT NOT NULL DEFAULT ''",
+        "worker_instance_id": "TEXT NOT NULL DEFAULT ''",
+        "knowledge_refs_json": "TEXT NOT NULL DEFAULT '[]'",
+        "source_channel": "TEXT NOT NULL DEFAULT ''",
+        "updated_by": "TEXT NOT NULL DEFAULT 'legacy'",
+        "closed_at": "TEXT NOT NULL DEFAULT ''",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            cur.execute(
+                f"ALTER TABLE nina_work_objects ADD COLUMN {name} {definition}"
+            )
+    statements = (
+        "CREATE INDEX IF NOT EXISTS idx_nina_work_objects_workspace_owner "
+        "ON nina_work_objects (workspace_id, owner_assignment_id)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_work_objects_workspace_created "
+        "ON nina_work_objects (workspace_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_work_objects_workspace_worker "
+        "ON nina_work_objects (workspace_id, worker_instance_id)",
+    )
+    for statement in statements:
+        cur.execute(statement)
+    cur.close()
+
+
 def _create_approval_layer(conn):
     cur = conn.cursor()
     cur.execute("""
@@ -839,6 +869,20 @@ MIGRATIONS = (
             "immutable-versions|safe-audit|deterministic-search"
         ),
     ),
+    Migration(
+        identifier="0012_universal_work_objects_v1",
+        version=12,
+        name="Complete the canonical workspace Universal Work Object contract",
+        phase=PHASE_EXPAND,
+        operation=_expand_universal_work_objects_workspace_v1,
+        checksum_source=(
+            "0012|EXPAND|canonical-nina_work_objects|"
+            "owner_assignment_id,worker_instance_id,knowledge_refs_json,"
+            "source_channel,updated_by,closed_at|"
+            "indexes:workspace_owner,workspace_created,workspace_worker|"
+            "no-copy,no-new-table,additive-only"
+        ),
+    ),
 )
 
 
@@ -867,6 +911,14 @@ _WORK_OBJECT_V1_CONTRACT = {
     "cancelled_at": (_TEXT_TYPES, False),
     "archived_at": (_TEXT_TYPES, False),
     "created_by": (_TEXT_TYPES, False),
+}
+_WORK_OBJECT_WORKSPACE_V1_CONTRACT = {
+    "owner_assignment_id": (_TEXT_TYPES, False),
+    "worker_instance_id": (_TEXT_TYPES, False),
+    "knowledge_refs_json": (_TEXT_TYPES, False),
+    "source_channel": (_TEXT_TYPES, False),
+    "updated_by": (_TEXT_TYPES, False),
+    "closed_at": (_TEXT_TYPES, False),
 }
 _WORK_EVENT_CONTRACT = {
     name: (_TEXT_TYPES, False)

@@ -19,13 +19,13 @@ TABLE_NAME = "nina_work_objects"
 EVENT_TABLE = "nina_work_object_events"
 OBJECT_TYPES = frozenset({
     "task", "follow_up", "approval", "reminder", "request", "issue",
-    "opportunity", "deliverable",
+    "opportunity", "deliverable", "note", "initiative",
 })
 STATUSES = frozenset({
     "draft", "open", "in_progress", "blocked", "waiting", "completed",
     "cancelled", "archived",
 })
-PRIORITIES = frozenset({"low", "normal", "high", "urgent"})
+PRIORITIES = frozenset({"low", "normal", "high", "urgent", "critical"})
 OWNER_TYPES = frozenset({"tenant", "human"})
 SOURCE_TYPES = frozenset({
     "nina", "user", "web", "telegram", "whatsapp", "system", "import",
@@ -93,10 +93,14 @@ class UniversalWorkObject:
     owner_type: str
     owner_id: str
     assigned_agent_assignment_id: str
+    owner_assignment_id: str
+    worker_instance_id: str
+    knowledge_refs: tuple
     client_id: str
     project_id: str
     parent_work_object_id: str
     source_type: str
+    source_channel: str
     source_reference: str
     due_at: str
     started_at: str
@@ -104,8 +108,10 @@ class UniversalWorkObject:
     cancelled_at: str
     archived_at: str
     created_by: str
+    updated_by: str
     created_at: str
     updated_at: str
+    closed_at: str
     metadata: dict
 
     def as_dict(self):
@@ -119,10 +125,14 @@ class UniversalWorkObject:
             "owner_type": self.owner_type,
             "owner_id": self.owner_id,
             "assigned_agent_assignment_id": self.assigned_agent_assignment_id,
+            "owner_assignment_id": self.owner_assignment_id,
+            "worker_instance_id": self.worker_instance_id,
+            "knowledge_refs": list(self.knowledge_refs),
             "client_id": self.client_id,
             "project_id": self.project_id,
             "parent_work_object_id": self.parent_work_object_id,
             "source_type": self.source_type,
+            "source_channel": self.source_channel,
             "source_reference": self.source_reference,
             "due_at": self.due_at,
             "started_at": self.started_at,
@@ -130,8 +140,10 @@ class UniversalWorkObject:
             "cancelled_at": self.cancelled_at,
             "archived_at": self.archived_at,
             "created_by": self.created_by,
+            "updated_by": self.updated_by,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "closed_at": self.closed_at,
             "metadata": dict(self.metadata),
         }
 
@@ -166,6 +178,15 @@ def _identifier(value, field, *, required=True):
 
 def _enum(value, field, allowed):
     value = _text(value, field, required=True, maximum=64)
+    normalized = value.casefold()
+    aliases = {
+        "client_request": "request",
+        "lead": "opportunity",
+        "case": "issue",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized in allowed:
+        value = normalized
     if value not in allowed:
         raise UniversalWorkValidationError(f"work_{field}_invalid")
     return value
@@ -227,6 +248,34 @@ def _metadata(value):
     return json.loads(encoded), encoded
 
 
+def _knowledge_refs(tenant_id, value):
+    if value is None:
+        value = []
+    if not isinstance(value, (list, tuple)) or len(value) > 100:
+        raise UniversalWorkValidationError("work_knowledge_refs_invalid")
+    refs = tuple(dict.fromkeys(
+        _identifier(item, "knowledge_ref") for item in value
+    ))
+    if not refs:
+        return refs, "[]"
+    conn = persistence_backend.connect()
+    try:
+        cur = conn.cursor()
+        placeholders = ",".join("%s" for _ in refs)
+        cur.execute(_sql(f"""
+            SELECT knowledge_id FROM nina_knowledge_items
+            WHERE workspace_id=%s AND knowledge_id IN ({placeholders})
+              AND status='active'
+        """), (tenant_id, *refs))
+        found = {str(row[0]) for row in (cur.fetchall() or [])}
+        cur.close()
+    finally:
+        conn.close()
+    if found != set(refs):
+        raise UniversalWorkNotFoundError("work_knowledge_ref_not_found")
+    return refs, json.dumps(refs, separators=(",", ":"))
+
+
 def _description(value):
     value = _text(value, "description", maximum=MAX_DESCRIPTION_BYTES)
     if len(value.encode("utf-8")) > MAX_DESCRIPTION_BYTES:
@@ -254,8 +303,28 @@ object_id,workspace_id,object_type,title,description,status,priority,owner_type,
 owner_id,assigned_agent_assignment_id,client_id,project_id,
 parent_work_object_id,source_type,source_reference,due_at,started_at,
 completed_at,cancelled_at,archived_at,created_by,created_at,updated_at,
-metadata_json
+metadata_json,owner_assignment_id,worker_instance_id,knowledge_refs_json,
+source_channel,updated_by,closed_at
 """
+
+def _select_fields(conn):
+    """Keep pre-0012 local projections readable while hosted readiness fails closed."""
+    cur = conn.cursor()
+    if persistence_backend.USE_POSTGRES:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema='public' AND table_name='nina_work_objects'"
+        )
+        columns = {str(row[0]) for row in cur.fetchall()}
+    else:
+        cur.execute("PRAGMA table_info(nina_work_objects)")
+        columns = {str(row[1]) for row in cur.fetchall()}
+    cur.close()
+    fields = [field.strip() for field in _FIELDS.split(",")]
+    return ",".join(
+        field if field in columns else f"'' AS {field}"
+        for field in fields
+    )
 
 
 def _from_row(row):
@@ -266,14 +335,20 @@ def _from_row(row):
         priority=str(row[6] or "normal"), owner_type=str(row[7] or "tenant"),
         owner_id=str(row[8] or ""),
         assigned_agent_assignment_id=str(row[9] or ""),
+        owner_assignment_id=str(row[24] or ""),
+        worker_instance_id=str(row[25] or ""),
+        knowledge_refs=tuple(json.loads(row[26] or "[]")),
         client_id=str(row[10] or ""), project_id=str(row[11] or ""),
         parent_work_object_id=str(row[12] or ""),
         source_type=str(row[13] or "system"),
+        source_channel=str(row[27] or ""),
         source_reference=str(row[14] or ""), due_at=str(row[15] or ""),
         started_at=str(row[16] or ""), completed_at=str(row[17] or ""),
         cancelled_at=str(row[18] or ""), archived_at=str(row[19] or ""),
         created_by=str(row[20] or "legacy"), created_at=str(row[21]),
-        updated_at=str(row[22]), metadata=json.loads(row[23] or "{}"),
+        updated_by=str(row[28] or "legacy"),
+        updated_at=str(row[22]), closed_at=str(row[29] or ""),
+        metadata=json.loads(row[23] or "{}"),
     )
 
 
@@ -302,7 +377,7 @@ def get_work_object(tenant_id, work_object_id):
     try:
         cur = conn.cursor()
         cur.execute(_sql(f"""
-            SELECT {_FIELDS} FROM {TABLE_NAME}
+            SELECT {_select_fields(conn)} FROM {TABLE_NAME}
             WHERE workspace_id=%s AND object_id=%s LIMIT 1
         """), (tenant, object_id))
         row = cur.fetchone()
@@ -317,8 +392,9 @@ def get_work_object(tenant_id, work_object_id):
 def create_work_object(
     tenant_id, *, object_type, title, description="", priority="normal",
     owner_type="tenant", owner_id="", assigned_agent_assignment_id="",
+    owner_assignment_id="", worker_instance_id="", knowledge_refs=None,
     client_id="", project_id="", parent_work_object_id="", source_type="user",
-    source_reference="", due_at="", metadata=None,
+    source_channel="", source_reference="", due_at="", metadata=None,
     created_by="workspace_client",
 ):
     tenant = _identifier(tenant_id, "tenant_id")
@@ -329,9 +405,17 @@ def create_work_object(
     owner_type = _enum(owner_type, "owner_type", OWNER_TYPES)
     owner_id = _identifier(owner_id, "owner_id", required=False)
     assignment_id = _validate_assignment(tenant, assigned_agent_assignment_id)
+    owner_assignment_id = _validate_assignment(
+        tenant, owner_assignment_id or assignment_id
+    )
+    worker_instance_id = _identifier(
+        worker_instance_id, "worker_instance_id", required=False
+    )
+    refs, knowledge_refs_json = _knowledge_refs(tenant, knowledge_refs)
     client_id = _identifier(client_id, "client_id", required=False)
     project_id = _identifier(project_id, "project_id", required=False)
     source_type = _enum(source_type, "source_type", SOURCE_TYPES)
+    source_channel = _text(source_channel, "source_channel", maximum=64)
     source_reference = _text(
         source_reference, "source_reference", maximum=500
     )
@@ -357,20 +441,24 @@ def create_work_object(
                 owner_id,assigned_agent_assignment_id,parent_work_object_id,
                 source_type,source_reference,due_at,started_at,completed_at,
                 cancelled_at,archived_at,created_by
+                ,owner_assignment_id,worker_instance_id,knowledge_refs_json,
+                source_channel,updated_by,closed_at
             ) VALUES (
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                %s,%s,%s,%s,%s,%s
             )
         """), (
             object_id, tenant, object_type, title, "draft", "", client_id,
             project_id, priority, due_at, "[]", metadata_json, source_type, "",
             None, now, now, description, owner_type, owner_id, assignment_id,
             parent_id, source_type, source_reference, due_at, "", "", "", "",
-            actor,
+            actor, owner_assignment_id, worker_instance_id,
+            knowledge_refs_json, source_channel or source_type, actor, "",
         ))
         cur.close()
         _record_event(
-            conn, tenant, object_id, "created", actor,
+            conn, tenant, object_id, "work_object_created", actor,
             to_status="draft", details={"source_type": source_type},
         )
         conn.commit()
@@ -441,7 +529,7 @@ def list_work_objects(
     try:
         cur = conn.cursor()
         cur.execute(_sql(f"""
-            SELECT {_FIELDS} FROM {TABLE_NAME}
+            SELECT {_select_fields(conn)} FROM {TABLE_NAME}
             WHERE {' AND '.join(where)}
             ORDER BY
                 CASE priority WHEN 'urgent' THEN 4 WHEN 'high' THEN 3
@@ -464,7 +552,7 @@ def _assert_editable(item):
 def update_work_object(
     tenant_id, work_object_id, *, title=None, description=None,
     owner_type=None, owner_id=None, client_id=None, project_id=None,
-    due_at=None, metadata=None,
+    due_at=None, metadata=None, knowledge_refs=None, updated_by="workspace_client",
 ):
     current = get_work_object(tenant_id, work_object_id)
     _assert_editable(current)
@@ -489,6 +577,9 @@ def update_work_object(
     due_at = current.due_at if due_at is None else _timestamp(due_at, "due_at")
     selected_metadata = current.metadata if metadata is None else metadata
     _, metadata_json = _metadata(selected_metadata)
+    selected_refs = current.knowledge_refs if knowledge_refs is None else knowledge_refs
+    _, knowledge_refs_json = _knowledge_refs(current.tenant_id, selected_refs)
+    updated_by = _identifier(updated_by, "updated_by")
     now = _now()
     conn = persistence_backend.connect()
     try:
@@ -496,11 +587,13 @@ def update_work_object(
         cur.execute(_sql(f"""
             UPDATE {TABLE_NAME} SET title=%s,description=%s,owner_type=%s,
                 owner_id=%s,client_id=%s,project_id=%s,due_at=%s,due_date=%s,
-                metadata_json=%s,updated_at=%s
+                metadata_json=%s,knowledge_refs_json=%s,updated_by=%s,
+                updated_at=%s
             WHERE workspace_id=%s AND object_id=%s AND status<>'archived'
         """), (
             title, description, owner_type, owner_id, client_id, project_id,
-            due_at, due_at, metadata_json, now, current.tenant_id,
+            due_at, due_at, metadata_json, knowledge_refs_json, updated_by,
+            now, current.tenant_id,
             current.work_object_id,
         ))
         if cur.rowcount != 1:
@@ -508,7 +601,7 @@ def update_work_object(
         cur.close()
         _record_event(
             conn, current.tenant_id, current.work_object_id, "updated",
-            "workspace_client",
+            updated_by,
         )
         conn.commit()
     except UniversalWorkError:
@@ -532,22 +625,26 @@ def transition_work_object(tenant_id, work_object_id, target_status, actor="work
     completed = now if target == "completed" else current.completed_at
     cancelled = now if target == "cancelled" else current.cancelled_at
     archived = now if target == "archived" else current.archived_at
+    closed = now if target in {"completed", "cancelled", "archived"} else current.closed_at
     conn = persistence_backend.connect()
     try:
         cur = conn.cursor()
         cur.execute(_sql(f"""
             UPDATE {TABLE_NAME} SET status=%s,started_at=%s,completed_at=%s,
-                cancelled_at=%s,archived_at=%s,updated_at=%s
+                cancelled_at=%s,archived_at=%s,closed_at=%s,updated_by=%s,
+                updated_at=%s
             WHERE workspace_id=%s AND object_id=%s AND status=%s
         """), (
-            target, started, completed, cancelled, archived, now,
+            target, started, completed, cancelled, archived, closed, actor, now,
             current.tenant_id, current.work_object_id, current.status,
         ))
         if cur.rowcount != 1:
             raise UniversalWorkConflictError("work_transition_conflict")
         cur.close()
         _record_event(
-            conn, current.tenant_id, current.work_object_id, "transition",
+            conn, current.tenant_id, current.work_object_id,
+            target if target in {"completed", "cancelled", "archived"}
+            else "updated",
             actor, current.status, target,
         )
         conn.commit()
@@ -705,9 +802,56 @@ def archive_work_object(tenant_id, work_object_id):
     return transition_work_object(tenant_id, work_object_id, "archived")
 
 
-def initialize_universal_work_objects():
+def initialize_universal_work_objects(require_schema=None):
     persistence_backend.assert_backend_ready()
-    return True
+    strict = (
+        persistence_backend.HOSTED
+        if require_schema is None
+        else bool(require_schema)
+    )
+    if (
+        not {"TASK", "FOLLOW_UP", "REMINDER", "NOTE", "INITIATIVE"}.issubset(
+            {item.upper() for item in OBJECT_TYPES}
+        )
+        or not {"LOW", "NORMAL", "HIGH", "CRITICAL"}.issubset(
+            {item.upper() for item in PRIORITIES}
+        )
+    ):
+        return not strict
+    required = {
+        "object_id", "workspace_id", "object_type", "title", "description",
+        "status", "priority", "owner_assignment_id", "worker_instance_id",
+        "knowledge_refs_json", "source_channel", "source_reference",
+        "created_by", "updated_by", "created_at", "updated_at", "closed_at",
+        "metadata_json",
+    }
+    conn = persistence_backend.connect()
+    try:
+        schema_cur = conn.cursor()
+        if persistence_backend.USE_POSTGRES:
+            schema_cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema='public' AND table_name='nina_work_objects'"
+            )
+            columns = {str(row[0]) for row in schema_cur.fetchall()}
+        else:
+            schema_cur.execute("PRAGMA table_info(nina_work_objects)")
+            columns = {str(row[1]) for row in schema_cur.fetchall()}
+        schema_cur.close()
+        if not required.issubset(columns):
+            return not strict
+        cur = conn.cursor()
+        cur.execute(_sql(
+            "SELECT object_id FROM nina_work_objects "
+            "WHERE workspace_id=%s LIMIT 1"
+        ), ("readiness_probe",))
+        cur.fetchall()
+        cur.close()
+        return True
+    except Exception:
+        return not strict
+    finally:
+        conn.close()
 
 
 def persistence_health():

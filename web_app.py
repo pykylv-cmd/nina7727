@@ -4565,6 +4565,74 @@ def knowledge_vault_html():
     )
 
 
+def universal_work_objects_html():
+    workspace_id = current_workspace_id()
+    query = (request.args.get("work_query") or "").strip()
+    items = list_universal_work_objects(
+        workspace_id, query=query or None, limit=50, offset=0
+    )
+    rows = []
+    for item in items:
+        update_action = f"work:update:{item.work_object_id}"
+        complete_action = f"work:complete:{item.work_object_id}"
+        archive_action = f"work:archive:{item.work_object_id}"
+        controls = (
+            "<details><summary>Edit</summary>"
+            f"<form method='post' action='/work-objects/{html_escape(item.work_object_id)}/update-form'>"
+            f"<input type='hidden' name='csrf_token' value='{_channel_csrf(update_action)}'>"
+            f"<input name='title' required value='{html_escape(item.title)}'>"
+            "<textarea name='description'>"
+            + html_escape(item.description)
+            + "</textarea><button class='btn' type='submit'>Save</button>"
+            "</form></details>"
+        )
+        if item.status in {"open", "in_progress"}:
+            controls += (
+                f"<form method='post' action='/work-objects/{html_escape(item.work_object_id)}/complete-form'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(complete_action)}'>"
+                "<button class='btn' type='submit'>Complete</button></form>"
+            )
+        if item.status in {"completed", "cancelled"}:
+            controls += (
+                f"<form method='post' action='/work-objects/{html_escape(item.work_object_id)}/archive-form'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(archive_action)}'>"
+                "<button class='btn' type='submit'>Archive</button></form>"
+            )
+        rows.append(
+            "<div class='row'><div><b>" + html_escape(item.title)
+            + "</b><span class='muted'>"
+            + html_escape(item.object_type.upper()) + " В· "
+            + html_escape(item.status.upper()) + " В· "
+            + html_escape(item.priority.upper()) + " В· Owner: "
+            + html_escape(item.owner_assignment_id or "unassigned")
+            + " В· Updated: " + html_escape(item.updated_at)
+            + " В· Knowledge: "
+            + html_escape(", ".join(item.knowledge_refs) or "none")
+            + "</span></div><div>" + controls + "</div></div>"
+        )
+    return (
+        "<section class='card card-pad'><div class='section-title'>Work Objects</div>"
+        "<p class='muted'>ONE NINA canonical workspace work.</p>"
+        "<form method='get' action='/dashboard'><input name='work_query' "
+        f"value='{html_escape(query)}' placeholder='Search Work Objects'>"
+        "<button class='btn' type='submit'>Search</button></form>"
+        "<details><summary>Create Work Object</summary>"
+        "<form method='post' action='/work-objects/create-form'>"
+        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('work:create')}'>"
+        "<input name='title' required placeholder='Title'>"
+        "<textarea name='description' placeholder='Description'></textarea>"
+        "<select name='object_type'><option>TASK</option><option>REMINDER</option>"
+        "<option>CLIENT_REQUEST</option><option>FOLLOW_UP</option><option>LEAD</option>"
+        "<option>CASE</option><option>NOTE</option><option>INITIATIVE</option></select>"
+        "<select name='priority'><option>NORMAL</option><option>LOW</option>"
+        "<option>HIGH</option><option>CRITICAL</option></select>"
+        "<button class='btn primary' type='submit'>Create Work Object</button>"
+        "</form></details><div class='list'>"
+        + ("".join(rows) or "<div class='row'>No Work Objects.</div>")
+        + "</div></section>"
+    )
+
+
 def dashboard_body(data):
     lang = current_language()
     c = data["counts"]
@@ -4713,6 +4781,14 @@ def dashboard_body(data):
             "<section class='card card-pad'><div class='section-title'>"
             "Knowledge Vault</div><div class='safe-note'>"
             "Knowledge Vault unavailable.</div></section>"
+        )
+    try:
+        one_nina_surface += universal_work_objects_html()
+    except Exception:
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "Work Objects</div><div class='safe-note'>"
+            "Work Objects unavailable.</div></section>"
         )
     try:
         rolepack_selection = get_workspace_rolepack(
@@ -7086,7 +7162,8 @@ def create_universal_work_object_api():
             "object_type", "title", "description", "priority", "owner_type",
             "owner_id", "assigned_agent_assignment_id", "client_id",
             "project_id", "parent_work_object_id", "source_type",
-            "source_reference", "due_at", "metadata",
+            "owner_assignment_id", "worker_instance_id", "knowledge_refs",
+            "source_channel", "source_reference", "due_at", "metadata",
         })
         item = create_universal_work_object(
             current_workspace_id(),
@@ -7099,10 +7176,14 @@ def create_universal_work_object_api():
             assigned_agent_assignment_id=payload.get(
                 "assigned_agent_assignment_id", ""
             ),
+            owner_assignment_id=payload.get("owner_assignment_id", ""),
+            worker_instance_id=payload.get("worker_instance_id", ""),
+            knowledge_refs=payload.get("knowledge_refs"),
             client_id=payload.get("client_id", ""),
             project_id=payload.get("project_id", ""),
             parent_work_object_id=payload.get("parent_work_object_id", ""),
             source_type=payload.get("source_type", "user"),
+            source_channel=payload.get("source_channel", ""),
             source_reference=payload.get("source_reference", ""),
             due_at=payload.get("due_at", ""),
             metadata=payload.get("metadata"),
@@ -7156,7 +7237,7 @@ def update_universal_work_object_api(work_object_id):
     try:
         payload = _work_payload({
             "title", "description", "owner_type", "owner_id", "client_id",
-            "project_id", "due_at", "metadata",
+            "project_id", "due_at", "metadata", "knowledge_refs",
         })
         if not payload:
             raise UniversalWorkValidationError("work_update_required")
@@ -7174,6 +7255,8 @@ def update_universal_work_object_api(work_object_id):
             if "project_id" in payload else None,
             due_at=payload.get("due_at") if "due_at" in payload else None,
             metadata=payload.get("metadata") if "metadata" in payload else None,
+            knowledge_refs=payload.get("knowledge_refs")
+            if "knowledge_refs" in payload else None,
         )
         return jsonify({"ok": True, "work_object": item.as_dict()})
     except UniversalWorkError as exc:
@@ -7307,6 +7390,72 @@ def list_universal_work_events_api(work_object_id):
         return jsonify({"ok": True, "events": list(events)})
     except UniversalWorkError as exc:
         return _work_error_response(exc)
+
+
+@app.post("/work-objects/create-form")
+def create_universal_work_object_form():
+    if not _valid_channel_csrf("work:create"):
+        return Response("work_csrf_invalid", status=403)
+    try:
+        item = create_universal_work_object(
+            current_workspace_id(),
+            object_type=request.form.get("object_type"),
+            title=request.form.get("title"),
+            description=request.form.get("description", ""),
+            priority=request.form.get("priority", "NORMAL"),
+            source_type="user",
+            source_channel="web",
+            created_by=current_web_contact()["contact_id"],
+        )
+        transition_work_object(
+            current_workspace_id(), item.work_object_id, "open",
+            actor=current_web_contact()["contact_id"],
+        )
+        notice = "Work Object created"
+    except UniversalWorkError:
+        notice = "Work Object create failed"
+    return redirect(q("/dashboard") + "&work_status=" + quote_plus(notice))
+
+
+@app.post("/work-objects/<work_object_id>/complete-form")
+def complete_universal_work_object_form(work_object_id):
+    if not _valid_channel_csrf(f"work:complete:{work_object_id}"):
+        return Response("work_csrf_invalid", status=403)
+    try:
+        complete_work_object(current_workspace_id(), work_object_id)
+    except UniversalWorkError:
+        return redirect(
+            q("/dashboard") + "&work_status=Work+Object+completion+failed"
+        )
+    return redirect(q("/dashboard") + "&work_status=Work+Object+completed")
+
+
+@app.post("/work-objects/<work_object_id>/update-form")
+def update_universal_work_object_form(work_object_id):
+    if not _valid_channel_csrf(f"work:update:{work_object_id}"):
+        return Response("work_csrf_invalid", status=403)
+    try:
+        update_universal_work_object(
+            current_workspace_id(),
+            work_object_id,
+            title=request.form.get("title"),
+            description=request.form.get("description", ""),
+            updated_by=current_web_contact()["contact_id"],
+        )
+    except UniversalWorkError:
+        return redirect(q("/dashboard") + "&work_status=Work+Object+update+failed")
+    return redirect(q("/dashboard") + "&work_status=Work+Object+updated")
+
+
+@app.post("/work-objects/<work_object_id>/archive-form")
+def archive_universal_work_object_form(work_object_id):
+    if not _valid_channel_csrf(f"work:archive:{work_object_id}"):
+        return Response("work_csrf_invalid", status=403)
+    try:
+        archive_universal_work_object(current_workspace_id(), work_object_id)
+    except UniversalWorkError:
+        return redirect(q("/dashboard") + "&work_status=Work+Object+archive+failed")
+    return redirect(q("/dashboard") + "&work_status=Work+Object+archived")
 
 
 @app.post("/internal/runtime/compatibility")
