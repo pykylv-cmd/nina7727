@@ -367,6 +367,72 @@ def _create_approval_layer(conn):
     cur.close()
 
 
+def _create_execution_layer(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_executions (
+            execution_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            approval_id TEXT NOT NULL,
+            initiative_id TEXT NOT NULL,
+            reply_id TEXT NOT NULL,
+            work_object_id TEXT NOT NULL,
+            action_type TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (
+                status IN (
+                    'pending','processing','succeeded','failed',
+                    'unsupported','cancelled'
+                )
+            ),
+            idempotency_key TEXT NOT NULL,
+            result_type TEXT NOT NULL DEFAULT '',
+            result_reference TEXT NOT NULL DEFAULT '',
+            error_code TEXT NOT NULL DEFAULT '',
+            error_summary TEXT NOT NULL DEFAULT '',
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            requested_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            started_at TEXT NOT NULL DEFAULT '',
+            completed_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            UNIQUE (workspace_id, approval_id, action_type),
+            UNIQUE (workspace_id, idempotency_key)
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_execution_events (
+            event_id TEXT PRIMARY KEY,
+            execution_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
+            event_type TEXT NOT NULL CHECK (
+                event_type IN (
+                    'execution_created','execution_started',
+                    'execution_succeeded','execution_failed',
+                    'execution_unsupported'
+                )
+            ),
+            previous_status TEXT NOT NULL DEFAULT '',
+            new_status TEXT NOT NULL,
+            actor TEXT NOT NULL DEFAULT '',
+            safe_metadata TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_executions_workspace_status
+        ON nina_executions (workspace_id, status, updated_at)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_executions_approval
+        ON nina_executions (workspace_id, approval_id)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_execution_events_workspace
+        ON nina_execution_events (workspace_id, execution_id, created_at)
+    """)
+    cur.close()
+
+
 MIGRATIONS = (
     Migration(
         identifier="0001_shared_conversation_state",
@@ -437,6 +503,20 @@ MIGRATIONS = (
             "decision-only-no-draft-copy|unique:workspace_initiative_reply|"
             "decisions:approved,dismissed,snoozed|"
             "statuses:pending,approved,dismissed,snoozed|audit-events"
+        ),
+    ),
+    Migration(
+        identifier="0006_execution_layer_v1",
+        version=6,
+        name="Create tenant-scoped Execution Layer V1",
+        phase=PHASE_EXPAND,
+        operation=_create_execution_layer,
+        checksum_source=(
+            "0006|EXPAND|nina_executions+nina_execution_events|"
+            "allowlist:REMIND,NO_ACTION|"
+            "unique:workspace_approval_action,workspace_idempotency|"
+            "statuses:pending,processing,succeeded,failed,unsupported,cancelled|"
+            "audit-events"
         ),
     ),
 )

@@ -112,6 +112,24 @@ def get_approval(workspace_id, initiative_id, reply_id):
         conn.close()
 
 
+def get_approval_by_id(workspace_id, approval_id):
+    workspace_id = _text(workspace_id, "workspace_id", 128)
+    approval_id = _text(approval_id, "approval_id", 128)
+    conn = persistence_backend.connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_sql(f"""
+            SELECT {_FIELDS} FROM nina_approvals
+            WHERE workspace_id=%s AND approval_id=%s
+            LIMIT 1
+        """), (workspace_id, approval_id))
+        row = cur.fetchone()
+        cur.close()
+        return _from_row(row) if row else None
+    finally:
+        conn.close()
+
+
 def ensure_approval(workspace_id, initiative_id, reply_id, work_object_id, now=None):
     approval_id = approval_identity(workspace_id, initiative_id, reply_id)
     current = get_approval(workspace_id, initiative_id, reply_id)

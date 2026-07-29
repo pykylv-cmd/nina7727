@@ -161,6 +161,13 @@ from approval_layer import (
     snooze_tomorrow,
     wake_expired,
 )
+from execution_layer import (
+    ALLOWLIST as EXECUTION_ALLOWLIST,
+    ExecutionError,
+    execute_approved,
+    get_execution,
+    list_executions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -4610,6 +4617,88 @@ def dashboard_body(data):
         + "</div></section>"
     )
     try:
+        execution_history = list_executions(NINA_WEB_WORKSPACE_ID, limit=12)
+        canonical_initiatives = {
+            item.initiative_id: item
+            for item in initiative_queue(NINA_WEB_WORKSPACE_ID, limit=100)
+        }
+    except Exception:
+        execution_history = ()
+        canonical_initiatives = {}
+    execution_by_approval = {
+        item.approval_id: item for item in execution_history
+    }
+    execution_rows = []
+    for approval in approval_history:
+        if approval.status != "approved":
+            continue
+        initiative = canonical_initiatives.get(approval.initiative_id)
+        try:
+            reply = (
+                build_reply_queue((initiative,))[0] if initiative else None
+            )
+        except (IndexError, TypeError, ValueError):
+            reply = None
+        execution = execution_by_approval.get(approval.approval_id)
+        action_type = reply.suggested_action if reply else ""
+        if execution:
+            action_type = execution.action_type
+            action_html = (
+                "<span class='muted'>Status: "
+                + html_escape(execution.status)
+                + " · Result: "
+                + html_escape(execution.result_type or "—")
+                + " "
+                + html_escape(execution.result_reference or "")
+                + " · Completed: "
+                + html_escape(execution.completed_at or "—")
+                + " · By "
+                + html_escape(execution.requested_by)
+                + "</span>"
+            )
+        elif reply and action_type in EXECUTION_ALLOWLIST:
+            csrf_action = f"execution:run:{approval.approval_id}"
+            action_html = (
+                "<form method='post' action='/executions/run'>"
+                f"<input type='hidden' name='approval_id' value='{html_escape(approval.approval_id)}'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(csrf_action)}'>"
+                "<button class='btn' type='submit'>Execute</button></form>"
+            )
+        else:
+            action_html = (
+                "<span class='muted'>Not supported in Execution Layer V1</span>"
+            )
+        execution_rows.append(
+            "<div class='row'><div><b>"
+            + html_escape(action_type or "Stale approval")
+            + "</b><span class='muted'>Approval "
+            + html_escape(approval.approval_id)
+            + " · Work Object "
+            + html_escape(approval.work_object_id)
+            + "</span><div class='form-actions'>"
+            + action_html
+            + "</div></div></div>"
+        )
+    execution_notice = request.args.get("execution_status", "")
+    execution_notice_html = (
+        f"<div class='safe-note'>{html_escape(execution_notice)}</div>"
+        if execution_notice else ""
+    )
+    one_nina_surface += (
+        "<section class='card card-pad'><div class='section-title'>"
+        "Execution</div><p class='muted'>Approved actions require a separate "
+        "explicit Execute. Only REMIND and NO_ACTION are supported in V1.</p>"
+        + execution_notice_html
+        + "<div class='list'>"
+        + (
+            "".join(execution_rows)
+            if execution_rows else
+            "<div class='row'><div><span class='muted'>"
+            "No approved actions ready for execution.</span></div></div>"
+        )
+        + "</div></section>"
+    )
+    try:
         notification_owner = current_web_contact()["contact_id"]
         reminders = [
             item for item in one_nina_list_work_objects(
@@ -7291,6 +7380,25 @@ def approval_decision():
     except ApprovalError as exc:
         status = str(exc)
     return redirect(q("/dashboard") + "&approval_status=" + quote_plus(status))
+
+
+@app.post("/executions/run")
+def execution_run():
+    workspace_id = NINA_WEB_WORKSPACE_ID
+    approval_id = str(request.form.get("approval_id") or "").strip()
+    csrf_action = f"execution:run:{approval_id}"
+    if not _valid_channel_csrf(csrf_action):
+        return Response("execution_csrf_invalid", status=403)
+    try:
+        result = execute_approved(
+            workspace_id,
+            approval_id,
+            requested_by=current_web_contact()["contact_id"],
+        )
+        status = result.status
+    except ExecutionError as exc:
+        status = str(exc)
+    return redirect(q("/dashboard") + "&execution_status=" + quote_plus(status))
 
 
 @app.post("/reminders/<object_id>/done")
