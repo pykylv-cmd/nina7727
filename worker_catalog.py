@@ -372,7 +372,14 @@ def set_workspace_worker(
         raise
     finally:
         conn.close()
-    return get_workspace_worker(workspace_id, create=False)
+    selection = get_workspace_worker(workspace_id, create=False)
+    # Agent Assignment owns the stable instance binding; importing lazily
+    # avoids making the catalog depend on assignment startup.
+    from agent_assignment import sync_workspace_assignment
+    sync_workspace_assignment(
+        workspace_id, selection.worker_id, actor=updated_by,
+    )
+    return selection
 
 
 def list_workspace_worker_events(workspace_id, limit=100):

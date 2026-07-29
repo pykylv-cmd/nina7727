@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from types import MappingProxyType
 
 import persistence_backend
+from worker_catalog import get_worker, get_workspace_worker
+from rolepack_system import get_rolepack
 from ready_worker_catalog import (
     ReadyWorkerNotFoundError,
     get_ready_worker,
@@ -581,5 +583,337 @@ def persistence_health():
             "version": AGENT_ASSIGNMENT_VERSION,
             "error": type(exc).__name__,
         }
+    finally:
+        conn.close()
+
+
+# Canonical workspace Worker-instance layer. The legacy CRUD interface above
+# remains available for API compatibility; this layer is the ONE NINA binding.
+WORKSPACE_STATUSES = frozenset({
+    "PROVISIONING", "ACTIVE", "SUSPENDED", "ARCHIVED",
+})
+_DB_STATUS = {
+    "PROVISIONING": "draft",
+    "ACTIVE": "active",
+    "SUSPENDED": "suspended",
+    "ARCHIVED": "archived",
+}
+_PUBLIC_STATUS = {value: key for key, value in _DB_STATUS.items()}
+
+
+@dataclass(frozen=True)
+class WorkspaceAgentAssignment:
+    assignment_id: str
+    worker_instance_id: str
+    workspace_id: str
+    worker_key: str
+    worker_version: str
+    rolepack_version: str
+    status: str
+    language: str
+    timezone: str
+    permissions_profile: str
+    created_at: str
+    updated_at: str
+    activated_at: str
+
+
+_WORKSPACE_SELECT = """
+assignment_id,worker_instance_id,workspace_id,worker_key,worker_version,
+rolepack_version,status,language,timezone,permissions_profile,created_at,
+updated_at,activated_at
+"""
+
+
+def _workspace_assignment_row(row):
+    if not row:
+        return None
+    values = [str(value or "") for value in row]
+    values[6] = _PUBLIC_STATUS.get(values[6], values[6].upper())
+    return WorkspaceAgentAssignment(*values)
+
+
+def _assignment_event(cur, assignment, event_type, actor, timestamp):
+    cur.execute(_sql("""
+        INSERT INTO nina_agent_assignment_events (
+            event_id,assignment_id,worker_instance_id,workspace_id,
+            event_type,actor,created_at
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s)
+    """), (
+        "assignment_event_" + secrets.token_hex(16),
+        assignment["assignment_id"], assignment["worker_instance_id"],
+        assignment["workspace_id"], event_type, actor, timestamp,
+    ))
+
+
+def get_workspace_assignment(workspace_id, *, create=True, actor="system"):
+    workspace = _identifier(workspace_id, "workspace_id")
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_sql(f"""
+            SELECT {_WORKSPACE_SELECT} FROM {TABLE_NAME}
+            WHERE workspace_id=%s AND status<>'archived'
+            ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'draft' THEN 1
+                ELSE 2 END,updated_at DESC LIMIT 1
+        """), (workspace,))
+        result = _workspace_assignment_row(cur.fetchone())
+        cur.close()
+    finally:
+        conn.close()
+    if result or not create:
+        return result
+    selection = get_workspace_worker(workspace, actor=actor)
+    return provision_workspace_assignment(
+        workspace, selection.worker_id, actor=actor, activate=True,
+    )
+
+
+def provision_workspace_assignment(
+    workspace_id,
+    worker_key,
+    *,
+    actor,
+    language="en",
+    timezone_name="UTC",
+    permissions_profile="standard",
+    activate=True,
+):
+    workspace = _identifier(workspace_id, "workspace_id")
+    actor = _text(actor, "actor", maximum=128, required=True)
+    worker = get_worker(_identifier(worker_key, "worker_key"))
+    language = validate_configuration({"language": language})["language"]
+    timezone_name = validate_configuration(
+        {"timezone": timezone_name}
+    )["timezone"]
+    profile = _identifier(permissions_profile, "permissions_profile")
+    existing = get_workspace_assignment(workspace, create=False)
+    if (
+        existing
+        and existing.worker_key == worker.worker_id
+        and existing.worker_version == worker.version
+        and existing.status != "ARCHIVED"
+    ):
+        return existing
+
+    now = _now()
+    assignment_id = "asg_" + secrets.token_hex(16)
+    worker_instance_id = "worker_instance_" + secrets.token_hex(16)
+    status = "active" if activate else "draft"
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        if activate:
+            cur.execute(_sql(f"""
+                UPDATE {TABLE_NAME} SET status='suspended',updated_at=%s,
+                    suspended_at=%s
+                WHERE workspace_id=%s AND status='active'
+            """), (now, now, workspace))
+            if existing and existing.status == "ACTIVE":
+                _assignment_event(cur, {
+                    "assignment_id": existing.assignment_id,
+                    "worker_instance_id": existing.worker_instance_id,
+                    "workspace_id": existing.workspace_id,
+                }, "assignment_suspended", actor, now)
+        cur.execute(_sql(f"""
+            INSERT INTO {TABLE_NAME} (
+                assignment_id,tenant_id,ready_worker_definition_id,
+                definition_version,primary_rolepack_id,display_name,status,
+                configuration_json,permissions_json,assigned_by,created_at,
+                updated_at,activated_at,suspended_at,archived_at,
+                worker_instance_id,workspace_id,worker_key,worker_version,
+                rolepack_version,language,timezone,permissions_profile
+            ) VALUES (
+                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                %s,%s,%s,%s,%s,%s,%s,%s
+            )
+        """), (
+            assignment_id, workspace, worker.worker_id, worker.version,
+            worker.primary_rolepack, worker.display_name, status,
+            json.dumps({"language": language, "timezone": timezone_name}),
+            "{}", actor, now, now, now if activate else "", "", "",
+            worker_instance_id, workspace, worker.worker_id, worker.version,
+            get_rolepack(worker.primary_rolepack).version,
+            language, timezone_name,
+            profile,
+        ))
+        record = {
+            "assignment_id": assignment_id,
+            "worker_instance_id": worker_instance_id,
+            "workspace_id": workspace,
+        }
+        _assignment_event(cur, record, "assignment_created", actor, now)
+        if activate:
+            _assignment_event(
+                cur, record, "assignment_activated", actor, now
+            )
+        conn.commit()
+        cur.close()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return get_workspace_assignment(workspace, create=False)
+
+
+def update_workspace_assignment(
+    workspace_id,
+    *,
+    actor,
+    language=None,
+    timezone_name=None,
+    permissions_profile=None,
+):
+    current = get_workspace_assignment(workspace_id, create=False)
+    if current is None or current.status == "ARCHIVED":
+        raise AgentAssignmentNotFoundError("agent_assignment_not_found")
+    selected_language = (
+        current.language if language is None
+        else validate_configuration({"language": language})["language"]
+    )
+    selected_timezone = (
+        current.timezone if timezone_name is None
+        else validate_configuration(
+            {"timezone": timezone_name}
+        )["timezone"]
+    )
+    selected_profile = (
+        current.permissions_profile if permissions_profile is None
+        else _identifier(permissions_profile, "permissions_profile")
+    )
+    clean_actor = _text(actor, "actor", maximum=128, required=True)
+    now = _now()
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_sql(f"""
+            UPDATE {TABLE_NAME} SET language=%s,timezone=%s,
+                permissions_profile=%s,updated_at=%s
+            WHERE workspace_id=%s AND assignment_id=%s
+                AND status<>'archived'
+        """), (
+            selected_language, selected_timezone, selected_profile, now,
+            current.workspace_id, current.assignment_id,
+        ))
+        if cur.rowcount != 1:
+            raise AgentAssignmentConflictError(
+                "agent_assignment_update_conflict"
+            )
+        _assignment_event(cur, {
+            "assignment_id": current.assignment_id,
+            "worker_instance_id": current.worker_instance_id,
+            "workspace_id": current.workspace_id,
+        }, "assignment_updated", clean_actor, now)
+        conn.commit()
+        cur.close()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return get_workspace_assignment(current.workspace_id, create=False)
+
+
+def transition_workspace_assignment(workspace_id, target_status, *, actor):
+    current = get_workspace_assignment(workspace_id, create=False)
+    target = str(target_status or "").strip().upper()
+    allowed = {
+        "PROVISIONING": frozenset({"ACTIVE", "ARCHIVED"}),
+        "ACTIVE": frozenset({"SUSPENDED", "ARCHIVED"}),
+        "SUSPENDED": frozenset({"ACTIVE", "ARCHIVED"}),
+        "ARCHIVED": frozenset(),
+    }
+    if current is None:
+        raise AgentAssignmentNotFoundError("agent_assignment_not_found")
+    if target not in allowed[current.status]:
+        raise AgentAssignmentTransitionError(
+            f"agent_assignment_transition_invalid:{current.status}:{target}"
+        )
+    clean_actor = _text(actor, "actor", maximum=128, required=True)
+    now = _now()
+    db_target = _DB_STATUS[target]
+    timestamp_field = {
+        "ACTIVE": "activated_at",
+        "SUSPENDED": "suspended_at",
+        "ARCHIVED": "archived_at",
+    }[target]
+    event_type = {
+        "ACTIVE": "assignment_activated",
+        "SUSPENDED": "assignment_suspended",
+        "ARCHIVED": "assignment_archived",
+    }[target]
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_sql(f"""
+            UPDATE {TABLE_NAME} SET status=%s,updated_at=%s,
+                {timestamp_field}=%s
+            WHERE workspace_id=%s AND assignment_id=%s AND status=%s
+        """), (
+            db_target, now, now, current.workspace_id,
+            current.assignment_id, _DB_STATUS[current.status],
+        ))
+        if cur.rowcount != 1:
+            raise AgentAssignmentConflictError(
+                "agent_assignment_transition_conflict"
+            )
+        _assignment_event(cur, {
+            "assignment_id": current.assignment_id,
+            "worker_instance_id": current.worker_instance_id,
+            "workspace_id": current.workspace_id,
+        }, event_type, clean_actor, now)
+        conn.commit()
+        cur.close()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    if target == "ARCHIVED":
+        return current.__class__(
+            **{**current.__dict__, "status": "ARCHIVED", "updated_at": now}
+        )
+    return get_workspace_assignment(current.workspace_id, create=False)
+
+
+def sync_workspace_assignment(workspace_id, worker_key, *, actor):
+    """Bind the selected catalog Worker without changing policy layers."""
+    current = get_workspace_assignment(workspace_id, create=False)
+    worker = get_worker(worker_key)
+    if (
+        current
+        and current.worker_key == worker.worker_id
+        and current.worker_version == worker.version
+        and current.status == "ACTIVE"
+    ):
+        return current
+    return provision_workspace_assignment(
+        workspace_id, worker.worker_id, actor=actor, activate=True,
+        language=current.language if current else "en",
+        timezone_name=current.timezone if current else "UTC",
+        permissions_profile=(
+            current.permissions_profile if current else "standard"
+        ),
+    )
+
+
+def list_workspace_assignment_events(workspace_id, limit=100):
+    workspace = _identifier(workspace_id, "workspace_id")
+    selected_limit = max(1, min(int(limit), 500))
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_sql("""
+            SELECT event_id,assignment_id,worker_instance_id,workspace_id,
+                event_type,actor,created_at
+            FROM nina_agent_assignment_events WHERE workspace_id=%s
+            ORDER BY created_at DESC,event_id LIMIT %s
+        """), (workspace, selected_limit))
+        rows = cur.fetchall() or []
+        cur.close()
+        return tuple(
+            tuple(str(value or "") for value in row) for row in rows
+        )
     finally:
         conn.close()

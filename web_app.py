@@ -103,7 +103,9 @@ from agent_assignment import (
     archive_assignment,
     create_assignment,
     get_assignment,
+    get_workspace_assignment,
     initialize_agent_assignment_service,
+    list_workspace_assignment_events,
     list_tenant_assignments,
     suspend_assignment,
     update_assignment,
@@ -4537,6 +4539,12 @@ def dashboard_body(data):
             NINA_WEB_WORKSPACE_ID, actor="system",
         )
         worker = active_worker(NINA_WEB_WORKSPACE_ID)
+        assignment = get_workspace_assignment(
+            NINA_WEB_WORKSPACE_ID, actor="system",
+        )
+        assignment_events = list_workspace_assignment_events(
+            NINA_WEB_WORKSPACE_ID, limit=5,
+        )
         worker_events = list_workspace_worker_events(
             NINA_WEB_WORKSPACE_ID, limit=5,
         )
@@ -4587,6 +4595,18 @@ def dashboard_body(data):
             + html_escape(worker.description)
             + "<br>RolePack composition: "
             + html_escape(" + ".join(worker.rolepacks))
+            + "<br><b>Worker Instance ID:</b> "
+            + html_escape(assignment.worker_instance_id)
+            + "<br><b>Status:</b> "
+            + html_escape(assignment.status)
+            + "<br><b>Language:</b> "
+            + html_escape(assignment.language)
+            + "<br><b>Timezone:</b> "
+            + html_escape(assignment.timezone)
+            + "<br><b>Version:</b> "
+            + html_escape(assignment.worker_version)
+            + "<br><b>Assignment audit events:</b> "
+            + html_escape(str(len(assignment_events)))
             + "</div><div class='list'>"
             + worker_event_rows
             + "</div></section>"

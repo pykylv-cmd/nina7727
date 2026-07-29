@@ -282,6 +282,41 @@ CONTRACTS = {
             "indexes": {"idx_nina_worker_events_workspace"},
         },
     },
+    "0010_agent_assignment_v1": {
+        "nina_agent_assignments": {
+            "columns": {
+                name: (TEXT_TYPES, nullable)
+                for name, nullable in {
+                    "worker_instance_id": True,
+                    "workspace_id": True,
+                    "worker_key": True,
+                    "worker_version": True,
+                    "rolepack_version": True,
+                    "language": False,
+                    "timezone": False,
+                    "permissions_profile": False,
+                }.items()
+            },
+            "indexes": {
+                "uq_nina_agent_assignments_active_workspace",
+                "uq_nina_agent_assignments_worker_instance",
+                "idx_nina_agent_assignments_workspace",
+            },
+        },
+        "nina_agent_assignment_events": {
+            "columns": {
+                name: (TEXT_TYPES, False)
+                for name in (
+                    "event_id", "assignment_id", "worker_instance_id",
+                    "workspace_id", "event_type", "actor", "created_at",
+                )
+            },
+            "primary_key": ("event_id",),
+            "indexes": {
+                "idx_nina_agent_assignment_events_workspace",
+            },
+        },
+    },
 }
 
 

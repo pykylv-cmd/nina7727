@@ -235,6 +235,11 @@ class ReadyWorkerCatalogV1Tests(unittest.TestCase):
         ):
             self.assertIn(label, body)
         self.assertIn("RolePack composition", body)
+        self.assertIn("Worker Instance ID", body)
+        self.assertIn("<b>Status:</b> ACTIVE", body)
+        self.assertIn("<b>Language:</b>", body)
+        self.assertIn("<b>Timezone:</b>", body)
+        self.assertIn("<b>Version:</b>", body)
         self.assertNotIn("action='/settings/rolepack'", body)
 
     def test_17_worker_post_uses_prg_and_persists(self):

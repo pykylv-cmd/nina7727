@@ -528,6 +528,91 @@ def _create_workspace_workers(conn):
     cur.close()
 
 
+def _create_agent_assignment_workspace_v1(conn):
+    """Expand the existing assignment store into the workspace instance model."""
+    cur = conn.cursor()
+    columns = (
+        ("worker_instance_id", "TEXT"),
+        ("workspace_id", "TEXT"),
+        ("worker_key", "TEXT"),
+        ("worker_version", "TEXT"),
+        ("rolepack_version", "TEXT"),
+        ("language", "TEXT NOT NULL DEFAULT 'en'"),
+        ("timezone", "TEXT NOT NULL DEFAULT 'UTC'"),
+        ("permissions_profile", "TEXT NOT NULL DEFAULT 'standard'"),
+    )
+    if persistence_backend.USE_POSTGRES:
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema=current_schema()
+                AND table_name='nina_agent_assignments'
+        """)
+        existing_columns = {str(row[0]) for row in cur.fetchall()}
+    else:
+        cur.execute("PRAGMA table_info(nina_agent_assignments)")
+        existing_columns = {str(row[1]) for row in cur.fetchall()}
+    for name, definition in columns:
+        if name not in existing_columns:
+            cur.execute(
+                f"ALTER TABLE nina_agent_assignments "
+                f"ADD COLUMN {name} {definition}"
+            )
+    cur.execute("""
+        UPDATE nina_agent_assignments SET
+            worker_instance_id=COALESCE(
+                worker_instance_id, 'worker_instance_' || assignment_id
+            ),
+            workspace_id=COALESCE(workspace_id, tenant_id),
+            worker_key=COALESCE(
+                worker_key, ready_worker_definition_id
+            ),
+            worker_version=COALESCE(
+                worker_version, definition_version
+            ),
+            rolepack_version=COALESCE(rolepack_version, '1.0.0')
+        WHERE worker_instance_id IS NULL OR workspace_id IS NULL
+            OR worker_key IS NULL OR worker_version IS NULL
+            OR rolepack_version IS NULL
+    """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS
+            uq_nina_agent_assignments_active_workspace
+        ON nina_agent_assignments (workspace_id)
+        WHERE status='active'
+    """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS
+            uq_nina_agent_assignments_worker_instance
+        ON nina_agent_assignments (worker_instance_id)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_agent_assignments_workspace
+        ON nina_agent_assignments (workspace_id, updated_at)
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_agent_assignment_events (
+            event_id TEXT PRIMARY KEY,
+            assignment_id TEXT NOT NULL,
+            worker_instance_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
+            event_type TEXT NOT NULL CHECK (
+                event_type IN (
+                    'assignment_created','assignment_updated',
+                    'assignment_activated','assignment_suspended',
+                    'assignment_archived'
+                )
+            ),
+            actor TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_agent_assignment_events_workspace
+        ON nina_agent_assignment_events (workspace_id, created_at)
+    """)
+    cur.close()
+
+
 MIGRATIONS = (
     Migration(
         identifier="0001_shared_conversation_state",
@@ -650,6 +735,20 @@ MIGRATIONS = (
             "0009|EXPAND|nina_workspace_workers+nina_worker_events|"
             "single-active-worker-per-workspace|"
             "worker-composes-rolepacks|audit:worker_changed"
+        ),
+    ),
+    Migration(
+        identifier="0010_agent_assignment_v1",
+        version=10,
+        name="Expand Agent Assignment into stable workspace Worker instances",
+        phase=PHASE_EXPAND,
+        operation=_create_agent_assignment_workspace_v1,
+        checksum_source=(
+            "0010|EXPAND|nina_agent_assignments+"
+            "nina_agent_assignment_events|"
+            "stable-worker-instance|single-active-per-workspace|"
+            "statuses:provisioning,active,suspended,archived|"
+            "audit:create,update,activate,suspend,archive"
         ),
     ),
 )
