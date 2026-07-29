@@ -220,6 +220,9 @@ class RolePackRegistryTests(unittest.TestCase):
                 "executive_assistant",
                 "customer_support",
                 "sales_assistant",
+                "office_manager",
+                "client_manager",
+                "personal_assistant",
             },
         )
         self.assertTrue(registry.health_status()["ready"])

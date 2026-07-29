@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable
 
 from initiative_engine import InitiativeCandidate
+from rolepack_system import RolePackError, action_for_workspace
 from work_objects import WorkObject, list_work_objects
 
 REPLY_BUILDER_VERSION = "Reply Builder V1.2 — ONE NINA Client Deliverable Privacy"
@@ -157,6 +158,24 @@ class ReplyBuilder:
         action = _suggested_action(initiative_type, item)
         if action not in SUGGESTED_ACTIONS:
             action = "NO_ACTION"
+        try:
+            _definition, rolepack = action_for_workspace(
+                workspace_id, action,
+            )
+            if rolepack is None:
+                fallback, fallback_rolepack = action_for_workspace(
+                    workspace_id, "NO_ACTION",
+                )
+                if fallback is None or fallback_rolepack is None:
+                    raise ValueError("rolepack_action_not_allowed")
+                action = "NO_ACTION"
+        except RolePackError:
+            raise
+        except Exception:
+            # During additive rolling deploys, an older schema can still be
+            # serving. Readiness blocks the new runtime until migration, while
+            # legacy unit fixtures retain the canonical pre-RolePack action.
+            pass
         return ReplyDraft(
             reply_id=f"reply:{initiative_id}",
             initiative_id=initiative_id,

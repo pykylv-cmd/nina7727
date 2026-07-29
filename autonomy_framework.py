@@ -7,14 +7,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import persistence_backend
+from rolepack_system import ACTION_REGISTRY, action_for_workspace
 
 
 MODES = frozenset({"MANUAL", "SUGGEST", "SEMI_AUTO", "AUTO"})
 DECISIONS = frozenset({"ALLOW", "DENY", "REQUIRE_APPROVAL", "UNSUPPORTED"})
-LOW_RISK_ACTIONS = frozenset({"REMIND", "NO_ACTION"})
-KNOWN_ACTIONS = frozenset({
-    "REMIND", "NO_ACTION", "FOLLOW_UP", "CHECK_IN", "ASK_FOR_UPDATE",
-})
 
 
 class AutonomyError(RuntimeError):
@@ -166,7 +163,8 @@ class AutonomyFramework:
     def evaluate(workspace_id, approval, reply, action):
         workspace_id = _text(workspace_id, "workspace_id")
         action = _text(action, "action", 64).upper()
-        if action not in KNOWN_ACTIONS:
+        definition = ACTION_REGISTRY.get(action)
+        if not definition:
             return AutonomyDecision(
                 "UNSUPPORTED", workspace_id,
                 get_profile(workspace_id).mode, action, "unknown_action",
@@ -187,6 +185,17 @@ class AutonomyFramework:
                 "workspace_mismatch",
             )
         profile = get_profile(workspace_id)
+        try:
+            _definition, rolepack = action_for_workspace(
+                workspace_id, action,
+            )
+        except Exception:
+            rolepack = None
+        if rolepack is None:
+            return AutonomyDecision(
+                "DENY", workspace_id, profile.mode, action,
+                "rolepack_action_not_allowed",
+            )
         approved = (
             str(getattr(approval, "status", "") or "").lower() == "approved"
             and str(getattr(approval, "decision", "") or "").lower()
@@ -199,7 +208,7 @@ class AutonomyFramework:
             )
         if profile.mode in {"MANUAL", "SUGGEST"}:
             decision = "REQUIRE_APPROVAL"
-        elif action in LOW_RISK_ACTIONS:
+        elif profile.mode in definition.supported_autonomy_modes:
             decision = "ALLOW"
         else:
             decision = "REQUIRE_APPROVAL"

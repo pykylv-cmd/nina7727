@@ -14,11 +14,11 @@ from approval_layer import get_approval_by_id
 from autonomy_framework import AutonomyFramework
 from initiative_engine import initiative_queue
 from reply_builder import ReplyBuilder
+from rolepack_system import action_for_workspace, executable_action_types
 from work_objects import create_work_object, get_work_object
 
 
-ALLOWLIST = frozenset({"REMIND", "NO_ACTION"})
-UNSUPPORTED_ACTIONS = frozenset({"FOLLOW_UP", "CHECK_IN", "ASK_FOR_UPDATE"})
+ALLOWLIST = executable_action_types()
 STATUSES = frozenset({
     "pending", "processing", "succeeded", "failed", "unsupported", "cancelled",
 })
@@ -385,12 +385,20 @@ class ExecutionLayer:
             raise ExecutionValidationError(
                 "execution_autonomy_" + policy.decision.lower()
             )
+        action_definition, rolepack = action_for_workspace(
+            workspace_id, action_type,
+        )
+        if not action_definition or not rolepack:
+            raise ExecutionValidationError("execution_rolepack_action_denied")
         execution, created = _claim(
             approval, action_type, requested_by, idempotency_key, now,
         )
         if not created:
             return execution
-        if action_type not in ALLOWLIST:
+        if (
+            action_definition.status != "active"
+            or not action_definition.executor
+        ):
             return _finish(
                 execution, "unsupported", requested_by,
                 error_code="unsupported_action",

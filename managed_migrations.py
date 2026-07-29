@@ -464,6 +464,38 @@ def _create_autonomy_framework(conn):
     cur.close()
 
 
+def _create_workspace_rolepacks(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_workspace_rolepacks (
+            workspace_id TEXT PRIMARY KEY,
+            rolepack_id TEXT NOT NULL,
+            rolepack_version TEXT NOT NULL,
+            updated_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_rolepack_events (
+            event_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            event_type TEXT NOT NULL CHECK (
+                event_type='rolepack_changed'
+            ),
+            old_rolepack TEXT NOT NULL DEFAULT '',
+            new_rolepack TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_rolepack_events_workspace
+        ON nina_rolepack_events (workspace_id, created_at)
+    """)
+    cur.close()
+
+
 MIGRATIONS = (
     Migration(
         identifier="0001_shared_conversation_state",
@@ -561,6 +593,19 @@ MIGRATIONS = (
             "modes:MANUAL,SUGGEST,SEMI_AUTO,AUTO|"
             "decisions:ALLOW,DENY,REQUIRE_APPROVAL,UNSUPPORTED|"
             "one-profile-per-workspace|audit:mode_changed"
+        ),
+    ),
+    Migration(
+        identifier="0008_rolepack_system_v1",
+        version=8,
+        name="Create tenant-scoped RolePack selection V1",
+        phase=PHASE_EXPAND,
+        operation=_create_workspace_rolepacks,
+        checksum_source=(
+            "0008|EXPAND|nina_workspace_rolepacks+nina_rolepack_events|"
+            "single-active-primary-rolepack-per-workspace|"
+            "action-registry:REMIND,NO_ACTION,FOLLOW_UP,CHECK_IN,"
+            "ASK_FOR_UPDATE|audit:rolepack_changed"
         ),
     ),
 )

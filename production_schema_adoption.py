@@ -234,6 +234,30 @@ CONTRACTS = {
             "indexes": {"idx_nina_autonomy_events_workspace"},
         },
     },
+    "0008_rolepack_system_v1": {
+        "nina_workspace_rolepacks": {
+            "columns": {
+                name: (TEXT_TYPES, False)
+                for name in (
+                    "workspace_id", "rolepack_id", "rolepack_version",
+                    "updated_by", "created_at", "updated_at",
+                )
+            },
+            "primary_key": ("workspace_id",),
+            "indexes": set(),
+        },
+        "nina_rolepack_events": {
+            "columns": {
+                name: (TEXT_TYPES, False)
+                for name in (
+                    "event_id", "workspace_id", "event_type",
+                    "old_rolepack", "new_rolepack", "actor", "created_at",
+                )
+            },
+            "primary_key": ("event_id",),
+            "indexes": {"idx_nina_rolepack_events_workspace"},
+        },
+    },
 }
 
 

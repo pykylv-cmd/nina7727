@@ -175,6 +175,13 @@ from autonomy_framework import (
     list_events as list_autonomy_events,
     set_mode as set_autonomy_mode,
 )
+from rolepack_system import (
+    RolePackError,
+    active_rolepack,
+    get_workspace_rolepack,
+    list_workspace_rolepack_events,
+    set_workspace_rolepack,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -4518,6 +4525,75 @@ def dashboard_body(data):
             "Autonomy profile unavailable.</div></section>"
         )
     try:
+        rolepack_selection = get_workspace_rolepack(
+            NINA_WEB_WORKSPACE_ID, actor="system",
+        )
+        rolepack = active_rolepack(NINA_WEB_WORKSPACE_ID)
+        rolepack_events = list_workspace_rolepack_events(
+            NINA_WEB_WORKSPACE_ID, limit=5,
+        )
+        rolepack_choices = (
+            ("office_manager", "Office Manager"),
+            ("sales_assistant", "Sales Assistant"),
+            ("client_manager", "Client Manager"),
+            ("personal_assistant", "Personal Assistant"),
+        )
+        rolepack_options = "".join(
+            f"<option value='{identifier}'"
+            + (
+                " selected"
+                if identifier == rolepack_selection.rolepack_id else ""
+            )
+            + f">{label}</option>"
+            for identifier, label in rolepack_choices
+        )
+        rolepack_event_rows = "".join(
+            "<div class='row'><div><b>RolePack changed</b>"
+            + "<span class='muted'>"
+            + html_escape(event[3] or "not configured")
+            + " → "
+            + html_escape(event[4])
+            + " · "
+            + html_escape(event[5])
+            + " · "
+            + html_escape(event[6])
+            + "</span></div></div>"
+            for event in rolepack_events
+        )
+        if not rolepack_event_rows:
+            rolepack_event_rows = (
+                "<div class='row'><span class='muted'>"
+                "No RolePack changes.</span></div>"
+            )
+        rolepack_notice = request.args.get("rolepack_status", "")
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "RolePack</div><p class='muted'>One Nina, configured for the "
+            "selected professional role. The canonical execution chain does "
+            "not change.</p>"
+            + (
+                f"<div class='safe-note'>{html_escape(rolepack_notice)}</div>"
+                if rolepack_notice else ""
+            )
+            + "<form method='post' action='/settings/rolepack'>"
+            + "<div class='field'><label for='rolepack-id'>RolePack</label>"
+            + f"<select id='rolepack-id' name='rolepack_id'>{rolepack_options}</select></div>"
+            + f"<input type='hidden' name='csrf_token' value='{_channel_csrf('rolepack:change')}'>"
+            + "<div class='form-actions'><button class='btn' type='submit'>"
+            + "Save RolePack</button></div></form>"
+            + "<div class='safe-note'>Capabilities: "
+            + html_escape(", ".join(rolepack.capabilities))
+            + "</div><div class='list'>"
+            + rolepack_event_rows
+            + "</div></section>"
+        )
+    except Exception:
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "RolePack</div><div class='safe-note'>"
+            "RolePack profile unavailable.</div></section>"
+        )
+    try:
         from nina_message_service import daily_work_summary
         today = daily_work_summary(
             NINA_WEB_WORKSPACE_ID, owner_id=current_web_contact()["contact_id"],
@@ -7478,6 +7554,26 @@ def autonomy_mode_update():
     except AutonomyError as exc:
         status = str(exc)
     return redirect(q("/dashboard") + "&autonomy_status=" + quote_plus(status))
+
+
+@app.post("/settings/rolepack")
+def rolepack_update():
+    if not _valid_channel_csrf("rolepack:change"):
+        return Response("rolepack_csrf_invalid", status=403)
+    rolepack_id = str(
+        request.form.get("rolepack_id") or ""
+    ).strip()
+    try:
+        selection = set_workspace_rolepack(
+            NINA_WEB_WORKSPACE_ID, rolepack_id,
+            updated_by=current_web_contact()["contact_id"],
+        )
+        status = selection.rolepack_id
+    except RolePackError as exc:
+        status = str(exc)
+    return redirect(
+        q("/dashboard") + "&rolepack_status=" + quote_plus(status)
+    )
 
 
 @app.post("/reminders/<object_id>/done")
