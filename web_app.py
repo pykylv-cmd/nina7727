@@ -168,6 +168,13 @@ from execution_layer import (
     get_execution,
     list_executions,
 )
+from autonomy_framework import (
+    AutonomyError,
+    MODES as AUTONOMY_MODES,
+    get_profile as get_autonomy_profile,
+    list_events as list_autonomy_events,
+    set_mode as set_autonomy_mode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -4457,6 +4464,60 @@ def dashboard_body(data):
     c = data["counts"]
     one_nina_surface = one_nina_work_surface_html(limit=6)
     try:
+        autonomy_profile = get_autonomy_profile(
+            NINA_WEB_WORKSPACE_ID, actor="system",
+        )
+        autonomy_events = list_autonomy_events(
+            NINA_WEB_WORKSPACE_ID, limit=5,
+        )
+        autonomy_options = "".join(
+            f"<option value='{mode}'"
+            + (" selected" if mode == autonomy_profile.mode else "")
+            + f">{mode}</option>"
+            for mode in ("MANUAL", "SUGGEST", "SEMI_AUTO", "AUTO")
+        )
+        autonomy_event_rows = "".join(
+            "<div class='row'><div><b>Mode changed</b>"
+            + "<span class='muted'>"
+            + html_escape(event[3] or "not configured")
+            + " → "
+            + html_escape(event[4])
+            + " · "
+            + html_escape(event[5])
+            + " · "
+            + html_escape(event[6])
+            + "</span></div></div>"
+            for event in autonomy_events
+        )
+        if not autonomy_event_rows:
+            autonomy_event_rows = (
+                "<div class='row'><span class='muted'>No mode changes.</span></div>"
+            )
+        autonomy_notice = request.args.get("autonomy_status", "")
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "Workspace Settings</div><p class='muted'>Autonomy Mode controls "
+            "policy only. It does not create a scheduler or execute work.</p>"
+            + (
+                f"<div class='safe-note'>{html_escape(autonomy_notice)}</div>"
+                if autonomy_notice else ""
+            )
+            + "<form method='post' action='/settings/autonomy'>"
+            + "<div class='field'><label for='autonomy-mode'>Autonomy Mode</label>"
+            + f"<select id='autonomy-mode' name='mode'>{autonomy_options}</select></div>"
+            + f"<input type='hidden' name='csrf_token' value='{_channel_csrf('autonomy:mode')}'>"
+            + "<div class='form-actions'><button class='btn' type='submit'>"
+            + "Save mode</button></div></form><div class='list'>"
+            + autonomy_event_rows
+            + "</div></section>"
+        )
+    except Exception:
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "Workspace Settings</div><div class='safe-note'>"
+            "Autonomy profile unavailable.</div></section>"
+        )
+    try:
         from nina_message_service import daily_work_summary
         today = daily_work_summary(
             NINA_WEB_WORKSPACE_ID, owner_id=current_web_contact()["contact_id"],
@@ -7399,6 +7460,24 @@ def execution_run():
     except ExecutionError as exc:
         status = str(exc)
     return redirect(q("/dashboard") + "&execution_status=" + quote_plus(status))
+
+
+@app.post("/settings/autonomy")
+def autonomy_mode_update():
+    if not _valid_channel_csrf("autonomy:mode"):
+        return Response("autonomy_csrf_invalid", status=403)
+    mode = str(request.form.get("mode") or "").strip().upper()
+    try:
+        if mode not in AUTONOMY_MODES:
+            raise AutonomyError("autonomy_mode_invalid")
+        profile = set_autonomy_mode(
+            NINA_WEB_WORKSPACE_ID, mode,
+            updated_by=current_web_contact()["contact_id"],
+        )
+        status = profile.mode
+    except AutonomyError as exc:
+        status = str(exc)
+    return redirect(q("/dashboard") + "&autonomy_status=" + quote_plus(status))
 
 
 @app.post("/reminders/<object_id>/done")

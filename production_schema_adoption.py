@@ -210,6 +210,30 @@ CONTRACTS = {
             "indexes": {"idx_nina_execution_events_workspace"},
         },
     },
+    "0007_autonomy_framework_v1": {
+        "nina_autonomy_profiles": {
+            "columns": {
+                name: (TEXT_TYPES, False)
+                for name in (
+                    "workspace_id", "mode", "updated_by",
+                    "created_at", "updated_at",
+                )
+            },
+            "primary_key": ("workspace_id",),
+            "indexes": set(),
+        },
+        "nina_autonomy_events": {
+            "columns": {
+                name: (TEXT_TYPES, False)
+                for name in (
+                    "event_id", "workspace_id", "event_type", "old_mode",
+                    "new_mode", "actor", "created_at",
+                )
+            },
+            "primary_key": ("event_id",),
+            "indexes": {"idx_nina_autonomy_events_workspace"},
+        },
+    },
 }
 
 

@@ -61,6 +61,7 @@ class ManagedMigrationTests(unittest.TestCase):
                 "0004_universal_work_objects_v1",
                 "0005_approval_layer_v1",
                 "0006_execution_layer_v1",
+                "0007_autonomy_framework_v1",
             ],
         )
         self.assertIn(managed_migrations.LEDGER_TABLE, self._tables())
@@ -86,6 +87,7 @@ class ManagedMigrationTests(unittest.TestCase):
                 "0004_universal_work_objects_v1",
                 "0005_approval_layer_v1",
                 "0006_execution_layer_v1",
+                "0007_autonomy_framework_v1",
             ],
         )
 
@@ -171,6 +173,7 @@ class ManagedMigrationTests(unittest.TestCase):
                 "0004_universal_work_objects_v1",
                 "0005_approval_layer_v1",
                 "0006_execution_layer_v1",
+                "0007_autonomy_framework_v1",
             ],
         )
 

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 import persistence_backend
 from approval_layer import get_approval_by_id
+from autonomy_framework import AutonomyFramework
 from initiative_engine import initiative_queue
 from reply_builder import ReplyBuilder
 from work_objects import create_work_object, get_work_object
@@ -377,6 +378,13 @@ class ExecutionLayer:
         action_type = str(reply.suggested_action or "").strip().upper()
         if not action_type:
             raise ExecutionValidationError("execution_action_missing")
+        policy = AutonomyFramework.evaluate(
+            workspace_id, approval, reply, action_type,
+        )
+        if policy.decision != "ALLOW":
+            raise ExecutionValidationError(
+                "execution_autonomy_" + policy.decision.lower()
+            )
         execution, created = _claim(
             approval, action_type, requested_by, idempotency_key, now,
         )

@@ -433,6 +433,37 @@ def _create_execution_layer(conn):
     cur.close()
 
 
+def _create_autonomy_framework(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_autonomy_profiles (
+            workspace_id TEXT PRIMARY KEY,
+            mode TEXT NOT NULL CHECK (
+                mode IN ('MANUAL','SUGGEST','SEMI_AUTO','AUTO')
+            ),
+            updated_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_autonomy_events (
+            event_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            event_type TEXT NOT NULL CHECK (event_type='mode_changed'),
+            old_mode TEXT NOT NULL DEFAULT '',
+            new_mode TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_autonomy_events_workspace
+        ON nina_autonomy_events (workspace_id, created_at)
+    """)
+    cur.close()
+
+
 MIGRATIONS = (
     Migration(
         identifier="0001_shared_conversation_state",
@@ -517,6 +548,19 @@ MIGRATIONS = (
             "unique:workspace_approval_action,workspace_idempotency|"
             "statuses:pending,processing,succeeded,failed,unsupported,cancelled|"
             "audit-events"
+        ),
+    ),
+    Migration(
+        identifier="0007_autonomy_framework_v1",
+        version=7,
+        name="Create tenant-scoped Autonomy Framework V1",
+        phase=PHASE_EXPAND,
+        operation=_create_autonomy_framework,
+        checksum_source=(
+            "0007|EXPAND|nina_autonomy_profiles+nina_autonomy_events|"
+            "modes:MANUAL,SUGGEST,SEMI_AUTO,AUTO|"
+            "decisions:ALLOW,DENY,REQUIRE_APPROVAL,UNSUPPORTED|"
+            "one-profile-per-workspace|audit:mode_changed"
         ),
     ),
 )

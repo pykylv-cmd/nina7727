@@ -444,7 +444,11 @@ class ExecutionLayerV1Tests(unittest.TestCase):
 
     def test_39_managed_migration_contract(self):
         identifiers = [item.identifier for item in self.migrations.MIGRATIONS]
-        self.assertEqual(identifiers[-1], "0006_execution_layer_v1")
+        self.assertIn("0006_execution_layer_v1", identifiers)
+        self.assertLess(
+            identifiers.index("0006_execution_layer_v1"),
+            identifiers.index("0007_autonomy_framework_v1"),
+        )
 
     def test_40_web_core_runtime_boundary(self):
         source = inspect.getsource(self.web.execution_run)
