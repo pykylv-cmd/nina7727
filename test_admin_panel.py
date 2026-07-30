@@ -173,6 +173,24 @@ class AdminPanelSeparationTests(unittest.TestCase):
             self.assertNotIn(token, cookie.value)
             self.assertEqual(client.get("/admin/channels").status_code, 200)
 
+    def test_bootstrap_login_normalizes_input_and_disables_browser_autofill(self):
+        token = "test-admin-bootstrap-token-at-least-32"
+        with patch.dict(os.environ, {"NINA_PLATFORM_ADMIN_BOOTSTRAP_TOKEN": token}):
+            client = web_app.app.test_client()
+            page = client.get("/admin/login?lang=en")
+            self.assertEqual(page.status_code, 200)
+            self.assertIn(b"name='bootstrap_token'", page.data)
+            self.assertIn(b"autocomplete='off'", page.data)
+            self.assertIn(b"autocapitalize='none'", page.data)
+            self.assertIn(b"spellcheck='false'", page.data)
+            response = client.post(
+                "/admin/login?lang=en",
+                data={"bootstrap_token": f"  {token}  "},
+            )
+            self.assertEqual(response.status_code, 302)
+            self.assertEqual(response.headers["Location"], "/admin/channels?lang=en")
+            self.assertEqual(client.get("/admin/channels?lang=en").status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6576,7 +6576,8 @@ def _admin_subnav():
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     if request.method == "POST":
-        if not verify_bootstrap_token(request.form.get("bootstrap_token")):
+        submitted_token = request.form.get("bootstrap_token", "").strip()
+        if not verify_bootstrap_token(submitted_token):
             return Response("Forbidden", status=403)
         response = redirect(q("/admin/channels"))
         response.set_cookie(
@@ -6594,7 +6595,8 @@ def admin_login():
         "<div class='page-title'><h1>Platform Admin</h1><p>Authorized NinaOS operators only.</p></div><br>"
         f"{status}<section class='card card-pad'><form method='post' class='channel-form'>"
         "<label for='bootstrap-token'>Admin access token</label>"
-        "<input id='bootstrap-token' name='bootstrap_token' type='password' required autocomplete='current-password'>"
+        "<input id='bootstrap-token' name='bootstrap_token' type='password' required "
+        "autocomplete='off' autocapitalize='none' spellcheck='false'>"
         "<button class='btn primary' type='submit'>Continue</button></form></section>"
     )
     return Response(page("Platform Admin", body, active="channels"), mimetype="text/html")
