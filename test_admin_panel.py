@@ -91,14 +91,60 @@ class AdminPanelSeparationTests(unittest.TestCase):
     def test_client_channels_are_product_facing_only(self):
         with patch.dict(os.environ, {"NINA_COMPANY_WHATSAPP_NUMBER": "+37120714711"}):
             page = web_app.app.test_client().get("/channels?lang=en").get_data(as_text=True)
-        self.assertIn("Talk to Nina on Web", page)
-        self.assertIn("Talk to Nina on WhatsApp", page)
-        self.assertIn("/nina/contact-qr.svg", page)
+        self.assertIn("Talk to Nina", page)
+        self.assertIn("href='/nina?lang=en'", page)
         for forbidden in (
             "Connect company phone", "Disconnect", "Linked Devices",
             "bridge", "workspace_id", "qr_svg", "NinaOS Company WhatsApp",
+            "WhatsApp", "wa.me", "/nina/contact-qr.svg", "/nina/contact.vcf",
         ):
             self.assertNotIn(forbidden, page)
+
+    def test_client_web_chat_does_not_expose_platform_contact_or_messages(self):
+        with patch.dict(os.environ, {"NINA_COMPANY_WHATSAPP_NUMBER": "+37120714711"}):
+            page = web_app.app.test_client().get("/nina?lang=en").get_data(as_text=True)
+        self.assertNotIn("wa.me", page)
+        self.assertNotIn("/nina/contact-qr.svg", page)
+        self.assertNotIn("/nina/contact.vcf", page)
+        self.assertNotIn("NinaOS Company WhatsApp", page)
+
+    def test_channel_layer_uses_signed_client_workspace_and_denies_management(self):
+        client = web_app.app.test_client()
+        workspace_id = "web_" + "a" * 32
+        client.set_cookie(
+            web_app._WORKSPACE_COOKIE,
+            web_app._workspace_cookie_value(workspace_id),
+        )
+        with patch.object(web_app, "list_layer_connections", return_value=()) as listed:
+            response = client.get("/channel-layer/connections")
+        self.assertEqual(response.status_code, 200)
+        listed.assert_called_once_with(workspace_id, limit=100)
+
+        with patch.object(web_app, "create_layer_connection") as create:
+            response = client.post(
+                "/channel-layer/create",
+                data={"csrf_token": web_app._channel_csrf("channel:create")},
+            )
+        self.assertEqual(response.status_code, 403)
+        create.assert_not_called()
+
+    def test_cross_workspace_connection_id_is_fail_closed(self):
+        client = web_app.app.test_client()
+        client.set_cookie(
+            web_app._WORKSPACE_COOKIE,
+            web_app._workspace_cookie_value("web_" + "b" * 32),
+        )
+        with patch.object(web_app, "update_layer_connection") as update:
+            response = client.post(
+                "/channel-layer/platform-connection/disconnect",
+                data={
+                    "csrf_token": web_app._channel_csrf(
+                        "channel:disconnect:platform-connection"
+                    )
+                },
+            )
+        self.assertEqual(response.status_code, 403)
+        update.assert_not_called()
 
     def test_public_contact_qr_is_distinct_from_private_pairing_status(self):
         client = web_app.app.test_client()

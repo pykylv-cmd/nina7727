@@ -97,8 +97,8 @@ class NinaOSNumberTests(unittest.TestCase):
         self.assertEqual(self.number.whatsapp_url(configured), "https://wa.me/37120714711")
         page = self.client.get("/nina?lang=en").get_data(as_text=True)
         self.assertIn("Talk to Nina", page)
-        self.assertIn("https://wa.me/37120714711", page)
-        self.assertIn("/nina/contact.vcf", page)
+        self.assertNotIn("https://wa.me/37120714711", page)
+        self.assertNotIn("/nina/contact.vcf", page)
         self.assertEqual(self.client.get("/nina/contact.vcf").status_code, 200)
         self.assertEqual(self.client.get("/nina/contact-qr.svg").status_code, 200)
 

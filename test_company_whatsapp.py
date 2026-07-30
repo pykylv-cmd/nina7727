@@ -111,7 +111,8 @@ class CompanyWhatsAppTests(unittest.TestCase):
             self.assertEqual(contact["whatsapp_url"],"https://wa.me/37120714711")
             page=self.client.get("/nina?lang=en").get_data(as_text=True)
             self.assertIn("Talk to Nina",page)
-            self.assertIn("https://wa.me/37120714711",page)
+            self.assertNotIn("https://wa.me/37120714711",page)
+            self.assertNotIn("/nina/contact.vcf",page)
 
     def test_internal_company_api_requires_bridge_auth_and_workspace(self):
         self.assertEqual(self.client.post("/internal/company-whatsapp/auth/load",json={"workspace_id":"ninaos_company"}).status_code,401)

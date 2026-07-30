@@ -4440,15 +4440,9 @@ def nina_chat_body(messages):
     if not bubbles:
         bubbles = f"<div class='chat-message nina'>{html_escape(copy['empty'])}<small>Nina</small></div>"
 
-    telegram_connection = get_connection(NINA_WEB_WORKSPACE_ID, "telegram")
-    telegram_state = copy["connected"] if telegram_connection["status"] == "connected" else copy["connect"]
     channels = (
         f"<div class='channel-card'><div><b>Web</b></div><span class='channel-state'>{copy['active']}</span></div>"
-        f"<div class='channel-card'><div><b>Telegram</b></div><span class='channel-state'>{telegram_state}</span></div>"
-        f"<div class='channel-card'><div><b>WhatsApp</b><span class='muted'>{copy['next']}</span></div><span class='channel-state next'>{copy['connect']}</span></div>"
-        f"<div class='channel-card'><div><b>Email</b><span class='muted'>{copy['next']}</span></div><span class='channel-state next'>{copy['connect']}</span></div>"
     )
-    nina_contact = nina_contact_html(lang)
     return (
         "<div class='chat-layout'>"
         "<section class='card card-pad chat-shell'>"
@@ -4462,7 +4456,7 @@ def nina_chat_body(messages):
         f"<button id='voice-cancel' class='btn voice-btn' type='button' hidden>{copy['cancel']}</button>"
         f"<button id='chat-send' class='btn primary' type='submit'>{copy['send']}</button></div></form>"
         "</section>"
-        f"<aside class='card card-pad'>{nina_contact}<div class='section-title'>{copy['channels']}</div>{channels}<div class='form-actions'><a class='btn' href='/channels?lang={lang}'>{copy['channels']}</a></div></aside>"
+        f"<aside class='card card-pad'><div class='section-title'>{copy['channels']}</div>{channels}<div class='form-actions'><a class='btn' href='/channels?lang={lang}'>{copy['channels']}</a></div></aside>"
         "</div>"
         f"<script>window.NinaVoiceConfig={json.dumps({'lang': lang, 'ready': copy['ready'], 'recording': copy['recording'], 'processing': copy['processing'], 'error': copy['error'], 'denied': copy['denied'], 'unsupported': copy['unsupported']}, ensure_ascii=False)};</script>"
         "<script>(function(){const c=window.NinaVoiceConfig,s=document.getElementById('voice-status'),start=document.getElementById('voice-start'),stop=document.getElementById('voice-stop'),cancel=document.getElementById('voice-cancel'),send=document.getElementById('chat-send');let recorder=null,stream=null,chunks=[],cancelled=false;function state(name,text){s.dataset.state=name;s.textContent=text;}function tracksOff(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}function controls(active){start.hidden=active;stop.hidden=!active;cancel.hidden=!active;send.disabled=active;}function reset(){tracksOff();controls(false);recorder=null;chunks=[];cancelled=false;state('ready',c.ready);}async function upload(blob){state('processing',c.processing);controls(false);start.disabled=true;send.disabled=true;const data=new FormData();const ext=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':blob.type.includes('mpeg')?'mp3':'webm';data.append('audio',blob,'voice.'+ext);data.append('lang',c.lang);try{const response=await fetch('/nina/voice?lang='+encodeURIComponent(c.lang),{method:'POST',body:data,credentials:'same-origin'});if(!response.ok)throw new Error('upload');window.location.href='/nina?lang='+encodeURIComponent(c.lang);}catch(e){state('error',c.error);start.disabled=false;send.disabled=false;}}start.addEventListener('click',async function(){if(!navigator.mediaDevices||!window.MediaRecorder){state('error',c.unsupported);return;}try{stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});chunks=[];cancelled=false;const preferred=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4','audio/webm','audio/ogg'].find(t=>MediaRecorder.isTypeSupported(t));const options={audioBitsPerSecond:128000};if(preferred)options.mimeType=preferred;recorder=new MediaRecorder(stream,options);recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};recorder.onerror=()=>{tracksOff();controls(false);state('error',c.error);};recorder.onstop=()=>{tracksOff();controls(false);if(cancelled){reset();return;}const blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});if(!blob.size){state('error',c.error);return;}upload(blob);};recorder.start();controls(true);state('recording',c.recording);}catch(e){tracksOff();controls(false);state('error',e&&e.name==='NotAllowedError'?c.denied:c.error);}});stop.addEventListener('click',()=>{if(recorder&&recorder.state!=='inactive')recorder.stop();});cancel.addEventListener('click',()=>{cancelled=true;if(recorder&&recorder.state!=='inactive')recorder.stop();else reset();});})();</script>"
@@ -4504,13 +4498,19 @@ def _knowledge_permission(permission_id):
 
 
 def _channel_permission(permission_id):
-    return (
-        permission_id in {
-            "channel_read", "channel_manage", "channel_message_read",
-            "channel_message_send", "channel_audit_view",
-        }
-        and get_permission_rule(permission_id) is not None
-    )
+    """Fail closed until a distinct workspace-admin identity is implemented."""
+    if get_permission_rule(permission_id) is None:
+        return False
+    if permission_id in {"channel_read", "channel_message_read"}:
+        return current_web_role() in {CLIENT_ROLE, ADMIN_ROLE}
+    return current_web_role() == ADMIN_ROLE
+
+
+def _channel_workspace_id():
+    """Resolve channel data from a server-authoritative access surface."""
+    if current_web_role() == ADMIN_ROLE:
+        return NINA_WEB_WORKSPACE_ID
+    return current_workspace_id()
 
 
 def knowledge_vault_html():
@@ -4592,7 +4592,7 @@ def knowledge_vault_html():
 
 
 def channel_layer_html():
-    workspace_id = NINA_WEB_WORKSPACE_ID
+    workspace_id = _channel_workspace_id()
     ensure_web_connection(workspace_id, actor="system")
     connections = list_layer_connections(workspace_id, limit=20)
     messages = list_channel_messages(workspace_id, limit=30)
@@ -4602,20 +4602,22 @@ def channel_layer_html():
         update_action = f"channel:update:{item.channel_connection_id}"
         suspend_action = f"channel:suspend:{item.channel_connection_id}"
         disconnect_action = f"channel:disconnect:{item.channel_connection_id}"
-        controls = (
-            "<details><summary>Edit</summary>"
-            f"<form method='post' action='/channel-layer/{html_escape(item.channel_connection_id)}/update'>"
-            f"<input type='hidden' name='csrf_token' value='{_channel_csrf(update_action)}'>"
-            f"<input name='display_name' value='{html_escape(item.display_name)}' required>"
-            "<button class='btn' type='submit'>Save</button></form></details>"
-        )
-        if item.status == "CONNECTED" and item.channel_type != "WEB":
+        controls = ""
+        if _channel_permission("channel_manage"):
+            controls = (
+                "<details><summary>Edit</summary>"
+                f"<form method='post' action='/channel-layer/{html_escape(item.channel_connection_id)}/update'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(update_action)}'>"
+                f"<input name='display_name' value='{html_escape(item.display_name)}' required>"
+                "<button class='btn' type='submit'>Save</button></form></details>"
+            )
+        if _channel_permission("channel_manage") and item.status == "CONNECTED" and item.channel_type != "WEB":
             controls += (
                 f"<form method='post' action='/channel-layer/{html_escape(item.channel_connection_id)}/suspend'>"
                 f"<input type='hidden' name='csrf_token' value='{_channel_csrf(suspend_action)}'>"
                 "<button class='btn' type='submit'>Suspend</button></form>"
             )
-        if item.status != "DISCONNECTED" and item.channel_type != "WEB":
+        if _channel_permission("channel_manage") and item.status != "DISCONNECTED" and item.channel_type != "WEB":
             controls += (
                 f"<form method='post' action='/channel-layer/{html_escape(item.channel_connection_id)}/disconnect'>"
                 f"<input type='hidden' name='csrf_token' value='{_channel_csrf(disconnect_action)}'>"
@@ -4669,21 +4671,26 @@ def channel_layer_html():
         + "</span></div></div>"
         for event in events
     )
-    type_options = "".join(
-        f"<option>{html_escape(channel_type)}</option>"
-        for channel_type in sorted(CHANNEL_TYPES - {"WEB"})
-    )
+    create_controls = ""
+    if _channel_permission("channel_manage"):
+        type_options = "".join(
+            f"<option>{html_escape(channel_type)}</option>"
+            for channel_type in sorted(CHANNEL_TYPES - {"WEB"})
+        )
+        create_controls = (
+            "<details><summary>Add Channel Connection</summary>"
+            "<form method='post' action='/channel-layer/create'>"
+            f"<input type='hidden' name='csrf_token' value='{_channel_csrf('channel:create')}'>"
+            f"<select name='channel_type'>{type_options}</select>"
+            "<input name='display_name' required placeholder='Display name'>"
+            "<input name='external_account_id' placeholder='Safe external account ID'>"
+            "<button class='btn primary' type='submit'>Add Channel Connection</button>"
+            "</form></details>"
+        )
     return (
         "<section class='card card-pad'><div class='section-title'>Channels</div>"
         "<p class='muted'>ONE NINA canonical communication surfaces.</p>"
-        "<details><summary>Add Channel Connection</summary>"
-        "<form method='post' action='/channel-layer/create'>"
-        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('channel:create')}'>"
-        f"<select name='channel_type'>{type_options}</select>"
-        "<input name='display_name' required placeholder='Display name'>"
-        "<input name='external_account_id' placeholder='Safe external account ID'>"
-        "<button class='btn primary' type='submit'>Add Channel Connection</button>"
-        "</form></details><div class='list'>"
+        + create_controls + "<div class='list'>"
         + ("".join(connection_rows) or "<div class='row'>No channels.</div>")
         + "</div><details><summary>Messages</summary><div class='list'>"
         + (message_rows or "<div class='row'>No canonical messages.</div>")
@@ -6444,15 +6451,12 @@ def client_channels_body():
     """Product communication choices without private connection controls or state."""
     lang = current_language()
     copy = {
-        "en": {"title":"Talk to Nina","sub":"Choose where you want to work with Nina.","web":"Talk to Nina on Web","web_text":"Open your private Nina workspace.","whatsapp":"Talk to Nina on WhatsApp","whatsapp_text":"Use Nina's official company contact.","telegram":"Talk to Nina on Telegram","telegram_text":"Open Nina in Telegram.","open":"Open","available":"Available"},
-        "lv": {"title":"Runāt ar Ninu","sub":"Izvēlies, kur vēlies strādāt ar Ninu.","web":"Runāt ar Ninu tīmeklī","web_text":"Atver savu privāto Ninas darba vidi.","whatsapp":"Runāt ar Ninu WhatsApp","whatsapp_text":"Izmanto Ninas oficiālo uzņēmuma kontaktu.","telegram":"Runāt ar Ninu Telegram","telegram_text":"Atver Ninu Telegram.","open":"Atvērt","available":"Pieejams"},
-        "ru": {"title":"Поговорить с Ниной","sub":"Выберите, где вы хотите работать с Ниной.","web":"Нина в Web","web_text":"Откройте своё личное рабочее пространство.","whatsapp":"Нина в WhatsApp","whatsapp_text":"Используйте официальный контакт Нины.","telegram":"Нина в Telegram","telegram_text":"Откройте Нину в Telegram.","open":"Открыть","available":"Доступно"},
+        "en": {"title":"Talk to Nina","sub":"Open your private Nina workspace.","web":"Talk to Nina","web_text":"Continue in your private Web Chat.","open":"Open Web Chat","available":"Available"},
+        "lv": {"title":"Runāt ar Ninu","sub":"Atver savu privāto Ninas darba vidi.","web":"Runāt ar Ninu","web_text":"Turpini savā privātajā Web Chat.","open":"Atvērt Web Chat","available":"Pieejams"},
+        "ru": {"title":"Поговорить с Ниной","sub":"Откройте своё личное пространство Нины.","web":"Поговорить с Ниной","web_text":"Продолжите в своём приватном Web Chat.","open":"Открыть Web Chat","available":"Доступно"},
     }[lang]
-    contact = public_ninaos_contact(primary_ninaos_number()) or {}
     choices = [
         (copy["web"], copy["web_text"], f"/nina?lang={lang}", ""),
-        (copy["whatsapp"], copy["whatsapp_text"], str(contact.get("whatsapp_url") or "#"), " target='_blank' rel='noopener noreferrer'"),
-        (copy["telegram"], copy["telegram_text"], f"https://t.me/{_telegram_bot_username()}", " target='_blank' rel='noopener noreferrer'"),
     ]
     cards = "".join(
         "<section class='card card-pad connection-card'>"
@@ -6462,7 +6466,7 @@ def client_channels_body():
     )
     return (
         f"<div class='page-title'><h1>{html_escape(copy['title'])}</h1><p>{html_escape(copy['sub'])}</p></div><br>"
-        f"{nina_contact_html(lang)}<div class='channels-grid'>{cards}</div>"
+        f"<div class='channels-grid'>{cards}</div>"
     )
 
 
@@ -7600,7 +7604,7 @@ def channel_layer_connections_api():
     if not _channel_permission("channel_read"):
         return jsonify({"ok": False, "error": "channel_permission_denied"}), 403
     try:
-        items = list_layer_connections(NINA_WEB_WORKSPACE_ID, limit=100)
+        items = list_layer_connections(_channel_workspace_id(), limit=100)
         return jsonify({
             "ok": True,
             "channel_types": sorted(CHANNEL_TYPES),
@@ -7615,7 +7619,7 @@ def channel_layer_messages_api():
     if not _channel_permission("channel_message_read"):
         return jsonify({"ok": False, "error": "channel_permission_denied"}), 403
     try:
-        items = list_channel_messages(NINA_WEB_WORKSPACE_ID, limit=100)
+        items = list_channel_messages(_channel_workspace_id(), limit=100)
         return jsonify({
             "ok": True,
             "messages": [item.as_dict() for item in items],
@@ -7632,7 +7636,7 @@ def channel_layer_create_form():
         return Response("channel_csrf_invalid", status=403)
     try:
         create_layer_connection(
-            NINA_WEB_WORKSPACE_ID,
+            _channel_workspace_id(),
             channel_type=request.form.get("channel_type"),
             display_name=request.form.get("display_name"),
             external_account_id=request.form.get("external_account_id", ""),
@@ -7653,7 +7657,7 @@ def channel_layer_update_form(channel_connection_id):
         return Response("channel_csrf_invalid", status=403)
     try:
         update_layer_connection(
-            NINA_WEB_WORKSPACE_ID, channel_connection_id,
+            _channel_workspace_id(), channel_connection_id,
             display_name=request.form.get("display_name"),
             updated_by=current_web_contact()["contact_id"],
         )
@@ -7671,7 +7675,7 @@ def _channel_connection_transition_form(channel_connection_id, target):
         return Response("channel_csrf_invalid", status=403)
     try:
         update_layer_connection(
-            NINA_WEB_WORKSPACE_ID, channel_connection_id,
+            _channel_workspace_id(), channel_connection_id,
             target_status=target,
             updated_by=current_web_contact()["contact_id"],
         )

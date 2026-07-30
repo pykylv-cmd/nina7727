@@ -356,7 +356,7 @@ class ChannelLayerWebTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn("Channels", body)
         self.assertIn("Messages", body)
-        self.assertIn("Add Channel Connection", body)
+        self.assertNotIn("Add Channel Connection", body)
         self.assertEqual(
             self.client.post(
                 "/channel-layer/create",
@@ -364,11 +364,18 @@ class ChannelLayerWebTests(unittest.TestCase):
             ).status_code,
             403,
         )
+        admin = self.web_app.app.test_client()
+        admin.set_cookie(
+            self.web_app.ADMIN_COOKIE,
+            self.web_app.create_admin_session(
+                self.web_app._workspace_cookie_secret()
+            ),
+        )
         with patch.object(
             self.web_app, "current_web_contact",
             return_value={"contact_id": "contact_owner"},
         ):
-            created = self.client.post(
+            created = admin.post(
                 "/channel-layer/create",
                 data={
                     "csrf_token": self.web_app._channel_csrf("channel:create"),
@@ -378,7 +385,7 @@ class ChannelLayerWebTests(unittest.TestCase):
                 },
             )
         self.assertEqual(created.status_code, 302)
-        body = self.client.get("/dashboard").get_data(as_text=True)
+        body = admin.get("/dashboard").get_data(as_text=True)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", body)
         self.assertNotIn("<script>alert(1)</script>", body)
 
