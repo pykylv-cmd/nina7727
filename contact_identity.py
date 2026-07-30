@@ -15,7 +15,7 @@ DATABASE_URL, DB_FILE, USE_POSTGRES = persistence_backend.module_settings()
 CONTACT_TABLE = "nina_contacts"
 IDENTITY_TABLE = "nina_contact_channel_identities"
 LINK_TABLE = "nina_contact_link_claims"
-ALLOWED_CHANNELS = {"company_whatsapp", "telegram", "web", "personal_whatsapp", "whatsapp", "ninaos_number"}
+ALLOWED_CHANNELS = {"company_whatsapp", "telegram", "web", "email", "personal_whatsapp", "whatsapp", "ninaos_number"}
 _SCOPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 

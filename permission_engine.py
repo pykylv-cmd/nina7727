@@ -82,6 +82,39 @@ class PermissionRule:
 # =========================================================
 
 PERMISSION_RULES: Dict[str, PermissionRule] = {
+    "channel_read": PermissionRule(
+        permission_id="channel_read",
+        label="Read Channels",
+        description="Read workspace channel connection state.",
+        category="channel",
+    ),
+    "channel_manage": PermissionRule(
+        permission_id="channel_manage",
+        label="Manage Channels",
+        description="Manage safe workspace channel configuration.",
+        category="channel",
+        risk_level="medium",
+    ),
+    "channel_message_read": PermissionRule(
+        permission_id="channel_message_read",
+        label="Read Channel Messages",
+        description="Read canonical workspace communication history.",
+        category="channel",
+    ),
+    "channel_message_send": PermissionRule(
+        permission_id="channel_message_send",
+        label="Send Channel Messages",
+        description="Request an approved external channel delivery.",
+        category="channel",
+        approval_required=True,
+        risk_level="medium",
+    ),
+    "channel_audit_view": PermissionRule(
+        permission_id="channel_audit_view",
+        label="View Channel Audit",
+        description="Read safe channel lifecycle and delivery events.",
+        category="channel",
+    ),
     "knowledge_read": PermissionRule(
         permission_id="knowledge_read",
         label="Read Knowledge",
@@ -351,6 +384,11 @@ PERMISSION_RULES: Dict[str, PermissionRule] = {
 
 ROLE_PERMISSION_MAP: Dict[str, List[str]] = {
     "office_manager_core": [
+        "channel_read",
+        "channel_manage",
+        "channel_message_read",
+        "channel_message_send",
+        "channel_audit_view",
         "read_task",
         "write_task",
         "delete_task",
@@ -388,6 +426,10 @@ ROLE_PERMISSION_MAP: Dict[str, List[str]] = {
     ],
 
     "client_followup_manager": [
+        "channel_read",
+        "channel_message_read",
+        "channel_message_send",
+        "channel_audit_view",
         "read_client",
         "write_client",
         "delete_client",

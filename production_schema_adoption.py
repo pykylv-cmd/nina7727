@@ -396,6 +396,63 @@ CONTRACTS = {
             "indexes": {"idx_nina_work_events_workspace_object"},
         },
     },
+    "0013_channel_layer_v1": {
+        "nina_channel_connections": {
+            "columns": {
+                name: (TEXT_TYPES, False)
+                for name in (
+                    "workspace_id", "channel", "status",
+                    "channel_connection_id", "channel_type", "display_name",
+                    "external_account_id", "capabilities_json",
+                    "configuration_reference", "created_by", "updated_by",
+                    "created_at", "updated_at", "activated_at",
+                    "suspended_at",
+                )
+            },
+            "indexes": {
+                "idx_nina_channel_connection_id",
+                "idx_nina_channel_external_identity",
+                "idx_nina_channel_workspace_status",
+            },
+        },
+        "nina_channel_messages": {
+            "columns": {
+                name: (TEXT_TYPES, False)
+                for name in (
+                    "message_id", "workspace_id", "channel_connection_id",
+                    "channel_type", "direction", "external_message_id",
+                    "thread_reference", "contact_id", "external_sender_id",
+                    "message_type", "text_content", "safe_metadata_json",
+                    "received_at", "created_at", "deduplication_key",
+                    "related_work_object_id", "processing_status",
+                    "related_inbound_message_id", "approval_reference",
+                    "execution_reference", "delivery_status",
+                    "external_delivery_id",
+                )
+            },
+            "primary_key": ("message_id",),
+            "indexes": {
+                "idx_nina_channel_inbound_dedup",
+                "idx_nina_channel_messages_workspace_created",
+                "idx_nina_channel_messages_workspace_contact",
+            },
+        },
+        "nina_channel_message_events": {
+            "columns": {
+                name: (TEXT_TYPES, False)
+                for name in (
+                    "event_id", "workspace_id", "channel_connection_id",
+                    "message_id", "event_type", "actor",
+                    "safe_metadata_json", "created_at",
+                )
+            },
+            "primary_key": ("event_id",),
+            "indexes": {
+                "idx_nina_channel_events_workspace_created",
+                "idx_nina_channel_events_message",
+            },
+        },
+    },
 }
 
 

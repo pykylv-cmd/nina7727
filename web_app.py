@@ -19,6 +19,20 @@ from flask import Flask, Response, g, has_request_context, jsonify, redirect, re
 from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, load_channel_conversation, load_web_conversation, send_message_to_nina
 from voice_engine import transcribe_audio_with_openai
 from channel_connections import claim_channel_message, consume_whatsapp_onboarding_state, create_telegram_token, create_whatsapp_onboarding_state, disconnect as disconnect_channel, get_connection, set_connection_for_test, update_whatsapp_verification
+from channel_layer import (
+    CHANNEL_TYPES,
+    ChannelLayerError,
+    create_connection as create_layer_connection,
+    create_outbound as create_channel_outbound,
+    ensure_web_connection,
+    get_message as get_channel_message,
+    ingest_inbound as ingest_channel_inbound,
+    initialize_channel_layer,
+    list_connections as list_layer_connections,
+    list_events as list_channel_events,
+    list_messages as list_channel_messages,
+    update_connection as update_layer_connection,
+)
 from whatsapp_channel import (
     WhatsAppProviderError,
     complete_embedded_signup,
@@ -353,6 +367,7 @@ WEB_RUNTIME_READINESS.register(
         callable(get_connection)
         and callable(list_connected_personal_whatsapp_workspaces)
         and callable(list_connected_company_whatsapp_workspaces)
+        and initialize_channel_layer()
     ),
 )
 WEB_RUNTIME_READINESS.register("platform_core", initialize_platform_runtime)
@@ -394,6 +409,7 @@ _COOKIE_MUTATION_PREFIXES = (
     "/agent-assignments",
     "/knowledge-vault/items",
     "/work-objects",
+    "/channel-layer",
 )
 
 
@@ -4487,6 +4503,16 @@ def _knowledge_permission(permission_id):
     )
 
 
+def _channel_permission(permission_id):
+    return (
+        permission_id in {
+            "channel_read", "channel_manage", "channel_message_read",
+            "channel_message_send", "channel_audit_view",
+        }
+        and get_permission_rule(permission_id) is not None
+    )
+
+
 def knowledge_vault_html():
     workspace_id = current_workspace_id()
     query = (request.args.get("knowledge_query") or "").strip()
@@ -4562,6 +4588,109 @@ def knowledge_vault_html():
         + "<input name='source_reference'></div>"
         + "<button class='btn primary' type='submit'>Create Knowledge</button></form></details>"
         + "<div class='list'>" + row_html + "</div></section>"
+    )
+
+
+def channel_layer_html():
+    workspace_id = NINA_WEB_WORKSPACE_ID
+    ensure_web_connection(workspace_id, actor="system")
+    connections = list_layer_connections(workspace_id, limit=20)
+    messages = list_channel_messages(workspace_id, limit=30)
+    events = list_channel_events(workspace_id, limit=20)
+    connection_rows = []
+    for item in connections:
+        update_action = f"channel:update:{item.channel_connection_id}"
+        suspend_action = f"channel:suspend:{item.channel_connection_id}"
+        disconnect_action = f"channel:disconnect:{item.channel_connection_id}"
+        controls = (
+            "<details><summary>Edit</summary>"
+            f"<form method='post' action='/channel-layer/{html_escape(item.channel_connection_id)}/update'>"
+            f"<input type='hidden' name='csrf_token' value='{_channel_csrf(update_action)}'>"
+            f"<input name='display_name' value='{html_escape(item.display_name)}' required>"
+            "<button class='btn' type='submit'>Save</button></form></details>"
+        )
+        if item.status == "CONNECTED" and item.channel_type != "WEB":
+            controls += (
+                f"<form method='post' action='/channel-layer/{html_escape(item.channel_connection_id)}/suspend'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(suspend_action)}'>"
+                "<button class='btn' type='submit'>Suspend</button></form>"
+            )
+        if item.status != "DISCONNECTED" and item.channel_type != "WEB":
+            controls += (
+                f"<form method='post' action='/channel-layer/{html_escape(item.channel_connection_id)}/disconnect'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(disconnect_action)}'>"
+                "<button class='btn' type='submit'>Disconnect</button></form>"
+            )
+        last_inbound = next(
+            (message.created_at for message in messages
+             if message.channel_connection_id == item.channel_connection_id
+             and message.direction == "INBOUND"),
+            "none",
+        )
+        last_outbound = next(
+            (message.created_at for message in messages
+             if message.channel_connection_id == item.channel_connection_id
+             and message.direction == "OUTBOUND"),
+            "none",
+        )
+        connection_rows.append(
+            "<div class='row'><div><b>" + html_escape(item.display_name)
+            + "</b><span class='muted'>" + html_escape(item.channel_type)
+            + " · " + html_escape(item.status)
+            + " · Account: "
+            + html_escape(item.as_dict()["external_account_safe_label"] or "internal")
+            + " · Capabilities: "
+            + html_escape(", ".join(item.capabilities) or "none")
+            + " · Last inbound: " + html_escape(last_inbound)
+            + " · Last outbound: " + html_escape(last_outbound)
+            + " · Updated: " + html_escape(item.updated_at)
+            + "</span></div><div>" + controls + "</div></div>"
+        )
+    message_rows = "".join(
+        "<div class='row'><div><b>" + html_escape(message.direction)
+        + " · " + html_escape(message.channel_type)
+        + "</b><span class='muted'>Contact: "
+        + html_escape(message.contact_id)
+        + " · " + html_escape(message.text_content[:120])
+        + " · "
+        + html_escape(
+            message.processing_status if message.direction == "INBOUND"
+            else message.delivery_status
+        )
+        + " · Work: " + html_escape(message.related_work_object_id or "none")
+        + " · " + html_escape(message.created_at)
+        + "</span></div></div>"
+        for message in messages
+    )
+    event_rows = "".join(
+        "<div class='row'><div><b>" + html_escape(event["event_type"])
+        + "</b><span class='muted'>" + html_escape(event["actor"])
+        + " · " + html_escape(event["created_at"])
+        + "</span></div></div>"
+        for event in events
+    )
+    type_options = "".join(
+        f"<option>{html_escape(channel_type)}</option>"
+        for channel_type in sorted(CHANNEL_TYPES - {"WEB"})
+    )
+    return (
+        "<section class='card card-pad'><div class='section-title'>Channels</div>"
+        "<p class='muted'>ONE NINA canonical communication surfaces.</p>"
+        "<details><summary>Add Channel Connection</summary>"
+        "<form method='post' action='/channel-layer/create'>"
+        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('channel:create')}'>"
+        f"<select name='channel_type'>{type_options}</select>"
+        "<input name='display_name' required placeholder='Display name'>"
+        "<input name='external_account_id' placeholder='Safe external account ID'>"
+        "<button class='btn primary' type='submit'>Add Channel Connection</button>"
+        "</form></details><div class='list'>"
+        + ("".join(connection_rows) or "<div class='row'>No channels.</div>")
+        + "</div><details><summary>Messages</summary><div class='list'>"
+        + (message_rows or "<div class='row'>No canonical messages.</div>")
+        + "</div></details><details><summary>Channel Audit</summary>"
+        "<div class='list'>"
+        + (event_rows or "<div class='row'>No channel events.</div>")
+        + "</div></details></section>"
     )
 
 
@@ -4789,6 +4918,14 @@ def dashboard_body(data):
             "<section class='card card-pad'><div class='section-title'>"
             "Work Objects</div><div class='safe-note'>"
             "Work Objects unavailable.</div></section>"
+        )
+    try:
+        one_nina_surface += channel_layer_html()
+    except Exception:
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "Channels</div><div class='safe-note'>"
+            "Channel Layer unavailable.</div></section>"
         )
     try:
         rolepack_selection = get_workspace_rolepack(
@@ -7458,6 +7595,106 @@ def archive_universal_work_object_form(work_object_id):
     return redirect(q("/dashboard") + "&work_status=Work+Object+archived")
 
 
+@app.get("/channel-layer/connections")
+def channel_layer_connections_api():
+    if not _channel_permission("channel_read"):
+        return jsonify({"ok": False, "error": "channel_permission_denied"}), 403
+    try:
+        items = list_layer_connections(NINA_WEB_WORKSPACE_ID, limit=100)
+        return jsonify({
+            "ok": True,
+            "channel_types": sorted(CHANNEL_TYPES),
+            "connections": [item.as_dict() for item in items],
+        })
+    except ChannelLayerError:
+        return jsonify({"ok": False, "error": "channel_layer_unavailable"}), 503
+
+
+@app.get("/channel-layer/messages")
+def channel_layer_messages_api():
+    if not _channel_permission("channel_message_read"):
+        return jsonify({"ok": False, "error": "channel_permission_denied"}), 403
+    try:
+        items = list_channel_messages(NINA_WEB_WORKSPACE_ID, limit=100)
+        return jsonify({
+            "ok": True,
+            "messages": [item.as_dict() for item in items],
+        })
+    except ChannelLayerError:
+        return jsonify({"ok": False, "error": "channel_layer_unavailable"}), 503
+
+
+@app.post("/channel-layer/create")
+def channel_layer_create_form():
+    if not _channel_permission("channel_manage"):
+        return Response("channel_permission_denied", status=403)
+    if not _valid_channel_csrf("channel:create"):
+        return Response("channel_csrf_invalid", status=403)
+    try:
+        create_layer_connection(
+            NINA_WEB_WORKSPACE_ID,
+            channel_type=request.form.get("channel_type"),
+            display_name=request.form.get("display_name"),
+            external_account_id=request.form.get("external_account_id", ""),
+            status="DISCONNECTED",
+            created_by=current_web_contact()["contact_id"],
+        )
+        notice = "Channel connection added"
+    except ChannelLayerError:
+        notice = "Channel connection failed"
+    return redirect(q("/dashboard") + "&channel_status=" + quote_plus(notice))
+
+
+@app.post("/channel-layer/<channel_connection_id>/update")
+def channel_layer_update_form(channel_connection_id):
+    if not _channel_permission("channel_manage"):
+        return Response("channel_permission_denied", status=403)
+    if not _valid_channel_csrf(f"channel:update:{channel_connection_id}"):
+        return Response("channel_csrf_invalid", status=403)
+    try:
+        update_layer_connection(
+            NINA_WEB_WORKSPACE_ID, channel_connection_id,
+            display_name=request.form.get("display_name"),
+            updated_by=current_web_contact()["contact_id"],
+        )
+        notice = "Channel updated"
+    except ChannelLayerError:
+        notice = "Channel update failed"
+    return redirect(q("/dashboard") + "&channel_status=" + quote_plus(notice))
+
+
+def _channel_connection_transition_form(channel_connection_id, target):
+    if not _channel_permission("channel_manage"):
+        return Response("channel_permission_denied", status=403)
+    action = f"channel:{target.lower()}:{channel_connection_id}"
+    if not _valid_channel_csrf(action):
+        return Response("channel_csrf_invalid", status=403)
+    try:
+        update_layer_connection(
+            NINA_WEB_WORKSPACE_ID, channel_connection_id,
+            target_status=target,
+            updated_by=current_web_contact()["contact_id"],
+        )
+        notice = f"Channel {target.lower()}"
+    except ChannelLayerError:
+        notice = "Channel transition failed"
+    return redirect(q("/dashboard") + "&channel_status=" + quote_plus(notice))
+
+
+@app.post("/channel-layer/<channel_connection_id>/suspend")
+def channel_layer_suspend_form(channel_connection_id):
+    return _channel_connection_transition_form(
+        channel_connection_id, "SUSPENDED"
+    )
+
+
+@app.post("/channel-layer/<channel_connection_id>/disconnect")
+def channel_layer_disconnect_form(channel_connection_id):
+    return _channel_connection_transition_form(
+        channel_connection_id, "DISCONNECTED"
+    )
+
+
 @app.post("/internal/runtime/compatibility")
 def internal_runtime_compatibility():
     payload = _bridge_json()
@@ -7862,11 +8099,44 @@ def nina_chat():
     if request.method == "POST":
         user_text = (request.form.get("message") or "").strip()
         if user_text:
-            send_message_to_nina(
+            inbound = None
+            if initialize_channel_layer(require_schema=True):
+                connection = ensure_web_connection(
+                    NINA_WEB_WORKSPACE_ID, actor="system"
+                )
+                inbound, _ = ingest_channel_inbound(
+                    NINA_WEB_WORKSPACE_ID,
+                    connection.channel_connection_id,
+                    external_message_id=(
+                        request.headers.get("Idempotency-Key")
+                        or "web_" + secrets.token_hex(16)
+                    ),
+                    thread_reference=contact["conversation_id"],
+                    external_sender_id=current_workspace_id(),
+                    message_type="TEXT", text_content=user_text,
+                    safe_metadata={"surface": "web_chat"},
+                    actor=contact["contact_id"],
+                )
+            nina_result = send_message_to_nina(
                 user_text, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web",
                 conversation_id=contact["conversation_id"], contact_id=contact["contact_id"],
                 contact_context=compact_contact_context(contact),
             )
+            nina_text = (
+                nina_result.get("text", "")
+                if isinstance(nina_result, dict) else nina_result
+            )
+            if inbound is not None and isinstance(nina_text, str) and nina_text.strip():
+                create_channel_outbound(
+                    NINA_WEB_WORKSPACE_ID,
+                    inbound.channel_connection_id,
+                    contact_id=contact["contact_id"],
+                    text_content=nina_text,
+                    related_inbound_message_id=inbound.message_id,
+                    status="DRAFT",
+                    safe_metadata={"surface": "web_chat"},
+                    created_by="nina_message_service",
+                )
         return redirect(q("/nina"))
     messages = load_channel_conversation(contact["conversation_id"], limit=30)
     return Response(page(tx("talk_to_nina"), nina_chat_body(messages), active="nina"), mimetype="text/html")

@@ -349,6 +349,173 @@ def _expand_universal_work_objects_workspace_v1(conn):
     cur.close()
 
 
+def _create_channel_layer_v1(conn):
+    """Add canonical channel identities and messages to existing channel truth."""
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_channel_connections (
+            workspace_id TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'disconnected',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            secret_ref TEXT NOT NULL DEFAULT '',
+            webhook_secret_ref TEXT NOT NULL DEFAULT '',
+            app_secret_ref TEXT NOT NULL DEFAULT '',
+            connect_token_hash TEXT NOT NULL DEFAULT '',
+            connect_token_expires_at TEXT NOT NULL DEFAULT '',
+            connect_token_used_at TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (workspace_id, channel)
+        )
+    """)
+    columns = set(_column_contract(conn, "nina_channel_connections"))
+    additions = {
+        "workspace_id": "TEXT NOT NULL DEFAULT ''",
+        "channel": "TEXT NOT NULL DEFAULT ''",
+        "status": "TEXT NOT NULL DEFAULT 'disconnected'",
+        "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
+        "secret_ref": "TEXT NOT NULL DEFAULT ''",
+        "webhook_secret_ref": "TEXT NOT NULL DEFAULT ''",
+        "app_secret_ref": "TEXT NOT NULL DEFAULT ''",
+        "connect_token_hash": "TEXT NOT NULL DEFAULT ''",
+        "connect_token_expires_at": "TEXT NOT NULL DEFAULT ''",
+        "connect_token_used_at": "TEXT NOT NULL DEFAULT ''",
+        "created_at": "TEXT NOT NULL DEFAULT ''",
+        "updated_at": "TEXT NOT NULL DEFAULT ''",
+        "channel_connection_id": "TEXT NOT NULL DEFAULT ''",
+        "channel_type": "TEXT NOT NULL DEFAULT ''",
+        "display_name": "TEXT NOT NULL DEFAULT ''",
+        "external_account_id": "TEXT NOT NULL DEFAULT ''",
+        "capabilities_json": "TEXT NOT NULL DEFAULT '[]'",
+        "configuration_reference": "TEXT NOT NULL DEFAULT ''",
+        "created_by": "TEXT NOT NULL DEFAULT 'legacy'",
+        "updated_by": "TEXT NOT NULL DEFAULT 'legacy'",
+        "activated_at": "TEXT NOT NULL DEFAULT ''",
+        "suspended_at": "TEXT NOT NULL DEFAULT ''",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            cur.execute(
+                f"ALTER TABLE nina_channel_connections "
+                f"ADD COLUMN {name} {definition}"
+            )
+    cur.execute(
+        "SELECT workspace_id,channel,channel_connection_id "
+        "FROM nina_channel_connections"
+    )
+    for workspace_id, channel, existing_id in cur.fetchall():
+        if existing_id:
+            continue
+        channel_value = str(channel or "").lower()
+        channel_type = (
+            "WHATSAPP" if "whatsapp" in channel_value
+            else channel_value.upper()
+        )
+        material = (
+            f"{workspace_id}\0{channel_type}\0legacy:{channel_value}"
+        ).encode()
+        connection_id = "chc_" + hashlib.sha256(material).hexdigest()[:32]
+        capabilities = (
+            '["receive_text","send_text"]'
+            if channel_type == "WEB" else '["receive_text"]'
+        )
+        cur.execute(_sql("""
+            UPDATE nina_channel_connections
+            SET channel_connection_id=%s,channel_type=%s,display_name=%s,
+                capabilities_json=%s,configuration_reference=%s,
+                created_by=%s,updated_by=%s
+            WHERE workspace_id=%s AND channel=%s
+        """), (
+            connection_id, channel_type, channel_type.title(), capabilities,
+            f"legacy:{channel_value}", "legacy", "legacy",
+            workspace_id, channel,
+        ))
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_nina_channel_connection_id
+        ON nina_channel_connections (channel_connection_id)
+    """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_nina_channel_external_identity
+        ON nina_channel_connections (channel_type, external_account_id)
+        WHERE external_account_id <> ''
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_channel_workspace_status
+        ON nina_channel_connections (workspace_id, status)
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_channel_messages (
+            message_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            channel_connection_id TEXT NOT NULL,
+            channel_type TEXT NOT NULL,
+            direction TEXT NOT NULL CHECK (
+                direction IN ('INBOUND','OUTBOUND')
+            ),
+            external_message_id TEXT NOT NULL DEFAULT '',
+            thread_reference TEXT NOT NULL DEFAULT '',
+            contact_id TEXT NOT NULL,
+            external_sender_id TEXT NOT NULL DEFAULT '',
+            message_type TEXT NOT NULL CHECK (
+                message_type IN ('TEXT','SYSTEM','IMAGE','AUDIO','VIDEO','FILE')
+            ),
+            text_content TEXT NOT NULL DEFAULT '',
+            safe_metadata_json TEXT NOT NULL DEFAULT '{}',
+            received_at TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            deduplication_key TEXT NOT NULL,
+            related_work_object_id TEXT NOT NULL DEFAULT '',
+            processing_status TEXT NOT NULL CHECK (
+                processing_status IN (
+                    'RECEIVED','NORMALIZED','ROUTED','PROCESSED',
+                    'FAILED','IGNORED'
+                )
+            ),
+            related_inbound_message_id TEXT NOT NULL DEFAULT '',
+            approval_reference TEXT NOT NULL DEFAULT '',
+            execution_reference TEXT NOT NULL DEFAULT '',
+            delivery_status TEXT NOT NULL DEFAULT '',
+            external_delivery_id TEXT NOT NULL DEFAULT ''
+        )
+    """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_nina_channel_inbound_dedup
+        ON nina_channel_messages (
+            workspace_id,channel_connection_id,deduplication_key
+        ) WHERE direction='INBOUND'
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_channel_messages_workspace_created
+        ON nina_channel_messages (workspace_id, created_at)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_channel_messages_workspace_contact
+        ON nina_channel_messages (workspace_id, contact_id, created_at)
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS nina_channel_message_events (
+            event_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            channel_connection_id TEXT NOT NULL DEFAULT '',
+            message_id TEXT NOT NULL DEFAULT '',
+            event_type TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            safe_metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_channel_events_workspace_created
+        ON nina_channel_message_events (workspace_id, created_at)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_nina_channel_events_message
+        ON nina_channel_message_events (workspace_id, message_id, created_at)
+    """)
+    cur.close()
+
+
 def _create_approval_layer(conn):
     cur = conn.cursor()
     cur.execute("""
@@ -881,6 +1048,20 @@ MIGRATIONS = (
             "source_channel,updated_by,closed_at|"
             "indexes:workspace_owner,workspace_created,workspace_worker|"
             "no-copy,no-new-table,additive-only"
+        ),
+    ),
+    Migration(
+        identifier="0013_channel_layer_v1",
+        version=13,
+        name="Add canonical ONE NINA Channel Layer connections and messages",
+        phase=PHASE_EXPAND,
+        operation=_create_channel_layer_v1,
+        checksum_source=(
+            "0013|EXPAND|existing:nina_channel_connections|"
+            "add:stable-connection-identity,registry,capabilities,safe-config-ref|"
+            "new:nina_channel_messages+nina_channel_message_events|"
+            "dedup:workspace,connection,key|contact+work+approval+execution-refs|"
+            "no-secrets,no-provider-send,additive-only"
         ),
     ),
 )

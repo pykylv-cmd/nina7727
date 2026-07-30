@@ -976,6 +976,7 @@ _RUNTIME_CAPABILITIES = (
 
 def _default_capability_health_checks():
     import channel_connections
+    from channel_layer import initialize_channel_layer
     import contact_identity
     import nina_message_service
     import persistence_backend
@@ -1003,8 +1004,9 @@ def _default_capability_health_checks():
             callable(nina_message_service.send_message_to_nina)
             and callable(nina_message_service.load_channel_conversation)
         ),
-        "channel_services": lambda: callable(
-            channel_connections.get_connection
+        "channel_services": lambda: (
+            callable(channel_connections.get_connection)
+            and initialize_channel_layer()
         ),
         "rolepack_system": initialize_rolepack_system,
         "ready_worker_catalog": initialize_ready_worker_catalog,
