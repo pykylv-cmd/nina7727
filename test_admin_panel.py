@@ -174,7 +174,7 @@ class AdminPanelSeparationTests(unittest.TestCase):
             self.assertEqual(client.get("/admin/channels").status_code, 200)
 
     def test_bootstrap_login_normalizes_input_and_disables_browser_autofill(self):
-        token = "test-admin-bootstrap-token-at-least-32"
+        token = "TempAdmin2026!"
         with patch.dict(os.environ, {"NINA_PLATFORM_ADMIN_BOOTSTRAP_TOKEN": token}):
             client = web_app.app.test_client()
             page = client.get("/admin/login?lang=en")

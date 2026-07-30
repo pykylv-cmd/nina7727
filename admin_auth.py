@@ -11,15 +11,16 @@ ADMIN_ROLE = "platform_admin"
 CLIENT_ROLE = "client"
 ADMIN_COOKIE = "nina_platform_admin"
 ADMIN_SESSION_SECONDS = 8 * 60 * 60
+ADMIN_BOOTSTRAP_MIN_LENGTH = 12
 
 
 def bootstrap_configured() -> bool:
-    return len((os.environ.get("NINA_PLATFORM_ADMIN_BOOTSTRAP_TOKEN") or "").strip()) >= 32
+    return len((os.environ.get("NINA_PLATFORM_ADMIN_BOOTSTRAP_TOKEN") or "").strip()) >= ADMIN_BOOTSTRAP_MIN_LENGTH
 
 
 def verify_bootstrap_token(supplied: str) -> bool:
     expected = (os.environ.get("NINA_PLATFORM_ADMIN_BOOTSTRAP_TOKEN") or "").strip()
-    return len(expected) >= 32 and hmac.compare_digest(str(supplied or ""), expected)
+    return len(expected) >= ADMIN_BOOTSTRAP_MIN_LENGTH and hmac.compare_digest(str(supplied or ""), expected)
 
 
 def _signature(secret: bytes, payload: str) -> str:
