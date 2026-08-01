@@ -574,6 +574,26 @@ def list_messages(workspace_id, limit=50):
     return tuple(_message_from_row(row) for row in rows)
 
 
+def get_outbound_for_work_object(workspace_id, work_object_id, contact_id):
+    """Return an existing recipient-bound outbound for idempotent delivery."""
+    workspace = _identifier(workspace_id, "workspace_id")
+    work_object = _identifier(work_object_id, "related_work_object_id")
+    contact = _identifier(contact_id, "contact_id")
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_sql(
+            f"SELECT {_MESSAGE_FIELDS} FROM {MESSAGE_TABLE} "
+            "WHERE workspace_id=%s AND related_work_object_id=%s "
+            "AND contact_id=%s AND direction=%s ORDER BY created_at LIMIT 1"
+        ), (workspace, work_object, contact, "OUTBOUND"))
+        row = cur.fetchone()
+        cur.close()
+    finally:
+        conn.close()
+    return _message_from_row(row) if row else None
+
+
 def ingest_inbound(
     workspace_id, channel_connection_id, *, external_message_id="",
     thread_reference="", external_sender_id="", message_type="TEXT",

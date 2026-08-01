@@ -38,6 +38,52 @@ def claim_next(worker_id="telegram-core", now=None):
     )
 
 
+def persist_web_delivery(reminder):
+    """Persist one claimed Web reminder in the existing canonical Channel Layer."""
+    from channel_layer import (
+        create_outbound,
+        ensure_web_connection,
+        get_outbound_for_work_object,
+        transition_delivery,
+    )
+
+    workspace_id = str(reminder.workspace_id or "").strip()
+    contact_id = str(reminder.origin_user_id or "").strip()
+    connection = ensure_web_connection(workspace_id, actor="reminder_scheduler")
+    outbound = get_outbound_for_work_object(
+        workspace_id, reminder.object_id, contact_id,
+    )
+    if outbound is None:
+        text = f"⏰ Atgādinājums: {reminder.title.removeprefix('Atgādinājums: ').strip()}"
+        outbound = create_outbound(
+            workspace_id,
+            connection.channel_connection_id,
+            contact_id=contact_id,
+            text_content=text,
+            related_work_object_id=reminder.object_id,
+            status="DRAFT",
+            safe_metadata={
+                "surface": "web_chat",
+                "notification_type": "reminder",
+                "conversation_id": f"contact:{contact_id}:web",
+            },
+            created_by="reminder_scheduler",
+        )
+    transitions = {
+        "DRAFT": ("APPROVED", {}),
+        "APPROVED": ("QUEUED", {}),
+        "QUEUED": ("SENT", {"provider_confirmed": True}),
+        "SENT": ("DELIVERED", {"delivery_receipt": True}),
+    }
+    while outbound.delivery_status in transitions:
+        target, options = transitions[outbound.delivery_status]
+        outbound = transition_delivery(
+            workspace_id, outbound.message_id, target,
+            actor="web_notification", **options,
+        )
+    return outbound
+
+
 async def deliver_claimed(reminder, telegram_sender=None, now=None):
     current = now or utc_now()
     metadata = dict(reminder.metadata or {})
@@ -48,7 +94,19 @@ async def deliver_claimed(reminder, telegram_sender=None, now=None):
             reminder.object_id, token, "awaiting_channel", error_code="no_delivery_channel",
         )
     if channel == "web":
-        metadata["unread"] = True
+        try:
+            outbound = persist_web_delivery(reminder)
+        except Exception as exc:
+            return finish_reminder_delivery(
+                reminder.object_id, token, "failed", channel="web",
+                error_code=f"web_{type(exc).__name__.lower()}",
+            )
+        if outbound.delivery_status != "DELIVERED":
+            return finish_reminder_delivery(
+                reminder.object_id, token, "failed", channel="web",
+                error_code="web_delivery_incomplete",
+            )
+        metadata.update({"unread": True, "channel_message_id": outbound.message_id})
         update_work_object(reminder.object_id, metadata=metadata)
         return finish_reminder_delivery(
             reminder.object_id, token, "delivered", channel="web",
