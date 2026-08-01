@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
+from brain import Brain, BrainContext
 from nina_identity import NINA_PROMPT
 import persistence_backend
 DATABASE_URL, DB_FILE, USE_POSTGRES = persistence_backend.module_settings()
@@ -73,6 +74,14 @@ def _memory_candidate(user_text: str) -> str:
         return ""
     explicit = re.sub(
         r"^(?:nina[, ]*)?atceries[, ]*(?:ka)?\s*",
+        "",
+        clean,
+        flags=re.IGNORECASE,
+    ).strip()
+    if explicit != clean and explicit:
+        return explicit
+    explicit = re.sub(
+        r"^(?:nina[, ]*)?man\s+j[āa]atceras[, ]*(?:ka)?\s*",
         "",
         clean,
         flags=re.IGNORECASE,
@@ -407,10 +416,34 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
     if len(clean) > 4000:
         return {"ok": False, "error": "message_too_long", "text": ""}
 
+    decision = Brain.decide(clean, BrainContext(
+        workspace_id=canonical_work_workspace_id or workspace_id,
+        channel=channel,
+        conversation_id=conversation_id,
+    ))
+    decision_payload = decision.to_dict()
+    if decision.no_action:
+        _save_turn(workspace_id, clean, "", conversation_id=conversation_id, channel=channel)
+        return {
+            "ok": True, "text": "", "source": "brain_no_action",
+            "channel": channel, "decision": decision_payload,
+        }
+    if decision.needs_clarification:
+        answer = (
+            "Kad tieši man tev to atgādināt?"
+            if decision.reason == "reminder_time_missing"
+            else "Lūdzu, precizē, ko un kad man vajadzētu izdarīt."
+        )
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+        return {
+            "ok": True, "text": answer, "source": "brain_clarification",
+            "channel": channel, "decision": decision_payload,
+        }
+
     memory_owner_id = str(
         contact_id or conversation_id or _conversation_id(workspace_id)
     ).strip()
-    memory_candidate = _memory_candidate(clean)
+    memory_candidate = _memory_candidate(clean) if decision.remember else ""
     if memory_candidate:
         try:
             _save_natural_memory(memory_owner_id, memory_candidate)
@@ -429,20 +462,22 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
     if daily_answer:
         answer = _customer_safe_text(daily_answer)
         _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
-        return {"ok": True, "text": answer, "source": "daily_assistant", "channel": channel}
+        return {"ok": True, "text": answer, "source": "daily_assistant", "channel": channel, "decision": decision_payload}
 
-    try:
-        work_result = execute_natural_work_request(
-            user_text=clean, workspace_id=canonical_work_workspace_id or workspace_id,
-            channel=channel, contact_id=contact_id,
-            canonical_client_id=canonical_client_id,
-        )
-    except Exception:
-        work_result = None
+    work_result = None
+    if decision.create_work_object:
+        try:
+            work_result = execute_natural_work_request(
+                user_text=clean, workspace_id=canonical_work_workspace_id or workspace_id,
+                channel=channel, contact_id=contact_id,
+                canonical_client_id=canonical_client_id,
+            )
+        except Exception:
+            work_result = None
     if work_result and work_result.get("handled") and str(work_result.get("text") or "").strip():
         answer = _customer_safe_text(work_result.get("text") or "")
         _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
-        return {"ok": True, "text": answer, "source": "shared_work", "channel": channel}
+        return {"ok": True, "text": answer, "source": "shared_work", "channel": channel, "decision": decision_payload}
 
     history = _load_conversation(conversation_id, limit=12) if conversation_id else load_web_conversation(workspace_id=workspace_id, limit=12)
     history_text = "\n".join(
@@ -480,8 +515,8 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         )
         answer = "Šobrīd nevaru izveidot atbildi. Lūdzu, mēģini vēlreiz pēc brīža."
         _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
-        return {"ok": False, "error": "generation_unavailable", "text": answer, "channel": channel}
+        return {"ok": False, "error": "generation_unavailable", "text": answer, "channel": channel, "decision": decision_payload}
     if not answer:
         return {"ok": False, "error": "empty_response", "text": ""}
     _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
-    return {"ok": True, "text": answer, "source": "nina", "channel": channel}
+    return {"ok": True, "text": answer, "source": "nina", "channel": channel, "decision": decision_payload}
