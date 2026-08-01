@@ -10886,33 +10886,26 @@ def add_reminder(user_id, user_text):
     allowed, message = can_create_reminder(user_id)
     if not allowed:
         return message
+    # Route the established Telegram command through the same ONE NINA Brain,
+    # Work Object and active-reminder delivery chain used by Web and WhatsApp.
+    # Historical reminder rows remain readable, but new truth is not duplicated.
+    from nina_message_service import send_message_to_nina
 
-    user = get_user(user_id)
-    task, remind_at_utc, local_time_text = parse_reminder(user_text, user["timezone"])
-
-    conn = get_db()
-    c = conn.cursor()
-    if USE_POSTGRES:
-        db_execute(c,
-            "INSERT INTO reminders (user_id, text, remind_at, local_time, status) VALUES (%s, %s, %s, %s, %s) RETURNING id",
-            (user_id, task, remind_at_utc, local_time_text, "active")
-        )
-        reminder_id = c.fetchone()[0]
-    else:
-        db_execute(c,
-            "INSERT INTO reminders (user_id, text, remind_at, local_time, status) VALUES (%s, %s, %s, %s, %s)",
-            (user_id, task, remind_at_utc, local_time_text, "active")
-        )
-        reminder_id = c.lastrowid
-    conn.commit()
-    c.close()
-    conn.close()
-
-    add_xp(user_id, 3)
-
-    if local_time_text:
-        return f"Pierakstīju atgādinājumu #{reminder_id}: {task}\nLaiks: {local_time_text} ({user['timezone']})"
-    return f"Pierakstīju atgādinājumu #{reminder_id}: {task}"
+    workspace_id = workspace_for_telegram_identity(
+        telegram_user_id=str(user_id),
+    ) or "demo_small_business"
+    result = send_message_to_nina(
+        user_text,
+        workspace_id=workspace_id,
+        channel="telegram",
+        conversation_id=f"telegram:{user_id}",
+        contact_id=str(user_id),
+        canonical_work_workspace_id=workspace_id,
+    )
+    answer = str(result.get("text") or "").strip() if isinstance(result, dict) else ""
+    if answer:
+        return answer
+    return "Atgādinājumu šoreiz nevarēju droši ieplānot. Precizē laiku un mēģini vēlreiz."
 
 
 def list_reminders(user_id):

@@ -161,5 +161,36 @@ class ReminderDeliveryTests(unittest.TestCase):
         self.assertTrue(reloaded.metadata["idempotency_key"])
 
 
+class TelegramReminderRoutingTests(unittest.TestCase):
+    def test_relative_reminder_routes_through_one_nina_work_object_chain(self):
+        with patch.dict(os.environ, {
+            "OPENAI_API_KEY": "test-openai-key",
+            "TELEGRAM_TOKEN": "123456:test-telegram-token",
+        }):
+            import app
+
+        expected = {"ok": True, "text": "Uzdevums izveidots.", "decision": {
+            "create_work_object": True, "create_reminder": True,
+        }}
+        with patch.object(app, "can_create_reminder", return_value=(True, "")), patch.object(
+            app, "workspace_for_telegram_identity", return_value="workspace-linked",
+        ) as workspace_for_identity, patch(
+            "nina_message_service.send_message_to_nina", return_value=expected,
+        ) as send:
+            answer = app.add_reminder(
+                "123456", "Atgādini man pēc 5 minūtēm pārbaudīt Ninu.",
+            )
+        self.assertEqual(answer, "Uzdevums izveidots.")
+        workspace_for_identity.assert_called_once_with(telegram_user_id="123456")
+        send.assert_called_once_with(
+            "Atgādini man pēc 5 minūtēm pārbaudīt Ninu.",
+            workspace_id="workspace-linked",
+            channel="telegram",
+            conversation_id="telegram:123456",
+            contact_id="123456",
+            canonical_work_workspace_id="workspace-linked",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
