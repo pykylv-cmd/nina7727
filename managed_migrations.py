@@ -883,6 +883,35 @@ def _create_knowledge_vault_workspace_v1(conn):
     cur.close()
 
 
+def _create_billing_v1(conn):
+    cur = conn.cursor()
+    statements = (
+        """CREATE TABLE IF NOT EXISTS nina_billing_plans (plan_id TEXT PRIMARY KEY,code TEXT NOT NULL UNIQUE,display_name TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',status TEXT NOT NULL,version INTEGER NOT NULL,is_public INTEGER NOT NULL DEFAULT 0,sort_order INTEGER NOT NULL DEFAULT 0,price_minor INTEGER NOT NULL DEFAULT 0,currency TEXT NOT NULL DEFAULT 'EUR',billing_period TEXT NOT NULL DEFAULT 'month',metadata_json TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL,updated_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS nina_billing_plan_entitlements (entitlement_id TEXT PRIMARY KEY,plan_id TEXT NOT NULL,entitlement_key TEXT NOT NULL,entitlement_type TEXT NOT NULL DEFAULT 'boolean',limit_value TEXT NOT NULL DEFAULT '',boolean_value INTEGER NOT NULL DEFAULT 0,text_value TEXT NOT NULL DEFAULT '',value_json TEXT NOT NULL,metadata_json TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(plan_id,entitlement_key))""",
+        """CREATE TABLE IF NOT EXISTS nina_workspace_subscriptions (subscription_id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,plan_id TEXT NOT NULL,status TEXT NOT NULL,billing_interval TEXT NOT NULL DEFAULT 'month',current_period_start TEXT NOT NULL DEFAULT '',current_period_end TEXT NOT NULL DEFAULT '',trial_start TEXT NOT NULL DEFAULT '',trial_end TEXT NOT NULL DEFAULT '',cancel_at_period_end INTEGER NOT NULL DEFAULT 0,cancelled_at TEXT NOT NULL DEFAULT '',provider TEXT NOT NULL DEFAULT 'manual',provider_customer_id TEXT NOT NULL DEFAULT '',provider_subscription_id TEXT NOT NULL DEFAULT '',source TEXT NOT NULL,started_at TEXT NOT NULL,ends_at TEXT NOT NULL DEFAULT '',metadata_json TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL,updated_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS nina_workspace_entitlement_overrides (override_id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,entitlement_key TEXT NOT NULL,entitlement_type TEXT NOT NULL DEFAULT 'boolean',limit_value TEXT NOT NULL DEFAULT '',boolean_value INTEGER NOT NULL DEFAULT 0,text_value TEXT NOT NULL DEFAULT '',value_json TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,reason TEXT NOT NULL DEFAULT '',starts_at TEXT NOT NULL DEFAULT '',expires_at TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS nina_billing_usage_counters (counter_id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,metric TEXT NOT NULL,period_start TEXT NOT NULL,period_end TEXT NOT NULL,quantity INTEGER NOT NULL DEFAULT 0,unit TEXT NOT NULL DEFAULT 'count',metadata_json TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(workspace_id,metric,period_start,period_end))""",
+        """CREATE TABLE IF NOT EXISTS nina_billing_usage_events (usage_event_id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,metric TEXT NOT NULL,quantity INTEGER NOT NULL,unit TEXT NOT NULL DEFAULT 'count',source_type TEXT NOT NULL,source_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,occurred_at TEXT NOT NULL,safe_metadata TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL,UNIQUE(workspace_id,metric,idempotency_key))""",
+        """CREATE TABLE IF NOT EXISTS nina_billing_events (event_id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,event_type TEXT NOT NULL,actor TEXT NOT NULL,actor_type TEXT NOT NULL DEFAULT 'system',old_state_json TEXT NOT NULL DEFAULT '{}',new_state_json TEXT NOT NULL DEFAULT '{}',safe_metadata TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS nina_billing_customers (mapping_id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,provider TEXT NOT NULL,provider_customer_id TEXT NOT NULL,status TEXT NOT NULL,metadata_json TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(workspace_id,provider),UNIQUE(provider,provider_customer_id))""",
+        """CREATE TABLE IF NOT EXISTS nina_billing_invoices (invoice_id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,subscription_id TEXT NOT NULL DEFAULT '',provider TEXT NOT NULL,provider_invoice_id TEXT NOT NULL,provider_payment_id TEXT NOT NULL DEFAULT '',status TEXT NOT NULL,subtotal_minor INTEGER NOT NULL DEFAULT 0,tax_minor INTEGER NOT NULL DEFAULT 0,amount_minor INTEGER NOT NULL,currency TEXT NOT NULL,issued_at TEXT NOT NULL,due_at TEXT NOT NULL DEFAULT '',paid_at TEXT NOT NULL DEFAULT '',invoice_url TEXT NOT NULL DEFAULT '',safe_metadata TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL DEFAULT '',UNIQUE(provider,provider_invoice_id))""",
+        "CREATE INDEX IF NOT EXISTS idx_nina_billing_subscriptions_workspace ON nina_workspace_subscriptions(workspace_id,status)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_nina_billing_single_active_subscription ON nina_workspace_subscriptions(workspace_id) WHERE status='active'",
+        "CREATE INDEX IF NOT EXISTS idx_nina_billing_overrides_workspace ON nina_workspace_entitlement_overrides(workspace_id,entitlement_key,active)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_billing_usage_workspace ON nina_billing_usage_events(workspace_id,metric,occurred_at)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_billing_events_workspace ON nina_billing_events(workspace_id,created_at)",
+    )
+    for statement in statements: cur.execute(statement)
+    now = datetime.now(timezone.utc).isoformat()
+    cur.execute("INSERT INTO nina_billing_plans (plan_id,code,display_name,description,status,version,is_public,price_minor,currency,billing_period,created_at,updated_at) SELECT 'plan_legacy','legacy','Grandfathered','Compatibility plan for existing workspaces','active',1,0,0,'EUR','month',?,? WHERE NOT EXISTS (SELECT 1 FROM nina_billing_plans WHERE plan_id='plan_legacy')" if not persistence_backend.USE_POSTGRES else "INSERT INTO nina_billing_plans (plan_id,code,display_name,description,status,version,is_public,price_minor,currency,billing_period,created_at,updated_at) VALUES ('plan_legacy','legacy','Grandfathered','Compatibility plan for existing workspaces','active',1,0,0,'EUR','month',%s,%s) ON CONFLICT (plan_id) DO NOTHING", (now, now))
+    for key, value in (("core.access", "true"), ("limit.work_objects", '"unlimited"'), ("limit.knowledge_items", '"unlimited"'), ("limit.workers", '"unlimited"'), ("limit.channels", '"unlimited"')):
+        eid = "legacy_" + key.replace(".", "_")
+        query = "INSERT INTO nina_billing_plan_entitlements (entitlement_id,plan_id,entitlement_key,value_json,created_at,updated_at) SELECT ?, 'plan_legacy', ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM nina_billing_plan_entitlements WHERE plan_id='plan_legacy' AND entitlement_key=?)" if not persistence_backend.USE_POSTGRES else "INSERT INTO nina_billing_plan_entitlements (entitlement_id,plan_id,entitlement_key,value_json,created_at,updated_at) VALUES (%s,'plan_legacy',%s,%s,%s,%s) ON CONFLICT (plan_id,entitlement_key) DO NOTHING"
+        params = (eid,key,value,now,now,key) if not persistence_backend.USE_POSTGRES else (eid,key,value,now,now)
+        cur.execute(query, params)
+    cur.close()
+
+
 MIGRATIONS = (
     Migration(
         identifier="0001_shared_conversation_state",
@@ -1063,6 +1092,14 @@ MIGRATIONS = (
             "dedup:workspace,connection,key|contact+work+approval+execution-refs|"
             "no-secrets,no-provider-send,additive-only"
         ),
+    ),
+    Migration(
+        identifier="0014_billing_v1", version=14,
+        name="Create canonical tenant-scoped Billing V1",
+        phase=PHASE_EXPAND, operation=_create_billing_v1,
+        checksum_source=("0014|EXPAND|billing-plans+entitlements+subscriptions+"
+            "overrides+usage-counters+usage-events+billing-events+customers+"
+            "invoices|legacy-grandfathered|provider-independent|tenant-scoped"),
     ),
 )
 

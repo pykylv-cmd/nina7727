@@ -68,6 +68,7 @@ class ManagedMigrationTests(unittest.TestCase):
                 "0011_knowledge_vault_v1",
                 "0012_universal_work_objects_v1",
                 "0013_channel_layer_v1",
+                "0014_billing_v1",
             ],
         )
         self.assertIn(managed_migrations.LEDGER_TABLE, self._tables())
@@ -100,6 +101,7 @@ class ManagedMigrationTests(unittest.TestCase):
                 "0011_knowledge_vault_v1",
                 "0012_universal_work_objects_v1",
                 "0013_channel_layer_v1",
+                "0014_billing_v1",
             ],
         )
 
@@ -192,6 +194,7 @@ class ManagedMigrationTests(unittest.TestCase):
                 "0011_knowledge_vault_v1",
                 "0012_universal_work_objects_v1",
                 "0013_channel_layer_v1",
+                "0014_billing_v1",
             ],
         )
 

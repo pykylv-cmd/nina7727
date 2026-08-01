@@ -453,6 +453,27 @@ CONTRACTS = {
             },
         },
     },
+    "0014_billing_v1": {
+        table: {
+            "columns": {
+                name: (INTEGER_TYPES if name in integer_columns else TEXT_TYPES, False)
+                for name in columns
+            },
+            "primary_key": (columns[0],),
+            "indexes": indexes,
+        }
+        for table, columns, integer_columns, indexes in (
+            ("nina_billing_plans", ("plan_id","code","display_name","description","status","version","is_public","price_minor","currency","billing_period","created_at","updated_at"), {"version","is_public","price_minor"}, set()),
+            ("nina_billing_plan_entitlements", ("entitlement_id","plan_id","entitlement_key","value_json","created_at","updated_at"), set(), set()),
+            ("nina_workspace_subscriptions", ("subscription_id","workspace_id","plan_id","status","source","started_at","ends_at","created_at","updated_at"), set(), {"idx_nina_billing_subscriptions_workspace","idx_nina_billing_single_active_subscription"}),
+            ("nina_workspace_entitlement_overrides", ("override_id","workspace_id","entitlement_key","value_json","active","expires_at","created_by","created_at","updated_at"), {"active"}, {"idx_nina_billing_overrides_workspace"}),
+            ("nina_billing_usage_counters", ("counter_id","workspace_id","metric","period_start","period_end","quantity","updated_at"), {"quantity"}, set()),
+            ("nina_billing_usage_events", ("usage_event_id","workspace_id","metric","quantity","idempotency_key","occurred_at","safe_metadata"), {"quantity"}, {"idx_nina_billing_usage_workspace"}),
+            ("nina_billing_events", ("event_id","workspace_id","event_type","actor","safe_metadata","created_at"), set(), {"idx_nina_billing_events_workspace"}),
+            ("nina_billing_customers", ("mapping_id","workspace_id","provider","provider_customer_id","status","created_at","updated_at"), set(), set()),
+            ("nina_billing_invoices", ("invoice_id","workspace_id","provider","provider_invoice_id","status","amount_minor","currency","issued_at","paid_at","safe_metadata"), {"amount_minor"}, set()),
+        )
+    },
 }
 
 

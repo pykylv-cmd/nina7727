@@ -296,7 +296,10 @@ class ChannelLayerV1Tests(unittest.TestCase):
     def test_migration_fresh_idempotent_checksum_and_contract(self):
         result = managed_migrations.run_migrations()
         self.assertEqual(result["applied"], [])
-        migration = managed_migrations.MIGRATIONS[-1]
+        migration = next(
+            item for item in managed_migrations.MIGRATIONS
+            if item.identifier == "0013_channel_layer_v1"
+        )
         self.assertEqual(migration.identifier, "0013_channel_layer_v1")
         self.assertEqual(len(migration.checksum), 64)
         self.assertIn(

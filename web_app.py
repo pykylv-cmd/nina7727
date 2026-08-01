@@ -107,6 +107,11 @@ from deployment_compatibility import DeploymentCompatibilityContract
 from platform_core import initialize_platform_runtime
 from rolepack_system import initialize_rolepack_system
 from ready_worker_catalog import initialize_ready_worker_catalog
+from billing_service import (
+    BillingError, change_workspace_plan, get_effective_entitlements,
+    get_workspace_subscription, initialize_billing_service,
+    list_billing_events, list_plans, set_override,
+)
 from permission_engine import get_permission_rule
 from agent_assignment import (
     AgentAssignmentConflictError,
@@ -382,6 +387,7 @@ WEB_RUNTIME_READINESS.register("knowledge_vault", initialize_knowledge_vault)
 WEB_RUNTIME_READINESS.register(
     "universal_work_objects", initialize_universal_work_objects
 )
+WEB_RUNTIME_READINESS.register("billing", initialize_billing_service)
 
 
 @app.before_request
@@ -6568,9 +6574,76 @@ def _admin_subnav():
         f"<a href='/admin/clients?lang={lang}'>Clients</a>"
         f"<a href='/admin/workers?lang={lang}'>Workers</a>"
         f"<a href='/admin/system?lang={lang}'>System</a>"
+        f"<a href='/admin/billing?lang={lang}'>Billing</a>"
         f"<form method='post' action='/admin/logout?lang={lang}'><button class='btn' type='submit'>Sign out</button></form>"
         "</div>"
     )
+
+
+def _billing_summary(workspace_id, admin=False):
+    subscription = get_workspace_subscription(workspace_id)
+    plans = list_plans(public_only=not admin)
+    plan = next((item for item in list_plans() if item["plan_id"] == subscription["plan_id"]), {})
+    entitlements = get_effective_entitlements(workspace_id)
+    rows = "".join(f"<div class='row'><b>{html_escape(key)}</b><span>{html_escape(value)}</span></div>" for key, value in sorted(entitlements.items())) or "<div class='safe-note'>No entitlements.</div>"
+    plan_options = "".join(f"<option value='{html_escape(item['plan_id'])}'>{html_escape(item['display_name'])}</option>" for item in plans)
+    controls = ""
+    if admin:
+        controls = (
+            "<section class='card card-pad'><h2>Change workspace plan</h2>"
+            "<form method='post' action='/admin/billing/plan'>"
+            f"<input type='hidden' name='csrf_token' value='{_channel_csrf('billing:plan')}'>"
+            f"<input name='workspace_id' required value='{html_escape(workspace_id)}'>"
+            f"<select name='plan_id'>{plan_options}</select><button class='btn primary' type='submit'>Apply plan</button></form>"
+            "<h2>Entitlement override</h2><form method='post' action='/admin/billing/override'>"
+            f"<input type='hidden' name='csrf_token' value='{_channel_csrf('billing:override')}'>"
+            f"<input name='workspace_id' required value='{html_escape(workspace_id)}'><input name='entitlement_key' required placeholder='entitlement key'>"
+            "<select name='value'><option value='true'>Enabled</option><option value='false'>Disabled</option></select>"
+            "<button class='btn primary' type='submit'>Set override</button></form></section>"
+        )
+    return (
+        f"<div class='page-title'><h1>Billing</h1><p>Plan and effective workspace access.</p></div><br>"
+        f"<section class='card card-pad'><h2>{html_escape(plan.get('display_name') or subscription['plan_id'])}</h2>"
+        f"<p class='muted'>Status: {html_escape(subscription['status'])} · source: {html_escape(subscription['source'])}</p><div class='list'>{rows}</div></section>{controls}"
+    )
+
+
+@app.get("/billing")
+def workspace_billing():
+    workspace_id = current_workspace_id()
+    return Response(page("Billing", _billing_summary(workspace_id), active="settings"), mimetype="text/html")
+
+
+@app.get("/admin/billing")
+@platform_admin_required
+def admin_billing():
+    workspace_id = (request.args.get("workspace_id") or current_workspace_id()).strip()
+    try:
+        body = _admin_subnav() + _billing_summary(workspace_id, admin=True)
+    except BillingError as exc:
+        body = _admin_subnav() + f"<div class='channel-message'>{html_escape(str(exc))}</div>"
+    return Response(page("Admin Billing", body, active="admin"), mimetype="text/html")
+
+
+@app.post("/admin/billing/plan")
+@platform_admin_required
+def admin_billing_plan():
+    if not _valid_channel_csrf("billing:plan"): return Response("Forbidden", status=403)
+    workspace_id = (request.form.get("workspace_id") or "").strip()
+    try: change_workspace_plan(workspace_id, request.form.get("plan_id"), actor="platform_admin")
+    except BillingError: return redirect(q("/admin/billing") + "&notice=invalid")
+    return redirect(q("/admin/billing") + "&workspace_id=" + quote_plus(workspace_id))
+
+
+@app.post("/admin/billing/override")
+@platform_admin_required
+def admin_billing_override():
+    if not _valid_channel_csrf("billing:override"): return Response("Forbidden", status=403)
+    workspace_id = (request.form.get("workspace_id") or "").strip()
+    value = (request.form.get("value") or "false") == "true"
+    try: set_override(workspace_id, request.form.get("entitlement_key"), value, actor="platform_admin")
+    except BillingError: return redirect(q("/admin/billing") + "&notice=invalid")
+    return redirect(q("/admin/billing") + "&workspace_id=" + quote_plus(workspace_id))
 
 
 @app.route("/admin/login", methods=["GET", "POST"])
