@@ -4432,6 +4432,122 @@ def activity_row(a):
     return f"<div class='row'><div><b>{html_escape(a.get('title'))}</b><span class='muted'>{html_escape(a.get('body'))}</span></div><span class='pill'>{html_escape(a.get('kind','info'))}</span></div>"
 
 
+def _web_push_client_script():
+    return r"""
+(function () {
+  const config = window.NinaPushConfig || {};
+  const state = document.getElementById('push-notification-state');
+  const enable = document.getElementById('push-enable');
+  const disable = document.getElementById('push-disable');
+  if (!state || !enable || !disable) return;
+
+  window.NinaPushState = {stage: 'initializing', handlerAttached: false};
+  function setStage(stage, text, enabled) {
+    window.NinaPushState.stage = stage;
+    state.textContent = text;
+    enable.hidden = enabled;
+    disable.hidden = !enabled;
+    enable.disabled = false;
+  }
+  function applicationServerKey(value) {
+    const padding = '='.repeat((4 - value.length % 4) % 4);
+    const bytes = atob((value + padding).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from([...bytes].map(item => item.charCodeAt(0)));
+  }
+  function supported() {
+    return Boolean(
+      config.available && config.publicKey && 'Notification' in window &&
+      'serviceWorker' in navigator && 'PushManager' in window
+    );
+  }
+  async function readyRegistration() {
+    await navigator.serviceWorker.register('/service-worker.js', {scope: '/'});
+    return navigator.serviceWorker.ready;
+  }
+  async function persistSubscription(subscription) {
+    window.NinaPushState.stage = 'subscription_post';
+    const response = await fetch('/nina/push/subscribe', {
+      method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': config.subscribeCsrf},
+      body: JSON.stringify({subscription: subscription.toJSON()})
+    });
+    if (!response.ok) throw new Error('subscription_post_' + response.status);
+  }
+  async function refresh() {
+    if (!supported()) {
+      setStage('unsupported', 'Notifications unavailable', false);
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      setStage('permission_denied', 'Notifications blocked in browser settings', false);
+      return;
+    }
+    const registration = await readyRegistration();
+    const subscription = await registration.pushManager.getSubscription();
+    setStage(subscription ? 'enabled' : 'ready', subscription ? 'Notifications enabled' : 'Notifications available', Boolean(subscription));
+  }
+  async function enableNotifications() {
+    let stage = 'permission';
+    try {
+      setStage('permission', 'Requesting notification permission...', false);
+      if (!supported()) throw new Error('unsupported');
+      const permission = Notification.permission === 'default'
+        ? await Notification.requestPermission()
+        : Notification.permission;
+      if (permission !== 'granted') {
+        setStage('permission_denied', 'Notifications blocked in browser settings', false);
+        return;
+      }
+      stage = 'service_worker_ready';
+      window.NinaPushState.stage = stage;
+      const registration = await readyRegistration();
+      stage = 'push_subscribe';
+      window.NinaPushState.stage = stage;
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: applicationServerKey(config.publicKey)
+        });
+      }
+      stage = 'subscription_post';
+      await persistSubscription(subscription);
+      setStage('enabled', 'Notifications enabled', true);
+    } catch (error) {
+      console.error('Nina Web Push enable failed', stage, error && error.name ? error.name : 'Error');
+      setStage('failed_' + stage, 'Notifications could not be enabled (' + stage + ')', false);
+    }
+  }
+  async function disableNotifications() {
+    try {
+      const registration = await readyRegistration();
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        const response = await fetch('/nina/push/unsubscribe', {
+          method: 'POST', credentials: 'same-origin',
+          headers: {'Content-Type': 'application/json', 'X-CSRF-Token': config.unsubscribeCsrf},
+          body: JSON.stringify({endpoint: subscription.endpoint})
+        });
+        if (!response.ok) throw new Error('unsubscribe');
+        await subscription.unsubscribe();
+      }
+      setStage('ready', 'Notifications available', false);
+    } catch (_) {
+      setStage('disable_failed', 'Could not disable notifications', true);
+    }
+  }
+  enable.addEventListener('click', enableNotifications);
+  disable.addEventListener('click', disableNotifications);
+  enable.dataset.handlerAttached = 'true';
+  window.NinaPushState.handlerAttached = true;
+  refresh().catch(error => {
+    console.error('Nina Web Push refresh failed', error && error.name ? error.name : 'Error');
+    setStage('refresh_failed', 'Notifications unavailable', false);
+  });
+})();
+""".strip()
+
+
 def nina_chat_body(messages):
     lang = current_language()
     copy = {
@@ -4483,7 +4599,7 @@ def nina_chat_body(messages):
         "</div>"
         f"<script>window.NinaVoiceConfig={json.dumps({'lang': lang, 'ready': copy['ready'], 'recording': copy['recording'], 'processing': copy['processing'], 'error': copy['error'], 'denied': copy['denied'], 'unsupported': copy['unsupported']}, ensure_ascii=False)};</script>"
         f"<script>window.NinaPushConfig={json.dumps(push_browser_config)};</script>"
-        "<script>(function(){const m=document.createElement('link');m.rel='manifest';m.href='/manifest.webmanifest';document.head.appendChild(m);const c=window.NinaPushConfig,state=document.getElementById('push-notification-state'),enable=document.getElementById('push-enable'),disable=document.getElementById('push-disable');function key(s){const p='='.repeat((4-s.length%4)%4),b=atob((s+p).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from([...b].map(x=>x.charCodeAt(0)));}function show(text,on){state.textContent=text;enable.hidden=on;disable.hidden=!on;}async function registration(){return navigator.serviceWorker.register('/service-worker.js',{scope:'/'});}async function refresh(){if(!c.available||!('serviceWorker'in navigator)||!('PushManager'in window)){show('Notifications unavailable',false);enable.disabled=true;return;}if(Notification.permission==='denied'){show('Notifications blocked',false);enable.disabled=true;return;}const r=await registration(),s=await r.pushManager.getSubscription();show(s?'Notifications enabled':'Notifications available',!!s);}enable.addEventListener('click',async()=>{try{const permission=await Notification.requestPermission();if(permission!=='granted'){show(permission==='denied'?'Notifications blocked':'Notifications not enabled',false);return;}const r=await registration();let s=await r.pushManager.getSubscription();if(!s)s=await r.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key(c.publicKey)});const response=await fetch('/nina/push/subscribe',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':c.subscribeCsrf},body:JSON.stringify({subscription:s.toJSON()})});if(!response.ok)throw new Error('subscribe');show('Notifications enabled',true);}catch(e){show('Notifications unavailable',false);}});disable.addEventListener('click',async()=>{try{const r=await registration(),s=await r.pushManager.getSubscription();if(s){const response=await fetch('/nina/push/unsubscribe',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':c.unsubscribeCsrf},body:JSON.stringify({endpoint:s.endpoint})});if(!response.ok)throw new Error('unsubscribe');await s.unsubscribe();}show('Notifications available',false);}catch(e){show('Could not disable notifications',true);}});refresh().catch(()=>show('Notifications unavailable',false));})();</script>"
+        f"<script>{_web_push_client_script()}</script>"
         "<script>(function(){const stream=document.getElementById('nina-chat-stream');async function poll(){try{const response=await fetch('/nina/notifications',{credentials:'same-origin',cache:'no-store'});if(!response.ok)return;const payload=await response.json();for(const item of payload.notifications||[]){if(stream.querySelector('[data-message-id=\"'+item.message_id+'\"]'))continue;const bubble=document.createElement('div');bubble.className='chat-message nina';bubble.dataset.messageId=item.message_id;bubble.textContent=item.text;const label=document.createElement('small');label.textContent='Nina';bubble.appendChild(label);stream.appendChild(bubble);stream.scrollTop=stream.scrollHeight;}}catch(e){}}setInterval(poll,10000);})();</script>"
         "<script>(function(){const c=window.NinaVoiceConfig,s=document.getElementById('voice-status'),start=document.getElementById('voice-start'),stop=document.getElementById('voice-stop'),cancel=document.getElementById('voice-cancel'),send=document.getElementById('chat-send');let recorder=null,stream=null,chunks=[],cancelled=false;function state(name,text){s.dataset.state=name;s.textContent=text;}function tracksOff(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}function controls(active){start.hidden=active;stop.hidden=!active;cancel.hidden=!active;send.disabled=active;}function reset(){tracksOff();controls(false);recorder=null;chunks=[];cancelled=false;state('ready',c.ready);}async function upload(blob){state('processing',c.processing);controls(false);start.disabled=true;send.disabled=true;const data=new FormData();const ext=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':blob.type.includes('mpeg')?'mp3':'webm';data.append('audio',blob,'voice.'+ext);data.append('lang',c.lang);try{const response=await fetch('/nina/voice?lang='+encodeURIComponent(c.lang),{method:'POST',body:data,credentials:'same-origin'});if(!response.ok)throw new Error('upload');window.location.href='/nina?lang='+encodeURIComponent(c.lang);}catch(e){state('error',c.error);start.disabled=false;send.disabled=false;}}start.addEventListener('click',async function(){if(!navigator.mediaDevices||!window.MediaRecorder){state('error',c.unsupported);return;}try{stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});chunks=[];cancelled=false;const preferred=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4','audio/webm','audio/ogg'].find(t=>MediaRecorder.isTypeSupported(t));const options={audioBitsPerSecond:128000};if(preferred)options.mimeType=preferred;recorder=new MediaRecorder(stream,options);recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};recorder.onerror=()=>{tracksOff();controls(false);state('error',c.error);};recorder.onstop=()=>{tracksOff();controls(false);if(cancelled){reset();return;}const blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});if(!blob.size){state('error',c.error);return;}upload(blob);};recorder.start();controls(true);state('recording',c.recording);}catch(e){tracksOff();controls(false);state('error',e&&e.name==='NotAllowedError'?c.denied:c.error);}});stop.addEventListener('click',()=>{if(recorder&&recorder.state!=='inactive')recorder.stop();});cancel.addEventListener('click',()=>{cancelled=true;if(recorder&&recorder.state!=='inactive')recorder.stop();else reset();});})();</script>"
     )
