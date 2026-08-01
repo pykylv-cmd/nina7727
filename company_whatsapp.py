@@ -268,7 +268,7 @@ def list_connected_workspaces():
     connection = get_connection(workspace_id, CHANNEL)
     metadata = connection.get("metadata") or {}
     runtime_state = str(metadata.get("runtime_state") or "")
-    if runtime_state in {"logged_out", "invalid_auth"}:
+    if runtime_state == "logged_out":
         logger.info(
             "Company WhatsApp active workspace lookup completed count=0 persisted_status=%s eligibility_reason=explicit_%s",
             connection["status"], runtime_state,

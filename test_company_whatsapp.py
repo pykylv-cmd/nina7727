@@ -148,7 +148,10 @@ class CompanyWhatsAppTests(unittest.TestCase):
         )
         self.assertEqual(invalid.status_code, 200)
         self.assertEqual(self.connections.get_connection("ninaos_company", "whatsapp_company")["status"], "error")
-        self.assertEqual(self.company.list_connected_workspaces(), [])
+        # Persisted auth remains eligible for a safe restore attempt. The bridge
+        # rejects any QR emitted during restore, so a stale invalid_auth marker
+        # cannot expose a pairing flow or permanently mask a valid session.
+        self.assertEqual(self.company.list_connected_workspaces(), ["ninaos_company"])
 
     def test_reconnecting_status_is_not_mistaken_for_expired_pairing(self):
         self.company.store_auth_record("ninaos_company", "creds", {"registered": True})
