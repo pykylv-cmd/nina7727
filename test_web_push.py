@@ -83,6 +83,20 @@ class WebPushTests(unittest.TestCase):
         self.assertEqual([item["status"] for item in second], ["DELIVERED", "DELIVERED"])
         self.assertTrue(all(item[1]["url"] == "/nina" for item in sent))
 
+    def test_different_reminders_have_distinct_notification_tags(self):
+        import web_push
+        web_push.register_subscription("workspace-a", "contact-a", self.subscription())
+        sent = []
+        sender = lambda subscription, payload: sent.append(payload)
+        reminder_one = type("Reminder", (), {"workspace_id": "workspace-a", "origin_user_id": "contact-a", "object_id": "reminder-one", "title": "First reminder"})()
+        reminder_two = type("Reminder", (), {"workspace_id": "workspace-a", "origin_user_id": "contact-a", "object_id": "reminder-two", "title": "Second reminder"})()
+        web_push.deliver_reminder_push(reminder_one, sender=sender)
+        web_push.deliver_reminder_push(reminder_two, sender=sender)
+        self.assertEqual(len(sent), 2)
+        self.assertNotEqual(sent[0]["tag"], sent[1]["tag"])
+        self.assertEqual(sent[0]["tag"], "nina-reminder-reminder-one")
+        self.assertEqual(sent[1]["tag"], "nina-reminder-reminder-two")
+
     def test_invalid_endpoint_is_deactivated_and_failure_is_safe(self):
         import web_push
         web_push.register_subscription("workspace-a", "contact-a", self.subscription())
@@ -121,6 +135,9 @@ class WebPushSurfaceTests(unittest.TestCase):
         self.assertEqual(manifest.get_json()["scope"], "/")
         self.assertEqual(worker.headers["Service-Worker-Allowed"], "/")
         self.assertIn("clients.openWindow('/nina')", worker.get_data(as_text=True))
+        self.assertIn("renotify: true", worker.get_data(as_text=True))
+        self.assertIn("vibrate: [200, 100, 200]", worker.get_data(as_text=True))
+        self.assertIn("data.tag || ('nina-reminder-' + Date.now())", worker.get_data(as_text=True))
 
     def test_permission_ui_and_anonymous_mutation(self):
         with self.web.app.test_request_context("/nina"):

@@ -8260,7 +8260,10 @@ self.addEventListener('push', event => {
   let data = {}; try { data = event.data ? event.data.json() : {}; } catch (_) {}
   event.waitUntil(self.registration.showNotification(data.title || 'Nina reminder', {
     body: data.body || 'You have a reminder from Nina.',
-    tag: data.tag || 'nina-reminder', data: {url: '/nina'}
+    tag: data.tag || ('nina-reminder-' + Date.now()),
+    renotify: true,
+    vibrate: [200, 100, 200],
+    data: {url: '/nina'}
   }));
 });
 self.addEventListener('notificationclick', event => {
