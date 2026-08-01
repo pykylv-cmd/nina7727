@@ -6939,19 +6939,26 @@ def channels_company_whatsapp_status():
     connection = get_connection(workspace_id, COMPANY_WHATSAPP_CHANNEL)
     if connection["status"] == "connected":
         return jsonify({"status": "connected"})
+    try:
+        state = personal_whatsapp_bridge_request("/v1/company/status", {"workspace_id": workspace_id})
+    except Exception:
+        return jsonify({"status": connection["status"], "qr_svg": ""})
+    bridge_status = str(state.get("status") or "")
+    if bridge_status == "connected":
+        reconciled = mark_company_whatsapp_runtime_state(workspace_id, "connected")
+        if not reconciled:
+            return jsonify({"status": "error", "qr_svg": ""}), 503
+        logger.info("Company WhatsApp status reconciled bridge=connected persistence=connected")
+        return jsonify({"status": "connected", "qr_svg": ""})
     runtime_state = str((connection.get("metadata") or {}).get("runtime_state") or "")
     if connection["status"] == "pending" and runtime_state not in {"reconnecting", "temporary_failure", "backend_unavailable"} and not company_whatsapp_pairing_is_active(workspace_id):
         set_connection_for_test(workspace_id, COMPANY_WHATSAPP_CHANNEL, "error", {"error_code": "pairing_expired"})
         logger.info("Company WhatsApp status write status=error runtime_state=pairing_expired")
         return jsonify({"status": "connection_lost", "qr_svg": ""})
-    try:
-        state = personal_whatsapp_bridge_request("/v1/company/status", {"workspace_id": workspace_id})
-    except Exception:
-        return jsonify({"status": connection["status"], "qr_svg": ""})
     svg = str(state.get("qr_svg") or "")
     if len(svg) > 250000 or not svg.lstrip().startswith("<svg") or "<script" in svg.lower() or "onload=" in svg.lower():
         svg = ""
-    return jsonify({"status": str(state.get("status") or connection["status"]), "qr_svg": svg})
+    return jsonify({"status": bridge_status or connection["status"], "qr_svg": svg})
 
 
 @app.post("/channels/whatsapp-company/disconnect")

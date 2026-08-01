@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {companyRestorationDiagnostics,companySessions,createCompanyAuthState,createCompanyQr,processCompanyMessageUpsert,publicCompanyDiagnostics,publicCompanyStatus,reconnectDelay,restoreCompanySessions,restoredQrIsInvalid,stopCompanySession} from '../src/company_session_manager.js'
+import {companyRestorationDiagnostics,companySessions,createCompanyAuthState,createCompanyQr,persistCompanyConnected,processCompanyMessageUpsert,publicCompanyDiagnostics,publicCompanyStatus,reconnectDelay,restoreCompanySessions,restoredQrIsInvalid,stopCompanySession} from '../src/company_session_manager.js'
 import {DisconnectReason} from '@whiskeysockets/baileys'
 import {publicStatus,sessions,stopSession} from '../src/session_manager.js'
 
@@ -84,6 +84,15 @@ test('company and personal restores are independently invocable',async()=>{
     Promise.resolve().then(()=>restored.push('personal:independent')),
   ])
   assert.deepEqual(restored.sort(),['company:company:','personal:independent'])
+})
+test('company connection open always persists connected and pairing also links first',async()=>{
+  const calls=[]
+  await persistCompanyConnected('ninaos_company','session',{masked_identity:'*******4711'},async(...args)=>calls.push(['linked',...args]),async(...args)=>calls.push(['runtime',...args]))
+  assert.deepEqual(calls.map(item=>item[0]),['linked','runtime'])
+  assert.deepEqual(calls[1],['runtime','ninaos_company','connected'])
+  calls.length=0
+  await persistCompanyConnected('ninaos_company','',{masked_identity:'*******4711'},async()=>calls.push(['linked']),async(...args)=>calls.push(['runtime',...args]))
+  assert.deepEqual(calls,[['runtime','ninaos_company','connected']])
 })
 test('company auth persists credentials and incremental keys across restart',async()=>{
   const database={creds:{registered:true},'key:session:old':{value:'old'}},writes=[]

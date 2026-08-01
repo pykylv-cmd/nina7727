@@ -217,6 +217,9 @@ def mark_runtime_state(workspace_id, state):
         status = "pending"
     elif state == "connected":
         metadata.pop("runtime_state", None)
+        metadata.pop("error_code", None)
+        metadata.pop("last_error", None)
+        metadata.pop("last_error_class", None)
         metadata["qr_required"] = False
         metadata["last_connected_at"] = _iso(_now())
         status = "connected"

@@ -165,6 +165,33 @@ class CompanyWhatsAppTests(unittest.TestCase):
         )
         self.assertEqual(self.company.list_connected_workspaces(), ["ninaos_company"])
 
+    def test_bridge_connected_reconciles_error_row_and_clears_only_safe_errors(self):
+        self.connections.set_connection_for_test(
+            "ninaos_company", "whatsapp_company", "error",
+            {"error_code": "pairing_expired", "last_error": "safe", "last_error_class": "temporary", "masked_identity": "*******4711"},
+        )
+        with patch.object(self.web, "personal_whatsapp_bridge_request", return_value={"status": "connected"}):
+            response = self.client.get("/channels/whatsapp-company/status")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["status"], "connected")
+        stored = self.connections.get_connection("ninaos_company", "whatsapp_company")
+        self.assertEqual(stored["status"], "connected")
+        self.assertTrue(stored["metadata"]["last_connected_at"])
+        self.assertEqual(stored["metadata"]["masked_identity"], "*******4711")
+        self.assertNotIn("error_code", stored["metadata"])
+        self.assertNotIn("last_error", stored["metadata"])
+        self.assertNotIn("last_error_class", stored["metadata"])
+
+    def test_connected_runtime_event_is_idempotent_and_wrong_workspace_is_blocked(self):
+        auth = {"Authorization": "Bearer bridge-test"}
+        self.connections.set_connection_for_test("ninaos_company", "whatsapp_company", "error", {})
+        first = self.client.post("/internal/company-whatsapp/runtime-state", headers=auth, json={"workspace_id":"ninaos_company","state":"connected"})
+        second = self.client.post("/internal/company-whatsapp/runtime-state", headers=auth, json={"workspace_id":"ninaos_company","state":"connected"})
+        wrong = self.client.post("/internal/company-whatsapp/runtime-state", headers=auth, json={"workspace_id":"other","state":"connected"})
+        self.assertEqual((first.status_code, second.status_code, wrong.status_code), (200, 200, 400))
+        self.assertEqual(self.connections.get_connection("ninaos_company", "whatsapp_company")["status"], "connected")
+        self.assertEqual(self.connections.get_connection("other", "whatsapp_company")["status"], "disconnected")
+
     def test_auth_survives_python_reload_and_wrong_key_is_diagnostic(self):
         self.company.store_auth_record("ninaos_company", "creds", {"registered": True})
         self.connections.set_connection_for_test("ninaos_company", "whatsapp_company", "connected", {})
