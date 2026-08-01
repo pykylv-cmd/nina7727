@@ -4451,6 +4451,21 @@ def nina_chat_body(messages):
     channels = (
         f"<div class='channel-card'><div><b>Web</b></div><span class='channel-state'>{copy['active']}</span></div>"
     )
+    from web_push import configuration_status
+    push_config = configuration_status()
+    push_ui = (
+        "<div class='channel-card' style='margin-top:14px'><div><b>Device notifications</b>"
+        "<p class='muted'>Nina can send a device notification. Sound and vibration depend on your device and browser settings.</p>"
+        "<div id='push-notification-state' class='channel-state'>Checking...</div></div>"
+        "<div class='form-actions'><button id='push-enable' class='btn primary' type='button'>Enable notifications</button>"
+        "<button id='push-disable' class='btn' type='button' hidden>Disable notifications</button></div></div>"
+    )
+    push_browser_config = {
+        "available": bool(push_config["available"]),
+        "publicKey": push_config["public_key"],
+        "subscribeCsrf": _channel_csrf("web-push:subscribe"),
+        "unsubscribeCsrf": _channel_csrf("web-push:unsubscribe"),
+    }
     return (
         "<div class='chat-layout'>"
         "<section class='card card-pad chat-shell'>"
@@ -4464,9 +4479,11 @@ def nina_chat_body(messages):
         f"<button id='voice-cancel' class='btn voice-btn' type='button' hidden>{copy['cancel']}</button>"
         f"<button id='chat-send' class='btn primary' type='submit'>{copy['send']}</button></div></form>"
         "</section>"
-        f"<aside class='card card-pad'><div class='section-title'>{copy['channels']}</div>{channels}<div class='form-actions'><a class='btn' href='/channels?lang={lang}'>{copy['channels']}</a></div></aside>"
+        f"<aside class='card card-pad'><div class='section-title'>{copy['channels']}</div>{channels}<div class='form-actions'><a class='btn' href='/channels?lang={lang}'>{copy['channels']}</a></div>{push_ui}</aside>"
         "</div>"
         f"<script>window.NinaVoiceConfig={json.dumps({'lang': lang, 'ready': copy['ready'], 'recording': copy['recording'], 'processing': copy['processing'], 'error': copy['error'], 'denied': copy['denied'], 'unsupported': copy['unsupported']}, ensure_ascii=False)};</script>"
+        f"<script>window.NinaPushConfig={json.dumps(push_browser_config)};</script>"
+        "<script>(function(){const m=document.createElement('link');m.rel='manifest';m.href='/manifest.webmanifest';document.head.appendChild(m);const c=window.NinaPushConfig,state=document.getElementById('push-notification-state'),enable=document.getElementById('push-enable'),disable=document.getElementById('push-disable');function key(s){const p='='.repeat((4-s.length%4)%4),b=atob((s+p).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from([...b].map(x=>x.charCodeAt(0)));}function show(text,on){state.textContent=text;enable.hidden=on;disable.hidden=!on;}async function registration(){return navigator.serviceWorker.register('/service-worker.js',{scope:'/'});}async function refresh(){if(!c.available||!('serviceWorker'in navigator)||!('PushManager'in window)){show('Notifications unavailable',false);enable.disabled=true;return;}if(Notification.permission==='denied'){show('Notifications blocked',false);enable.disabled=true;return;}const r=await registration(),s=await r.pushManager.getSubscription();show(s?'Notifications enabled':'Notifications available',!!s);}enable.addEventListener('click',async()=>{try{const permission=await Notification.requestPermission();if(permission!=='granted'){show(permission==='denied'?'Notifications blocked':'Notifications not enabled',false);return;}const r=await registration();let s=await r.pushManager.getSubscription();if(!s)s=await r.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key(c.publicKey)});const response=await fetch('/nina/push/subscribe',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':c.subscribeCsrf},body:JSON.stringify({subscription:s.toJSON()})});if(!response.ok)throw new Error('subscribe');show('Notifications enabled',true);}catch(e){show('Notifications unavailable',false);}});disable.addEventListener('click',async()=>{try{const r=await registration(),s=await r.pushManager.getSubscription();if(s){const response=await fetch('/nina/push/unsubscribe',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':c.unsubscribeCsrf},body:JSON.stringify({endpoint:s.endpoint})});if(!response.ok)throw new Error('unsubscribe');await s.unsubscribe();}show('Notifications available',false);}catch(e){show('Could not disable notifications',true);}});refresh().catch(()=>show('Notifications unavailable',false));})();</script>"
         "<script>(function(){const stream=document.getElementById('nina-chat-stream');async function poll(){try{const response=await fetch('/nina/notifications',{credentials:'same-origin',cache:'no-store'});if(!response.ok)return;const payload=await response.json();for(const item of payload.notifications||[]){if(stream.querySelector('[data-message-id=\"'+item.message_id+'\"]'))continue;const bubble=document.createElement('div');bubble.className='chat-message nina';bubble.dataset.messageId=item.message_id;bubble.textContent=item.text;const label=document.createElement('small');label.textContent='Nina';bubble.appendChild(label);stream.appendChild(bubble);stream.scrollTop=stream.scrollHeight;}}catch(e){}}setInterval(poll,10000);})();</script>"
         "<script>(function(){const c=window.NinaVoiceConfig,s=document.getElementById('voice-status'),start=document.getElementById('voice-start'),stop=document.getElementById('voice-stop'),cancel=document.getElementById('voice-cancel'),send=document.getElementById('chat-send');let recorder=null,stream=null,chunks=[],cancelled=false;function state(name,text){s.dataset.state=name;s.textContent=text;}function tracksOff(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}function controls(active){start.hidden=active;stop.hidden=!active;cancel.hidden=!active;send.disabled=active;}function reset(){tracksOff();controls(false);recorder=null;chunks=[];cancelled=false;state('ready',c.ready);}async function upload(blob){state('processing',c.processing);controls(false);start.disabled=true;send.disabled=true;const data=new FormData();const ext=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':blob.type.includes('mpeg')?'mp3':'webm';data.append('audio',blob,'voice.'+ext);data.append('lang',c.lang);try{const response=await fetch('/nina/voice?lang='+encodeURIComponent(c.lang),{method:'POST',body:data,credentials:'same-origin'});if(!response.ok)throw new Error('upload');window.location.href='/nina?lang='+encodeURIComponent(c.lang);}catch(e){state('error',c.error);start.disabled=false;send.disabled=false;}}start.addEventListener('click',async function(){if(!navigator.mediaDevices||!window.MediaRecorder){state('error',c.unsupported);return;}try{stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});chunks=[];cancelled=false;const preferred=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4','audio/webm','audio/ogg'].find(t=>MediaRecorder.isTypeSupported(t));const options={audioBitsPerSecond:128000};if(preferred)options.mimeType=preferred;recorder=new MediaRecorder(stream,options);recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};recorder.onerror=()=>{tracksOff();controls(false);state('error',c.error);};recorder.onstop=()=>{tracksOff();controls(false);if(cancelled){reset();return;}const blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});if(!blob.size){state('error',c.error);return;}upload(blob);};recorder.start();controls(true);state('recording',c.recording);}catch(e){tracksOff();controls(false);state('error',e&&e.name==='NotAllowedError'?c.denied:c.error);}});stop.addEventListener('click',()=>{if(recorder&&recorder.state!=='inactive')recorder.stop();});cancel.addEventListener('click',()=>{cancelled=true;if(recorder&&recorder.state!=='inactive')recorder.stop();else reset();});})();</script>"
     )
@@ -8227,6 +8244,90 @@ def nina_contact_vcard():
     return Response(body, mimetype="text/vcard", headers={"Content-Disposition": 'attachment; filename="Nina.vcf"', "Cache-Control": "public, max-age=300"})
 
 
+@app.get("/manifest.webmanifest")
+def web_manifest():
+    return jsonify({
+        "name": "NinaOS", "short_name": "Nina", "start_url": "/nina",
+        "scope": "/", "display": "standalone", "background_color": "#080910",
+        "theme_color": "#080910",
+    })
+
+
+@app.get("/service-worker.js")
+def web_push_service_worker():
+    script = """
+self.addEventListener('push', event => {
+  let data = {}; try { data = event.data ? event.data.json() : {}; } catch (_) {}
+  event.waitUntil(self.registration.showNotification(data.title || 'Nina reminder', {
+    body: data.body || 'You have a reminder from Nina.',
+    tag: data.tag || 'nina-reminder', data: {url: '/nina'}
+  }));
+});
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  event.waitUntil(clients.matchAll({type:'window', includeUncontrolled:true}).then(items => {
+    for (const client of items) { if ('focus' in client) { client.navigate('/nina'); return client.focus(); } }
+    return clients.openWindow ? clients.openWindow('/nina') : undefined;
+  }));
+});
+""".strip()
+    return Response(script, mimetype="application/javascript", headers={
+        "Service-Worker-Allowed": "/", "Cache-Control": "no-cache, no-store",
+    })
+
+
+def _push_request_owner():
+    browser_workspace = _verified_workspace_cookie(request.cookies.get(_WORKSPACE_COOKIE))
+    if not browser_workspace:
+        return None
+    return resolve_contact_identity(
+        NINA_WEB_WORKSPACE_ID, "web", browser_workspace,
+        {"relationship_type": "client"},
+    )
+
+
+def _valid_push_csrf(action):
+    supplied = (request.headers.get("X-CSRF-Token") or "").strip()
+    return bool(supplied) and hmac.compare_digest(supplied, _channel_csrf(action))
+
+
+@app.post("/nina/push/subscribe")
+def web_push_subscribe():
+    from web_push import WebPushError, configuration_status, register_subscription
+    if not _valid_push_csrf("web-push:subscribe"):
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+    owner = _push_request_owner()
+    if owner is None:
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+    if not configuration_status()["available"]:
+        return jsonify({"ok": False, "error": "web_push_unavailable"}), 503
+    payload = request.get_json(silent=True) or {}
+    try:
+        result = register_subscription(
+            NINA_WEB_WORKSPACE_ID, owner["contact_id"], payload.get("subscription"),
+            request.headers.get("User-Agent") or "",
+        )
+    except WebPushError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify({"ok": True, "subscription_id": result["subscription_id"]})
+
+
+@app.post("/nina/push/unsubscribe")
+def web_push_unsubscribe():
+    from web_push import WebPushError, unsubscribe
+    if not _valid_push_csrf("web-push:unsubscribe"):
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+    owner = _push_request_owner()
+    if owner is None:
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+    payload = request.get_json(silent=True) or {}
+    try:
+        removed = unsubscribe(NINA_WEB_WORKSPACE_ID, owner["contact_id"], payload.get("endpoint"))
+    except WebPushError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify({"ok": True, "disabled": removed})
+
+
 @app.get("/nina/contact-qr.svg")
 def nina_contact_qr():
     try:
@@ -8705,11 +8806,16 @@ def ready():
 
 @app.route("/health")
 def health():
-    
+    from web_push import deliver_reminder_push, readiness_status
+    push_readiness = readiness_status(
+        service_worker_present=True,
+        adapter_present=callable(deliver_reminder_push),
+    )
     diag = telegram_bridge_db_diagnostics()
     return {
         "ok": True,
         "runtime": "web_app.py",
+        "web_push": push_readiness,
         "version": WEB_APP_VERSION,
         "language": current_language(),
         "preview_objects": len(WORKSPACE_ACTION_PREVIEWS),

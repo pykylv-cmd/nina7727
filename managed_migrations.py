@@ -912,6 +912,21 @@ def _create_billing_v1(conn):
     cur.close()
 
 
+def _create_web_push_notifications_v1(conn):
+    cur = conn.cursor()
+    statements = (
+        """CREATE TABLE IF NOT EXISTS nina_web_push_subscriptions (subscription_id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,contact_id TEXT NOT NULL,endpoint_hash TEXT NOT NULL UNIQUE,encrypted_subscription_json TEXT NOT NULL,user_agent_safe TEXT NOT NULL DEFAULT '',status TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,last_success_at TEXT NOT NULL DEFAULT '',last_failure_at TEXT NOT NULL DEFAULT '',failure_code TEXT NOT NULL DEFAULT '')""",
+        """CREATE TABLE IF NOT EXISTS nina_web_push_deliveries (delivery_id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,contact_id TEXT NOT NULL,subscription_id TEXT NOT NULL,reminder_id TEXT NOT NULL,idempotency_key TEXT NOT NULL UNIQUE,status TEXT NOT NULL,failure_code TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS nina_web_push_events (event_id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,subscription_id TEXT NOT NULL,event_type TEXT NOT NULL,safe_metadata_json TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL)""",
+        "CREATE INDEX IF NOT EXISTS idx_nina_web_push_subscription_owner ON nina_web_push_subscriptions(workspace_id,contact_id,status)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_web_push_delivery_owner ON nina_web_push_deliveries(workspace_id,contact_id,reminder_id)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_web_push_events_workspace ON nina_web_push_events(workspace_id,created_at)",
+    )
+    for statement in statements:
+        cur.execute(statement)
+    cur.close()
+
+
 MIGRATIONS = (
     Migration(
         identifier="0001_shared_conversation_state",
@@ -1100,6 +1115,14 @@ MIGRATIONS = (
         checksum_source=("0014|EXPAND|billing-plans+entitlements+subscriptions+"
             "overrides+usage-counters+usage-events+billing-events+customers+"
             "invoices|legacy-grandfathered|provider-independent|tenant-scoped"),
+    ),
+    Migration(
+        identifier="0015_web_push_notifications_v1", version=15,
+        name="Add optional Web Push subscriptions and delivery audit",
+        phase=PHASE_EXPAND, operation=_create_web_push_notifications_v1,
+        checksum_source=("0015|EXPAND|web-push-subscriptions+deliveries+events|"
+            "encrypted-subscription|workspace-contact-scope|"
+            "reminder-subscription-idempotency|optional-capability"),
     ),
 )
 

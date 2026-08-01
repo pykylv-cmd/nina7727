@@ -106,6 +106,13 @@ async def deliver_claimed(reminder, telegram_sender=None, now=None):
                 reminder.object_id, token, "failed", channel="web",
                 error_code="web_delivery_incomplete",
             )
+        # Web Push is additive and best-effort. Its own delivery ledger records
+        # failures; the canonical Web reminder must retain its successful state.
+        try:
+            from web_push import deliver_reminder_push
+            deliver_reminder_push(reminder)
+        except Exception:
+            pass
         metadata.update({"unread": True, "channel_message_id": outbound.message_id})
         update_work_object(reminder.object_id, metadata=metadata)
         return finish_reminder_delivery(

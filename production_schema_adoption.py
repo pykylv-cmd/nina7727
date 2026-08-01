@@ -474,6 +474,18 @@ CONTRACTS = {
             ("nina_billing_invoices", ("invoice_id","workspace_id","provider","provider_invoice_id","status","amount_minor","currency","issued_at","paid_at","safe_metadata"), {"amount_minor"}, set()),
         )
     },
+    "0015_web_push_notifications_v1": {
+        table: {
+            "columns": {name: (TEXT_TYPES, False) for name in columns},
+            "primary_key": (columns[0],),
+            "indexes": indexes,
+        }
+        for table, columns, indexes in (
+            ("nina_web_push_subscriptions", ("subscription_id","workspace_id","contact_id","endpoint_hash","encrypted_subscription_json","status","created_at","updated_at"), {"idx_nina_web_push_subscription_owner"}),
+            ("nina_web_push_deliveries", ("delivery_id","workspace_id","contact_id","subscription_id","reminder_id","idempotency_key","status","created_at","updated_at"), {"idx_nina_web_push_delivery_owner"}),
+            ("nina_web_push_events", ("event_id","workspace_id","subscription_id","event_type","safe_metadata_json","created_at"), {"idx_nina_web_push_events_workspace"}),
+        )
+    },
 }
 
 

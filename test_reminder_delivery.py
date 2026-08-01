@@ -155,6 +155,22 @@ class ReminderDeliveryTests(unittest.TestCase):
         self.assertEqual(messages[0].contact_id, "contact-a")
         self.assertEqual(messages[0].related_work_object_id, reminder.object_id)
 
+    def test_web_delivery_additionally_invokes_push_sender(self):
+        reminder = self.reminder(owner="contact-a", channel="web")
+        claimed = self.delivery.claim_next(now=self.now)
+        with patch("web_push.deliver_reminder_push") as push_sender:
+            result = asyncio.run(self.delivery.deliver_claimed(claimed, now=self.now))
+        self.assertEqual(result.metadata["delivery_status"], "delivered")
+        push_sender.assert_called_once()
+        self.assertEqual(push_sender.call_args.args[0].object_id, reminder.object_id)
+
+    def test_push_failure_does_not_fail_canonical_web_delivery(self):
+        reminder = self.reminder(owner="contact-a", channel="web")
+        claimed = self.delivery.claim_next(now=self.now)
+        with patch("web_push.deliver_reminder_push", side_effect=RuntimeError("push unavailable")):
+            result = asyncio.run(self.delivery.deliver_claimed(claimed, now=self.now))
+        self.assertEqual(result.metadata["delivery_status"], "delivered")
+
     def test_web_delivery_is_idempotent_after_existing_message(self):
         reminder = self.reminder(owner="contact-a", channel="web")
         claimed = self.delivery.claim_next(now=self.now)
