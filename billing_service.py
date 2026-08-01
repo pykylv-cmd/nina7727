@@ -119,7 +119,7 @@ def _legacy_subscription(workspace_id, actor="system"):
     workspace = _id(workspace_id, "workspace_id")
     conn = persistence_backend.connect()
     try:
-        cur = conn.cursor(); cur.execute(_sql(f"SELECT subscription_id,plan_id,status,source,started_at,ends_at FROM {SUBSCRIPTION_TABLE} WHERE workspace_id=%s AND status='active' LIMIT 1"), (workspace,)); row = cur.fetchone()
+        cur = conn.cursor(); cur.execute(_sql(f"SELECT subscription_id,plan_id,status,source,started_at,ends_at FROM {SUBSCRIPTION_TABLE} WHERE workspace_id=%s ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END, updated_at DESC LIMIT 1"), (workspace,)); row = cur.fetchone()
         if not row:
             now = _now(); sid = "subscription_" + secrets.token_hex(16)
             cur.execute(_sql(f"INSERT INTO {SUBSCRIPTION_TABLE} (subscription_id,workspace_id,plan_id,status,source,started_at,ends_at,created_at,updated_at) VALUES (%s,%s,'plan_legacy','active','grandfathered',%s,'',%s,%s)"), (sid, workspace, now, now, now))
@@ -165,6 +165,8 @@ def activate_subscription(workspace_id, plan_id=None, actor="platform_admin"):
     return _set_subscription_status(workspace_id,"active",actor)
 def suspend_subscription(workspace_id, actor="platform_admin"): return _set_subscription_status(workspace_id,"suspended",actor)
 def cancel_subscription(workspace_id, actor="platform_admin"): return _set_subscription_status(workspace_id,"cancelled",actor)
+def set_subscription_status(workspace_id, status, actor="platform_admin"):
+    return _set_subscription_status(workspace_id, status, actor)
 
 
 def set_override(workspace_id, key, value, actor="platform_admin", expires_at=""):
@@ -245,6 +247,53 @@ def check_limit(workspace_id, metric, period_start="all", period_end="all"):
     used = get_usage(workspace_id, metric, period_start, period_end)
     allowed = value in (None, "unlimited", -1) or used < int(value)
     return {"allowed": allowed, "reason": "allowed" if allowed else "limit_reached", "entitlement_key": f"limit.{metric}", "usage": used, "used": used, "limit": value, "upgrade_required": not allowed}
+
+
+def reserve_usage(workspace_id, metric, idempotency_key, *, source_type,
+                  source_id="", period_start="all", period_end="all"):
+    """Atomically reserve one unit without allowing concurrent over-allocation."""
+    workspace = _id(workspace_id, "workspace_id")
+    metric = _id(metric, "metric")
+    idem = _id(idempotency_key, "idempotency_key")
+    entitlements = get_effective_entitlements(workspace)
+    limit = entitlements.get(f"limit.{metric}")
+    conn = persistence_backend.connect()
+    try:
+        cur = conn.cursor(); now = _now()
+        if persistence_backend.USE_POSTGRES:
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s), hashtext(%s))", (workspace, metric))
+        else:
+            cur.execute("BEGIN IMMEDIATE")
+        cur.execute(_sql(f"SELECT quantity FROM {COUNTER_TABLE} WHERE workspace_id=%s AND metric=%s AND period_start=%s AND period_end=%s" + (" FOR UPDATE" if persistence_backend.USE_POSTGRES else "")), (workspace, metric, period_start, period_end))
+        row = cur.fetchone(); used = int(row[0]) if row else 0
+        cur.execute(_sql(f"SELECT 1 FROM {USAGE_TABLE} WHERE workspace_id=%s AND metric=%s AND idempotency_key=%s"), (workspace, metric, idem))
+        if cur.fetchone():
+            conn.commit(); cur.close()
+            return {"allowed": True, "recorded": False, "usage": used, "limit": limit}
+        if limit not in (None, "unlimited", -1) and used >= int(limit):
+            conn.rollback(); cur.close()
+            raise BillingLimitError("billing_limit_reached")
+        cur.execute(_sql(f"INSERT INTO {USAGE_TABLE} (usage_event_id,workspace_id,metric,quantity,unit,source_type,source_id,idempotency_key,occurred_at,safe_metadata,created_at) VALUES (%s,%s,%s,1,'count',%s,%s,%s,%s,'{{}}',%s)"), ("usage_"+secrets.token_hex(16),workspace,metric,_id(source_type,"source_type"),str(source_id or "")[:128],idem,now,now))
+        cur.execute(_sql(f"INSERT INTO {COUNTER_TABLE} (counter_id,workspace_id,metric,period_start,period_end,quantity,unit,created_at,updated_at) VALUES (%s,%s,%s,%s,%s,1,'count',%s,%s) ON CONFLICT (workspace_id,metric,period_start,period_end) DO UPDATE SET quantity={COUNTER_TABLE}.quantity+1,updated_at=excluded.updated_at"), ("counter_"+secrets.token_hex(16),workspace,metric,period_start,period_end,now,now))
+        conn.commit(); cur.close()
+        return {"allowed": True, "recorded": True, "usage": used + 1, "limit": limit}
+    except BillingLimitError: raise
+    except Exception: conn.rollback(); raise
+    finally: conn.close()
+
+
+def list_usage(workspace_id, limit=100):
+    workspace=_id(workspace_id,"workspace_id"); conn=persistence_backend.connect()
+    try:
+        cur=conn.cursor(); cur.execute(_sql(f"SELECT metric,quantity,unit,source_type,source_id,occurred_at FROM {USAGE_TABLE} WHERE workspace_id=%s ORDER BY occurred_at DESC LIMIT %s"),(workspace,min(max(int(limit),1),100))); rows=cur.fetchall() or []; cur.close(); return tuple(rows)
+    finally: conn.close()
+
+
+def list_invoices(workspace_id, limit=100):
+    workspace=_id(workspace_id,"workspace_id"); conn=persistence_backend.connect()
+    try:
+        cur=conn.cursor(); cur.execute(_sql(f"SELECT invoice_id,status,amount_minor,currency,issued_at,due_at,paid_at FROM {INVOICE_TABLE} WHERE workspace_id=%s ORDER BY issued_at DESC LIMIT %s"),(workspace,min(max(int(limit),1),100))); rows=cur.fetchall() or []; cur.close(); return tuple(rows)
+    finally: conn.close()
 
 
 change_plan = change_workspace_plan

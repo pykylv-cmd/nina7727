@@ -108,9 +108,10 @@ from platform_core import initialize_platform_runtime
 from rolepack_system import initialize_rolepack_system
 from ready_worker_catalog import initialize_ready_worker_catalog
 from billing_service import (
-    BillingError, change_workspace_plan, get_effective_entitlements,
+    BillingError, BillingLimitError, change_workspace_plan, get_effective_entitlements,
     get_workspace_subscription, initialize_billing_service,
-    list_billing_events, list_plans, set_override,
+    list_billing_events, list_invoices, list_plans, list_usage, reserve_usage,
+    set_override, deactivate_override, set_subscription_status,
 )
 from permission_engine import get_permission_rule
 from agent_assignment import (
@@ -6589,6 +6590,12 @@ def _billing_summary(workspace_id, admin=False):
     plan_options = "".join(f"<option value='{html_escape(item['plan_id'])}'>{html_escape(item['display_name'])}</option>" for item in plans)
     controls = ""
     if admin:
+        usage = list_usage(workspace_id)
+        invoices = list_invoices(workspace_id)
+        events = list_billing_events(workspace_id)
+        usage_rows = "".join(f"<div class='row'><b>{html_escape(r[0])}</b><span>{html_escape(r[1])} {html_escape(r[2])} · {html_escape(r[5])}</span></div>" for r in usage) or "<div class='safe-note'>No usage events.</div>"
+        invoice_rows = "".join(f"<div class='row'><b>{html_escape(r[0])}</b><span>{html_escape(r[1])} · {html_escape(r[2])} {html_escape(r[3])}</span></div>" for r in invoices) or "<div class='safe-note'>No invoice or payment records.</div>"
+        event_rows = "".join(f"<div class='row'><b>{html_escape(r[1])}</b><span>{html_escape(r[2])} · {html_escape(r[4])}</span></div>" for r in events) or "<div class='safe-note'>No billing events.</div>"
         controls = (
             "<section class='card card-pad'><h2>Change workspace plan</h2>"
             "<form method='post' action='/admin/billing/plan'>"
@@ -6600,6 +6607,12 @@ def _billing_summary(workspace_id, admin=False):
             f"<input name='workspace_id' required value='{html_escape(workspace_id)}'><input name='entitlement_key' required placeholder='entitlement key'>"
             "<select name='value'><option value='true'>Enabled</option><option value='false'>Disabled</option></select>"
             "<button class='btn primary' type='submit'>Set override</button></form></section>"
+            "<section class='card card-pad'><h2>Subscription status</h2><form method='post' action='/admin/billing/status'>"
+            f"<input type='hidden' name='csrf_token' value='{_channel_csrf('billing:status')}'><input name='workspace_id' required value='{html_escape(workspace_id)}'>"
+            "<select name='status'><option>active</option><option>trialing</option><option>past_due</option><option>suspended</option><option>cancelled</option><option>expired</option><option>incomplete</option></select><button class='btn primary'>Change status</button></form>"
+            "<h2>Remove override</h2><form method='post' action='/admin/billing/override/remove'>"
+            f"<input type='hidden' name='csrf_token' value='{_channel_csrf('billing:override:remove')}'><input name='workspace_id' required value='{html_escape(workspace_id)}'><input name='entitlement_key' required><button class='btn'>Remove override</button></form></section>"
+            f"<section class='card card-pad'><h2>Usage</h2><div class='list'>{usage_rows}</div><h2>Invoices / payments</h2><div class='list'>{invoice_rows}</div><h2>Billing events</h2><div class='list'>{event_rows}</div></section>"
         )
     return (
         f"<div class='page-title'><h1>Billing</h1><p>Plan and effective workspace access.</p></div><br>"
@@ -6642,6 +6655,26 @@ def admin_billing_override():
     workspace_id = (request.form.get("workspace_id") or "").strip()
     value = (request.form.get("value") or "false") == "true"
     try: set_override(workspace_id, request.form.get("entitlement_key"), value, actor="platform_admin")
+    except BillingError: return redirect(q("/admin/billing") + "&notice=invalid")
+    return redirect(q("/admin/billing") + "&workspace_id=" + quote_plus(workspace_id))
+
+
+@app.post("/admin/billing/status")
+@platform_admin_required
+def admin_billing_status():
+    if not _valid_channel_csrf("billing:status"): return Response("Forbidden", status=403)
+    workspace_id = (request.form.get("workspace_id") or "").strip()
+    try: set_subscription_status(workspace_id, request.form.get("status"), actor="platform_admin")
+    except BillingError: return redirect(q("/admin/billing") + "&notice=invalid")
+    return redirect(q("/admin/billing") + "&workspace_id=" + quote_plus(workspace_id))
+
+
+@app.post("/admin/billing/override/remove")
+@platform_admin_required
+def admin_billing_override_remove():
+    if not _valid_channel_csrf("billing:override:remove"): return Response("Forbidden", status=403)
+    workspace_id = (request.form.get("workspace_id") or "").strip()
+    try: deactivate_override(workspace_id, request.form.get("entitlement_key"), actor="platform_admin")
     except BillingError: return redirect(q("/admin/billing") + "&notice=invalid")
     return redirect(q("/admin/billing") + "&workspace_id=" + quote_plus(workspace_id))
 
@@ -6975,6 +7008,18 @@ def _assignment_payload(allowed):
     return payload
 
 
+def _billing_reserve(workspace_id, metric, source_type):
+    key = (request.headers.get("Idempotency-Key") or
+           f"{source_type}_{secrets.token_hex(16)}")
+    return reserve_usage(workspace_id, metric, key,
+                         source_type=source_type, source_id=key)
+
+
+def _billing_limit_response(metric):
+    return jsonify({"ok": False, "error": "billing_limit_reached",
+                    "metric": metric, "upgrade_required": True}), 429
+
+
 @app.post("/agent-assignments")
 def create_agent_assignment_api():
     try:
@@ -6985,8 +7030,11 @@ def create_agent_assignment_api():
             "configuration",
             "permissions",
         })
+        workspace_id = current_workspace_id()
+        if payload.get("ready_worker_definition_id") and payload.get("display_name"):
+            _billing_reserve(workspace_id, "workers", "agent_assignment")
         assignment = create_assignment(
-            current_workspace_id(),
+            workspace_id,
             payload.get("ready_worker_definition_id"),
             payload.get("definition_version"),
             payload.get("display_name"),
@@ -6995,6 +7043,8 @@ def create_agent_assignment_api():
             assigned_by="workspace_client",
         )
         return jsonify({"ok": True, "assignment": assignment.as_dict()}), 201
+    except BillingLimitError:
+        return _billing_limit_response("workers")
     except AgentAssignmentError as exc:
         return _agent_assignment_error_response(exc)
 
@@ -7125,8 +7175,11 @@ def create_knowledge_item_api():
             "title", "content", "knowledge_type", "source_type",
             "source_reference", "tags",
         })
+        workspace_id = current_workspace_id()
+        if payload.get("title") and payload.get("content"):
+            _billing_reserve(workspace_id, "knowledge_items", "knowledge_item")
         item = create_knowledge_item(
-            current_workspace_id(),
+            workspace_id,
             title=payload.get("title"),
             content=payload.get("content"),
             knowledge_type=payload.get("knowledge_type"),
@@ -7136,6 +7189,8 @@ def create_knowledge_item_api():
             created_by="workspace_client",
         )
         return jsonify({"ok": True, "item": item.as_dict()}), 201
+    except BillingLimitError:
+        return _billing_limit_response("knowledge_items")
     except KnowledgeVaultError as exc:
         return _knowledge_error_response(exc)
 
@@ -7277,6 +7332,7 @@ def create_knowledge_form():
     if not _valid_channel_csrf("knowledge:create"):
         return Response("knowledge_csrf_invalid", status=403)
     try:
+        _billing_reserve(current_workspace_id(), "knowledge_items", "knowledge_item")
         create_knowledge_item(
             current_workspace_id(),
             title=request.form.get("title"),
@@ -7288,7 +7344,7 @@ def create_knowledge_form():
             created_by=current_web_contact()["contact_id"],
         )
         status = "Knowledge created"
-    except KnowledgeVaultError:
+    except (KnowledgeVaultError, BillingLimitError):
         status = "Knowledge validation failed"
     return redirect(q("/dashboard") + "&knowledge_status=" + quote_plus(status))
 
@@ -7381,8 +7437,11 @@ def create_universal_work_object_api():
             "owner_assignment_id", "worker_instance_id", "knowledge_refs",
             "source_channel", "source_reference", "due_at", "metadata",
         })
+        workspace_id = current_workspace_id()
+        if payload.get("object_type") and payload.get("title"):
+            _billing_reserve(workspace_id, "work_objects", "work_object")
         item = create_universal_work_object(
-            current_workspace_id(),
+            workspace_id,
             object_type=payload.get("object_type"),
             title=payload.get("title"),
             description=payload.get("description", ""),
@@ -7406,6 +7465,8 @@ def create_universal_work_object_api():
             created_by="workspace_client",
         )
         return jsonify({"ok": True, "work_object": item.as_dict()}), 201
+    except BillingLimitError:
+        return _billing_limit_response("work_objects")
     except UniversalWorkError as exc:
         return _work_error_response(exc)
 
@@ -7613,6 +7674,7 @@ def create_universal_work_object_form():
     if not _valid_channel_csrf("work:create"):
         return Response("work_csrf_invalid", status=403)
     try:
+        _billing_reserve(current_workspace_id(), "work_objects", "work_object")
         item = create_universal_work_object(
             current_workspace_id(),
             object_type=request.form.get("object_type"),
@@ -7628,7 +7690,7 @@ def create_universal_work_object_form():
             actor=current_web_contact()["contact_id"],
         )
         notice = "Work Object created"
-    except UniversalWorkError:
+    except (UniversalWorkError, BillingLimitError):
         notice = "Work Object create failed"
     return redirect(q("/dashboard") + "&work_status=" + quote_plus(notice))
 
@@ -7710,6 +7772,7 @@ def channel_layer_create_form():
     if not _valid_channel_csrf("channel:create"):
         return Response("channel_csrf_invalid", status=403)
     try:
+        _billing_reserve(_channel_workspace_id(), "channels", "channel_connection")
         create_layer_connection(
             _channel_workspace_id(),
             channel_type=request.form.get("channel_type"),
@@ -7719,7 +7782,7 @@ def channel_layer_create_form():
             created_by=current_web_contact()["contact_id"],
         )
         notice = "Channel connection added"
-    except ChannelLayerError:
+    except (ChannelLayerError, BillingLimitError):
         notice = "Channel connection failed"
     return redirect(q("/dashboard") + "&channel_status=" + quote_plus(notice))
 
