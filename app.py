@@ -17343,6 +17343,43 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply_text(update, nina_public_append_hint(nina_task_list_answer(user_id), "task_list"))
             return
 
+        # ONE NINA reminder routing: Telegram uses the same Brain decision and
+        # shared Work Object effect as Web, WhatsApp and API surfaces. Legacy
+        # reminder parsers below remain historical compatibility code only.
+        from brain import Brain as OneNinaBrain, BrainContext as OneNinaBrainContext
+        from nina_message_service import send_message_to_nina as send_one_nina_message
+        reminder_workspace = workspace_for_telegram_identity(
+            telegram_user_id=str(user_id),
+        ) or "demo_small_business"
+        reminder_decision = OneNinaBrain.decide(
+            user_text,
+            OneNinaBrainContext(
+                workspace_id=reminder_workspace,
+                channel="telegram",
+                conversation_id=f"telegram:{user_id}",
+            ),
+        )
+
+        if reminder_decision is not None and (
+            reminder_decision.create_reminder
+            or reminder_decision.reason == "cancel_all_reminders"
+        ):
+            reminder_result = send_one_nina_message(
+                user_text,
+                workspace_id=reminder_workspace,
+                channel="telegram",
+                conversation_id=f"telegram:{user_id}",
+                contact_id=str(user_id),
+                canonical_work_workspace_id=reminder_workspace,
+                precomputed_decision=reminder_decision,
+            )
+            await safe_reply_text(
+                update,
+                str(reminder_result.get("text") or "").strip(),
+                disable_web_page_preview=True,
+            )
+            return
+
         # ONE NINA Natural Channel Work Execution V1
         # Telegram is only the current work surface. The same Work Engine action
         # resolves and executes against the same canonical nina_work_objects truth.

@@ -14,7 +14,7 @@ from nina_identity import NINA_PROMPT
 import persistence_backend
 DATABASE_URL, DB_FILE, USE_POSTGRES = persistence_backend.module_settings()
 from work_engine import execute_natural_work_request
-from work_objects import create_work_object, list_work_objects
+from work_objects import create_work_object, list_work_objects, update_work_object
 
 logger = logging.getLogger(__name__)
 
@@ -404,11 +404,38 @@ def _customer_safe_text(value: str) -> str:
     return re.sub(r"[ \t]+\n", "\n", re.sub(r" {2,}", " ", text)).strip()
 
 
+def _cancel_all_reminders(workspace_id: str, owner_id: str = "") -> int:
+    """Cancel active reminder truth in the existing Work Object store."""
+    cancelled = 0
+    for obj in list_work_objects(workspace_id=workspace_id, limit=500):
+        metadata = dict(getattr(obj, "metadata", {}) or {})
+        object_owner = str(getattr(obj, "origin_user_id", "") or "").strip()
+        if owner_id and object_owner and object_owner != owner_id:
+            continue
+        is_reminder = getattr(obj, "object_type", "") == "reminder"
+        is_source = metadata.get("reminder_state") == "scheduled"
+        if not (is_reminder or is_source):
+            continue
+        if str(getattr(obj, "status", "")).lower() in {
+            "completed", "done", "archived", "cancelled", "rejected",
+        }:
+            continue
+        if is_reminder:
+            metadata["delivery_status"] = "cancelled"
+            metadata["unread"] = False
+        if is_source:
+            metadata["reminder_state"] = "cancelled"
+        update_work_object(obj.object_id, status="cancelled", metadata=metadata)
+        cancelled += 1
+    return cancelled
+
+
 def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, channel: str = "web",
                          generator: Optional[Callable[[str], str]] = None,
                          conversation_id: str = "", contact_id: str = "",
                          contact_context: str = "", canonical_client_id: str = "",
-                         canonical_work_workspace_id: str = "") -> Dict[str, Any]:
+                         canonical_work_workspace_id: str = "",
+                         precomputed_decision=None) -> Dict[str, Any]:
     """Route one message through shared work truth and Nina's shared identity."""
     clean = str(user_text or "").strip()
     if not clean:
@@ -416,12 +443,25 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
     if len(clean) > 4000:
         return {"ok": False, "error": "message_too_long", "text": ""}
 
-    decision = Brain.decide(clean, BrainContext(
+    decision = precomputed_decision or Brain.decide(clean, BrainContext(
         workspace_id=canonical_work_workspace_id or workspace_id,
         channel=channel,
         conversation_id=conversation_id,
     ))
     decision_payload = decision.to_dict()
+    if decision.reason == "cancel_all_reminders":
+        target_workspace = canonical_work_workspace_id or workspace_id
+        cancelled = _cancel_all_reminders(target_workspace, str(contact_id or "").strip())
+        answer = (
+            f"Atcēlu aktīvos atgādinājumus: {cancelled}."
+            if cancelled else "Aktīvu atgādinājumu nebija."
+        )
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+        return {
+            "ok": True, "text": answer, "source": "shared_work",
+            "channel": channel, "decision": decision_payload,
+            "cancelled_reminders": cancelled,
+        }
     if decision.no_action:
         _save_turn(workspace_id, clean, "", conversation_id=conversation_id, channel=channel)
         return {
@@ -471,6 +511,7 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
                 user_text=clean, workspace_id=canonical_work_workspace_id or workspace_id,
                 channel=channel, contact_id=contact_id,
                 canonical_client_id=canonical_client_id,
+                reminder_requested=decision.create_reminder,
             )
         except Exception:
             work_result = None
@@ -478,6 +519,15 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         answer = _customer_safe_text(work_result.get("text") or "")
         _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
         return {"ok": True, "text": answer, "source": "shared_work", "channel": channel, "decision": decision_payload}
+
+    if decision.create_reminder:
+        answer = "Atgādinājumu neizdevās droši ieplānot. Mēģini vēlreiz."
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+        return {
+            "ok": False, "error": "reminder_creation_failed", "text": answer,
+            "source": "shared_work", "channel": channel,
+            "decision": decision_payload,
+        }
 
     history = _load_conversation(conversation_id, limit=12) if conversation_id else load_web_conversation(workspace_id=workspace_id, limit=12)
     history_text = "\n".join(

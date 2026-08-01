@@ -105,6 +105,56 @@ class ReminderDeliveryTests(unittest.TestCase):
             objects[0].metadata["reminder_at"], "2026-08-01T12:05+03:00",
         )
 
+    def test_relative_minute_abbreviation_and_implicit_command_are_scheduled(self):
+        from brain.executive_brain import classify_message
+        from task_engine import detect_reminder_schedule
+        fixed_now = datetime(
+            2026, 8, 1, 12, 0, tzinfo=timezone(timedelta(hours=3)),
+        )
+        decision = classify_message("Pēc 5 min pārbaudīt Ninu.")
+        parsed = detect_reminder_schedule(
+            "Pēc 5 min pārbaudīt Ninu.", now=fixed_now,
+            reminder_requested=decision.create_reminder,
+        )
+        self.assertTrue(decision.create_reminder)
+        self.assertFalse(decision.needs_clarification)
+        self.assertEqual(parsed["reminder_at"], "2026-08-01T12:05+03:00")
+
+    def test_hour_without_number_is_scheduled(self):
+        from task_engine import detect_reminder_schedule
+        fixed_now = datetime(
+            2026, 8, 1, 12, 0, tzinfo=timezone(timedelta(hours=3)),
+        )
+        parsed = detect_reminder_schedule(
+            "Pēc stundas pārbaudīt Ninu.", now=fixed_now,
+            reminder_requested=True,
+        )
+        self.assertEqual(parsed["reminder_at"], "2026-08-01T13:00+03:00")
+
+    def test_cancel_all_uses_existing_work_objects_and_owner_scope(self):
+        from nina_message_service import send_message_to_nina
+        own_source = self.work.create_work_object(
+            object_type="task", title="Own reminder source",
+            workspace_id="tenant-a", origin_channel="web",
+            origin_user_id="contact-a",
+            metadata={"reminder_state": "scheduled", "reminder_at": "tomorrow"},
+        )
+        own_reminder = self.reminder(
+            owner="contact-a", channel="web", workspace="tenant-a",
+        )
+        other = self.reminder(
+            owner="contact-b", channel="web", workspace="tenant-a",
+        )
+        result = send_message_to_nina(
+            "novāc visus atgādinājumus", workspace_id="tenant-a",
+            channel="web", conversation_id="contact:contact-a:web",
+            contact_id="contact-a", canonical_work_workspace_id="tenant-a",
+        )
+        self.assertEqual(result["cancelled_reminders"], 2)
+        self.assertEqual(self.work.get_work_object(own_source.object_id).status, "cancelled")
+        self.assertEqual(self.work.get_work_object(own_reminder.object_id).status, "cancelled")
+        self.assertEqual(self.work.get_work_object(other.object_id).status, "active")
+
     def test_one_reminder_is_sent_once_across_two_workers(self):
         self.reminder()
         first = self.delivery.claim_next("worker-1", self.now)
@@ -261,6 +311,15 @@ class TelegramReminderRoutingTests(unittest.TestCase):
             contact_id="123456",
             canonical_work_workspace_id="workspace-linked",
         )
+
+    def test_telegram_reply_routes_reminders_before_legacy_parsers(self):
+        import inspect
+        import app
+        source = inspect.getsource(app.reply)
+        one_nina = source.index("ONE NINA reminder routing")
+        legacy = source.index("parse_reminder_request")
+        self.assertLess(one_nina, legacy)
+        self.assertIn("precomputed_decision=reminder_decision", source)
 
 
 class WebReminderVisibilityTests(unittest.TestCase):

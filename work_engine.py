@@ -568,13 +568,17 @@ def execute_natural_work_request(
     channel: str = "telegram",
     contact_id: str = "",
     canonical_client_id: str = "",
+    reminder_requested: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Execute a natural work command through the same ONE NINA Work Engine.
 
     Channel is context only. Telegram, WhatsApp and future surfaces must call the
     same function instead of building channel-specific business brains.
     """
-    task = detect_task(user_text)
+    task = (
+        detect_task(user_text, reminder_requested=True)
+        if reminder_requested else detect_task(user_text)
+    )
     if task:
         title = _clean(task.get("title"))
         due_date = _clean(task.get("deadline"))

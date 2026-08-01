@@ -51,8 +51,37 @@ class BrainDecisionTests(unittest.TestCase):
     def test_clarification_decision(self):
         decision = classify_message("Atgādini piezvanīt Jānim.")
         self.assertTrue(decision.needs_clarification)
-        self.assertFalse(decision.create_work_object)
-        self.assertFalse(decision.create_reminder)
+        self.assertTrue(decision.create_work_object)
+        self.assertTrue(decision.create_reminder)
+
+    def test_all_supported_reminder_times_use_one_decision_contract(self):
+        commands = (
+            "Atgādini pēc 5 min izvest suni.",
+            "Atceries pēc stundas piezvanīt Jānim.",
+            "Pēc 5 min pārbaudīt Ninu.",
+            "Rīt 10:00 zobārsts.",
+            "Parīt 9:00 nosūtīt atskaiti.",
+            "Pirmdien 11:00 sapulce.",
+            "2026-08-10 15:00 vizīte.",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                decision = classify_message(command)
+                self.assertTrue(decision.create_work_object)
+                self.assertTrue(decision.create_reminder)
+                self.assertFalse(decision.needs_clarification)
+
+    def test_cancel_all_reminders_is_a_brain_decision(self):
+        for command in (
+            "novāc visus atgādinājumus",
+            "izdzēs visus reminderus",
+            "cancel all reminders",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(
+                    classify_message(command).reason,
+                    "cancel_all_reminders",
+                )
 
     def test_no_action_decision(self):
         decision = classify_message("Ok.")
@@ -113,6 +142,22 @@ class BrainIntegrationTests(unittest.TestCase):
         self.assertEqual(result["source"], "shared_work")
         self.assertTrue(result["decision"]["create_reminder"])
         work.assert_called_once()
+        self.assertTrue(work.call_args.kwargs["reminder_requested"])
+
+    def test_scheduled_reminder_failure_never_falls_through_to_clarification(self):
+        with patch.object(messaging, "_save_turn"), patch.object(
+            messaging, "_save_natural_memory"
+        ), patch.object(
+            messaging, "execute_natural_work_request", return_value=None,
+        ):
+            result = messaging.send_message_to_nina(
+                "Atgādini pēc 5 min izvest suni.",
+                workspace_id="workspace-a", channel="web",
+                contact_id="contact-a",
+                generator=lambda _: self.fail("provider must not handle reminders"),
+            )
+        self.assertEqual(result["error"], "reminder_creation_failed")
+        self.assertNotIn("Kad tieši", result["text"])
 
     def test_general_reply_uses_existing_provider_not_work_engine(self):
         with patch.object(messaging, "_save_turn"), patch.object(

@@ -36,6 +36,13 @@ _FOLLOW_UP_MARKERS = (
     "pajauta statusu", "gaidu atbildi",
 )
 
+_CANCEL_ALL_REMINDERS = (
+    "novāc visus atgādinājumus", "novac visus atgadinajumus",
+    "izdzēs visus reminderus", "izdzes visus reminderus",
+    "izdzēs visus atgādinājumus", "izdzes visus atgadinajumus",
+    "cancel all reminders",
+)
+
 
 def _normalized(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "").strip()).casefold()
@@ -51,6 +58,7 @@ def _plain_acknowledgement(value: str) -> bool:
 def _has_clock_or_date(value: str) -> bool:
     return bool(
         re.search(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", value)
+        or re.search(r"\b\d{4}-\d{2}-\d{2}(?:[ t]\d{1,2}[:.]\d{2})?\b", value)
         or re.search(r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b", value)
         or re.search(
             r"\b\d{1,2}\.?(?:\s+)(?:janvār|janvar|februār|februar|mart|aprīl|april|"
@@ -58,6 +66,17 @@ def _has_clock_or_date(value: str) -> bool:
             value,
         )
         or any(marker in value for marker in _TIME_MARKERS)
+    )
+
+
+def _starts_with_time(value: str) -> bool:
+    return bool(
+        re.match(
+            r"^(?:p(?:ē|e)c\s+|šodien\b|sodien\b|rīt\b|rit\b|parīt\b|parit\b|"
+            r"(?:nākam\w*|nakam\w*)\s+|pirmdien\b|otrdien\b|trešdien\b|tresdien\b|"
+            r"ceturtdien\b|piektdien\b|sestdien\b|svētdien\b|svetdien\b|\d{4}-\d{2}-\d{2}\b)",
+            value,
+        )
     )
 
 
@@ -74,9 +93,19 @@ def classify_message(message: str) -> Decision:
             confidence=0.99, reason="acknowledgement_no_action",
         )
 
-    reminder = any(marker in value for marker in _REMINDER_MARKERS)
+    if value in _CANCEL_ALL_REMINDERS:
+        return Decision(
+            reply_required=True, confidence=1.0,
+            reason="cancel_all_reminders",
+        )
+
     has_time = _has_clock_or_date(value)
     remember = any(marker in value for marker in _MEMORY_MARKERS)
+    reminder = (
+        any(marker in value for marker in _REMINDER_MARKERS)
+        or (remember and has_time)
+        or (has_time and _starts_with_time(value) and "?" not in value)
+    )
     birthday_or_event = any(marker in value for marker in (
         "dzimšanas dien", "dzimsanas dien", "jubilej", "appointment", "vizīte", "vizite",
         "zobārst", "zobarst", "dentist", "ārst", "arst", "doctor",
@@ -88,6 +117,7 @@ def classify_message(message: str) -> Decision:
     if reminder and not has_time:
         return Decision(
             reply_required=True, remember=remember,
+            create_work_object=True, create_reminder=True,
             needs_clarification=True, priority="high" if high else "normal",
             confidence=0.98, reason="reminder_time_missing",
         )

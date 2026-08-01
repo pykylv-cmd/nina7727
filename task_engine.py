@@ -81,7 +81,7 @@ def normalize_person_name(name):
     return raw[:1].upper() + raw[1:]
 
 
-def detect_task(text):
+def detect_task(text, reminder_requested=False):
     raw = _clean(text)
     lower = raw.lower()
 
@@ -108,7 +108,9 @@ def detect_task(text):
         "uzdevums:",
     ]
 
-    natural_reminder = detect_reminder_schedule(raw)
+    natural_reminder = detect_reminder_schedule(
+        raw, reminder_requested=reminder_requested,
+    )
     if not explicit_task and not _contains_any(lower, task_markers) and not natural_reminder:
         return None
 
@@ -132,7 +134,9 @@ def detect_task(text):
     }
 
 
-def detect_reminder_schedule(text, now=None, timezone_name="Europe/Riga"):
+def detect_reminder_schedule(
+    text, now=None, timezone_name="Europe/Riga", reminder_requested=False,
+):
     """Interpret reminder timing for the existing Work Object contract."""
     raw = _clean(text)
     lower = raw.casefold()
@@ -147,7 +151,13 @@ def detect_reminder_schedule(text, now=None, timezone_name="Europe/Riga"):
         "otrdien", "trešdien", "tresdien", "ceturtdien", "piektdien",
         "sestdien", "svētdien", "svetdien",
     )
-    if not any(value in lower for value in actions) or not any(value in lower for value in temporal):
+    has_action = any(value in lower for value in actions)
+    has_temporal = (
+        any(value in lower for value in temporal)
+        or bool(re.search(r"\b\d{4}-\d{2}-\d{2}\b", lower))
+        or "parīt" in lower or "parit" in lower
+    )
+    if not (has_action or reminder_requested) or not has_temporal:
         return {}
 
     tz = ZoneInfo(timezone_name)
@@ -155,23 +165,34 @@ def detect_reminder_schedule(text, now=None, timezone_name="Europe/Riga"):
     if current.tzinfo is None:
         current = current.replace(tzinfo=tz)
     relative = re.search(
-        r"\bp(?:ē|e)c\s+(?:(\d+)|vienas?|div(?:ā|a)m?|tr(?:ī|i)m?)\s+"
-        r"(stund(?:as?|u|ām?)|minūt(?:es?|ēm?)|minut(?:es?|em?))\b",
+        r"\bp(?:ē|e)c\s+(?:(?:(\d+)|vienas?|div(?:ā|a)m?|tr(?:ī|i)m?)\s+)?"
+        r"(stund(?:as?|u|ām?)|minūt(?:es?|ēm?)|minut(?:es?|em?)|min)\b",
         lower,
     )
     if relative:
         word = relative.group(1) or relative.group(0)
         amount = int(relative.group(1)) if relative.group(1) else (
-            1 if "vien" in word else 2 if "div" in word else 3
+            2 if "div" in word else 3 if "tr" in word else 1
         )
         target = current + (
             timedelta(hours=amount) if "stund" in relative.group(2)
             else timedelta(minutes=amount)
         )
     else:
+        absolute = re.search(
+            r"\b(\d{4})-(\d{2})-(\d{2})(?:[ t]([01]?\d|2[0-3])[:.]([0-5]\d))?\b",
+            lower,
+        )
         day = current.date()
-        if "rīt" in lower or re.search(r"\brit\b", lower):
+        if absolute:
+            day = datetime(
+                int(absolute.group(1)), int(absolute.group(2)),
+                int(absolute.group(3)), tzinfo=tz,
+            ).date()
+        elif "rīt" in lower or re.search(r"\brit\b", lower):
             day += timedelta(days=1)
+        elif "parīt" in lower or "parit" in lower:
+            day += timedelta(days=2)
         elif not ("šodien" in lower or "sodien" in lower):
             weekdays = {
                 "pirmdien": 0, "otrdien": 1, "trešdien": 2, "tresdien": 2,
