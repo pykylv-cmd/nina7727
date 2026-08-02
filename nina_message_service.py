@@ -147,18 +147,26 @@ def _load_conversation(conversation_id: str, limit: int = 20) -> List[Dict[str, 
     conn = _connect()
     cur = conn.cursor()
     cur.execute(_sql("""
-        SELECT user_text, nina_text, created_at FROM conversation_state
+        SELECT id, user_text, nina_text, created_at FROM conversation_state
         WHERE user_id = %s AND intent = %s ORDER BY id DESC LIMIT %s
     """), (conversation_id, "web_chat", max(1, min(int(limit or 20), 100))))
     rows = cur.fetchall() or []
     cur.close()
     conn.close()
     messages: List[Dict[str, str]] = []
-    for user_text, nina_text, created_at in reversed(rows):
+    for row_id, user_text, nina_text, created_at in reversed(rows):
         if str(user_text or "").strip():
-            messages.append({"role": "user", "text": str(user_text), "created_at": str(created_at or "")})
+            messages.append({
+                "role": "user", "text": str(user_text),
+                "created_at": str(created_at or ""),
+                "message_id": f"conversation:{row_id}:0:user",
+            })
         if str(nina_text or "").strip():
-            messages.append({"role": "nina", "text": str(nina_text), "created_at": str(created_at or "")})
+            messages.append({
+                "role": "nina", "text": str(nina_text),
+                "created_at": str(created_at or ""),
+                "message_id": f"conversation:{row_id}:1:nina",
+            })
     return messages
 
 

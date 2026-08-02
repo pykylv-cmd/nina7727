@@ -4564,7 +4564,8 @@ def nina_chat_body(messages):
         role = "user" if message.get("role") == "user" else "nina"
         label = "You" if role == "user" and lang == "en" else ("Tu" if role == "user" else "Nina")
         message_id = html_escape(message.get("message_id") or "")
-        bubbles += f"<div class='chat-message {role}' data-message-id='{message_id}'>{html_escape(message.get('text'))}<small>{label}</small></div>"
+        timeline_key = html_escape(message.get("timeline_key") or "")
+        bubbles += f"<div class='chat-message {role}' data-message-id='{message_id}' data-timeline-key='{timeline_key}'>{html_escape(message.get('text'))}<small>{label}</small></div>"
     if not bubbles:
         bubbles = f"<div class='chat-message nina'>{html_escape(copy['empty'])}<small>Nina</small></div>"
 
@@ -4632,7 +4633,7 @@ def nina_chat_body(messages):
         + f"<script>window.NinaVoiceConfig={json.dumps({'lang': lang, 'ready': copy['ready'], 'recording': copy['recording'], 'processing': copy['processing'], 'error': copy['error'], 'denied': copy['denied'], 'unsupported': copy['unsupported']}, ensure_ascii=False)};</script>"
         f"<script>window.NinaPushConfig={json.dumps(push_browser_config)};</script>"
         f"<script>{_web_push_client_script()}</script>"
-        "<script>(function(){const stream=document.getElementById('nina-chat-stream');async function poll(){try{const response=await fetch('/nina/notifications',{credentials:'same-origin',cache:'no-store'});if(!response.ok)return;const payload=await response.json();for(const item of payload.notifications||[]){if(stream.querySelector('[data-message-id=\"'+item.message_id+'\"]'))continue;const bubble=document.createElement('div');bubble.className='chat-message nina';bubble.dataset.messageId=item.message_id;bubble.textContent=item.text;const label=document.createElement('small');label.textContent='Nina';bubble.appendChild(label);stream.appendChild(bubble);stream.scrollTop=stream.scrollHeight;}}catch(e){}}setInterval(poll,10000);})();</script>"
+        "<script>(function(){const stream=document.getElementById('nina-chat-stream');if(!stream)return;const bottom=()=>{stream.scrollTop=stream.scrollHeight};const order=()=>{[...stream.querySelectorAll('.chat-message[data-timeline-key]')].sort((a,b)=>(a.dataset.timelineKey||'').localeCompare(b.dataset.timelineKey||'')).forEach(node=>stream.appendChild(node))};order();bottom();async function poll(){try{const response=await fetch('/nina/notifications',{credentials:'same-origin',cache:'no-store'});if(!response.ok)return;const payload=await response.json();let added=false;for(const item of payload.notifications||[]){if(stream.querySelector('[data-message-id=\"'+item.message_id+'\"]'))continue;const bubble=document.createElement('div');bubble.className='chat-message nina';bubble.dataset.messageId=item.message_id;bubble.dataset.timelineKey=item.timeline_key;bubble.textContent=item.text;const label=document.createElement('small');label.textContent='Nina';bubble.appendChild(label);stream.appendChild(bubble);added=true;}if(added){order();bottom();}}catch(e){}}setInterval(poll,10000);})();</script>"
         "<script>(function(){const c=window.NinaVoiceConfig,s=document.getElementById('voice-status'),start=document.getElementById('voice-start'),stop=document.getElementById('voice-stop'),cancel=document.getElementById('voice-cancel'),send=document.getElementById('chat-send');let recorder=null,stream=null,chunks=[],cancelled=false;function state(name,text){s.dataset.state=name;s.textContent=text;}function tracksOff(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}function controls(active){start.hidden=active;stop.hidden=!active;cancel.hidden=!active;send.disabled=active;}function reset(){tracksOff();controls(false);recorder=null;chunks=[];cancelled=false;state('ready',c.ready);}async function upload(blob){state('processing',c.processing);controls(false);start.disabled=true;send.disabled=true;const data=new FormData();const ext=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':blob.type.includes('mpeg')?'mp3':'webm';data.append('audio',blob,'voice.'+ext);data.append('lang',c.lang);try{const response=await fetch('/nina/voice?lang='+encodeURIComponent(c.lang),{method:'POST',body:data,credentials:'same-origin'});if(!response.ok)throw new Error('upload');window.location.href='/nina?lang='+encodeURIComponent(c.lang);}catch(e){state('error',c.error);start.disabled=false;send.disabled=false;}}start.addEventListener('click',async function(){if(!navigator.mediaDevices||!window.MediaRecorder){state('error',c.unsupported);return;}try{stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});chunks=[];cancelled=false;const preferred=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4','audio/webm','audio/ogg'].find(t=>MediaRecorder.isTypeSupported(t));const options={audioBitsPerSecond:128000};if(preferred)options.mimeType=preferred;recorder=new MediaRecorder(stream,options);recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};recorder.onerror=()=>{tracksOff();controls(false);state('error',c.error);};recorder.onstop=()=>{tracksOff();controls(false);if(cancelled){reset();return;}const blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});if(!blob.size){state('error',c.error);return;}upload(blob);};recorder.start();controls(true);state('recording',c.recording);}catch(e){tracksOff();controls(false);state('error',e&&e.name==='NotAllowedError'?c.denied:c.error);}});stop.addEventListener('click',()=>{if(recorder&&recorder.state!=='inactive')recorder.stop();});cancel.addEventListener('click',()=>{cancelled=true;if(recorder&&recorder.state!=='inactive')recorder.stop();else reset();});})();</script>"
     )
 
@@ -8561,8 +8562,7 @@ def nina_chat():
         return redirect(q("/nina"))
     messages = load_channel_conversation(contact["conversation_id"], limit=30)
     messages.extend(_web_reminder_notifications(contact))
-    messages.sort(key=lambda item: str(item.get("created_at") or ""))
-    messages = messages[-30:]
+    messages = _canonical_conversation_timeline(messages, limit=30)
     return Response(page(tx("talk_to_nina"), nina_chat_body(messages), active="nina"), mimetype="text/html")
 
 
@@ -8653,6 +8653,42 @@ def nina_file_create_work(file_id):
     return redirect(q("/nina"))
 
 
+def _timeline_datetime(value):
+    text = str(value or "").strip()
+    if not text:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _effective_timeline_timestamp(item):
+    metadata = item.get("safe_metadata") if isinstance(item.get("safe_metadata"), dict) else {}
+    for field in ("delivered_at", "sent_at", "created_at"):
+        value = item.get(field) or metadata.get(field)
+        if str(value or "").strip():
+            return _timeline_datetime(value)
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _canonical_conversation_timeline(messages, limit=30):
+    timeline = []
+    for index, source in enumerate(messages or ()):
+        item = dict(source or {})
+        timestamp = _effective_timeline_timestamp(item)
+        message_id = str(item.get("message_id") or f"timeline:{index:08d}")
+        item["message_id"] = message_id
+        item["effective_timestamp"] = timestamp.isoformat()
+        item["timeline_key"] = timestamp.isoformat() + "|" + message_id
+        timeline.append(item)
+    timeline.sort(key=lambda item: (item["effective_timestamp"], item["message_id"]))
+    return timeline[-max(1, min(int(limit or 30), 100)):]
+
+
 def _web_reminder_notifications(contact):
     """Read recipient-bound Web reminders from canonical channel persistence."""
     contact_id = str((contact or {}).get("contact_id") or "").strip()
@@ -8679,18 +8715,25 @@ def _web_reminder_notifications(contact):
             "role": "nina",
             "text": message.text_content,
             "created_at": message.created_at,
+            "sent_at": metadata.get("sent_at") or "",
+            "delivered_at": metadata.get("delivered_at") or "",
+            "safe_metadata": metadata,
             "message_id": message.message_id,
         })
-    return notifications
+    return _canonical_conversation_timeline(notifications, limit=100)
 
 
 @app.get("/nina/notifications")
 def nina_notifications():
     contact = current_web_contact()
-    items = _web_reminder_notifications(contact)
+    items = _canonical_conversation_timeline(
+        _web_reminder_notifications(contact), limit=100,
+    )
     return jsonify({
         "notifications": [
-            {"message_id": item["message_id"], "text": item["text"]}
+            {"message_id": item["message_id"], "text": item["text"],
+             "effective_timestamp": item["effective_timestamp"],
+             "timeline_key": item["timeline_key"]}
             for item in items
         ],
     })
