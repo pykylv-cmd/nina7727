@@ -927,6 +927,20 @@ def _create_web_push_notifications_v1(conn):
     cur.close()
 
 
+def _create_vision_document_intelligence_v1(conn):
+    cur = conn.cursor()
+    statements = (
+        """CREATE TABLE IF NOT EXISTS nina_files (file_id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,contact_id TEXT NOT NULL,conversation_id TEXT NOT NULL DEFAULT '',source_channel TEXT NOT NULL,original_filename TEXT NOT NULL,safe_filename TEXT NOT NULL,media_type TEXT NOT NULL,mime_type TEXT NOT NULL,size_bytes INTEGER NOT NULL,checksum_sha256 TEXT NOT NULL,storage_reference TEXT NOT NULL,status TEXT NOT NULL,processing_status TEXT NOT NULL,extraction_version TEXT NOT NULL,created_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,processed_at TEXT NOT NULL DEFAULT '',failure_code TEXT NOT NULL DEFAULT '',safe_metadata_json TEXT NOT NULL DEFAULT '{}',UNIQUE(workspace_id,contact_id,checksum_sha256))""",
+        """CREATE TABLE IF NOT EXISTS nina_file_extractions (file_id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,extraction_version TEXT NOT NULL,content_json TEXT NOT NULL,created_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS nina_file_events (event_id TEXT PRIMARY KEY,file_id TEXT NOT NULL,workspace_id TEXT NOT NULL,event_type TEXT NOT NULL,actor TEXT NOT NULL,safe_metadata_json TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL)""",
+        "CREATE INDEX IF NOT EXISTS idx_nina_files_owner ON nina_files(workspace_id,contact_id,conversation_id,created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_files_status ON nina_files(workspace_id,status,processing_status)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_file_events_owner ON nina_file_events(workspace_id,file_id,created_at)",
+    )
+    for statement in statements: cur.execute(statement)
+    cur.close()
+
+
 MIGRATIONS = (
     Migration(
         identifier="0001_shared_conversation_state",
@@ -1123,6 +1137,14 @@ MIGRATIONS = (
         checksum_source=("0015|EXPAND|web-push-subscriptions+deliveries+events|"
             "encrypted-subscription|workspace-contact-scope|"
             "reminder-subscription-idempotency|optional-capability"),
+    ),
+    Migration(
+        identifier="0016_vision_document_intelligence_v1", version=16,
+        name="Add canonical workspace file identity and extracted content",
+        phase=PHASE_EXPAND, operation=_create_vision_document_intelligence_v1,
+        checksum_source=("0016|EXPAND|nina_files+nina_file_extractions+nina_file_events|"
+            "workspace-contact-scope|checksum-idempotence|safe-storage-reference|"
+            "unified-extracted-content|audit-events|additive-only"),
     ),
 )
 

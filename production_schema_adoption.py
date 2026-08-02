@@ -486,6 +486,21 @@ CONTRACTS = {
             ("nina_web_push_events", ("event_id","workspace_id","subscription_id","event_type","safe_metadata_json","created_at"), {"idx_nina_web_push_events_workspace"}),
         )
     },
+    "0016_vision_document_intelligence_v1": {
+        table: {
+            "columns": {
+                name: (INTEGER_TYPES if name == "size_bytes" else TEXT_TYPES, False)
+                for name in columns
+            },
+            "primary_key": (columns[0],),
+            "indexes": indexes,
+        }
+        for table, columns, indexes in (
+            ("nina_files", ("file_id","workspace_id","contact_id","conversation_id","source_channel","original_filename","safe_filename","media_type","mime_type","size_bytes","checksum_sha256","storage_reference","status","processing_status","extraction_version","created_by","created_at","updated_at","processed_at","failure_code","safe_metadata_json"), {"idx_nina_files_owner","idx_nina_files_status"}),
+            ("nina_file_extractions", ("file_id","workspace_id","extraction_version","content_json","created_at"), set()),
+            ("nina_file_events", ("event_id","file_id","workspace_id","event_type","actor","safe_metadata_json","created_at"), {"idx_nina_file_events_owner"}),
+        )
+    },
 }
 
 

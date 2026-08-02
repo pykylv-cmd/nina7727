@@ -16,7 +16,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote_plus, unquote_plus
 from flask import Flask, Response, g, has_request_context, jsonify, redirect, request
-from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, load_channel_conversation, load_web_conversation, send_message_to_nina
+from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, generate_with_nina, load_channel_conversation, load_web_conversation, save_channel_turn, send_message_to_nina
 from voice_engine import transcribe_audio_with_openai
 from channel_connections import claim_channel_message, consume_whatsapp_onboarding_state, create_telegram_token, create_whatsapp_onboarding_state, disconnect as disconnect_channel, get_connection, set_connection_for_test, update_whatsapp_verification
 from channel_layer import (
@@ -389,6 +389,10 @@ WEB_RUNTIME_READINESS.register(
     "universal_work_objects", initialize_universal_work_objects
 )
 WEB_RUNTIME_READINESS.register("billing", initialize_billing_service)
+WEB_RUNTIME_READINESS.register(
+    "vision_document_intelligence",
+    lambda: __import__("file_intelligence").readiness_status(),
+)
 
 
 @app.before_request
@@ -4582,6 +4586,34 @@ def nina_chat_body(messages):
         "subscribeCsrf": _channel_csrf("web-push:subscribe"),
         "unsubscribeCsrf": _channel_csrf("web-push:unsubscribe"),
     }
+    try:
+        from file_intelligence import list_files
+        current_contact = current_web_contact()
+        files = list_files(NINA_WEB_WORKSPACE_ID, current_contact["contact_id"], current_contact["conversation_id"])
+    except Exception:
+        files = []
+    file_cards = "".join(
+        "<div class='channel-card'><div><b>" + html_escape(item.safe_filename) + "</b>"
+        + "<p class='muted'>" + html_escape(item.media_type.upper() + " · " + str(item.size_bytes) + " bytes") + "</p></div>"
+        + "<span class='channel-state'>" + html_escape(item.status) + "</span>"
+        + ("<form method='post' action='/nina/files/" + html_escape(item.file_id) + "/work'><input type='hidden' name='csrf_token' value='" + _channel_csrf("file:work:" + item.file_id) + "'><button class='btn' type='submit'>Create proposed work</button></form>" if item.status == "READY" else "")
+        + ("<form method='post' action='/nina/files/" + html_escape(item.file_id) + "/archive'><input type='hidden' name='csrf_token' value='" + _channel_csrf("file:archive:" + item.file_id) + "'><button class='btn' type='submit'>Archive</button></form>" if item.status != "ARCHIVED" else "")
+        + "</div>" for item in files[:10]
+    )
+    upload_ui = (
+        "<section class='card card-pad' style='margin-top:16px'><div class='section-title'>Files</div>"
+        "<form id='nina-file-upload' method='post' action='/nina/files' enctype='multipart/form-data'>"
+        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('file:upload')}'>"
+        "<label class='channel-card' id='nina-file-drop'><input name='file' type='file' required accept='.jpg,.jpeg,.png,.webp,.pdf,.docx,.xlsx,.csv,.pptx,.mp4,.mov,.webm'>"
+        "<span><b>Add a file</b><br><span class='muted'>Image, PDF, Word, Excel, CSV, PowerPoint or short video</span></span></label>"
+        "<div class='form-actions'><button class='btn primary' type='submit'>Upload and analyze</button></div>"
+        "<div id='nina-file-progress' class='muted' role='status'></div></form>" + file_cards + "</section>"
+        "<script>(function(){const f=document.getElementById('nina-file-upload'),s=document.getElementById('nina-file-progress'),d=document.getElementById('nina-file-drop');"
+        "if(!f)return;['dragenter','dragover'].forEach(x=>d.addEventListener(x,e=>{e.preventDefault();d.classList.add('active')}));"
+        "['dragleave','drop'].forEach(x=>d.addEventListener(x,e=>{e.preventDefault();d.classList.remove('active')}));"
+        "d.addEventListener('drop',e=>{if(e.dataTransfer.files.length)f.elements.file.files=e.dataTransfer.files});"
+        "f.addEventListener('submit',()=>{s.textContent='Uploading and processing…';f.querySelector('button').disabled=true});})();</script>"
+    )
     return (
         "<div class='chat-layout'>"
         "<section class='card card-pad chat-shell'>"
@@ -4596,8 +4628,8 @@ def nina_chat_body(messages):
         f"<button id='chat-send' class='btn primary' type='submit'>{copy['send']}</button></div></form>"
         "</section>"
         f"<aside class='card card-pad'><div class='section-title'>{copy['channels']}</div>{channels}<div class='form-actions'><a class='btn' href='/channels?lang={lang}'>{copy['channels']}</a></div>{push_ui}</aside>"
-        "</div>"
-        f"<script>window.NinaVoiceConfig={json.dumps({'lang': lang, 'ready': copy['ready'], 'recording': copy['recording'], 'processing': copy['processing'], 'error': copy['error'], 'denied': copy['denied'], 'unsupported': copy['unsupported']}, ensure_ascii=False)};</script>"
+        "</div>" + upload_ui
+        + f"<script>window.NinaVoiceConfig={json.dumps({'lang': lang, 'ready': copy['ready'], 'recording': copy['recording'], 'processing': copy['processing'], 'error': copy['error'], 'denied': copy['denied'], 'unsupported': copy['unsupported']}, ensure_ascii=False)};</script>"
         f"<script>window.NinaPushConfig={json.dumps(push_browser_config)};</script>"
         f"<script>{_web_push_client_script()}</script>"
         "<script>(function(){const stream=document.getElementById('nina-chat-stream');async function poll(){try{const response=await fetch('/nina/notifications',{credentials:'same-origin',cache:'no-store'});if(!response.ok)return;const payload=await response.json();for(const item of payload.notifications||[]){if(stream.querySelector('[data-message-id=\"'+item.message_id+'\"]'))continue;const bubble=document.createElement('div');bubble.className='chat-message nina';bubble.dataset.messageId=item.message_id;bubble.textContent=item.text;const label=document.createElement('small');label.textContent='Nina';bubble.appendChild(label);stream.appendChild(bubble);stream.scrollTop=stream.scrollHeight;}}catch(e){}}setInterval(poll,10000);})();</script>"
@@ -8490,11 +8522,27 @@ def nina_chat():
                     safe_metadata={"surface": "web_chat"},
                     actor=contact["contact_id"],
                 )
-            nina_result = send_message_to_nina(
-                user_text, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web",
-                conversation_id=contact["conversation_id"], contact_id=contact["contact_id"],
-                contact_context=compact_contact_context(contact),
-            )
+            nina_result = None
+            try:
+                from file_intelligence import answer_file_question
+                explicit = ""
+                match = re.search(r"\b(file_[a-f0-9]{32})\b", user_text)
+                if match: explicit = match.group(1)
+                file_answer = answer_file_question(
+                    NINA_WEB_WORKSPACE_ID, contact["contact_id"], contact["conversation_id"],
+                    user_text, generate_with_nina, explicit,
+                )
+                nina_result = {"ok": True, "text": file_answer["answer"], "source": "shared_file_context"}
+                save_channel_turn(NINA_WEB_WORKSPACE_ID, user_text, file_answer["answer"], conversation_id=contact["conversation_id"], channel="web")
+            except Exception as file_exc:
+                if type(file_exc).__name__ == "FileIntelligenceError" and str(file_exc) == "file_selection_required":
+                    nina_result = {"ok": True, "text": "Please select the file you want me to use.", "source": "shared_file_context"}
+            if nina_result is None:
+                nina_result = send_message_to_nina(
+                    user_text, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web",
+                    conversation_id=contact["conversation_id"], contact_id=contact["contact_id"],
+                    contact_context=compact_contact_context(contact),
+                )
             nina_text = (
                 nina_result.get("text", "")
                 if isinstance(nina_result, dict) else nina_result
@@ -8516,6 +8564,93 @@ def nina_chat():
     messages.sort(key=lambda item: str(item.get("created_at") or ""))
     messages = messages[-30:]
     return Response(page(tx("talk_to_nina"), nina_chat_body(messages), active="nina"), mimetype="text/html")
+
+
+@app.post("/nina/files")
+def nina_file_upload():
+    if not _valid_channel_csrf("file:upload"):
+        return Response("file_csrf_invalid", status=403)
+    contact = current_web_contact()
+    upload = request.files.get("file")
+    if upload is None:
+        return Response("file_required", status=400)
+    from file_intelligence import (
+        DOCUMENT_MAX, FileIntelligenceError, VisionProvider, create_file,
+        process_file,
+    )
+    data = upload.stream.read(max(DOCUMENT_MAX, 40 * 1024 * 1024) + 1)
+    try:
+        item, created = create_file(
+            workspace_id=NINA_WEB_WORKSPACE_ID,
+            contact_id=contact["contact_id"],
+            conversation_id=contact["conversation_id"],
+            source_channel="web", filename=upload.filename or "file",
+            mime_type=upload.content_type or upload.mimetype or "",
+            data=data, created_by=contact["contact_id"],
+        )
+        if created or item.status != "READY":
+            client = None
+            if (os.environ.get("OPENAI_API_KEY") or "").strip():
+                from openai import OpenAI
+                client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+            result = process_file(NINA_WEB_WORKSPACE_ID, contact["contact_id"], item.file_id, VisionProvider(client))
+            summary = str(result.get("summary") or result.get("extracted_text") or result.get("transcript") or "")[:1600]
+            save_channel_turn(NINA_WEB_WORKSPACE_ID, "[File] " + item.safe_filename,
+                              "File analyzed. " + (summary or "Structured content is ready."),
+                              conversation_id=contact["conversation_id"], channel="web")
+        return redirect(q("/nina"))
+    except FileIntelligenceError as exc:
+        return Response(str(exc), status=400)
+    except Exception as exc:
+        return Response("file_processing_failed", status=503)
+
+
+@app.get("/nina/files/<file_id>")
+def nina_file_detail(file_id):
+    contact = current_web_contact()
+    from file_intelligence import get_extraction
+    try:
+        return jsonify(get_extraction(NINA_WEB_WORKSPACE_ID, contact["contact_id"], file_id))
+    except Exception:
+        return Response("file_not_found", status=404)
+
+
+@app.post("/nina/files/<file_id>/archive")
+def nina_file_archive(file_id):
+    if not _valid_channel_csrf("file:archive:" + file_id):
+        return Response("file_csrf_invalid", status=403)
+    contact = current_web_contact()
+    from file_intelligence import archive_file
+    try:
+        archive_file(NINA_WEB_WORKSPACE_ID, contact["contact_id"], file_id, contact["contact_id"])
+    except Exception:
+        return Response("file_not_found", status=404)
+    return redirect(q("/nina"))
+
+
+@app.post("/nina/files/<file_id>/work")
+def nina_file_create_work(file_id):
+    if not _valid_channel_csrf("file:work:" + file_id):
+        return Response("file_csrf_invalid", status=403)
+    contact = current_web_contact()
+    from file_intelligence import get_extraction, propose_action_items
+    from work_objects import save_or_get_work_object
+    try:
+        extraction = get_extraction(NINA_WEB_WORKSPACE_ID, contact["contact_id"], file_id)
+    except Exception:
+        return Response("file_not_found", status=404)
+    proposals = propose_action_items(extraction)
+    for proposal in proposals:
+        save_or_get_work_object(
+            object_type="task", title=proposal["title"],
+            source_key=f"vision:{file_id}:{proposal['action_key']}",
+            workspace_id=NINA_WEB_WORKSPACE_ID,
+            linked_files=[file_id],
+            metadata={"source": "vision_document_intelligence_v1", "file_id": file_id,
+                      "action_key": proposal["action_key"], "user_approved": True},
+            origin_channel="web", origin_user_id=contact["contact_id"],
+        )
+    return redirect(q("/nina"))
 
 
 def _web_reminder_notifications(contact):
@@ -8933,10 +9068,12 @@ def health():
         adapter_present=callable(deliver_reminder_push),
     )
     diag = telegram_bridge_db_diagnostics()
+    from file_intelligence import readiness_status as vision_readiness_status
     return {
         "ok": True,
         "runtime": "web_app.py",
         "web_push": push_readiness,
+        "vision_document_intelligence": vision_readiness_status(),
         "version": WEB_APP_VERSION,
         "language": current_language(),
         "preview_objects": len(WORKSPACE_ACTION_PREVIEWS),

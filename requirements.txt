@@ -8,3 +8,9 @@ pypdf
 cryptography
 qrcode
 pywebpush
+Pillow
+python-docx
+openpyxl
+python-pptx
+PyMuPDF
+imageio-ffmpeg
