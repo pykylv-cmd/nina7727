@@ -209,7 +209,12 @@ def _xlsx(data):
                     value_node = next((n for n in cell if n.tag.endswith("}v")), None)
                     formula_node = next((n for n in cell if n.tag.endswith("}f")), None)
                     raw = value_node.text if value_node is not None else ""
-                    value = shared[int(raw)] if kind == "s" and str(raw).isdigit() and int(raw) < len(shared) else raw
+                    if kind == "inlineStr":
+                        value = _xml_text(cell)
+                    elif kind == "s" and str(raw).isdigit() and int(raw) < len(shared):
+                        value = shared[int(raw)]
+                    else:
+                        value = raw
                     values.append({"cell": ref, "value": value, "formula": formula_node.text if formula_node is not None else ""})
                     if formula_node is not None: formulas.append({"sheet": index, "cell": ref, "formula": formula_node.text or "", "cached_value": value})
                 rows.append(values)

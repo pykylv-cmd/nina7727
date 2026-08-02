@@ -75,6 +75,12 @@ class FileIntelligenceTests(unittest.TestCase):
         item,_=self.create("x.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",data)
         result=self.files.process_file("a","one",item.file_id); self.assertEqual(result["formulas"][0],{"sheet":1,"cell":"B1","formula":"A1*2","cached_value":"4"})
 
+    def test_xlsx_inline_strings_are_extracted(self):
+        data=package({"xl/workbook.xml":"<workbook/>","xl/worksheets/sheet1.xml":"<worksheet xmlns='x'><sheetData><row r='1'><c r='A1' t='inlineStr'><is><t>Item</t></is></c><c r='B1' t='inlineStr'><is><t>Amount</t></is></c></row></sheetData></worksheet>"})
+        item,_=self.create("inline.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",data)
+        result=self.files.process_file("a","one",item.file_id)
+        self.assertIn("Item | Amount",result["extracted_text"])
+
     def test_pptx_slide_number_and_text(self):
         data=package({"ppt/presentation.xml":"<p/>","ppt/slides/slide1.xml":"<p:sld xmlns:p='p' xmlns:a='a'><a:t>Decision</a:t></p:sld>"})
         item,_=self.create("x.pptx","application/vnd.openxmlformats-officedocument.presentationml.presentation",data)
