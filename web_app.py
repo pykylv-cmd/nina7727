@@ -8048,6 +8048,7 @@ def internal_personal_whatsapp_inbound():
         str(payload.get("text") or ""), workspace_id=workspace_id,
         channel=PERSONAL_WHATSAPP_CHANNEL, conversation_id=contact["conversation_id"],
         contact_id=contact["contact_id"], contact_context=compact_contact_context(contact),
+        delivery_recipient=str(payload.get("chat_jid") or ""),
     )
     return jsonify({"ok": True, "accepted": True, "reply": str(result.get("text") or "")})
 
@@ -8196,6 +8197,7 @@ def internal_company_whatsapp_inbound():
             contact_context=compact_contact_context(contact),
             canonical_client_id=mapping["canonical_client_id"],
             canonical_work_workspace_id=workspace_id,
+            delivery_recipient=sender_jid,
         )
     return jsonify({"ok": True, "accepted": True, "reply": str(result.get("text") or "")})
 

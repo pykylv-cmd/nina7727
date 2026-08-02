@@ -569,6 +569,7 @@ def execute_natural_work_request(
     contact_id: str = "",
     canonical_client_id: str = "",
     reminder_requested: bool = False,
+    delivery_recipient: str = "",
 ) -> Optional[Dict[str, Any]]:
     """Execute a natural work command through the same ONE NINA Work Engine.
 
@@ -598,6 +599,11 @@ def execute_natural_work_request(
                 "canonical_client_id": _clean(canonical_client_id),
                 "reminder_at": _clean(task.get("reminder_at")),
                 "reminder_state": "scheduled" if _clean(task.get("reminder_at")) else "",
+                "whatsapp_recipient_jid": (
+                    _clean(delivery_recipient)
+                    if _clean(channel) in {"whatsapp_company", "company_whatsapp"}
+                    else ""
+                ),
             },
         )
         obj = create_work_object(

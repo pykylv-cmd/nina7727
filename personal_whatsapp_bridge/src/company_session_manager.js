@@ -125,6 +125,20 @@ export async function persistCompanyConnected(workspaceId,sessionToken,identity,
   return runtimeState(workspaceId,'connected')
 }
 export function publicCompanyStatus(workspaceId){const state=companySessions.get(workspaceId);return state?{status:state.status,qr_svg:state.qrSvg}:{status:'disconnected',qr_svg:''}}
+export async function sendCompanyReminder(workspaceId,deliveryId,recipientJid,text){
+  const state=companySessions.get(workspaceId),recipient=normalizedJid(recipientJid)
+  const cleanId=String(deliveryId||'').trim(),cleanText=String(text||'').trim()
+  if(!state?.socket||state.status!=='connected')throw new Error('company_session_not_connected')
+  if(!cleanId||cleanId.length>200||!cleanText||cleanText.length>4000||!recipient||unsupportedChat(recipient)||!(recipient.endsWith('@s.whatsapp.net')||recipient.endsWith('@lid')))throw new Error('invalid_outbound_reminder')
+  state.reminderDeliveries=state.reminderDeliveries||new Map()
+  if(state.reminderDeliveries.has(cleanId))return{ok:true,message_id:state.reminderDeliveries.get(cleanId),duplicate:true}
+  const sent=await state.socket.sendMessage(recipient,{text:cleanText}),messageId=String(sent?.key?.id||'')
+  if(!messageId)throw new Error('company_send_unconfirmed')
+  state.sent.add(messageId);state.reminderDeliveries.set(cleanId,messageId)
+  if(state.reminderDeliveries.size>200)state.reminderDeliveries.delete(state.reminderDeliveries.keys().next().value)
+  lifecycle.info({workspace_id:workspaceId,delivery_id:cleanId,reminder_sent:true},'company WhatsApp reminder sent')
+  return{ok:true,message_id:messageId,duplicate:false}
+}
 export function publicCompanyDiagnostics(workspaceId){const value=diagnostic(workspaceId);return{restoration_state:value.restoration_state,last_error_class:value.last_error_class,restore_attempt:value.restore_attempt,last_connected_at:value.last_connected_at}}
 export async function stopCompanySession(workspaceId,logout=true){const state=companySessions.get(workspaceId);companySessions.delete(workspaceId);if(!state?.socket)return;state.closed=true;if(state.retryTimer)clearTimeout(state.retryTimer);try{if(logout)await state.socket.logout();else state.socket.end(undefined)}catch(_){}}
 export async function restoreCompanySessions(workspaceIds=[],starter=startCompanySession){

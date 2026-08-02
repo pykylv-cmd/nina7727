@@ -214,6 +214,77 @@ class ReminderDeliveryTests(unittest.TestCase):
         push_sender.assert_called_once()
         self.assertEqual(push_sender.call_args.args[0].object_id, reminder.object_id)
 
+    def test_personal_whatsapp_reminder_calls_bridge_once(self):
+        reminder = self.reminder(
+            owner="contact-owner", channel="whatsapp_personal",
+        )
+        claimed = self.delivery.claim_next(now=self.now)
+        with patch(
+            "personal_whatsapp.bridge_request",
+            return_value={"ok": True, "message_id": "wa-reminder-1"},
+        ) as bridge:
+            result = asyncio.run(self.delivery.deliver_claimed(claimed, now=self.now))
+        self.assertEqual(result.metadata["delivery_status"], "delivered")
+        self.assertEqual(result.metadata["channel"], "whatsapp_personal")
+        bridge.assert_called_once()
+        self.assertEqual(bridge.call_args.args[0], "/v1/outbound")
+        self.assertEqual(
+            bridge.call_args.args[1]["delivery_id"],
+            f"reminder:{reminder.object_id}",
+        )
+        self.assertIsNone(self.delivery.claim_next(now=self.now))
+
+    def test_company_whatsapp_reminder_preserves_recipient(self):
+        source = self.work.create_work_object(
+            object_type="task", title="Company reminder",
+            workspace_id="tenant-a", origin_channel="whatsapp_company",
+            origin_user_id="contact-client",
+            metadata={
+                "reminder_state": "scheduled",
+                "reminder_at": self.now.isoformat(timespec="seconds"),
+                "whatsapp_recipient_jid": "37120000001@s.whatsapp.net",
+            },
+        )
+        from nina_message_service import materialize_due_reminders
+        created = materialize_due_reminders("tenant-a", now=self.now)
+        self.assertEqual(len(created), 1)
+        self.assertEqual(
+            created[0].metadata["whatsapp_recipient_jid"],
+            "37120000001@s.whatsapp.net",
+        )
+        claimed = self.delivery.claim_next(now=self.now)
+        with patch(
+            "personal_whatsapp.bridge_request",
+            return_value={"ok": True, "message_id": "wa-company-1"},
+        ) as bridge:
+            result = asyncio.run(self.delivery.deliver_claimed(claimed, now=self.now))
+        self.assertEqual(result.metadata["delivery_status"], "delivered")
+        self.assertEqual(bridge.call_args.args[0], "/v1/company/outbound")
+        self.assertEqual(
+            bridge.call_args.args[1]["recipient_jid"],
+            "37120000001@s.whatsapp.net",
+        )
+        self.assertEqual(self.work.get_work_object(source.object_id).status, "open")
+
+    def test_web_reminder_cannot_select_unlinked_whatsapp(self):
+        reminder = self.reminder(owner="contact-web", channel="web")
+        metadata = dict(reminder.metadata)
+        metadata["preferred_channel"] = "whatsapp_personal"
+        reminder = self.work.update_work_object(reminder.object_id, metadata=metadata)
+        with patch.object(self.delivery, "_linked_whatsapp_channel", return_value=False):
+            self.assertEqual(self.delivery.delivery_channel(reminder), "web")
+
+    def test_whatsapp_bridge_failure_is_persisted_safely(self):
+        self.reminder(owner="contact-owner", channel="whatsapp_personal")
+        claimed = self.delivery.claim_next(now=self.now)
+        with patch(
+            "personal_whatsapp.bridge_request", side_effect=RuntimeError("secret"),
+        ):
+            result = asyncio.run(self.delivery.deliver_claimed(claimed, now=self.now))
+        self.assertEqual(result.metadata["delivery_status"], "failed")
+        self.assertEqual(result.metadata["error_code"], "whatsapp_personal_runtimeerror")
+        self.assertNotIn("secret", str(result.metadata))
+
     def test_push_failure_does_not_fail_canonical_web_delivery(self):
         reminder = self.reminder(owner="contact-a", channel="web")
         claimed = self.delivery.claim_next(now=self.now)

@@ -304,6 +304,9 @@ def materialize_due_reminders(workspace_id: str, now=None, owner_id: str = ""):
                 "delivery_status": "scheduled",
                 "attempt_count": 0,
                 "unread": False,
+                "whatsapp_recipient_jid": str(
+                    metadata.get("whatsapp_recipient_jid") or ""
+                ).strip(),
             },
             origin_channel=obj.origin_channel,
             origin_user_id=obj.origin_user_id,
@@ -435,7 +438,8 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
                          conversation_id: str = "", contact_id: str = "",
                          contact_context: str = "", canonical_client_id: str = "",
                          canonical_work_workspace_id: str = "",
-                         precomputed_decision=None) -> Dict[str, Any]:
+                         precomputed_decision=None,
+                         delivery_recipient: str = "") -> Dict[str, Any]:
     """Route one message through shared work truth and Nina's shared identity."""
     clean = str(user_text or "").strip()
     if not clean:
@@ -512,6 +516,7 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
                 channel=channel, contact_id=contact_id,
                 canonical_client_id=canonical_client_id,
                 reminder_requested=decision.create_reminder,
+                delivery_recipient=delivery_recipient,
             )
         except Exception:
             work_result = None

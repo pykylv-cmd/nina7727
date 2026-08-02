@@ -154,6 +154,20 @@ export async function startSession(workspaceId, sessionToken, options={}) {
 export function publicStatus(workspaceId) {
   const s=sessions.get(workspaceId); return s ? {status:s.status,qr_svg:s.qrSvg} : {status:'disconnected',qr_svg:''}
 }
+export async function sendReminder(workspaceId,deliveryId,text) {
+  const state=sessions.get(workspaceId)
+  const cleanId=String(deliveryId||'').trim(),cleanText=String(text||'').trim()
+  if(!state?.socket||state.status!=='connected'||!state.primaryJid)throw new Error('personal_session_not_connected')
+  if(!cleanId||cleanId.length>200||!cleanText||cleanText.length>4000)throw new Error('invalid_outbound_reminder')
+  state.reminderDeliveries=state.reminderDeliveries||new Map()
+  if(state.reminderDeliveries.has(cleanId))return{ok:true,message_id:state.reminderDeliveries.get(cleanId),duplicate:true}
+  const sent=await state.socket.sendMessage(state.primaryJid,{text:cleanText}),messageId=String(sent?.key?.id||'')
+  if(!messageId)throw new Error('personal_send_unconfirmed')
+  state.sent.add(messageId);state.reminderDeliveries.set(cleanId,messageId)
+  if(state.reminderDeliveries.size>200)state.reminderDeliveries.delete(state.reminderDeliveries.keys().next().value)
+  lifecycle.info({workspace_id:workspaceId,delivery_id:cleanId,reminder_sent:true},'personal WhatsApp reminder sent')
+  return{ok:true,message_id:messageId,duplicate:false}
+}
 export async function stopSession(workspaceId, logout=true) {
   const state=sessions.get(workspaceId); sessions.delete(workspaceId)
   if (!state?.socket) return

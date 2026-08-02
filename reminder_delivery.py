@@ -17,16 +17,70 @@ def utc_now():
     return datetime.now(timezone.utc)
 
 
+def _linked_whatsapp_channel(reminder, channel):
+    """Allow Web-origin routing only for a tenant-scoped linked contact."""
+    try:
+        from channel_connections import get_connection
+        from contact_identity import get_contact
+        contact = get_contact(reminder.origin_user_id, reminder.workspace_id)
+        connection = get_connection(reminder.workspace_id, channel)
+    except Exception:
+        return False
+    return channel in set(contact.get("channels") or ()) and (
+        connection.get("status") == "connected"
+    )
+
+
 def delivery_channel(reminder):
     metadata = reminder.metadata if isinstance(reminder.metadata, dict) else {}
     preferred = str(metadata.get("preferred_channel") or "").strip().lower()
     if preferred in {"telegram", "web"}:
         return preferred
+    if preferred in {"whatsapp_personal", "whatsapp_company"} and (
+        reminder.origin_channel in {
+            "personal_whatsapp", "whatsapp_personal",
+            "company_whatsapp", "whatsapp_company",
+        }
+        or _linked_whatsapp_channel(reminder, preferred)
+    ):
+        return preferred
     if reminder.origin_channel == "telegram" and str(reminder.origin_user_id or "").isdigit():
         return "telegram"
     if reminder.origin_channel == "web" and reminder.origin_user_id:
         return "web"
+    if reminder.origin_channel in {"personal_whatsapp", "whatsapp_personal"}:
+        return "whatsapp_personal"
+    if reminder.origin_channel in {"company_whatsapp", "whatsapp_company"}:
+        return "whatsapp_company"
     return ""
+
+
+def deliver_whatsapp(reminder, channel):
+    """Send one claimed reminder through the existing Baileys bridge."""
+    from personal_whatsapp import bridge_request
+
+    metadata = reminder.metadata if isinstance(reminder.metadata, dict) else {}
+    path = (
+        "/v1/company/outbound"
+        if channel == "whatsapp_company" else "/v1/outbound"
+    )
+    payload = {
+        "workspace_id": str(reminder.workspace_id or "").strip(),
+        "delivery_id": f"reminder:{reminder.object_id}",
+        "text": f"⏰ Atgādinājums: {reminder.title.removeprefix('Atgādinājums: ').strip()}",
+    }
+    if channel == "whatsapp_company":
+        payload["recipient_jid"] = str(
+            metadata.get("whatsapp_recipient_jid") or ""
+        ).strip()
+    result = bridge_request(path, payload, timeout=15)
+    if (
+        not isinstance(result, dict)
+        or not result.get("ok")
+        or not str(result.get("message_id") or "").strip()
+    ):
+        raise RuntimeError("whatsapp_delivery_failed")
+    return str(result.get("message_id") or "").strip()
 
 
 def claim_next(worker_id="telegram-core", now=None):
@@ -117,6 +171,20 @@ async def deliver_claimed(reminder, telegram_sender=None, now=None):
         update_work_object(reminder.object_id, metadata=metadata)
         return finish_reminder_delivery(
             reminder.object_id, token, "delivered", channel="web",
+            delivered_at=current.isoformat(timespec="seconds"),
+        )
+    if channel in {"whatsapp_personal", "whatsapp_company"}:
+        try:
+            message_id = deliver_whatsapp(reminder, channel)
+        except Exception as exc:
+            return finish_reminder_delivery(
+                reminder.object_id, token, "failed", channel=channel,
+                error_code=f"{channel}_{type(exc).__name__.lower()}",
+            )
+        metadata["whatsapp_message_id"] = message_id
+        update_work_object(reminder.object_id, metadata=metadata)
+        return finish_reminder_delivery(
+            reminder.object_id, token, "delivered", channel=channel,
             delivered_at=current.isoformat(timespec="seconds"),
         )
     if telegram_sender is None:
