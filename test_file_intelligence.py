@@ -48,6 +48,17 @@ class FileIntelligenceTests(unittest.TestCase):
         self.assertTrue(created); self.assertFalse(created2); self.assertEqual(first.file_id,second.file_id)
         self.assertEqual(first.safe_filename,"screen_shot.png"); self.assertNotIn("..",first.storage_reference)
 
+    def test_storage_reference_cannot_escape_server_root(self):
+        with self.assertRaisesRegex(ValueError,"unsafe_storage_reference"):
+            self.files.storage_path("../../outside.csv")
+        with self.assertRaisesRegex(ValueError,"unsafe_storage_reference"):
+            self.files.storage_path(str(Path(self.temp.name) / "outside.csv"))
+
+    def test_production_storage_requires_explicit_root(self):
+        with patch.dict(os.environ,{"NINA_RUNTIME_ENV":"production","NINA_FILE_STORAGE_ROOT":""}):
+            with self.assertRaisesRegex(ValueError,"file_storage_not_configured"):
+                self.files.storage_root()
+
     def test_rejects_unknown_too_large_and_forged_mime(self):
         with self.assertRaisesRegex(ValueError,"unsupported_file_type"): self.create("x.exe","application/octet-stream",b"MZ")
         with self.assertRaisesRegex(ValueError,"file_signature_mismatch"): self.create("x.pdf","application/pdf",b"not pdf")

@@ -68,9 +68,25 @@ def _json(value): return json.dumps(value, ensure_ascii=False, separators=(",", 
 
 def storage_root():
     configured = (os.getenv("NINA_FILE_STORAGE_ROOT") or "").strip()
-    root = Path(configured or (Path(tempfile.gettempdir()) / "ninaos-files-v1"))
+    if not configured and (os.getenv("NINA_RUNTIME_ENV") or "").strip().lower() == "production":
+        raise FileIntelligenceError("file_storage_not_configured")
+    root = Path(configured or (Path(tempfile.gettempdir()) / "ninaos-files-v1")).resolve()
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def storage_path(reference):
+    """Resolve a server-owned reference without allowing it outside storage root."""
+    root = storage_root()
+    relative = Path(str(reference or "").strip())
+    if not str(relative) or relative.is_absolute():
+        raise FileIntelligenceError("unsafe_storage_reference")
+    candidate = (root / relative).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise FileIntelligenceError("unsafe_storage_reference") from exc
+    return candidate
 
 
 def safe_filename(name):
@@ -151,7 +167,7 @@ def create_file(*, workspace_id, contact_id, conversation_id, source_channel, fi
         if prior: return _row(prior), False
         file_id = "file_" + secrets.token_hex(16)
         relative = f"{hashlib.sha256(workspace.encode()).hexdigest()[:16]}/{file_id}{ext}"
-        target = storage_root() / relative; target.parent.mkdir(parents=True, exist_ok=True)
+        target = storage_path(relative); target.parent.mkdir(parents=True, exist_ok=True)
         temporary = target.with_suffix(target.suffix + ".upload")
         temporary.write_bytes(data); os.replace(temporary, target)
         values = (file_id, workspace, contact, str(conversation_id or ""), str(source_channel or "web"), str(filename or "")[:255], clean, media_type, detected_mime, len(data), checksum, relative, "UPLOADED", "PENDING", EXTRACTION_VERSION, str(created_by or contact), now, now, "", "", "{}")
@@ -315,7 +331,7 @@ def _video(path, provider):
 
 def process_file(workspace_id, contact_id, file_id, provider=None):
     item = get_file(workspace_id, contact_id, file_id); provider = provider or VisionProvider()
-    path = storage_root() / item.storage_reference
+    path = storage_path(item.storage_reference)
     _set_state(item, "PROCESSING", "PROCESSING", "")
     try:
         data = path.read_bytes(); base = {"file_id": item.file_id, "content_type": item.media_type, "sections": [], "pages": [], "sheets": [], "slides": [], "frames": [], "transcript": "", "timestamps": [], "tables": [], "formulas": [], "charts": [], "warnings": [], "confidence": 1.0, "provenance": [], "created_at": _now()}
