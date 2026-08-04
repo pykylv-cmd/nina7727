@@ -4650,14 +4650,19 @@ def nina_chat_body(messages):
         if research:
             rows = ""
             for item in (research.get("results") or ())[:20]:
+                direct_url = item.get("source_url") if item.get("source_url_verified") else None
+                direct_action = (
+                    "<a class='btn' href='" + html_escape(direct_url)
+                    + "' target='_blank' rel='noopener noreferrer'>Open source</a>"
+                    if direct_url else "<span class='muted'>Tiešā saite nav pieejama</span>"
+                )
                 rows += (
                     "<div class='row'><div><b>" + html_escape(item.get("title") or "Unknown listing") + "</b>"
                     "<span class='muted'>" + html_escape(str(item.get("year") or "unknown")) + " · "
                     + html_escape(str(item.get("price") or "unknown")) + " " + html_escape(item.get("currency") or "") + " · "
                     + html_escape(str(item.get("mileage") or "unknown")) + " km · "
                     + html_escape(item.get("fuel") or "unknown") + " · " + html_escape(item.get("transmission") or "unknown")
-                    + "</span></div><a class='btn' href='" + html_escape(item.get("source_url") or research.get("source_url") or "#")
-                    + "' target='_blank' rel='noopener noreferrer'>Open source</a></div>"
+                    + "</span></div>" + direct_action + "</div>"
                 )
             comparison = research.get("comparison") or {}
             state = "Source read" if research.get("source_access") == "read" else "Source access limited"

@@ -39,6 +39,7 @@ MAX_RESULTS_HARD = 20
 MAX_RESPONSE_BYTES = 1_000_000
 FETCH_TIMEOUT_SECONDS = 8
 MAX_REDIRECTS = 3
+MAX_LISTING_URL_VERIFICATIONS = 5
 USER_AGENT = "NinaOS-PublicResearch/1.0 (+controlled user-requested fetch)"
 CONTACT_BULK_PATTERN = re.compile(r"(?:\+?\d[\d\s().-]{7,}\d|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,})")
 _RATE_LOCK = threading.Lock()
@@ -243,6 +244,22 @@ def _unknown(value):
     return value if value not in (None, "") else "unknown"
 
 
+def _ss_listing_url(raw_url, base_url):
+    """Accept only a real-looking listing href obtained from SS HTML."""
+    candidate = parse.urljoin(base_url, unescape(str(raw_url or ""))).split("#", 1)[0]
+    parsed = parse.urlsplit(candidate)
+    filename = parsed.path.rsplit("/", 1)[-1].casefold()
+    if (
+        parsed.scheme != "https"
+        or not _host_allowed(parsed.hostname)
+        or not re.fullmatch(r"/msg/(?:lv|ru|en)/[^?#]+/[a-z0-9_-]+\.html", parsed.path, re.I)
+        or re.fullmatch(r"\d{6,}\.html", filename)
+        or any(token in filename for token in ("placeholder", "example", "test-listing", "dummy"))
+    ):
+        return None
+    return parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
+
+
 def parse_search_results(page, intent):
     if not page or parse.urlsplit(page.get("url") or "").hostname not in DOMAIN_POLICY:
         raise WebResearchError("unsupported_domain")
@@ -253,9 +270,7 @@ def parse_search_results(page, intent):
         link = re.search(r"<a\b[^>]*href=[\"']([^\"']*/msg/[^\"']+)[\"'][^>]*>(.*?)</a>", row, re.I | re.S)
         if not link:
             continue
-        source_url = parse.urljoin(page["url"], unescape(link.group(1)))
-        if not _host_allowed(parse.urlsplit(source_url).hostname):
-            continue
+        source_url = _ss_listing_url(link.group(1), page["url"])
         text = _plain(row)
         title = _redact_contacts(_plain(link.group(2)) or text[:160])
         year_match = re.search(r"\b(19\d{2}|20\d{2})\b", text)
@@ -266,10 +281,12 @@ def parse_search_results(page, intent):
         transmission = "automatic" if any(x in text.casefold() for x in ("automāt", "automat", "automatic")) else ("manual" if "manuāl" in text.casefold() else "unknown")
         price = _clean_number(price_matches[-1]) if price_matches else None
         mileage = _clean_number(mileage_match.group(1)) if mileage_match else None
-        result_id = "result_" + hashlib.sha256(source_url.split("?", 1)[0].encode()).hexdigest()[:20]
+        identity = source_url.split("?", 1)[0] if source_url else text
+        result_id = "result_" + hashlib.sha256(identity.encode()).hexdigest()[:20]
         item = {
-            "result_id": result_id, "source": parse.urlsplit(source_url).hostname,
-            "source_url": source_url, "page_title": page.get("title") or "",
+            "result_id": result_id, "source": parse.urlsplit(page["url"]).hostname,
+            "source_url": source_url, "source_url_provenance": "parsed_html" if source_url else "unavailable",
+            "source_url_verified": False, "page_title": page.get("title") or "",
             "title": title[:240], "make": intent.filters.get("make") or "unknown",
             "model": intent.filters.get("model") or "unknown",
             "year": int(year_match.group(1)) if year_match else "unknown",
@@ -342,11 +359,23 @@ def build_source_url(intent):
     return f"https://www.ss.lv/lv/transport/cars/{make}/{model}/"
 
 
-def search_public_web(intent, fetcher=fetch_public_page):
+def search_public_web(intent, fetcher=fetch_public_page, result_verifier=None):
     source_url = build_source_url(intent)
     try:
         page = fetcher(source_url)
         results = normalize_results(parse_search_results(page, intent), intent)
+        verifier = result_verifier or verify_result
+        for index, item in enumerate(results):
+            verified = False
+            if item.get("source_url") and index < MAX_LISTING_URL_VERIFICATIONS:
+                if result_verifier is None:
+                    time.sleep(.51)
+                verified = bool(verifier(item))
+            item["source_url_verified"] = verified
+            if not verified:
+                item["source_url"] = None
+                item["source_url_provenance"] = "unavailable"
+                item.setdefault("warnings", []).append("Direct listing URL is unavailable or unverified.")
         return {"ok": True, "intent": asdict(intent), "results": results,
                 "comparison": compare_results(results), "source_url": source_url,
                 "source_access": "read", "fetched_at": page.get("fetched_at") or _now()}
@@ -356,8 +385,19 @@ def search_public_web(intent, fetcher=fetch_public_page):
                 "source_access": "limited", "error": str(exc), "fetched_at": _now()}
 
 
-def verify_result(result):
-    return bool(result and result.get("source_url") and _host_allowed(parse.urlsplit(result["source_url"]).hostname))
+def verify_result(result, fetcher=fetch_public_page):
+    if not result or result.get("source_url_provenance") != "parsed_html":
+        return False
+    url = _ss_listing_url(result.get("source_url"), result.get("source_url"))
+    if not url:
+        return False
+    try:
+        page = fetcher(url)
+    except (WebResearchError, OSError, ValueError):
+        return False
+    content = (str(page.get("title") or "") + " " + str(page.get("html") or "")).casefold()
+    not_found = ("sludinājums nav atrasts", "sludinajums nav atrasts", "advertisement not found", "page not found")
+    return not any(marker in content for marker in not_found)
 
 
 def summarize_sources(payload):
@@ -368,7 +408,9 @@ def summarize_sources(payload):
         return f"Publiskajā lapā neatradu filtriem atbilstošus rezultātus. Avots: {payload.get('source_url')}"
     lines = [f"Atradu {len(results)} publiskus piedāvājumus. Trūkstošos laukus atzīmēju kā unknown."]
     for index, item in enumerate(results[:5], 1):
-        lines.append(f"{index}. {item['title']} — {item['year']} — {item['price']} {item['currency']} — {item['mileage']} km — {item['source_url']}")
+        direct_url = item.get("source_url") if item.get("source_url_verified") else None
+        link_text = direct_url or "Tiešā saite nav pieejama"
+        lines.append(f"{index}. {item['title']} — {item['year']} — {item['price']} {item['currency']} — {item['mileage']} km — {link_text}")
     lines.append("Ieteikums nav tehniskā stāvokļa garantija. Pārbaudi VIN, servisa/CSDD un avāriju vēsturi, nobraukumu, apskati, īpašniekus un neatkarīgu diagnostiku.")
     return "\n".join(lines)[:4000]
 
