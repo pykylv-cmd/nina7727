@@ -461,6 +461,50 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         conversation_id=conversation_id,
     ))
     decision_payload = decision.to_dict()
+    # ONE NINA routes explicit public research after the shared Brain decision.
+    # The capability is deterministic and never treats page content as instructions.
+    try:
+        from web_research import (
+            apply_followup, build_search_plan, clarification_for,
+            latest_research_session, save_research_session, save_search,
+            search_public_web, summarize_sources,
+        )
+        research_owner = str(contact_id or conversation_id or _conversation_id(workspace_id)).strip()
+        previous_research = latest_research_session(workspace_id, research_owner, conversation_id) if conversation_id else None
+        folded = clean.casefold()
+        explicit_save = bool(previous_research) and any(
+            phrase in folded for phrase in ("saglabā šo meklējumu", "saglaba so meklejumu", "save this search")
+        )
+        if explicit_save:
+            saved, created = save_search(workspace_id, research_owner, previous_research["session_id"])
+            answer = "Meklēšana saglabāta." if created else "Šī meklēšana jau bija saglabāta."
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {"ok": True, "text": answer, "source": "web_research", "channel": channel,
+                    "decision": decision_payload, "saved_search_id": saved["search_id"]}
+        followup_signal = bool(previous_research) and any(
+            phrase in folded for phrase in ("rādi tikai", "radi tikai", "izmet", "salīdzini", "salidzini", "kurš", "kurs")
+        )
+        intent = build_search_plan(clean, previous_research.get("intent") if followup_signal else None)
+        if intent:
+            clarification = clarification_for(intent)
+            if clarification:
+                _save_turn(workspace_id, clean, clarification, conversation_id=conversation_id, channel=channel)
+                return {"ok": True, "text": clarification, "source": "web_research_clarification",
+                        "channel": channel, "decision": decision_payload, "search_intent": dict(intent.__dict__)}
+            payload = apply_followup(previous_research, clean) if followup_signal else search_public_web(intent)
+            session_id = save_research_session(workspace_id, research_owner, conversation_id, payload)
+            answer = summarize_sources(payload)
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {"ok": bool(payload.get("ok")), "text": answer, "source": "web_research",
+                    "channel": channel, "decision": decision_payload, "search_session_id": session_id,
+                    "search_intent": payload.get("intent"), "source_access": payload.get("source_access")}
+    except Exception as exc:
+        logger.error("Nina Web Research routing failed: exception=%s", type(exc).__name__)
+        if "intent" in locals() and intent:
+            answer = "Publisko avotu šobrīd nevaru droši nolasīt. Nemēģināšu apiet vietnes aizsardzību."
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {"ok": False, "error": "web_research_unavailable", "text": answer,
+                    "source": "web_research", "channel": channel, "decision": decision_payload}
     if decision.reason == "cancel_all_reminders":
         target_workspace = canonical_work_workspace_id or workspace_id
         cancelled = _cancel_all_reminders(target_workspace, str(contact_id or "").strip())

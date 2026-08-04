@@ -4643,12 +4643,41 @@ def nina_chat_body(messages):
         "d.addEventListener('drop',e=>{if(e.dataTransfer.files.length)f.elements.file.files=e.dataTransfer.files});"
         "f.addEventListener('submit',()=>{s.textContent='Uploading and processing…';f.querySelector('button').disabled=true});})();</script>"
     )
+    research_ui = ""
+    try:
+        from web_research import latest_research_session
+        research = latest_research_session(NINA_WEB_WORKSPACE_ID, current_contact["contact_id"], current_contact["conversation_id"])
+        if research:
+            rows = ""
+            for item in (research.get("results") or ())[:20]:
+                rows += (
+                    "<div class='row'><div><b>" + html_escape(item.get("title") or "Unknown listing") + "</b>"
+                    "<span class='muted'>" + html_escape(str(item.get("year") or "unknown")) + " · "
+                    + html_escape(str(item.get("price") or "unknown")) + " " + html_escape(item.get("currency") or "") + " · "
+                    + html_escape(str(item.get("mileage") or "unknown")) + " km · "
+                    + html_escape(item.get("fuel") or "unknown") + " · " + html_escape(item.get("transmission") or "unknown")
+                    + "</span></div><a class='btn' href='" + html_escape(item.get("source_url") or research.get("source_url") or "#")
+                    + "' target='_blank' rel='noopener noreferrer'>Open source</a></div>"
+                )
+            comparison = research.get("comparison") or {}
+            state = "Source read" if research.get("source_access") == "read" else "Source access limited"
+            research_ui = (
+                "<section class='card card-pad' style='margin-top:16px'><div class='section-title'>Web Research</div>"
+                "<p class='muted'>" + html_escape(state) + " · " + html_escape(str(comparison.get("count") or 0)) + " results</p>"
+                + ("<div class='list'>" + rows + "</div>" if rows else "<p>No public results were read.</p>")
+                + "<div class='form-actions'><a class='btn' href='" + html_escape(research.get("source_url") or "#") + "' target='_blank' rel='noopener noreferrer'>Open public search</a>"
+                + "<form method='post' action='/nina/research/" + html_escape(research["session_id"]) + "/save'>"
+                + "<input type='hidden' name='csrf_token' value='" + _channel_csrf("research:save:" + research["session_id"]) + "'>"
+                + "<button class='btn' type='submit'>Save this search</button></form></div></section>"
+            )
+    except Exception:
+        research_ui = ""
     return (
         "<div class='chat-layout'>"
         "<section class='card card-pad chat-shell'>"
         f"<div class='chat-head'>{nina_logo_html('small')}<div><div class='section-title' style='margin:0'>{copy['title']}</div><span class='muted'>{copy['sub']}</span></div></div>"
         f"<div id='nina-chat-stream' class='chat-stream'>{bubbles}</div>"
-        f"<form class='chat-compose' method='post' action='/nina?lang={lang}'>"
+        f"<form id='nina-chat-compose' class='chat-compose' method='post' action='/nina?lang={lang}'>"
         f"<div class='chat-input'><textarea name='message' maxlength='4000' required placeholder='{copy['placeholder']}'></textarea>"
         f"<div id='voice-status' class='voice-status' data-state='ready' role='status' aria-live='polite'>{copy['ready']}</div></div>"
         f"<div class='form-actions'><button id='voice-start' class='btn voice-btn' type='button' aria-label='{copy['mic']}' title='{copy['mic']}'>🎤</button>"
@@ -4657,10 +4686,11 @@ def nina_chat_body(messages):
         f"<button id='chat-send' class='btn primary' type='submit'>{copy['send']}</button></div></form>"
         "</section>"
         f"<aside class='card card-pad'><div class='section-title'>{copy['channels']}</div>{channels}<div class='form-actions'><a class='btn' href='/channels?lang={lang}'>{copy['channels']}</a></div>{push_ui}</aside>"
-        "</div>" + upload_ui
+        "</div>" + research_ui + upload_ui
         + f"<script>window.NinaVoiceConfig={json.dumps({'lang': lang, 'ready': copy['ready'], 'recording': copy['recording'], 'processing': copy['processing'], 'error': copy['error'], 'denied': copy['denied'], 'unsupported': copy['unsupported']}, ensure_ascii=False)};</script>"
         f"<script>window.NinaPushConfig={json.dumps(push_browser_config)};</script>"
         f"<script>{_web_push_client_script()}</script>"
+        "<script>(function(){const f=document.getElementById('nina-chat-compose'),b=document.getElementById('chat-send'),s=document.getElementById('voice-status');if(f)f.addEventListener('submit',()=>{if(b)b.disabled=true;if(s)s.textContent='Meklēju…'});})();</script>"
         "<script>(function(){const stream=document.getElementById('nina-chat-stream');if(!stream)return;const bottom=()=>{stream.scrollTop=stream.scrollHeight};const order=()=>{[...stream.querySelectorAll('.chat-message[data-timeline-key]')].sort((a,b)=>(a.dataset.timelineKey||'').localeCompare(b.dataset.timelineKey||'')).forEach(node=>stream.appendChild(node))};order();bottom();async function poll(){try{const response=await fetch('/nina/notifications',{credentials:'same-origin',cache:'no-store'});if(!response.ok)return;const payload=await response.json();let added=false;for(const item of payload.notifications||[]){if(stream.querySelector('[data-message-id=\"'+item.message_id+'\"]'))continue;const bubble=document.createElement('div');bubble.className='chat-message nina';bubble.dataset.messageId=item.message_id;bubble.dataset.timelineKey=item.timeline_key;bubble.textContent=item.text;const label=document.createElement('small');label.textContent='Nina';bubble.appendChild(label);stream.appendChild(bubble);added=true;}if(added){order();bottom();}}catch(e){}}setInterval(poll,10000);})();</script>"
         "<script>(function(){const c=window.NinaVoiceConfig,s=document.getElementById('voice-status'),start=document.getElementById('voice-start'),stop=document.getElementById('voice-stop'),cancel=document.getElementById('voice-cancel'),send=document.getElementById('chat-send');let recorder=null,stream=null,chunks=[],cancelled=false;function state(name,text){s.dataset.state=name;s.textContent=text;}function tracksOff(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}function controls(active){start.hidden=active;stop.hidden=!active;cancel.hidden=!active;send.disabled=active;}function reset(){tracksOff();controls(false);recorder=null;chunks=[];cancelled=false;state('ready',c.ready);}async function upload(blob){state('processing',c.processing);controls(false);start.disabled=true;send.disabled=true;const data=new FormData();const ext=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':blob.type.includes('mpeg')?'mp3':'webm';data.append('audio',blob,'voice.'+ext);data.append('lang',c.lang);try{const response=await fetch('/nina/voice?lang='+encodeURIComponent(c.lang),{method:'POST',body:data,credentials:'same-origin'});if(!response.ok)throw new Error('upload');window.location.href='/nina?lang='+encodeURIComponent(c.lang);}catch(e){state('error',c.error);start.disabled=false;send.disabled=false;}}start.addEventListener('click',async function(){if(!navigator.mediaDevices||!window.MediaRecorder){state('error',c.unsupported);return;}try{stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});chunks=[];cancelled=false;const preferred=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4','audio/webm','audio/ogg'].find(t=>MediaRecorder.isTypeSupported(t));const options={audioBitsPerSecond:128000};if(preferred)options.mimeType=preferred;recorder=new MediaRecorder(stream,options);recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};recorder.onerror=()=>{tracksOff();controls(false);state('error',c.error);};recorder.onstop=()=>{tracksOff();controls(false);if(cancelled){reset();return;}const blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});if(!blob.size){state('error',c.error);return;}upload(blob);};recorder.start();controls(true);state('recording',c.recording);}catch(e){tracksOff();controls(false);state('error',e&&e.name==='NotAllowedError'?c.denied:c.error);}});stop.addEventListener('click',()=>{if(recorder&&recorder.state!=='inactive')recorder.stop();});cancel.addEventListener('click',()=>{cancelled=true;if(recorder&&recorder.state!=='inactive')recorder.stop();else reset();});})();</script>"
     )
@@ -8701,7 +8731,11 @@ def nina_file_action(file_id):
         )
     else:
         evidence = extraction.get("risks") if action_id == "find_risks" else extraction.get("important_facts")
-        response = action["label"] + ": " + "; ".join(str(x)[:240] for x in (evidence or ())[:5])
+        response = (
+            "Pasaki, kurus materiālus vai tirgus kritērijus salīdzināt publiskajos avotos."
+            if action_id == "research_public_market"
+            else action["label"] + ": " + "; ".join(str(x)[:240] for x in (evidence or ())[:5])
+        )
         save_channel_turn(NINA_WEB_WORKSPACE_ID, action["label"], response[:1600],
                           conversation_id=contact["conversation_id"], channel="web")
     return redirect(q("/nina"))
@@ -8711,6 +8745,19 @@ def nina_file_action(file_id):
 def nina_file_create_work(file_id):
     """Legacy bulk endpoint is fail-closed; explicit action approval is required."""
     return Response("explicit_document_action_required", status=400)
+
+
+@app.post("/nina/research/<session_id>/save")
+def nina_research_save(session_id):
+    if not _valid_channel_csrf("research:save:" + session_id):
+        return Response("research_csrf_invalid", status=403)
+    contact = current_web_contact()
+    from web_research import WebResearchError, save_search
+    try:
+        save_search(NINA_WEB_WORKSPACE_ID, contact["contact_id"], session_id)
+    except WebResearchError:
+        return Response("research_session_not_found", status=404)
+    return redirect(q("/nina"))
 
 
 def _timeline_datetime(value):

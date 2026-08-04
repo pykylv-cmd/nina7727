@@ -65,7 +65,7 @@ DOCUMENT_ACTION_ALLOWLIST = {
     "check_calculations", "compare_line_items", "find_cost_items", "find_risks", "summarize",
     "create_work_object", "create_reminder", "link_client_project",
     "prepare_client_offer", "find_anomalies", "explain_formulas",
-    "create_defect_list", "show_timestamped_moments",
+    "create_defect_list", "show_timestamped_moments", "research_public_market",
 }
 
 
@@ -149,7 +149,7 @@ def recommend_document_actions(document_type, entities):
             _recommendation("check_calculations", "Check calculations", "Review totals and visible calculations."),
             _recommendation("compare_line_items", "Compare line items", "Compare the visible positions and prices."),
             _recommendation("find_cost_items", "Find highest-cost items", "Highlight the largest priced positions."),
-            _recommendation("prepare_client_offer", "Prepare client offer", "Draft an offer grounded in this document."),
+            _recommendation("research_public_market", "Compare public prices", "Start a controlled public market comparison after your selection."),
             _recommendation("create_work_object", "Create work task", "Create one canonical Work Object.", risk="MEDIUM"),
         ],
         "INVOICE": [

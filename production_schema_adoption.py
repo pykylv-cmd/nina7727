@@ -501,6 +501,17 @@ CONTRACTS = {
             ("nina_file_events", ("event_id","file_id","workspace_id","event_type","actor","safe_metadata_json","created_at"), {"idx_nina_file_events_owner"}),
         )
     },
+    "0017_web_research_market_search_v1": {
+        table: {
+            "columns": {name: (TEXT_TYPES, False) for name in columns},
+            "primary_key": (columns[0],),
+            "indexes": indexes,
+        }
+        for table, columns, indexes in (
+            ("nina_web_research_sessions", ("session_id","workspace_id","contact_id","conversation_id","intent_json","results_json","comparison_json","source_url","source_access","error_code","created_at","updated_at"), {"idx_nina_research_session_owner"}),
+            ("nina_saved_searches", ("search_id","workspace_id","contact_id","name","search_type","query_json","target_domains","status","created_at","updated_at"), {"idx_nina_saved_search_owner"}),
+        )
+    },
 }
 
 

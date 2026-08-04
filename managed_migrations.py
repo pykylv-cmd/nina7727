@@ -941,6 +941,18 @@ def _create_vision_document_intelligence_v1(conn):
     cur.close()
 
 
+def _create_web_research_v1(conn):
+    cur = conn.cursor()
+    statements = (
+        """CREATE TABLE IF NOT EXISTS nina_web_research_sessions (session_id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,contact_id TEXT NOT NULL,conversation_id TEXT NOT NULL,intent_json TEXT NOT NULL,results_json TEXT NOT NULL,comparison_json TEXT NOT NULL,source_url TEXT NOT NULL,source_access TEXT NOT NULL,error_code TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS nina_saved_searches (search_id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,contact_id TEXT NOT NULL,name TEXT NOT NULL,search_type TEXT NOT NULL,query_json TEXT NOT NULL,target_domains TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(workspace_id,contact_id,query_json))""",
+        "CREATE INDEX IF NOT EXISTS idx_nina_research_session_owner ON nina_web_research_sessions(workspace_id,contact_id,conversation_id,created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_saved_search_owner ON nina_saved_searches(workspace_id,contact_id,status,created_at)",
+    )
+    for statement in statements: cur.execute(statement)
+    cur.close()
+
+
 MIGRATIONS = (
     Migration(
         identifier="0001_shared_conversation_state",
@@ -1145,6 +1157,14 @@ MIGRATIONS = (
         checksum_source=("0016|EXPAND|nina_files+nina_file_extractions+nina_file_events|"
             "workspace-contact-scope|checksum-idempotence|safe-storage-reference|"
             "unified-extracted-content|audit-events|additive-only"),
+    ),
+    Migration(
+        identifier="0017_web_research_market_search_v1", version=17,
+        name="Add controlled ONE NINA Web Research sessions and saved searches",
+        phase=PHASE_EXPAND, operation=_create_web_research_v1,
+        checksum_source=("0017|EXPAND|nina_web_research_sessions+nina_saved_searches|"
+            "workspace-contact-conversation-scope|explicit-save|query-deduplication|"
+            "public-source-provenance|additive-only"),
     ),
 )
 
