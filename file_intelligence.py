@@ -55,6 +55,18 @@ MAGIC = {
     ".webm": (b"\x1aE\xdf\xa3",),
 }
 STATUSES = {"UPLOADED", "PROCESSING", "READY", "FAILED", "ARCHIVED"}
+DOCUMENT_TYPES = {
+    "ESTIMATE", "INVOICE", "CONTRACT", "REPORT", "PROCEDURE",
+    "MEETING_NOTES", "PROJECT_DOCUMENT", "SPREADSHEET_DATA",
+    "PRESENTATION", "IMAGE_EVIDENCE", "VIDEO_RECORDING",
+    "GENERAL_DOCUMENT",
+}
+DOCUMENT_ACTION_ALLOWLIST = {
+    "check_calculations", "compare_line_items", "find_cost_items", "find_risks", "summarize",
+    "create_work_object", "create_reminder", "link_client_project",
+    "prepare_client_offer", "find_anomalies", "explain_formulas",
+    "create_defect_list", "show_timestamped_moments",
+}
 
 
 class FileIntelligenceError(ValueError):
@@ -64,6 +76,153 @@ class FileIntelligenceError(ValueError):
 def _now(): return datetime.now(timezone.utc).isoformat()
 def _sql(q): return persistence_backend.sql(q)
 def _json(value): return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _source_text(extraction):
+    return str((extraction or {}).get("extracted_text") or
+               (extraction or {}).get("transcript") or
+               (extraction or {}).get("summary") or "")[:50000]
+
+
+def classify_document(extraction, media_type="", filename=""):
+    """Return a practical, deterministic classification without exposing reasoning."""
+    media = str(media_type or (extraction or {}).get("content_type") or "").lower()
+    text = _source_text(extraction).casefold()
+    if media in {"xlsx", "csv"}: return "SPREADSHEET_DATA", .99, "media_spreadsheet"
+    if media == "pptx": return "PRESENTATION", .99, "media_presentation"
+    if media == "image": return "IMAGE_EVIDENCE", .96, "media_image"
+    if media == "video": return "VIDEO_RECORDING", .99, "media_video"
+    signals = (
+        ("INVOICE", ("invoice", "rēķins", "rekins", "payment due", "apmaksas termiņ")),
+        ("ESTIMATE", ("estimate", "quotation", "quote", "tāme", "tame", "piedāvājum")),
+        ("CONTRACT", ("contract", "agreement", "līgums", "ligums", "penalty", "sods")),
+        ("MEETING_NOTES", ("meeting notes", "minutes", "sapulces protokol", "attendees")),
+        ("PROCEDURE", ("procedure", "instruction", "procedūra", "instrukcija", "step 1")),
+        ("REPORT", ("report", "pārskats", "parskats", "findings", "secinājum")),
+        ("PROJECT_DOCUMENT", ("project", "projekts", "scope of work", "darbu apjoms")),
+    )
+    for document_type, words in signals:
+        matches = sum(1 for word in words if word in text)
+        if matches:
+            return document_type, min(.96, .68 + .1 * matches), "content_signal"
+    return "GENERAL_DOCUMENT", .45, "no_specific_signal"
+
+
+def extract_document_entities(extraction):
+    text = _source_text(extraction)
+    lines = [re.sub(r"\s+", " ", line).strip(" -•\t")
+             for line in re.split(r"[\r\n]+", text)]
+    lines = [line for line in lines if line]
+    amounts = []
+    amount_pattern = re.compile(r"(?<!\w)(\d{1,3}(?:[ .]\d{3})*(?:[,.]\d{2})|\d+(?:[,.]\d{2})?)\s*(EUR|€|USD|GBP)(?!\w)", re.I)
+    for match in amount_pattern.finditer(text):
+        amounts.append({"value": match.group(1), "currency": match.group(2).upper().replace("€", "EUR"), "evidence": match.group(0)})
+    dates = []
+    for pattern in (r"\b\d{4}-\d{2}-\d{2}\b", r"\b\d{1,2}[./]\d{1,2}[./]\d{4}\b"):
+        dates.extend(re.findall(pattern, text))
+    dates = list(dict.fromkeys(dates))[:20]
+    risks = [line for line in lines if any(x in line.casefold() for x in ("risk", "penalty", "delay", "kavēj", "sods", "atbildība"))][:12]
+    addresses = [line for line in lines if re.search(r"\b(iela|street|road|avenue|bulvāris|bulvaris)\b", line, re.I)][:10]
+    parties = [line for line in lines if re.match(r"^(client|customer|supplier|contractor|pasūtītājs|pasutitajs|izpildītājs|izpilditajs)\s*[:\-]", line, re.I)][:10]
+    action_items = propose_action_items(extraction)
+    return {
+        "important_facts": lines[:8], "dates": dates, "amounts": amounts[:20],
+        "parties": parties, "addresses": addresses, "risks": risks,
+        "anomalies": [], "action_items": action_items,
+    }
+
+
+def _recommendation(action_id, label, description, *, risk="LOW", supported=True,
+                    required_entities=(), disabled_reason=""):
+    if action_id not in DOCUMENT_ACTION_ALLOWLIST:
+        raise FileIntelligenceError("document_action_not_allowed")
+    return {"action_id": action_id, "label": label, "description": description,
+            "action_type": action_id.upper(), "risk_level": risk,
+            "approval_required": True, "required_entities": list(required_entities),
+            "supported": bool(supported), "disabled_reason": str(disabled_reason or "")}
+
+
+def recommend_document_actions(document_type, entities):
+    common = [_recommendation("summarize", "Summarize", "Prepare a concise management summary.")]
+    mapping = {
+        "ESTIMATE": [
+            _recommendation("check_calculations", "Check calculations", "Review totals and visible calculations."),
+            _recommendation("compare_line_items", "Compare line items", "Compare the visible positions and prices."),
+            _recommendation("find_cost_items", "Find highest-cost items", "Highlight the largest priced positions."),
+            _recommendation("prepare_client_offer", "Prepare client offer", "Draft an offer grounded in this document."),
+            _recommendation("create_work_object", "Create work task", "Create one canonical Work Object.", risk="MEDIUM"),
+        ],
+        "INVOICE": [
+            _recommendation("find_anomalies", "Check invoice details", "Review totals, tax and visible inconsistencies."),
+            _recommendation("create_reminder", "Create payment reminder", "Create a reminder from the extracted due date.", risk="MEDIUM", supported=bool(entities["dates"]), required_entities=("date",), disabled_reason="A payment date was not found." if not entities["dates"] else ""),
+            _recommendation("link_client_project", "Link to client or project", "Link after choosing a server-known entity.", risk="MEDIUM", supported=False, required_entities=("client_or_project",), disabled_reason="Choose a client or project first."),
+        ],
+        "CONTRACT": [
+            _recommendation("find_risks", "Find risks", "Highlight obligations, penalties and deadlines."),
+            _recommendation("create_reminder", "Create deadline reminder", "Create a reminder from an extracted date.", risk="MEDIUM", supported=bool(entities["dates"]), required_entities=("date",), disabled_reason="A deadline was not found." if not entities["dates"] else ""),
+            _recommendation("create_work_object", "Create review task", "Create one canonical contract review Work Object.", risk="MEDIUM"),
+        ],
+        "SPREADSHEET_DATA": [
+            _recommendation("find_anomalies", "Find duplicates and gaps", "Inspect visible rows for anomalies."),
+            _recommendation("explain_formulas", "Explain formulas", "Explain extracted formulas and cached values."),
+            _recommendation("create_work_object", "Create work task", "Create one canonical Work Object.", risk="MEDIUM"),
+        ],
+        "IMAGE_EVIDENCE": [
+            _recommendation("create_defect_list", "Create defect list", "Summarize visible defects or UI errors."),
+            _recommendation("create_work_object", "Create work task", "Create one canonical Work Object.", risk="MEDIUM"),
+        ],
+        "VIDEO_RECORDING": [
+            _recommendation("show_timestamped_moments", "Show key moments", "Summarize timestamped video moments."),
+            _recommendation("create_work_object", "Create work task", "Create one canonical Work Object.", risk="MEDIUM"),
+        ],
+    }
+    actions = mapping.get(document_type, common + [
+        _recommendation("find_risks", "Find risks", "Highlight risks grounded in the file."),
+        _recommendation("create_work_object", "Create work task", "Create one canonical Work Object.", risk="MEDIUM"),
+    ])
+    return actions[:5]
+
+
+def enrich_document_result(extraction, media_type="", filename=""):
+    result = dict(extraction or {})
+    document_type, confidence, reasoning_code = classify_document(result, media_type, filename)
+    entities = extract_document_entities(result)
+    result.setdefault("warnings", [])
+    result.update(entities)
+    result.update({"document_type": document_type, "classification_confidence": confidence,
+                   "reasoning_code": reasoning_code,
+                   "extracted_entities": {k: entities[k] for k in ("dates", "amounts", "parties", "addresses")},
+                   "recommended_actions": recommend_document_actions(document_type, entities),
+                   "title": str(filename or document_type.replace("_", " ").title()),
+                   "short_summary": _source_text(result)[:600]})
+    return result
+
+
+def get_document_action(extraction, action_id):
+    """Resolve one persisted recommendation through the server allowlist."""
+    action_id = str(action_id or "").strip()
+    if action_id not in DOCUMENT_ACTION_ALLOWLIST:
+        raise FileIntelligenceError("document_action_not_allowed")
+    for action in (extraction or {}).get("recommended_actions") or ():
+        if str(action.get("action_id") or "") == action_id:
+            if not action.get("supported"):
+                raise FileIntelligenceError("document_action_not_supported")
+            return dict(action)
+    raise FileIntelligenceError("document_action_not_recommended")
+
+
+def document_action_summary(extraction):
+    """Return a concise user-facing summary without exposing file contents or reasoning."""
+    result = extraction or {}
+    document_type = str(result.get("document_type") or "GENERAL_DOCUMENT").replace("_", " ").title()
+    facts = [str(x)[:180] for x in (result.get("important_facts") or ())[:3]]
+    actions = [str(x.get("label") or "")[:80] for x in (result.get("recommended_actions") or ()) if x.get("supported")][:5]
+    message = f"File analyzed as {document_type}."
+    if facts:
+        message += " Important: " + "; ".join(facts) + "."
+    if actions:
+        message += " What Nina can do next: " + "; ".join(actions) + "."
+    return message[:1600]
 
 
 def storage_root():
@@ -344,6 +503,7 @@ def process_file(workspace_id, contact_id, file_id, provider=None):
         elif item.media_type == "video": result = _video(path, provider)
         else: raise FileIntelligenceError("unsupported_file_type")
         base.update(result); base["provenance"] = [{"file_id": item.file_id, "type": item.media_type}]
+        base = enrich_document_result(base, item.media_type, item.safe_filename)
         _save_result(item, base); _set_state(item, "READY", "COMPLETE", "")
         return base
     except Exception as exc:

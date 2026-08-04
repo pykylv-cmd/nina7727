@@ -14,6 +14,7 @@ import hmac
 import secrets
 import re
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from urllib.parse import quote_plus, unquote_plus
 from flask import Flask, Response, g, has_request_context, jsonify, redirect, request
 from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, generate_with_nina, load_channel_conversation, load_web_conversation, save_channel_turn, send_message_to_nina
@@ -4588,19 +4589,46 @@ def nina_chat_body(messages):
         "unsubscribeCsrf": _channel_csrf("web-push:unsubscribe"),
     }
     try:
-        from file_intelligence import list_files
+        from file_intelligence import get_extraction, list_files
         current_contact = current_web_contact()
         files = list_files(NINA_WEB_WORKSPACE_ID, current_contact["contact_id"], current_contact["conversation_id"])
     except Exception:
         files = []
-    file_cards = "".join(
-        "<div class='channel-card'><div><b>" + html_escape(item.safe_filename) + "</b>"
-        + "<p class='muted'>" + html_escape(item.media_type.upper() + " · " + str(item.size_bytes) + " bytes") + "</p></div>"
-        + "<span class='channel-state'>" + html_escape(item.status) + "</span>"
-        + ("<form method='post' action='/nina/files/" + html_escape(item.file_id) + "/work'><input type='hidden' name='csrf_token' value='" + _channel_csrf("file:work:" + item.file_id) + "'><button class='btn' type='submit'>Create proposed work</button></form>" if item.status == "READY" else "")
-        + ("<form method='post' action='/nina/files/" + html_escape(item.file_id) + "/archive'><input type='hidden' name='csrf_token' value='" + _channel_csrf("file:archive:" + item.file_id) + "'><button class='btn' type='submit'>Archive</button></form>" if item.status != "ARCHIVED" else "")
-        + "</div>" for item in files[:10]
-    )
+    file_cards = ""
+    for item in files[:10]:
+        analysis_html = ""
+        if item.status == "READY":
+            try:
+                extraction = get_extraction(NINA_WEB_WORKSPACE_ID, current_contact["contact_id"], item.file_id)
+                document_type = str(extraction.get("document_type") or "GENERAL_DOCUMENT").replace("_", " ").title()
+                facts = "".join("<li>" + html_escape(str(fact)[:220]) + "</li>" for fact in (extraction.get("important_facts") or ())[:3])
+                action_html = ""
+                for action in (extraction.get("recommended_actions") or ())[:5]:
+                    action_id = str(action.get("action_id") or "")
+                    label = html_escape(action.get("label") or action_id)
+                    if action.get("supported"):
+                        action_html += (
+                            "<form method='post' action='/nina/files/" + html_escape(item.file_id) + "/action'>"
+                            "<input type='hidden' name='csrf_token' value='" + _channel_csrf("file:action:" + item.file_id + ":" + action_id) + "'>"
+                            "<input type='hidden' name='action_id' value='" + html_escape(action_id) + "'>"
+                            "<button class='btn' type='submit'>" + label + "</button></form>"
+                        )
+                    else:
+                        action_html += "<div><button class='btn' type='button' disabled>" + label + "</button><p class='muted'>" + html_escape(action.get("disabled_reason") or "This action is not available.") + "</p></div>"
+                analysis_html = (
+                    "<div style='width:100%'><p><b>" + html_escape(document_type) + "</b></p>"
+                    + ("<ul>" + facts + "</ul>" if facts else "")
+                    + "<p><b>Ko Nina var izdarīt tālāk?</b></p><div class='form-actions'>" + action_html + "</div></div>"
+                )
+            except Exception:
+                analysis_html = "<p class='muted'>Structured analysis is unavailable.</p>"
+        file_cards += (
+            "<div class='channel-card' style='display:block'><div><b>" + html_escape(item.safe_filename) + "</b>"
+            + "<p class='muted'>" + html_escape(item.media_type.upper() + " / " + str(item.size_bytes) + " bytes") + "</p></div>"
+            + "<span class='channel-state'>" + html_escape(item.status) + "</span>" + analysis_html
+            + ("<form method='post' action='/nina/files/" + html_escape(item.file_id) + "/archive'><input type='hidden' name='csrf_token' value='" + _channel_csrf("file:archive:" + item.file_id) + "'><button class='btn' type='submit'>Archive</button></form>" if item.status != "ARCHIVED" else "")
+            + "</div>"
+        )
     upload_ui = (
         "<section class='card card-pad' style='margin-top:16px'><div class='section-title'>Files</div>"
         "<form id='nina-file-upload' method='post' action='/nina/files' enctype='multipart/form-data'>"
@@ -8594,9 +8622,9 @@ def nina_file_upload():
                 from openai import OpenAI
                 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
             result = process_file(NINA_WEB_WORKSPACE_ID, contact["contact_id"], item.file_id, VisionProvider(client))
-            summary = str(result.get("summary") or result.get("extracted_text") or result.get("transcript") or "")[:1600]
+            from file_intelligence import document_action_summary
             save_channel_turn(NINA_WEB_WORKSPACE_ID, "[File] " + item.safe_filename,
-                              "File analyzed. " + (summary or "Structured content is ready."),
+                              document_action_summary(result),
                               conversation_id=contact["conversation_id"], channel="web")
         return redirect(q("/nina"))
     except FileIntelligenceError as exc:
@@ -8628,29 +8656,61 @@ def nina_file_archive(file_id):
     return redirect(q("/nina"))
 
 
-@app.post("/nina/files/<file_id>/work")
-def nina_file_create_work(file_id):
-    if not _valid_channel_csrf("file:work:" + file_id):
+@app.post("/nina/files/<file_id>/action")
+def nina_file_action(file_id):
+    action_id = str(request.form.get("action_id") or "").strip()
+    if not _valid_channel_csrf("file:action:" + file_id + ":" + action_id):
         return Response("file_csrf_invalid", status=403)
     contact = current_web_contact()
-    from file_intelligence import get_extraction, propose_action_items
+    from file_intelligence import FileIntelligenceError, get_document_action, get_extraction
     from work_objects import save_or_get_work_object
     try:
         extraction = get_extraction(NINA_WEB_WORKSPACE_ID, contact["contact_id"], file_id)
-    except Exception:
-        return Response("file_not_found", status=404)
-    proposals = propose_action_items(extraction)
-    for proposal in proposals:
+        action = get_document_action(extraction, action_id)
+    except FileIntelligenceError as exc:
+        code = str(exc)
+        return Response(code, status=404 if code == "file_not_found" else 409)
+    title = str(extraction.get("title") or "Analyzed document")[:180]
+    if action_id in {"create_work_object", "create_reminder"}:
+        due_date = ""
+        metadata = {"source": "document_action_recommendations_v1", "file_id": file_id,
+                    "action_id": action_id, "user_approved": True}
+        if action_id == "create_reminder":
+            dates = extraction.get("dates") or []
+            if not dates:
+                return Response("document_action_missing_date", status=409)
+            raw_date = str(dates[0])
+            try:
+                parsed = datetime.strptime(raw_date, "%Y-%m-%d").replace(hour=9, tzinfo=ZoneInfo("Europe/Riga")).astimezone(timezone.utc)
+            except ValueError:
+                try:
+                    parsed = datetime.strptime(raw_date, "%d.%m.%Y").replace(hour=9, tzinfo=ZoneInfo("Europe/Riga")).astimezone(timezone.utc)
+                except ValueError:
+                    return Response("document_action_invalid_date", status=409)
+            due_date = parsed.isoformat(timespec="seconds")
+            metadata.update({"planned_at": due_date, "reminder_at": due_date})
         save_or_get_work_object(
-            object_type="task", title=proposal["title"],
-            source_key=f"vision:{file_id}:{proposal['action_key']}",
+            object_type="reminder" if action_id == "create_reminder" else "task",
+            title="Document deadline reminder" if action_id == "create_reminder" else "Review: " + title,
+            source_key=f"vision-action:{file_id}:{action_id}",
             workspace_id=NINA_WEB_WORKSPACE_ID,
+            due_date=due_date,
             linked_files=[file_id],
-            metadata={"source": "vision_document_intelligence_v1", "file_id": file_id,
-                      "action_key": proposal["action_key"], "user_approved": True},
+            metadata=metadata,
             origin_channel="web", origin_user_id=contact["contact_id"],
         )
+    else:
+        evidence = extraction.get("risks") if action_id == "find_risks" else extraction.get("important_facts")
+        response = action["label"] + ": " + "; ".join(str(x)[:240] for x in (evidence or ())[:5])
+        save_channel_turn(NINA_WEB_WORKSPACE_ID, action["label"], response[:1600],
+                          conversation_id=contact["conversation_id"], channel="web")
     return redirect(q("/nina"))
+
+
+@app.post("/nina/files/<file_id>/work")
+def nina_file_create_work(file_id):
+    """Legacy bulk endpoint is fail-closed; explicit action approval is required."""
+    return Response("explicit_document_action_required", status=400)
 
 
 def _timeline_datetime(value):
