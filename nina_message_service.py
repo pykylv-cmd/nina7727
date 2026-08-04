@@ -467,7 +467,7 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         from web_research import (
             apply_followup, build_search_plan, clarification_for,
             latest_research_session, save_research_session, save_search,
-            search_public_web, summarize_sources,
+            search_public_web, summarize_sources, summarize_verified_links,
         )
         research_owner = str(contact_id or conversation_id or _conversation_id(workspace_id)).strip()
         previous_research = latest_research_session(workspace_id, research_owner, conversation_id) if conversation_id else None
@@ -481,6 +481,17 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
             return {"ok": True, "text": answer, "source": "web_research", "channel": channel,
                     "decision": decision_payload, "saved_search_id": saved["search_id"]}
+        links_followup = bool(previous_research) and any(
+            phrase in folded for phrase in (
+                "sūti saites", "suti saites", "atsūti saites", "atsuti saites",
+                "send links", "show links",
+            )
+        )
+        if links_followup:
+            answer = summarize_verified_links(previous_research)
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {"ok": True, "text": answer, "source": "web_research", "channel": channel,
+                    "decision": decision_payload, "search_session_id": previous_research["session_id"]}
         followup_signal = bool(previous_research) and any(
             phrase in folded for phrase in ("rādi tikai", "radi tikai", "izmet", "salīdzini", "salidzini", "kurš", "kurs")
         )

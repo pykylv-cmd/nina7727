@@ -260,6 +260,43 @@ def _ss_listing_url(raw_url, base_url):
     return parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
 
 
+def _verified_result_id(item):
+    """Bind a verified result to its parser-provided URL and structured fields."""
+    canonical_url = _ss_listing_url(item.get("source_url"), item.get("source_url"))
+    if not canonical_url:
+        return ""
+    fields = {
+        key: item.get(key)
+        for key in (
+            "result_id", "title", "make", "model", "year", "price", "currency",
+            "mileage", "fuel", "transmission", "engine", "body_type", "location",
+            "published_at", "seller_type", "description_summary",
+        )
+    }
+    fields["source_url"] = canonical_url
+    identity = json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "verified_" + hashlib.sha256(identity.encode()).hexdigest()[:24]
+
+
+def verified_results(payload):
+    """Return only intact, uniquely URL-bound results from the verified set."""
+    unique = {}
+    for raw in (payload or {}).get("results") or ():
+        item = dict(raw)
+        canonical_url = _ss_listing_url(item.get("source_url"), item.get("source_url"))
+        expected_id = _verified_result_id(item)
+        if (
+            not canonical_url
+            or item.get("source_url_provenance") != "parsed_html"
+            or item.get("source_url_verified") is not True
+            or item.get("verified_result_id") != expected_id
+        ):
+            continue
+        item["source_url"] = canonical_url
+        unique.setdefault(canonical_url, item)
+    return list(unique.values())
+
+
 def parse_search_results(page, intent):
     if not page or parse.urlsplit(page.get("url") or "").hostname not in DOMAIN_POLICY:
         raise WebResearchError("unsupported_domain")
@@ -375,7 +412,10 @@ def search_public_web(intent, fetcher=fetch_public_page, result_verifier=None):
             if not verified:
                 item["source_url"] = None
                 item["source_url_provenance"] = "unavailable"
+                item.pop("verified_result_id", None)
                 item.setdefault("warnings", []).append("Direct listing URL is unavailable or unverified.")
+            else:
+                item["verified_result_id"] = _verified_result_id(item)
         return {"ok": True, "intent": asdict(intent), "results": results,
                 "comparison": compare_results(results), "source_url": source_url,
                 "source_access": "read", "fetched_at": page.get("fetched_at") or _now()}
@@ -401,11 +441,11 @@ def verify_result(result, fetcher=fetch_public_page):
 
 
 def summarize_sources(payload):
-    results = payload.get("results") or []
+    results = verified_results(payload)
     if not payload.get("ok"):
         return f"Avota automātiska nolasīšana nav pieejama ({payload.get('error')}). Atver publisko meklēšanu: {payload.get('source_url')}"
     if not results:
-        return f"Publiskajā lapā neatradu filtriem atbilstošus rezultātus. Avots: {payload.get('source_url')}"
+        return f"Neizdevās iegūt verificētus sludinājumus. Meklēšanas lapa: {payload.get('source_url')}"
     lines = [f"Atradu {len(results)} publiskus piedāvājumus. Trūkstošos laukus atzīmēju kā unknown."]
     for index, item in enumerate(results[:5], 1):
         direct_url = item.get("source_url") if item.get("source_url_verified") else None
@@ -413,6 +453,16 @@ def summarize_sources(payload):
         lines.append(f"{index}. {item['title']} — {item['year']} — {item['price']} {item['currency']} — {item['mileage']} km — {link_text}")
     lines.append("Ieteikums nav tehniskā stāvokļa garantija. Pārbaudi VIN, servisa/CSDD un avāriju vēsturi, nobraukumu, apskati, īpašniekus un neatkarīgu diagnostiku.")
     return "\n".join(lines)[:4000]
+
+
+def summarize_verified_links(payload):
+    results = verified_results(payload)
+    if not results:
+        return f"Neizdevās iegūt verificētus sludinājumus. Meklēšanas lapa: {payload.get('source_url')}"
+    return "\n".join(
+        f"{index}. {item['title']} — {item['source_url']}"
+        for index, item in enumerate(results, 1)
+    )[:4000]
 
 
 def _ensure_schema():

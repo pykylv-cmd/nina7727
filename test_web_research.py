@@ -170,7 +170,7 @@ class WebResearchTests(unittest.TestCase):
         payload=self.research.search_public_web(self.full_intent(),fetcher=lambda _url:self.page(),result_verifier=lambda _item:False)
         self.assertTrue(payload["results"])
         self.assertTrue(all(item["source_url"] is None for item in payload["results"]))
-        self.assertIn("Tiešā saite nav pieejama",self.research.summarize_sources(payload))
+        self.assertIn("Neizdevās iegūt verificētus sludinājumus",self.research.summarize_sources(payload))
         self.assertNotIn("12345678",self.research.summarize_sources(payload))
         import web_app
         sid=self.research.save_research_session("a","one","conv",payload)
@@ -178,10 +178,47 @@ class WebResearchTests(unittest.TestCase):
         with patch.object(web_app,"NINA_WEB_WORKSPACE_ID","a"),patch.object(web_app,"current_web_contact",return_value=contact):
             with web_app.app.test_request_context("/nina"):
                 html=web_app.nina_chat_body([])
-        self.assertIn("Tiešā saite nav pieejama",html)
+        self.assertIn("Neizdevās iegūt verificētus sludinājumus",html)
         self.assertNotIn("12345678",html)
         self.assertNotIn("Open source",html)
-        self.assertIn(sid,html)
+        self.assertNotIn("Save this search",html)
+
+    def test_verified_set_is_url_bound_unique_and_cannot_be_extended(self):
+        payload=self.research.search_public_web(self.full_intent(),fetcher=lambda _url:self.page(),result_verifier=lambda _item:True)
+        verified=self.research.verified_results(payload)
+        self.assertEqual(len(verified),2)
+        self.assertTrue(all(item["verified_result_id"].startswith("verified_") for item in verified))
+        fabricated=dict(verified[0],title="BMW X5 xDrive40i fabricated",source_url="https://www.ss.lv/msg/lv/transport/cars/bmw/x5/2019_xdrive40i.html")
+        payload["results"].append(fabricated)
+        payload["results"].append(dict(verified[0],title="LLM invented title"))
+        payload["results"].append(dict(verified[0]))
+        clean=self.research.verified_results(payload)
+        self.assertEqual(len(clean),2)
+        self.assertNotIn("fabricated",self.research.summarize_sources(payload))
+        self.assertEqual(len({item["source_url"] for item in clean}),len(clean))
+
+    def test_verified_links_followup_uses_only_persisted_verified_results(self):
+        payload=self.research.search_public_web(self.full_intent(),fetcher=lambda _url:self.page(),result_verifier=lambda _item:True)
+        summary=self.research.summarize_verified_links(payload)
+        self.assertIn("abc.html",summary); self.assertIn("def.html",summary)
+        self.assertNotIn("12345678",summary)
+
+    def test_empty_verified_set_contains_no_listing_claims(self):
+        payload=self.research.search_public_web(self.full_intent(),fetcher=lambda _url:self.page(),result_verifier=lambda _item:False)
+        summary=self.research.summarize_sources(payload)
+        self.assertIn("Neizdevās iegūt verificētus sludinājumus",summary)
+        self.assertNotIn("BMW X5 xDrive",summary)
+
+    def test_send_links_routes_from_persisted_verified_set_without_generator(self):
+        payload=self.research.search_public_web(self.full_intent(),fetcher=lambda _url:self.page(),result_verifier=lambda _item:True)
+        self.research.save_research_session("a","one","conv",payload)
+        import nina_message_service
+        result=nina_message_service.send_message_to_nina(
+            "Sūti saites",workspace_id="a",channel="web",conversation_id="conv",contact_id="one",
+            generator=lambda _prompt: self.fail("generic LLM path must not run"),
+        )
+        self.assertEqual(result["source"],"web_research")
+        self.assertIn("abc.html",result["text"]); self.assertIn("def.html",result["text"])
 
 
 if __name__ == "__main__": unittest.main()

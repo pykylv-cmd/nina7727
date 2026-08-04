@@ -4645,11 +4645,12 @@ def nina_chat_body(messages):
     )
     research_ui = ""
     try:
-        from web_research import latest_research_session
+        from web_research import latest_research_session, verified_results
         research = latest_research_session(NINA_WEB_WORKSPACE_ID, current_contact["contact_id"], current_contact["conversation_id"])
         if research:
             rows = ""
-            for item in (research.get("results") or ())[:20]:
+            verified_items = verified_results(research)
+            for item in verified_items[:20]:
                 direct_url = item.get("source_url") if item.get("source_url_verified") else None
                 direct_action = (
                     "<a class='btn' href='" + html_escape(direct_url)
@@ -4666,14 +4667,18 @@ def nina_chat_body(messages):
                 )
             comparison = research.get("comparison") or {}
             state = "Source read" if research.get("source_access") == "read" else "Source access limited"
+            save_action = (
+                "<form method='post' action='/nina/research/" + html_escape(research["session_id"]) + "/save'>"
+                + "<input type='hidden' name='csrf_token' value='" + _channel_csrf("research:save:" + research["session_id"]) + "'>"
+                + "<button class='btn' type='submit'>Save this search</button></form>"
+                if verified_items else ""
+            )
             research_ui = (
                 "<section class='card card-pad' style='margin-top:16px'><div class='section-title'>Web Research</div>"
-                "<p class='muted'>" + html_escape(state) + " · " + html_escape(str(comparison.get("count") or 0)) + " results</p>"
-                + ("<div class='list'>" + rows + "</div>" if rows else "<p>No public results were read.</p>")
+                "<p class='muted'>" + html_escape(state) + " · " + html_escape(str(len(verified_items))) + " verified results</p>"
+                + ("<div class='list'>" + rows + "</div>" if rows else "<p>Neizdevās iegūt verificētus sludinājumus.</p>")
                 + "<div class='form-actions'><a class='btn' href='" + html_escape(research.get("source_url") or "#") + "' target='_blank' rel='noopener noreferrer'>Open public search</a>"
-                + "<form method='post' action='/nina/research/" + html_escape(research["session_id"]) + "/save'>"
-                + "<input type='hidden' name='csrf_token' value='" + _channel_csrf("research:save:" + research["session_id"]) + "'>"
-                + "<button class='btn' type='submit'>Save this search</button></form></div></section>"
+                + save_action + "</div></section>"
             )
     except Exception:
         research_ui = ""
