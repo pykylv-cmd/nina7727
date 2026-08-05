@@ -592,7 +592,11 @@ def classify_public_page(intent, candidate, page):
     if any(marker in folded[:5000] for marker in ("captcha", "sign in to continue", "type=\"password\"")):
         return RESULT_BLOCKED, "access_challenge"
     term_groups = _query_term_groups(intent)
-    evidence = (title_folded + " " + folded[:20000])
+    evidence = (
+        title_folded + " " + parse.unquote(path).replace("-", "_")
+        if intent.search_type == "PRODUCT_SEARCH"
+        else title_folded + " " + folded[:20000]
+    )
     if term_groups and any(not any(term in evidence for term in group) for group in term_groups):
         return RESULT_IRRELEVANT, "query_terms_absent"
     if intent.search_type == "PRODUCT_SEARCH":

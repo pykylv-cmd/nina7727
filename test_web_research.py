@@ -406,7 +406,8 @@ class WebResearchTests(unittest.TestCase):
             intent, search_provider=lambda _intent:[candidate],
             fetcher=lambda url,**_kwargs:{
                 "url":url,"title":"Aromatic fragrance lamp",
-                "html":"<h1>Aromatic fragrance lamp</h1>","fetched_at":"2026-08-05T10:00:00+00:00",
+                "html":"<h1>Aromatic fragrance lamp</h1><footer>Related scented candles</footer>",
+                "fetched_at":"2026-08-05T10:00:00+00:00",
             },
         )
         self.assertEqual(payload["results"],[])
