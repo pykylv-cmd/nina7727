@@ -502,9 +502,10 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
     # The capability is deterministic and never treats page content as instructions.
     try:
         from web_research import (
-            apply_followup, build_search_plan, clarification_for,
+            answer_page_content, apply_followup, build_search_plan, clarification_for,
+            extract_public_urls,
             latest_research_session, save_research_session, save_search,
-            search_public_web, summarize_sources, summarize_verified_links,
+            read_public_websites, search_public_web, summarize_sources, summarize_verified_links,
         )
         research_owner = str(contact_id or conversation_id or _conversation_id(workspace_id)).strip()
         previous_research = latest_research_session(workspace_id, research_owner, conversation_id) if conversation_id else None
@@ -518,6 +519,18 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
             return {"ok": True, "text": answer, "source": "web_research", "channel": channel,
                     "decision": decision_payload, "saved_search_id": saved["search_id"]}
+        explicit_urls = extract_public_urls(clean)
+        if explicit_urls:
+            crawl = any(phrase in folded for phrase in (
+                "atrodi šajā vietnē", "atrodi saja vietne", "find on this site", "meklē šajā vietnē",
+            ))
+            payload = read_public_websites(explicit_urls, clean, crawl=crawl)
+            session_id = save_research_session(workspace_id, research_owner, conversation_id, payload)
+            answer = answer_page_content(payload, clean)
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {"ok": bool(payload.get("ok")), "text": answer, "source": "web_research",
+                    "channel": channel, "decision": decision_payload, "search_session_id": session_id,
+                    "search_intent": payload.get("intent"), "source_access": payload.get("source_access")}
         links_followup = bool(previous_research) and any(
             phrase in folded for phrase in (
                 "sūti saites", "suti saites", "atsūti saites", "atsuti saites",
@@ -526,6 +539,17 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         )
         if links_followup:
             answer = summarize_verified_links(previous_research)
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {"ok": True, "text": answer, "source": "web_research", "channel": channel,
+                    "decision": decision_payload, "search_session_id": previous_research["session_id"]}
+        page_followup = bool(previous_research) and (previous_research.get("intent") or {}).get("search_type") == "SOURCE_PAGE_ANALYSIS" and any(
+            phrase in folded for phrase in (
+                "cik maks", "cena", "price", "kontakt", "tālrun", "talrun", "email", "e-past",
+                "kur atrod", "adrese", "address", "kas tur", "ko tur", "salīdz", "salidz", "compare",
+            )
+        )
+        if page_followup:
+            answer = answer_page_content(previous_research, clean)
             _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
             return {"ok": True, "text": answer, "source": "web_research", "channel": channel,
                     "decision": decision_payload, "search_session_id": previous_research["session_id"]}
@@ -548,6 +572,11 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
                     "search_intent": payload.get("intent"), "source_access": payload.get("source_access")}
     except Exception as exc:
         logger.error("Nina Web Research routing failed: exception=%s", type(exc).__name__)
+        if "explicit_urls" in locals() and explicit_urls:
+            answer = "Neizdevās droši nolasīt norādīto publisko lapu. Neapiešu piekļuves aizsardzību un neizdomāšu tās saturu."
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {"ok": False, "error": "source_page_unavailable", "text": answer,
+                    "source": "web_research", "channel": channel, "decision": decision_payload}
         if "intent" in locals() and intent:
             answer = "Publisko avotu šobrīd nevaru droši nolasīt. Nemēģināšu apiet vietnes aizsardzību."
             _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)

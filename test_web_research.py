@@ -423,6 +423,65 @@ class WebResearchTests(unittest.TestCase):
         self.assertEqual([item["source_url"] for item in payload["verified_search_pages"]],["https://reklama.lv/search/bmw-x3"])
         self.assertNotIn("ss.lv",self.research.summarize_sources(payload))
 
+    def test_verified_search_page_expands_three_literal_bmw_x3_offers(self):
+        intent=self.research.build_search_plan("Atrodi BMW X3 reklama.lv")
+        category="https://reklama.lv/transport/legkovye-avtomobili/bmw/"
+        html="""<nav><a href='/login'>Login</a></nav>
+        <a href='/transport/legkovye-avtomobili/bmw/bmw-x3-one-101.html'>BMW X3 one</a>
+        <a href='https://reklama.lv/transport/legkovye-avtomobili/bmw/bmw-x3-two-102.html'>BMW X3 two</a>
+        <a href='/transport/legkovye-avtomobili/bmw/bmw-x3-three-103.html'>BMW X3 three</a>"""
+        def fetcher(url,**_kwargs):
+            if url == category:
+                return {"url":url,"title":"BMW sludinājumi","html":html,"fetched_at":"2026-08-05T10:00:00+00:00"}
+            return {"url":url,"title":"BMW X3 konkrēts sludinājums","html":"<h1>BMW X3</h1><meta itemprop='price' content='17500'>","fetched_at":"2026-08-05T10:01:00+00:00"}
+        payload=self.research.search_public_web(intent,search_provider=lambda _:[{"url":category}],fetcher=fetcher)
+        self.assertEqual(len(payload["verified_search_pages"]),1)
+        self.assertEqual(len(payload["results"]),3)
+        self.assertTrue(all(item["source_url_provenance"] == "parsed_search_html" for item in payload["results"]))
+        self.assertTrue(all(item["price"] == 17500 for item in payload["results"]))
+
+    def test_search_page_expansion_rejects_navigation_ads_cross_domain_wrong_model_and_duplicates(self):
+        intent=self.research.build_search_plan("Atrodi BMW X3 reklama.lv")
+        html="""
+        <a href='/login'>BMW X3 login</a>
+        <a href='/advert/bmw-x3-banner.html'>BMW X3 reklāma</a>
+        <a href='https://evil.example/item/bmw-x3.html'>BMW X3 elsewhere</a>
+        <a href='/cars/bmw-x5-1.html'>BMW X5</a>
+        <a href='/cars/bmw-x3-1.html'>BMW X3 piedāvājums</a>
+        <a href='https://reklama.lv/cars/bmw-x3-1.html'>BMW X3 duplicate</a>
+        """
+        links=self.research.extract_verified_search_page_hrefs(html,"https://reklama.lv/cars/bmw/",intent)
+        self.assertEqual([item["canonical_url"] for item in links],["https://reklama.lv/cars/bmw-x3-1.html"])
+        self.assertEqual(links[0]["raw_href"],"/cars/bmw-x3-1.html")
+
+    def test_empty_search_page_keeps_only_verified_category_fallback_and_persists_it(self):
+        intent=self.research.build_search_plan("Atrodi BMW X3 reklama.lv")
+        category="https://reklama.lv/search/bmw-x3"
+        payload=self.research.search_public_web(
+            intent,search_provider=lambda _:[{"url":category}],
+            fetcher=lambda url,**_kwargs:{"url":url,"title":"BMW X3 kategorija","html":"<h1>BMW X3</h1>","fetched_at":"2026-08-05T10:00:00+00:00"},
+        )
+        self.assertEqual(payload["results"],[])
+        self.assertEqual(len(payload["verified_search_pages"]),1)
+        self.assertIn("Atradu verificētu kategorijas lapu",self.research.summarize_sources(payload))
+        self.research.save_research_session("expand","contact","conversation",payload)
+        persisted=self.research.latest_research_session("expand","contact","conversation")
+        self.assertIn(category,self.research.summarize_verified_links(persisted))
+
+    def test_search_page_expansion_verified_set_cannot_be_extended_by_llm_data(self):
+        intent=self.research.build_search_plan("Atrodi BMW X3 reklama.lv")
+        url="https://reklama.lv/cars/bmw-x3-real.html"
+        payload=self.research.search_public_web(
+            intent,search_provider=lambda _:[{"url":"https://reklama.lv/search/bmw-x3"}],
+            fetcher=lambda candidate,**_kwargs:(
+                {"url":candidate,"title":"BMW X3 kategorija","html":f"<a href='{url}'>BMW X3</a>"}
+                if "/search/" in candidate else
+                {"url":candidate,"title":"BMW X3 real","html":"<h1>BMW X3</h1>"}
+            ),
+        )
+        payload["results"].append({"source_url":"https://reklama.lv/cars/bmw-x3-invented.html","title":"LLM result","price":1})
+        self.assertEqual([item["source_url"] for item in self.research.verified_results(payload)],[url])
+
     def test_alibaba_alias_is_an_exact_domain_constraint(self):
         intent=self.research.build_search_plan("Atrodi Samsung S24 Alibaba")
         self.assertEqual(intent.target_domains,("alibaba.com",))

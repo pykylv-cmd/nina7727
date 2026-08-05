@@ -40,6 +40,8 @@ MAX_RESULTS_HARD = 20
 MAX_RESPONSE_BYTES = 1_000_000
 FETCH_TIMEOUT_SECONDS = 8
 MAX_REDIRECTS = 3
+MAX_CRAWL_PAGES = 10
+MAX_CRAWL_DEPTH = 2
 MAX_LISTING_URL_VERIFICATIONS = 5
 RESULT_VERIFIED = "VERIFIED_RESULT"
 SEARCH_PAGE_VERIFIED = "VERIFIED_SEARCH_PAGE"
@@ -81,6 +83,44 @@ class SearchIntent:
     user_goal: str = "compare_public_results"
     missing_information: tuple[str, ...] = ()
     confidence: float = 0.0
+
+
+@dataclass(frozen=True)
+class PageContent:
+    canonical_url: str
+    final_url: str
+    domain: str
+    page_title: str = "unknown"
+    meta_description: str = "unknown"
+    headings: tuple[str, ...] = ()
+    main_text: str = "unknown"
+    links: tuple[dict, ...] = ()
+    product_names: tuple[str, ...] = ()
+    prices: tuple[dict, ...] = ()
+    currency: str = "unknown"
+    contacts: tuple[dict, ...] = ()
+    addresses: tuple[str, ...] = ()
+    dates: tuple[str, ...] = ()
+    tables: tuple[tuple[tuple[str, ...], ...], ...] = ()
+    structured_data: tuple[dict, ...] = ()
+    json_ld: tuple[dict, ...] = ()
+    fetched_at: str = ""
+    content_hash: str = ""
+    warnings: tuple[str, ...] = ()
+    extraction_status: str = "verified"
+
+
+PUBLIC_URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.I)
+
+
+def extract_public_urls(text):
+    """Extract literal user-provided URLs; never infer or construct a domain."""
+    urls = []
+    for match in PUBLIC_URL_PATTERN.findall(str(text or "")):
+        candidate = match.rstrip(".,;:!?)]}")
+        if candidate not in urls:
+            urls.append(candidate)
+    return urls[:2]
 
 
 def _now():
@@ -278,6 +318,228 @@ def _redact_contacts(value):
     return CONTACT_BULK_PATTERN.sub("[contact omitted]", str(value or ""))
 
 
+class _PageContentParser(HTMLParser):
+    """Extract evidence from HTML without executing or interpreting scripts."""
+
+    SKIP_TAGS = {"script", "style", "noscript", "svg", "canvas", "template"}
+    CHROME_TAGS = {"nav", "footer", "header"}
+
+    def __init__(self, base_url):
+        super().__init__(convert_charrefs=True)
+        self.base_url = base_url
+        self.title_parts = []
+        self.meta_description = ""
+        self.headings = []
+        self.text_parts = []
+        self.links = []
+        self.addresses = []
+        self.dates = []
+        self.tables = []
+        self.json_ld_raw = []
+        self._stack = []
+        self._anchor = None
+        self._heading = None
+        self._table = None
+        self._row = None
+        self._cell = None
+        self._json_ld = None
+
+    def _hidden(self):
+        return any(item[0] in self.SKIP_TAGS | self.CHROME_TAGS or item[1] for item in self._stack)
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.casefold(); values = {str(k).casefold(): str(v or "") for k, v in attrs}
+        marker = (values.get("class", "") + " " + values.get("id", "")).casefold()
+        chrome = any(x in marker for x in ("cookie", "consent", "breadcrumb", "pagination", "advert", "sidebar", "menu"))
+        self._stack.append((tag, chrome))
+        if tag == "meta" and values.get("name", "").casefold() == "description":
+            self.meta_description = re.sub(r"\s+", " ", values.get("content", "")).strip()[:1000]
+        if tag == "a": self._anchor = {"href": values.get("href", ""), "text": []}
+        if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}: self._heading = []
+        if tag == "table": self._table = []
+        if tag == "tr" and self._table is not None: self._row = []
+        if tag in {"td", "th"} and self._row is not None: self._cell = []
+        if tag == "time" and values.get("datetime"): self.dates.append(values["datetime"][:80])
+        if tag == "script" and values.get("type", "").casefold() == "application/ld+json": self._json_ld = []
+
+    def handle_data(self, data):
+        text = re.sub(r"\s+", " ", str(data or "")).strip()
+        if not text: return
+        tag = self._stack[-1][0] if self._stack else ""
+        if self._json_ld is not None and tag == "script": self._json_ld.append(data); return
+        if tag == "title": self.title_parts.append(text)
+        if self._anchor is not None: self._anchor["text"].append(text)
+        if self._heading is not None: self._heading.append(text)
+        if self._cell is not None: self._cell.append(text)
+        if tag == "address": self.addresses.append(text)
+        if not self._hidden() and tag not in {"title", "head"}: self.text_parts.append(text)
+
+    def handle_endtag(self, tag):
+        tag = tag.casefold()
+        if tag == "a" and self._anchor is not None:
+            href = self._anchor["href"].strip(); absolute = parse.urljoin(self.base_url, href)
+            parsed = parse.urlsplit(absolute)
+            if parsed.scheme in {"http", "https"} and parsed.hostname and not parsed.username and not parsed.password:
+                canonical = parse.urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), parsed.path or "/", parsed.query, ""))
+                self.links.append({"url": canonical, "raw_href": href, "text": " ".join(self._anchor["text"])[:240] or "unknown"})
+            self._anchor = None
+        if tag in {"h1", "h2", "h3", "h4", "h5", "h6"} and self._heading is not None:
+            value = " ".join(self._heading).strip()
+            if value: self.headings.append(value[:500])
+            self._heading = None
+        if tag in {"td", "th"} and self._cell is not None:
+            self._row.append(" ".join(self._cell)[:1000]); self._cell = None
+        if tag == "tr" and self._row is not None:
+            if any(self._row): self._table.append(tuple(self._row))
+            self._row = None
+        if tag == "table" and self._table is not None:
+            if self._table: self.tables.append(tuple(self._table[:100]))
+            self._table = None
+        if tag == "script" and self._json_ld is not None:
+            self.json_ld_raw.append("".join(self._json_ld)); self._json_ld = None
+        for index in range(len(self._stack) - 1, -1, -1):
+            if self._stack[index][0] == tag:
+                del self._stack[index:]; break
+
+
+def _json_objects(value):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values(): yield from _json_objects(child)
+    elif isinstance(value, list):
+        for child in value: yield from _json_objects(child)
+
+
+def extract_page_content(page, canonical_url=None):
+    """Build server-authoritative Page Content from fetched HTML evidence only."""
+    final_url = str((page or {}).get("url") or canonical_url or "")
+    canonical = str(canonical_url or final_url)
+    parser_instance = _PageContentParser(final_url)
+    html = str((page or {}).get("html") or "")
+    parser_instance.feed(html)
+    json_ld = []
+    for raw in parser_instance.json_ld_raw:
+        try:
+            value = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        json_ld.extend(item for item in _json_objects(value) if isinstance(item, dict))
+    products, prices, addresses, dates = [], [], list(parser_instance.addresses), list(parser_instance.dates)
+    for item in json_ld:
+        item_type = item.get("@type")
+        types = item_type if isinstance(item_type, list) else [item_type]
+        if "Product" in types and item.get("name"): products.append(str(item["name"])[:500])
+        if item.get("address"):
+            address = item["address"]
+            addresses.append(json.dumps(address, ensure_ascii=False, sort_keys=True) if isinstance(address, dict) else str(address))
+        if item.get("datePublished"): dates.append(str(item["datePublished"])[:80])
+        if "Offer" in types or item.get("price") is not None:
+            offer_price = item.get("price") or (item.get("offers") or {}).get("price") if isinstance(item.get("offers"), dict) else item.get("price")
+            currency = item.get("priceCurrency") or ((item.get("offers") or {}).get("priceCurrency") if isinstance(item.get("offers"), dict) else None)
+            if offer_price is not None: prices.append({"value": str(offer_price)[:80], "currency": str(currency or "unknown")[:12], "source": "json_ld"})
+    main_text = re.sub(r"\s+", " ", " ".join(parser_instance.text_parts)).strip()[:100_000]
+    if not prices:
+        for match in re.finditer(r"(?<!\w)(\d{1,3}(?:[ .]\d{3})*(?:[,.]\d{1,2})?)\s*(EUR|USD|GBP|€|\$|£)(?!\w)", main_text, re.I):
+            prices.append({"value": match.group(1), "currency": {"€":"EUR", "$":"USD", "£":"GBP"}.get(match.group(2), match.group(2).upper()), "source":"visible_html"})
+            if len(prices) >= 20: break
+    emails = list(dict.fromkeys(re.findall(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", main_text)))[:5]
+    phones = list(dict.fromkeys(re.findall(r"(?<!\w)\+?\d[\d ()-]{7,}\d", main_text)))[:5]
+    unique_prices = {}
+    for price in prices:
+        unique_prices.setdefault((price["value"], price["currency"], price["source"]), price)
+    prices = list(unique_prices.values())
+    contacts = ([{"type":"email", "value": value} for value in emails] + [{"type":"phone", "value": value.strip()} for value in phones])[:10]
+    warnings = []
+    folded = html.casefold()
+    status = "verified"
+    if len(main_text) < 80 and any(x in folded for x in ("__next_data__", "id=\"root\"", "id='root'", "enable javascript")):
+        status = "javascript_required"; warnings.append("javascript_rendering_required")
+    if any(x in main_text.casefold() for x in ("ignore previous instructions", "system prompt", "assistant instructions")):
+        warnings.append("untrusted_instruction_text_ignored")
+    if len(emails) + len(phones) >= 10: warnings.append("contacts_truncated")
+    title = " ".join(parser_instance.title_parts).strip()[:500] or str((page or {}).get("title") or "").strip()[:500] or "unknown"
+    evidence = {"url": final_url, "title": title, "main_text": main_text, "json_ld": json_ld, "links": parser_instance.links}
+    content_hash = hashlib.sha256(json.dumps(evidence, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return PageContent(
+        canonical_url=canonical, final_url=final_url, domain=parse.urlsplit(final_url).hostname or "unknown",
+        page_title=title, meta_description=parser_instance.meta_description or "unknown",
+        headings=tuple(dict.fromkeys(parser_instance.headings)), main_text=main_text or "unknown",
+        links=tuple(parser_instance.links[:200]), product_names=tuple(dict.fromkeys(products)),
+        prices=tuple(prices), currency=(prices[0]["currency"] if prices else "unknown"), contacts=tuple(contacts),
+        addresses=tuple(dict.fromkeys(value[:1000] for value in addresses if value)), dates=tuple(dict.fromkeys(dates)),
+        tables=tuple(parser_instance.tables[:20]), structured_data=tuple(json_ld), json_ld=tuple(json_ld),
+        fetched_at=str((page or {}).get("fetched_at") or _now()), content_hash=content_hash,
+        warnings=tuple(warnings), extraction_status=status,
+    )
+
+
+def _page_result(content):
+    item = asdict(content)
+    item.update({
+        "result_id": "page_" + content.content_hash[:20], "title": content.page_title,
+        "source_url": content.canonical_url, "source_domain": content.domain,
+        "source_url_provenance": "direct_user_url", "source_url_verified": True,
+        "result_status": RESULT_VERIFIED,
+    })
+    item["verified_result_id"] = _verified_result_id(item)
+    return item
+
+
+def read_public_websites(urls, query="", fetcher=fetch_public_page, crawl=False):
+    """Read up to two explicit URLs, optionally crawling ten same-domain pages."""
+    queue = [(url, 0) for url in list(urls or ())[:2]]; seen = set(); contents = []
+    root_hosts = []
+    for raw in urls or ():
+        host = parse.urlsplit(raw).hostname
+        if host: root_hosts.append(host.casefold())
+    while queue and len(contents) < MAX_CRAWL_PAGES:
+        raw_url, depth = queue.pop(0)
+        try:
+            validated = validate_public_url(raw_url, allowed_domains=root_hosts)
+        except WebResearchError:
+            if not contents: raise
+            continue
+        canonical = validated.split("#", 1)[0]
+        if canonical in seen: continue
+        seen.add(canonical)
+        page = fetcher(validated, allowed_domains=root_hosts) if fetcher is fetch_public_page else fetcher(validated)
+        content = extract_page_content(page, canonical)
+        contents.append(content)
+        if crawl and depth < MAX_CRAWL_DEPTH:
+            for link in content.links:
+                candidate = link.get("url")
+                parsed = parse.urlsplit(candidate or "")
+                if parsed.hostname and _matches_allowed_domain(parsed.hostname, root_hosts) and candidate not in seen:
+                    queue.append((candidate, depth + 1))
+                    if len(queue) + len(contents) >= MAX_CRAWL_PAGES: break
+    intent = {"search_type":"SOURCE_PAGE_ANALYSIS", "query":str(query or ""), "target_domains":root_hosts}
+    results = [_page_result(content) for content in contents]
+    return {"ok":bool(results), "intent":intent, "results":results, "comparison":{},
+            "source_url":results[0]["source_url"] if results else "", "source_access":"read",
+            "fetched_at":_now(), "error":"" if results else "no_verified_page_content"}
+
+
+def answer_page_content(payload, question=""):
+    pages = verified_results(payload); folded = str(question or "").casefold()
+    if not pages: return "Neizdevās iegūt verificētu lapas saturu."
+    if len(pages) > 1 and not any(x in folded for x in ("salīdz", "salidz", "compare", "abas", "both")):
+        return "Ir vairākas avota lapas. Norādi, kuru no tām analizēt, vai pasaki, ka vēlies salīdzinājumu."
+    lines = []
+    for page in pages:
+        if page.get("extraction_status") == "javascript_required":
+            lines.append(f"Lapai nepieciešama JavaScript renderēšana; statisko saturu droši iegūt neizdevās. Avots: {page['source_url']}")
+            continue
+        facts = []
+        if any(x in folded for x in ("cik maks", "cena", "price")): facts.append("cenas: " + (", ".join(f"{p['value']} {p['currency']}" for p in page.get("prices") or []) or "unknown"))
+        elif any(x in folded for x in ("kontakt", "tālrun", "talrun", "email", "e-past")): facts.append("kontakti: " + (", ".join(c["value"] for c in page.get("contacts") or []) or "unknown"))
+        elif any(x in folded for x in ("kur atrod", "adrese", "address")): facts.append("adrese: " + (", ".join(page.get("addresses") or []) or "unknown"))
+        else:
+            if page.get("product_names"): facts.append("produkti: " + ", ".join(page["product_names"][:5]))
+            facts.append("saturs: " + str(page.get("main_text") or "unknown")[:900])
+        lines.append(f"{page.get('page_title') or 'unknown'} — {'; '.join(facts)}. Avots: {page['source_url']}")
+    return "\n".join(lines)[:4000]
+
+
 def _unknown(value):
     return value if value not in (None, "") else "unknown"
 
@@ -348,7 +610,7 @@ def _canonical_result_url(item):
     provenance = item.get("source_url_provenance")
     if provenance == "parsed_html":
         return _ss_listing_url(item.get("source_url"), item.get("source_url"))
-    if provenance == "search_provider":
+    if provenance in {"search_provider", "parsed_search_html", "direct_user_url"}:
         parsed = parse.urlsplit(str(item.get("source_url") or ""))
         if parsed.scheme == "https" and parsed.hostname and not parsed.username and not parsed.password:
             return parse.urlunsplit(("https", parsed.netloc.lower(), parsed.path or "/", parsed.query, ""))
@@ -367,7 +629,7 @@ def _verified_result_id(item):
             "mileage", "fuel", "transmission", "engine", "body_type", "location",
             "published_at", "seller_type", "description_summary",
             "source_domain", "page_title", "fetched_at", "extracted_snippet", "provider",
-            "result_status",
+            "result_status", "content_hash", "extraction_status",
         )
     }
     fields["source_url"] = canonical_url
@@ -384,7 +646,7 @@ def verified_results(payload):
         expected_id = _verified_result_id(item)
         if (
             not canonical_url
-            or item.get("source_url_provenance") not in {"parsed_html", "search_provider"}
+            or item.get("source_url_provenance") not in {"parsed_html", "search_provider", "parsed_search_html", "direct_user_url"}
             or item.get("source_url_verified") is not True
             or item.get("verified_result_id") != expected_id
         ):
@@ -572,6 +834,120 @@ def _generic_page_facts(page):
     }
 
 
+class _PublicSearchHrefParser(HTMLParser):
+    """Collect literal anchors and their visible text from one fetched page."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.current = None
+        self.links = []
+        self.index = -1
+
+    def handle_starttag(self, tag, attrs):
+        if tag.casefold() != "a":
+            return
+        self.index += 1
+        raw_href = next((value for name, value in attrs if name.casefold() == "href"), None)
+        self.current = {"raw_href": raw_href, "text": [], "row_index": self.index}
+
+    def handle_data(self, data):
+        if self.current is not None:
+            self.current["text"].append(str(data or ""))
+
+    def handle_endtag(self, tag):
+        if tag.casefold() == "a" and self.current is not None:
+            self.current["anchor_text"] = _plain(" ".join(self.current.pop("text", [])))[:300]
+            self.links.append(self.current)
+            self.current = None
+
+
+def extract_verified_search_page_hrefs(html, base_url, intent):
+    """Extract unique, query-relevant offer hrefs literally present in raw HTML."""
+    parser_instance = _PublicSearchHrefParser()
+    parser_instance.feed(str(html or ""))
+    unique = {}
+    blocked_path_tokens = (
+        "/login", "/signin", "/register", "/account", "/help", "/contact",
+        "/privacy", "/terms", "/advert", "/reklam", "/category/", "/catalog/",
+    )
+    term_groups = _query_term_groups(intent)
+    for link in parser_instance.links:
+        raw_href = str(link.get("raw_href") or "").strip()
+        candidate = parse.urljoin(base_url, unescape(raw_href)).split("#", 1)[0]
+        parsed = parse.urlsplit(candidate)
+        path = parsed.path or "/"
+        folded_path = parse.unquote(path).replace("-", " ").replace("_", " ").casefold()
+        evidence = (str(link.get("anchor_text") or "") + " " + folded_path).casefold()
+        if (
+            parsed.scheme != "https" or not parsed.hostname
+            or parsed.username or parsed.password
+            or not _matches_allowed_domain(parsed.hostname, intent.target_domains)
+            or any(token in path.casefold() for token in blocked_path_tokens)
+            or not (path.casefold().endswith((".html", ".htm")) or any(token in path.casefold() for token in ("/item/", "/offer/", "/product/")))
+            or (term_groups and any(not any(term in evidence for term in group) for group in term_groups))
+        ):
+            continue
+        canonical = parse.urlunsplit(("https", parsed.netloc.lower(), path, parsed.query, ""))
+        unique.setdefault(canonical, {
+            "canonical_url": canonical,
+            "raw_href": raw_href,
+            "anchor_text": str(link.get("anchor_text") or "")[:300],
+            "parser_source": "verified_search_page_html_anchor",
+            "row_index": link.get("row_index"),
+        })
+    return list(unique.values())
+
+
+def _clear_page_price(page):
+    html = str((page or {}).get("html") or "")
+    patterns = (
+        r"itemprop=[\"']price[\"'][^>]*content=[\"']([\d\s.,]+)[\"']",
+        r"content=[\"']([\d\s.,]+)[\"'][^>]*itemprop=[\"']price[\"']",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, html, re.I)
+        if match:
+            value = _clean_number(match.group(1))
+            if value is not None:
+                return value
+    return "unknown"
+
+
+def _expand_verified_search_page(intent, page, fetcher, provider_name, provider_index):
+    expanded = []
+    candidates = extract_verified_search_page_hrefs(page.get("html"), page.get("url"), intent)
+    for candidate in candidates:
+        if len(expanded) >= 5:
+            break
+        try:
+            detail = fetcher(candidate["canonical_url"], allowed_domains=intent.target_domains)
+        except (WebResearchError, OSError, ValueError):
+            continue
+        status, _reason = classify_public_page(intent, candidate, detail)
+        if status != RESULT_VERIFIED:
+            continue
+        facts = _generic_page_facts(detail)
+        item = {
+            "result_id": "result_" + hashlib.sha256(candidate["canonical_url"].encode()).hexdigest()[:20],
+            "source_url": candidate["canonical_url"],
+            "source_url_provenance": "parsed_search_html",
+            "source_url_raw_href": candidate["raw_href"],
+            "source_url_parser_source": candidate["parser_source"],
+            "source_url_row_index": candidate["row_index"],
+            "source_url_verified": True,
+            "source_domain": parse.urlsplit(candidate["canonical_url"]).hostname or "",
+            "provider": provider_name,
+            "provider_result_index": provider_index,
+            "result_status": RESULT_VERIFIED,
+            "title": facts["page_title"],
+            "price": _clear_page_price(detail),
+            **facts,
+        }
+        item["verified_result_id"] = _verified_result_id(item)
+        expanded.append(item)
+    return expanded, candidates
+
+
 def _query_term_groups(intent):
     ignored = {
         "atrodi", "mekle", "meklē", "find", "search", "letas", "lētas", "cena",
@@ -580,7 +956,7 @@ def _query_term_groups(intent):
     }
     domain_parts = {part for domain in intent.target_domains for part in domain.split(".")}
     terms = [
-        term for term in re.findall(r"[a-zāčēģīķļņōŗšūž0-9]{3,}", intent.query.casefold())
+        term for term in re.findall(r"[a-zāčēģīķļņōŗšūž0-9]{2,}", intent.query.casefold())
         if term not in ignored and term not in domain_parts
     ]
     groups = []
@@ -634,6 +1010,15 @@ def classify_public_page(intent, candidate, page):
         if search_path:
             return SEARCH_PAGE_VERIFIED, "search_or_category_page"
         return RESULT_IRRELEVANT, "not_product_or_search_page"
+    literal_offers = extract_verified_search_page_hrefs(html, url, intent)
+    individual_path = path.endswith((".html", ".htm")) or product_path
+    category_markers = any(marker in folded[:20000] for marker in (
+        "filtrs", "sludinājumu", "sludinajumu", "listings", "search results",
+    ))
+    if not individual_path and (literal_offers or (path.endswith("/") and category_markers)):
+        return SEARCH_PAGE_VERIFIED, (
+            "search_page_with_literal_offers" if literal_offers else "verified_category_page"
+        )
     if product_path:
         return RESULT_VERIFIED, "product_page"
     if search_path:
@@ -679,7 +1064,17 @@ def search_verified_web(intent, search_provider=None, fetcher=fetch_public_page,
             "provider_result_index": index, "result_status": status, **facts,
         }
         item["verified_result_id"] = _verified_result_id(item)
-        (verified if status == RESULT_VERIFIED else search_pages).append(item)
+        if status == RESULT_VERIFIED:
+            verified.append(item)
+        else:
+            search_pages.append(item)
+            expanded, _literal_candidates = _expand_verified_search_page(
+                intent, page, fetcher, provider_name, index,
+            )
+            for expanded_item in expanded:
+                if expanded_item["source_url"] not in seen:
+                    seen.add(expanded_item["source_url"])
+                    verified.append(expanded_item)
     return {
         "ok": True, "intent": asdict(intent), "results": verified,
         "comparison": compare_results([]), "source_url": "",
@@ -821,7 +1216,7 @@ def summarize_sources(payload):
             domain = ((payload.get("intent") or {}).get("target_domains") or ["publiskā interneta"])[0]
             if search_pages:
                 page = search_pages[0]
-                return f"Individuālus piedāvājumus droši iegūt neizdevās. Te ir verificēta meklēšanas lapa: {page['source_url']}"
+                return f"Atradu verificētu kategorijas lapu, bet individuālus piedāvājumus droši iegūt neizdevās. {page['source_url']}"
             return f"Nespēju iegūt verificētus rezultātus no {domain}. Negribu tev izdomāt saites vai piedāvājumus."
         return f"Neizdevās iegūt verificētus sludinājumus. Meklēšanas lapa: {payload.get('source_url')}"
     if (payload.get("intent") or {}).get("search_type") != "VEHICLE_SEARCH":
@@ -866,9 +1261,10 @@ def _ensure_schema():
 
 def save_research_session(workspace_id, contact_id, conversation_id, payload):
     _ensure_schema(); now = _now(); session_id = "search_" + secrets.token_hex(16)
+    persisted_results = payload.get("results") or payload.get("verified_search_pages") or []
     conn = persistence_backend.connect(); cur = conn.cursor()
     q = "INSERT INTO nina_web_research_sessions (session_id,workspace_id,contact_id,conversation_id,intent_json,results_json,comparison_json,source_url,source_access,error_code,created_at,updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-    cur.execute(persistence_backend.sql(q),(session_id,workspace_id,contact_id,conversation_id,json.dumps(payload.get("intent") or {},ensure_ascii=False),json.dumps(payload.get("results") or [],ensure_ascii=False),json.dumps(payload.get("comparison") or {},ensure_ascii=False),payload.get("source_url") or "",payload.get("source_access") or "",payload.get("error") or "",now,now)); conn.commit(); cur.close(); conn.close()
+    cur.execute(persistence_backend.sql(q),(session_id,workspace_id,contact_id,conversation_id,json.dumps(payload.get("intent") or {},ensure_ascii=False),json.dumps(persisted_results,ensure_ascii=False),json.dumps(payload.get("comparison") or {},ensure_ascii=False),payload.get("source_url") or "",payload.get("source_access") or "",payload.get("error") or "",now,now)); conn.commit(); cur.close(); conn.close()
     return session_id
 
 
