@@ -398,15 +398,16 @@ def _matches(item, filters):
         ("mileage_max", "mileage", lambda a, b: b <= a),
     )
     for filter_key, item_key, predicate in checks:
-        if filters.get(filter_key) is not None and item.get(item_key) != "unknown" and not predicate(filters[filter_key], item[item_key]):
-            return False
+        if filters.get(filter_key) is not None:
+            if item.get(item_key) == "unknown" or not predicate(filters[filter_key], item[item_key]):
+                return False
     for key in ("fuel", "transmission", "engine", "body_type", "location"):
         if filters.get(key) and item.get(key) != "unknown" and item[key] != filters[key]:
             return False
     return True
 
 
-def normalize_results(results, intent):
+def normalize_results(results, intent, apply_filters=True):
     unique = {}
     for raw in results or ():
         item = dict(raw)
@@ -416,7 +417,7 @@ def normalize_results(results, intent):
         current = unique.get(key)
         if current is None or len(item.get("missing_fields") or ()) < len(current.get("missing_fields") or ()):
             unique[key] = item
-    filtered = [item for item in unique.values() if _matches(item, intent.filters)]
+    filtered = [item for item in unique.values() if not apply_filters or _matches(item, intent.filters)]
     filtered.sort(key=lambda x: (x.get("price") == "unknown", x.get("price") if isinstance(x.get("price"), int) else 10**18, -(x.get("year") if isinstance(x.get("year"), int) else 0), x.get("result_id") or ""))
     return filtered[:min(MAX_RESULTS_HARD, max(1, int(intent.max_results)))]
 
@@ -451,8 +452,9 @@ def search_public_web(intent, fetcher=fetch_public_page, result_verifier=None):
     source_url = build_source_url(intent)
     try:
         page = fetcher(source_url)
-        results = normalize_results(parse_search_results(page, intent), intent)
+        results = normalize_results(parse_search_results(page, intent), intent, apply_filters=False)
         verifier = result_verifier or verify_result
+        accepted = []
         for index, item in enumerate(results):
             # Search rows identify candidates only. Displayed listing details must
             # come from the concrete listing page, never from inferred row data.
@@ -466,7 +468,7 @@ def search_public_web(intent, fetcher=fetch_public_page, result_verifier=None):
                 "published_at", "seller_type",
             ]
             verified = False
-            if item.get("source_url") and index < MAX_LISTING_URL_VERIFICATIONS:
+            if item.get("source_url") and index < MAX_RESULTS_HARD:
                 if result_verifier is None:
                     time.sleep(.51)
                 verified = bool(verifier(item))
@@ -478,6 +480,9 @@ def search_public_web(intent, fetcher=fetch_public_page, result_verifier=None):
                 item.setdefault("warnings", []).append("Direct listing URL is unavailable or unverified.")
             else:
                 item["verified_result_id"] = _verified_result_id(item)
+                if _matches(item, intent.filters):
+                    accepted.append(item)
+        results = accepted
         return {"ok": True, "intent": asdict(intent), "results": results,
                 "comparison": compare_results(results), "source_url": source_url,
                 "source_access": "read", "fetched_at": page.get("fetched_at") or _now()}
@@ -485,6 +490,48 @@ def search_public_web(intent, fetcher=fetch_public_page, result_verifier=None):
         return {"ok": False, "intent": asdict(intent), "results": [],
                 "comparison": compare_results([]), "source_url": source_url,
                 "source_access": "limited", "error": str(exc), "fetched_at": _now()}
+
+
+def parse_ss_listing_fields(page):
+    """Read vehicle fields only from SS.lv's labelled option table and price cell."""
+    html = str((page or {}).get("html") or "")
+    by_id = {}
+    for match in re.finditer(r"<(?:td|span)\b(?=[^>]*\bid=)([^>]*)>(.*?)</(?:td|span)>", html, re.I | re.S):
+        attrs = match.group(1) or ""
+        body = match.group(2)
+        id_match = re.search(r"\bid=[\"']?([a-z0-9_-]+)", attrs, re.I)
+        if id_match:
+            by_id[id_match.group(1).casefold()] = _plain(body)
+
+    def integer_from(field_id):
+        value = by_id.get(field_id, "")
+        number = _clean_number(value)
+        return number if number is not None else "unknown"
+
+    year_text = by_id.get("tdo_18", "")
+    year_match = re.match(r"\s*(19\d{2}|20\d{2})\b", year_text)
+    motor = by_id.get("tdo_15", "").casefold()
+    gearbox = by_id.get("tdo_35", "").casefold()
+    fuel = next((value for token, value in (
+        ("dīzel", "diesel"), ("dizel", "diesel"), ("benz", "petrol"),
+        ("elektr", "electric"), ("hibr", "hybrid"),
+    ) if token in motor), "unknown")
+    transmission = "automatic" if "autom" in gearbox else ("manual" if "manu" in gearbox else "unknown")
+    fields = {
+        "price": integer_from("tdo_8"),
+        "year": int(year_match.group(1)) if year_match else "unknown",
+        "mileage": integer_from("tdo_16"),
+        "fuel": fuel,
+        "transmission": transmission,
+        "field_sources": {
+            "price": "listing_html:#tdo_8",
+            "year": "listing_html:#tdo_18",
+            "mileage": "listing_html:#tdo_16",
+            "fuel": "listing_html:#tdo_15",
+            "transmission": "listing_html:#tdo_35",
+        },
+    }
+    return fields
 
 
 def verify_result(result, fetcher=fetch_public_page):
@@ -501,17 +548,8 @@ def verify_result(result, fetcher=fetch_public_page):
     not_found = ("sludinājums nav atrasts", "sludinajums nav atrasts", "advertisement not found", "page not found")
     if any(marker in content for marker in not_found):
         return False
-    plain = _plain(page.get("html") or "")
-    year_match = re.search(r"\b(19\d{2}|20\d{2})\b", plain)
-    price_matches = re.findall(r"(\d[\d\s.]*)\s*(?:EUR)(?!\w)", plain, re.I)
-    mileage_match = re.search(r"(\d[\d\s.]*)\s*km\b", plain, re.I)
-    result.update({
-        "title": _redact_contacts(page.get("title") or "unknown")[:240] or "unknown",
-        "year": int(year_match.group(1)) if year_match else "unknown",
-        "price": _clean_number(price_matches[-1]) if price_matches else "unknown",
-        "mileage": _clean_number(mileage_match.group(1)) if mileage_match else "unknown",
-        "listing_detail_provenance": "listing_html",
-    })
+    result.update(parse_ss_listing_fields(page))
+    result.update({"title": _redact_contacts(page.get("title") or "unknown")[:240] or "unknown", "listing_detail_provenance": "listing_html"})
     result["missing_fields"] = [
         key for key in ("year", "price", "mileage", "fuel", "transmission", "location", "published_at", "seller_type")
         if result.get(key) == "unknown"
