@@ -260,6 +260,52 @@ def _ss_listing_url(raw_url, base_url):
     return parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
 
 
+class _SSListingHrefParser(HTMLParser):
+    """Collect literal SS.lv listing hrefs without deriving any URL data."""
+
+    def __init__(self, base_url):
+        super().__init__(convert_charrefs=True)
+        self.base_url = base_url
+        self.row_index = -1
+        self.current_row = None
+        self.links = []
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.casefold()
+        if tag == "tr":
+            self.row_index += 1
+            self.current_row = self.row_index
+            return
+        if tag != "a":
+            return
+        raw_href = next((value for name, value in attrs if name.casefold() == "href"), None)
+        canonical_url = _ss_listing_url(raw_href, self.base_url)
+        if not canonical_url or parse.urlsplit(canonical_url).hostname not in {"ss.lv", "www.ss.lv"}:
+            return
+        self.links.append({
+            "canonical_url": canonical_url,
+            "raw_href": raw_href,
+            "parser_source": "ss_search_html_anchor",
+            "row_index": self.current_row,
+        })
+
+    def handle_endtag(self, tag):
+        if tag.casefold() == "tr":
+            self.current_row = None
+
+
+def extract_ss_listing_hrefs(html, base_url):
+    """Return unique literal /msg/ anchors found in SS.lv search HTML."""
+    parser_instance = _SSListingHrefParser(base_url)
+    parser_instance.feed(str(html or ""))
+    unique = {}
+    for link in parser_instance.links:
+        canonical = link["canonical_url"].split("?", 1)[0]
+        link["canonical_url"] = canonical
+        unique.setdefault(canonical, link)
+    return list(unique.values())
+
+
 def _verified_result_id(item):
     """Bind a verified result to its parser-provided URL and structured fields."""
     canonical_url = _ss_listing_url(item.get("source_url"), item.get("source_url"))
@@ -303,13 +349,15 @@ def parse_search_results(page, intent):
     html = str(page.get("html") or "")
     rows = re.findall(r"<tr\b[^>]*>(.*?)</tr>", html, re.I | re.S)
     results = []
-    for row in rows:
-        link = re.search(r"<a\b[^>]*href=[\"']([^\"']*/msg/[^\"']+)[\"'][^>]*>(.*?)</a>", row, re.I | re.S)
-        if not link:
+    for row_index, row in enumerate(rows):
+        parsed_links = extract_ss_listing_hrefs(row, page["url"])
+        if not parsed_links:
             continue
-        source_url = _ss_listing_url(link.group(1), page["url"])
+        parsed_link = parsed_links[0]
+        source_url = parsed_link["canonical_url"]
+        link = re.search(r"<a\b[^>]*href=[\"']" + re.escape(parsed_link["raw_href"]) + r"[\"'][^>]*>(.*?)</a>", row, re.I | re.S)
         text = _plain(row)
-        title = _redact_contacts(_plain(link.group(2)) or text[:160])
+        title = _redact_contacts(_plain(link.group(1)) if link else text[:160])
         year_match = re.search(r"\b(19\d{2}|20\d{2})\b", text)
         price_matches = re.findall(r"(\d[\d\s.]*)\s*(?:€|EUR)(?!\w)", text, re.I)
         mileage_match = re.search(r"(\d[\d\s.]*)\s*(?:tūkst\.?\s*)?km\b", text, re.I)
@@ -323,6 +371,9 @@ def parse_search_results(page, intent):
         item = {
             "result_id": result_id, "source": parse.urlsplit(page["url"]).hostname,
             "source_url": source_url, "source_url_provenance": "parsed_html" if source_url else "unavailable",
+            "source_url_raw_href": parsed_link["raw_href"],
+            "source_url_parser_source": parsed_link["parser_source"],
+            "source_url_row_index": row_index,
             "source_url_verified": False, "page_title": page.get("title") or "",
             "title": title[:240], "make": intent.filters.get("make") or "unknown",
             "model": intent.filters.get("model") or "unknown",
@@ -403,6 +454,17 @@ def search_public_web(intent, fetcher=fetch_public_page, result_verifier=None):
         results = normalize_results(parse_search_results(page, intent), intent)
         verifier = result_verifier or verify_result
         for index, item in enumerate(results):
+            # Search rows identify candidates only. Displayed listing details must
+            # come from the concrete listing page, never from inferred row data.
+            item.update({key: "unknown" for key in (
+                "title", "make", "model", "year", "price", "mileage", "fuel",
+                "transmission", "engine", "body_type", "location", "published_at",
+                "seller_type", "description_summary", "image_url",
+            )})
+            item["missing_fields"] = [
+                "year", "price", "mileage", "fuel", "transmission", "location",
+                "published_at", "seller_type",
+            ]
             verified = False
             if item.get("source_url") and index < MAX_LISTING_URL_VERIFICATIONS:
                 if result_verifier is None:
@@ -437,7 +499,24 @@ def verify_result(result, fetcher=fetch_public_page):
         return False
     content = (str(page.get("title") or "") + " " + str(page.get("html") or "")).casefold()
     not_found = ("sludinājums nav atrasts", "sludinajums nav atrasts", "advertisement not found", "page not found")
-    return not any(marker in content for marker in not_found)
+    if any(marker in content for marker in not_found):
+        return False
+    plain = _plain(page.get("html") or "")
+    year_match = re.search(r"\b(19\d{2}|20\d{2})\b", plain)
+    price_matches = re.findall(r"(\d[\d\s.]*)\s*(?:EUR)(?!\w)", plain, re.I)
+    mileage_match = re.search(r"(\d[\d\s.]*)\s*km\b", plain, re.I)
+    result.update({
+        "title": _redact_contacts(page.get("title") or "unknown")[:240] or "unknown",
+        "year": int(year_match.group(1)) if year_match else "unknown",
+        "price": _clean_number(price_matches[-1]) if price_matches else "unknown",
+        "mileage": _clean_number(mileage_match.group(1)) if mileage_match else "unknown",
+        "listing_detail_provenance": "listing_html",
+    })
+    result["missing_fields"] = [
+        key for key in ("year", "price", "mileage", "fuel", "transmission", "location", "published_at", "seller_type")
+        if result.get(key) == "unknown"
+    ]
+    return True
 
 
 def summarize_sources(payload):

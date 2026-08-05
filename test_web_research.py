@@ -79,6 +79,39 @@ class WebResearchTests(unittest.TestCase):
         self.assertEqual(raw[1]["transmission"],"unknown"); self.assertIn("transmission",raw[1]["missing_fields"])
         self.assertEqual(raw[0]["page_title"],"BMW X5 sludinājumi"); self.assertTrue(raw[0]["fetched_at"])
 
+    def test_real_ss_href_parser_extracts_only_literal_listing_anchors(self):
+        html="""<table>
+        <tr><td><a href='/msg/lv/transport/cars/bmw/x5/abc.html'>A</a></td></tr>
+        <tr><td><a href='https://www.ss.lv/msg/lv/transport/cars/bmw/x5/def.html'>B</a></td></tr>
+        <tr><td><a href='/msg/lv/transport/cars/bmw/x5/ghi.html'>C</a></td></tr>
+        </table>"""
+        links=self.research.extract_ss_listing_hrefs(html,self.page()["url"])
+        self.assertEqual(len(links),3)
+        self.assertEqual(links[0],{
+            "canonical_url":"https://www.ss.lv/msg/lv/transport/cars/bmw/x5/abc.html",
+            "raw_href":"/msg/lv/transport/cars/bmw/x5/abc.html",
+            "parser_source":"ss_search_html_anchor","row_index":0,
+        })
+
+    def test_ss_href_parser_rejects_non_listing_placeholder_and_empty_html(self):
+        html="""<table><tr>
+        <a href='/lv/transport/cars/bmw/x5/'>Category</a>
+        <a href='/advertising/'>Advertising</a>
+        <a href='/msg/lv/transport/cars/bmw/x5/12345678.html'>Placeholder</a>
+        <a href='https://example.com/msg/lv/fake.html'>External</a>
+        </tr></table>"""
+        self.assertEqual(self.research.extract_ss_listing_hrefs(html,self.page()["url"]),[])
+        self.assertEqual(self.research.extract_ss_listing_hrefs("",self.page()["url"]),[])
+
+    def test_ss_href_parser_deduplicates_canonical_url_and_ignores_llm_data(self):
+        html="""<tr>
+        <a href='/msg/lv/transport/cars/bmw/x5/abc.html'>A</a>
+        <a href='/msg/lv/transport/cars/bmw/x5/abc.html?duplicate=1'>A duplicate</a>
+        </tr>"""
+        links=self.research.extract_ss_listing_hrefs(html,self.page()["url"])
+        self.assertEqual(len(links),1)
+        self.assertNotIn("llm",links[0])
+
     def test_deduplication_filtering_and_stable_sort(self):
         raw=self.research.parse_search_results(self.page(),self.full_intent())
         first=self.research.normalize_results(raw,self.full_intent()); second=self.research.normalize_results(list(reversed(raw)),self.full_intent())
@@ -90,7 +123,21 @@ class WebResearchTests(unittest.TestCase):
         followed=self.research.apply_followup(base,"Rādi tikai dīzeļus")
         self.assertEqual(followed["intent"]["filters"]["fuel"],"diesel"); self.assertEqual(len(followed["results"]),2)
         selected=self.research.compare_results(followed["results"],[followed["results"][0]["result_id"]])
-        self.assertEqual(selected["count"],1); self.assertEqual(selected["cheapest_id"],followed["results"][0]["result_id"])
+        self.assertEqual(selected["count"],1); self.assertEqual(selected["cheapest_id"],"unknown")
+
+    def test_renderer_uses_exactly_parser_urls_and_unproven_details_stay_unknown(self):
+        html=SS_HTML.replace("</table>","<tr><td><a href='/msg/lv/transport/cars/bmw/x5/ghi.html'>Claimed model</a></td><td>2021</td><td>Diesel Automatic 99 000 km</td><td>24 000 EUR</td></tr></table>")
+        payload=self.research.search_public_web(self.full_intent(),fetcher=lambda _url:self.page(html),result_verifier=lambda _item:True)
+        links=self.research.verified_results(payload)
+        self.assertEqual({item["source_url"] for item in links},{
+            "https://www.ss.lv/msg/lv/transport/cars/bmw/x5/def.html",
+            "https://www.ss.lv/msg/lv/transport/cars/bmw/x5/abc.html",
+            "https://www.ss.lv/msg/lv/transport/cars/bmw/x5/ghi.html",
+        })
+        self.assertTrue(all(item["title"] == item["year"] == item["price"] == item["mileage"] == "unknown" for item in links))
+        rendered=self.research.summarize_sources(payload)
+        self.assertEqual(rendered.count("https://www.ss.lv/msg/"),3)
+        self.assertNotIn("Claimed model",rendered)
 
     def test_search_source_link_and_access_limited_contract(self):
         ok=self.research.search_public_web(self.full_intent(),fetcher=lambda _url:self.page(),result_verifier=lambda _item:True)
@@ -161,7 +208,7 @@ class WebResearchTests(unittest.TestCase):
     def test_placeholder_and_nonexistent_listing_urls_are_not_verified(self):
         placeholder=self.page(SS_HTML.replace("abc.html","12345678.html"))
         parsed=self.research.parse_search_results(placeholder,self.full_intent())
-        self.assertIsNone(parsed[0]["source_url"])
+        self.assertNotIn("12345678.html",{item["source_url"] for item in parsed})
         result={"source_url":"https://www.ss.lv/msg/lv/transport/cars/bmw/x5/abc.html","source_url_provenance":"parsed_html"}
         missing=lambda _url:{"title":"Sludinājums nav atrasts","html":"<h1>Sludinājums nav atrasts</h1>"}
         self.assertFalse(self.research.verify_result(result,fetcher=missing))
