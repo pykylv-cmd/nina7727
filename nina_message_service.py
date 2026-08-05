@@ -197,6 +197,43 @@ def save_channel_turn(workspace_id: str, user_text: str, nina_text: str,
     _save_turn(workspace_id, user_text, nina_text, conversation_id=conversation_id, channel=channel)
 
 
+def _pending_reminder_request(conversation_id: str) -> str:
+    """Recover the last reminder action from existing conversation truth."""
+    if not str(conversation_id or "").strip():
+        return ""
+    messages = _load_conversation(conversation_id, limit=8)
+    for index in range(len(messages) - 1, 0, -1):
+        current = messages[index]
+        previous = messages[index - 1]
+        if (
+            current.get("role") == "nina"
+            and "kad tieši" in str(current.get("text") or "").casefold()
+            and previous.get("role") == "user"
+        ):
+            return str(previous.get("text") or "").strip()
+    return ""
+
+
+def _reminder_continuation_text(clean: str, conversation_id: str, decision) -> str:
+    """Combine a time-only answer with the pending action, excluding answer prose."""
+    if not decision.create_reminder or decision.needs_clarification:
+        return clean
+    if not re.search(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", clean.casefold()):
+        return clean
+    pending = _pending_reminder_request(conversation_id)
+    if not pending:
+        return clean
+    from task_engine import build_task_title
+    action = build_task_title(pending)
+    weekday = re.search(
+        r"\b(?:pirmdien|otrdien|trešdien|tresdien|ceturtdien|piektdien|sestdien|svētdien|svetdien)\b",
+        clean, re.IGNORECASE,
+    )
+    clock = re.search(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", clean)
+    timing = " ".join(part.group(0) for part in (weekday, clock) if part)
+    return f"Atgādini {timing} {action}" if action and timing else clean
+
+
 def generate_with_nina(prompt: str) -> str:
     """Expose Nina's established provider boundary to shared media services."""
     return _openai_generate(prompt)
@@ -572,10 +609,11 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         return {"ok": True, "text": answer, "source": "daily_assistant", "channel": channel, "decision": decision_payload}
 
     work_result = None
+    work_text = _reminder_continuation_text(clean, conversation_id, decision)
     if decision.create_work_object:
         try:
             work_result = execute_natural_work_request(
-                user_text=clean, workspace_id=canonical_work_workspace_id or workspace_id,
+                user_text=work_text, workspace_id=canonical_work_workspace_id or workspace_id,
                 channel=channel, contact_id=contact_id,
                 canonical_client_id=canonical_client_id,
                 reminder_requested=decision.create_reminder,

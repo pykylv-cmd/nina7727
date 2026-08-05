@@ -184,6 +184,8 @@ def detect_reminder_schedule(
             lower,
         )
         day = current.date()
+        target_weekday = None
+        explicit_next_week = "nākam" in lower or "nakam" in lower
         if absolute:
             day = datetime(
                 int(absolute.group(1)), int(absolute.group(2)),
@@ -202,20 +204,27 @@ def detect_reminder_schedule(
             for marker, weekday in weekdays.items():
                 if marker in lower:
                     days = (weekday - current.weekday()) % 7
-                    if days == 0 or "nākam" in lower or "nakam" in lower:
+                    if explicit_next_week:
                         days = 7
                     day += timedelta(days=days)
+                    target_weekday = weekday
                     break
         time_match = re.search(r"\b(?:pulksten\s*)?([01]?\d|2[0-3])[:.]([0-5]\d)\b", lower)
         hour = int(time_match.group(1)) if time_match else 9
         minute = int(time_match.group(2)) if time_match else 0
         target = datetime(day.year, day.month, day.day, hour, minute, tzinfo=tz)
+        if target_weekday is not None and not explicit_next_week and target <= current:
+            target += timedelta(days=7)
     return {"reminder_at": target.isoformat(timespec="minutes"), "timezone": timezone_name}
 
 
 def build_task_title(text):
     raw = _clean(text)
     lower = raw.lower()
+
+    reminder_title = _reminder_task_title(raw)
+    if reminder_title:
+        return reminder_title[:120]
 
     explicit = _explicit_task_command(raw)
     if explicit:
@@ -235,6 +244,27 @@ def build_task_title(text):
             return raw[len(prefix):].strip(" :.,!")[:120] or raw[:120]
 
     return raw[:120]
+
+
+def _reminder_task_title(text):
+    """Extract only the user action; delivery date/time never becomes the title."""
+    raw = _clean(text)
+    lower = raw.casefold()
+    if "atgādini" not in lower and "atgadini" not in lower:
+        return ""
+    value = re.sub(r"^.*?\batg[āa]dini(?:\s+man)?(?:\s+ka)?\s*", "", raw, flags=re.IGNORECASE)
+    value = re.sub(
+        r"\b(?:šodien|sodien|rīt|rit|parīt|parit|pirmdien|otrdien|trešdien|tresdien|"
+        r"ceturtdien|piektdien|sestdien|svētdien|svetdien)\b", "", value, flags=re.IGNORECASE,
+    )
+    value = re.sub(r"\b(?:pulksten\s*)?\d{1,2}[:.]\d{2}\b", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bno\s+rīta\b", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"^\s*ka\s+", "", value, flags=re.IGNORECASE)
+    value = " ".join(value.strip(" ,.!?- ").split())
+    value = re.sub(r"^jāsarēķina\b", "Sarēķināt", value, flags=re.IGNORECASE)
+    value = re.sub(r"\balga\b", "algu", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bpa\s+jumtu\b", "par jumtu", value, flags=re.IGNORECASE)
+    return value
 
 
 def _explicit_task_command(text):

@@ -5,6 +5,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from test_runtime_support import bind_sqlite_database, install_test_environment
 
@@ -169,6 +170,43 @@ class ReminderDeliveryTests(unittest.TestCase):
         asyncio.run(self.delivery.deliver_claimed(first, sender, self.now))
         self.assertIsNone(self.delivery.claim_next("worker-2", self.now))
         self.assertEqual(len(sent), 1)
+
+    def test_friday_with_clock_creates_immediately(self):
+        from brain.executive_brain import classify_message
+        decision = classify_message("Atgādini piektdien 7.00 sarēķināt algu")
+        self.assertTrue(decision.create_reminder)
+        self.assertFalse(decision.needs_clarification)
+
+    def test_clarification_preserves_original_action_and_whatsapp_recipient(self):
+        from nina_message_service import send_message_to_nina
+        first = send_message_to_nina(
+            "piektdien atgādini man ka jāsarēķina Kristapam alga pa jumtu",
+            workspace_id="tenant-a", channel="whatsapp_company",
+            conversation_id="whatsapp:contact-a", contact_id="contact-a",
+            canonical_work_workspace_id="tenant-a", delivery_recipient="37120000000@s.whatsapp.net",
+        )
+        self.assertTrue(first["decision"]["needs_clarification"])
+        second = send_message_to_nina(
+            "Piektdien 7.00 no rīta, bļāviens",
+            workspace_id="tenant-a", channel="whatsapp_company",
+            conversation_id="whatsapp:contact-a", contact_id="contact-a",
+            canonical_work_workspace_id="tenant-a", delivery_recipient="37120000000@s.whatsapp.net",
+        )
+        self.assertEqual(second["source"],"shared_work")
+        obj=self.work.list_work_objects(workspace_id="tenant-a")[0]
+        self.assertEqual(obj.title,"Sarēķināt Kristapam algu par jumtu")
+        self.assertEqual(obj.metadata["whatsapp_recipient_jid"],"37120000000@s.whatsapp.net")
+        self.assertNotIn("bļāviens",obj.title.casefold())
+
+    def test_next_friday_uses_riga_now_and_rolls_after_seven(self):
+        from task_engine import detect_reminder_schedule
+        riga=ZoneInfo("Europe/Riga")
+        before=datetime(2026,8,7,6,30,tzinfo=riga)
+        after=datetime(2026,8,7,7,30,tzinfo=riga)
+        same=detect_reminder_schedule("Atgādini piektdien 7.00 pārbaudīt",now=before,reminder_requested=True)
+        following=detect_reminder_schedule("Atgādini piektdien 7.00 pārbaudīt",now=after,reminder_requested=True)
+        self.assertEqual(same["reminder_at"],"2026-08-07T07:00+03:00")
+        self.assertEqual(following["reminder_at"],"2026-08-14T07:00+03:00")
 
     def test_restart_recovers_stale_claim_and_overdue(self):
         stale = (self.now - timedelta(minutes=10)).isoformat(timespec="seconds")

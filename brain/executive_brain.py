@@ -69,6 +69,15 @@ def _has_clock_or_date(value: str) -> bool:
     )
 
 
+def _has_reminder_time(value: str) -> bool:
+    """A day alone is not a delivery time; relative durations are complete."""
+    return bool(
+        re.search(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", value)
+        or re.search(r"\b\d{4}-\d{2}-\d{2}[ t](?:[01]?\d|2[0-3])[:.]\d{2}\b", value)
+        or re.search(r"\bp(?:ē|e)c\s+(?:(?:\d+|vienas?|div(?:ā|a)m?|tr(?:ī|i)m?)\s+)?(?:stund|min)", value)
+    )
+
+
 def _starts_with_time(value: str) -> bool:
     return bool(
         re.match(
@@ -114,7 +123,7 @@ def classify_message(message: str) -> Decision:
     follow_up = any(marker in value for marker in _FOLLOW_UP_MARKERS)
     high = any(marker in value for marker in _HIGH_PRIORITY_MARKERS)
 
-    if reminder and not has_time:
+    if reminder and not _has_reminder_time(value):
         return Decision(
             reply_required=True, remember=remember,
             create_work_object=True, create_reminder=True,
