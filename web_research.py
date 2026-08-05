@@ -94,7 +94,11 @@ def _clean_number(value):
 
 def build_search_plan(user_text, previous_intent=None):
     text = re.sub(r"\s+", " ", str(user_text or "")).strip()
-    folded = text.casefold()
+    # A human smoke-test marker is transport metadata, not a public-search
+    # concept. Keep the original message in conversation history, but do not
+    # require external pages to contain this terminal marker.
+    search_text = re.sub(r"\s+TESTS?\s+JAUNS\s*$", "", text, flags=re.I).strip()
+    folded = search_text.casefold()
     previous = dict(previous_intent or {})
     filters = dict(previous.get("filters") or {})
     is_followup = bool(previous) and any(x in folded for x in ("rādi tikai", "radi tikai", "izmet", "salīdzini", "salidzini", "kurš", "kurs"))
@@ -113,7 +117,7 @@ def build_search_plan(user_text, previous_intent=None):
         target_domains = (explicit_domain,) if explicit_domain else ()
         return SearchIntent(
             search_type="PRODUCT_SEARCH" if any(x in folded for x in ("lētas", "letas", "cena", "price", "buy", "pirkt")) else "GENERAL_WEB_RESEARCH",
-            query=text, target_domains=target_domains, category="public_web",
+            query=search_text, target_domains=target_domains, category="public_web",
             required_fields=("source_url", "source_domain", "page_title", "fetched_at"),
             preferred_fields=("extracted_snippet",), max_results=5,
             language="lv", confidence=.9,
@@ -148,7 +152,7 @@ def build_search_plan(user_text, previous_intent=None):
     missing = tuple(x for x in ("make", "model") if not filters.get(x))
     confidence = .94 if not missing else .62
     return SearchIntent(
-        search_type="VEHICLE_SEARCH", query=text,
+        search_type="VEHICLE_SEARCH", query=search_text,
         target_domains=("www.ss.lv",), category="vehicles",
         filters=filters,
         required_fields=("title", "source_url", "price", "year"),

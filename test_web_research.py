@@ -384,6 +384,7 @@ class WebResearchTests(unittest.TestCase):
 
     def test_provider_retries_one_transient_empty_result_without_relaxing_domain(self):
         intent=self.research.build_search_plan("Atrodi BMW X3 reklama.lv TESTS JAUNS")
+        self.assertEqual(intent.query,"Atrodi BMW X3 reklama.lv")
         calls=[]
         def provider(actual_intent):
             calls.append(actual_intent.target_domains)
