@@ -47,6 +47,12 @@ RESULT_IRRELEVANT = "IRRELEVANT"
 RESULT_UNAVAILABLE = "UNAVAILABLE"
 RESULT_BLOCKED = "BLOCKED"
 USER_AGENT = "NinaOS-PublicResearch/1.0 (+controlled user-requested fetch)"
+DOMAIN_ALIASES = {
+    "alibaba": "alibaba.com",
+    "reklama": "reklama.lv",
+    "ss.lv": "ss.lv",
+    "ss.com": "ss.com",
+}
 CONTACT_BULK_PATTERN = re.compile(r"(?:\+?\d[\d\s().-]{7,}\d|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,})")
 _RATE_LOCK = threading.Lock()
 _LAST_FETCH = {}
@@ -94,6 +100,11 @@ def build_search_plan(user_text, previous_intent=None):
     is_followup = bool(previous) and any(x in folded for x in ("rādi tikai", "radi tikai", "izmet", "salīdzini", "salidzini", "kurš", "kurs"))
     domain_match = re.search(r"(?<![\w.-])(?:https?://)?(?:www\.)?([a-z0-9](?:[a-z0-9-]{0,62})(?:\.[a-z0-9](?:[a-z0-9-]{0,62}))+)(?![\w.-])", folded)
     explicit_domain = domain_match.group(1) if domain_match else ""
+    if not explicit_domain:
+        explicit_domain = next(
+            (domain for alias, domain in DOMAIN_ALIASES.items() if re.search(r"(?<![\w.-])" + re.escape(alias) + r"(?![\w.-])", folded)),
+            "",
+        )
     vehicle_signal = any(x in folded for x in ("ss.lv", "ss.com", "auto", "bmw", "audi", "volvo", "mercedes", "toyota", "volkswagen"))
     search_signal = any(x in folded for x in ("atrodi", "meklē", "mekle", "search", "find")) or is_followup
     if not search_signal:
@@ -557,6 +568,7 @@ def _query_term_groups(intent):
     ignored = {
         "atrodi", "mekle", "meklē", "find", "search", "letas", "lētas", "cena",
         "price", "buy", "pirkt", "com", "www", "no", "lidz", "līdz", "gada",
+        "latvijā", "latvija", "latvia",
     }
     domain_parts = {part for domain in intent.target_domains for part in domain.split(".")}
     terms = [
@@ -570,6 +582,10 @@ def _query_term_groups(intent):
             equivalents.update(("candle", "candles"))
         if term.startswith("aromāt") or term.startswith("aromat"):
             equivalents.update(("aromatic", "scented", "fragrance"))
+        if term.startswith("urb"):
+            equivalents.update(("drill", "drills"))
+        if term.startswith("putekļ") or term.startswith("putekl"):
+            equivalents.update(("vacuum", "cleaner", "hoover"))
         groups.append(equivalents)
     return groups
 
@@ -592,17 +608,17 @@ def classify_public_page(intent, candidate, page):
     if any(marker in folded[:5000] for marker in ("captcha", "sign in to continue", "type=\"password\"")):
         return RESULT_BLOCKED, "access_challenge"
     term_groups = _query_term_groups(intent)
+    search_path = any(token in path for token in ("/search", "/category", "/catalog", "/products", "/wholesale", "/trade/"))
+    product_path = any(token in path for token in ("/product-detail", "/product/", "/item/", "/offer/", "/p/"))
     evidence = (
         title_folded + " " + parse.unquote(path).replace("-", "_")
-        if intent.search_type == "PRODUCT_SEARCH"
+        if intent.search_type == "PRODUCT_SEARCH" or search_path or product_path
         else title_folded + " " + folded[:20000]
     )
     if term_groups and any(not any(term in evidence for term in group) for group in term_groups):
         return RESULT_IRRELEVANT, "query_terms_absent"
     if intent.search_type == "PRODUCT_SEARCH":
         blog_path = any(token in path for token in ("/blog/", "/blogs/", "/article/", "/news/", "/guide"))
-        search_path = any(token in path for token in ("/search", "/category", "/catalog", "/products", "/wholesale"))
-        product_path = any(token in path for token in ("/product-detail", "/product/", "/item/", "/offer/"))
         if blog_path:
             return RESULT_IRRELEVANT, "product_query_blog_page"
         if product_path:
@@ -610,6 +626,10 @@ def classify_public_page(intent, candidate, page):
         if search_path:
             return SEARCH_PAGE_VERIFIED, "search_or_category_page"
         return RESULT_IRRELEVANT, "not_product_or_search_page"
+    if product_path:
+        return RESULT_VERIFIED, "product_page"
+    if search_path:
+        return SEARCH_PAGE_VERIFIED, "search_or_category_page"
     return RESULT_VERIFIED, "relevant_public_page"
 
 

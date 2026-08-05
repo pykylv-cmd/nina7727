@@ -382,6 +382,52 @@ class WebResearchTests(unittest.TestCase):
         self.assertEqual(len(results),1)
         self.assertEqual(self.research.configured_search_providers({}),[])
 
+    def test_explicit_reklama_domain_never_routes_to_ss(self):
+        intent=self.research.build_search_plan("Atrodi BMW X3 reklama.lv")
+        self.assertEqual(intent.target_domains,("reklama.lv",))
+        self.assertEqual(intent.search_type,"GENERAL_WEB_RESEARCH")
+        self.assertNotIn("ss.lv",str(intent))
+        payload=self.research.search_public_web(
+            intent,
+            search_provider=lambda _intent:[
+                {"url":"https://www.ss.lv/lv/transport/cars/bmw/x3/"},
+                {"url":"https://reklama.lv/search/bmw-x3"},
+            ],
+            fetcher=lambda url,**_kwargs:{"url":url,"title":"BMW X3","html":"<h1>BMW X3</h1>"},
+        )
+        self.assertEqual(payload["results"],[])
+        self.assertEqual([item["source_url"] for item in payload["verified_search_pages"]],["https://reklama.lv/search/bmw-x3"])
+        self.assertNotIn("ss.lv",self.research.summarize_sources(payload))
+
+    def test_alibaba_alias_is_an_exact_domain_constraint(self):
+        intent=self.research.build_search_plan("Atrodi Samsung S24 Alibaba")
+        self.assertEqual(intent.target_domains,("alibaba.com",))
+        payload=self.research.search_public_web(
+            intent,
+            search_provider=lambda _intent:[
+                {"url":"https://example.com/product/samsung-s24"},
+                {"url":"https://www.alibaba.com/product-detail/samsung-s24.html"},
+            ],
+            fetcher=lambda url,**_kwargs:{"url":url,"title":"Samsung S24","html":"<h1>Samsung S24</h1>"},
+        )
+        self.assertEqual([item["source_domain"] for item in payload["results"]],["www.alibaba.com"])
+
+    def test_domainless_products_accept_verified_product_and_search_pages(self):
+        cases=(
+            ("Atrodi Bosch urbi Latvijā","https://shop.example/search/bosch-drill",self.research.SEARCH_PAGE_VERIFIED),
+            ("Atrodi Dyson putekļsūcēju","https://shop.example/product/dyson-vacuum",self.research.RESULT_VERIFIED),
+        )
+        for query,url,status in cases:
+            with self.subTest(query=query):
+                intent=self.research.build_search_plan(query)
+                payload=self.research.search_public_web(
+                    intent,search_provider=lambda _intent,u=url:[{"url":u}],
+                    fetcher=lambda candidate,**_kwargs:{"url":candidate,"title":candidate.rsplit("/",1)[-1].replace("-"," "),"html":"<h1>verified</h1>"},
+                )
+                combined=payload["results"]+payload["verified_search_pages"]
+                self.assertEqual(len(combined),1)
+                self.assertEqual(combined[0]["result_status"],status)
+
     def test_product_blog_rejected_and_search_page_allowed(self):
         intent=self.research.build_search_plan("Atrodi Alibaba.com lētas aromātiskās sveces")
         candidates=[
