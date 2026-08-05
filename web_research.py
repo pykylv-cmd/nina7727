@@ -540,13 +540,17 @@ def provider_search(intent, providers=None):
         raise WebResearchError("search_provider_not_configured")
     failures = []
     for provider_name, provider in providers:
-        try:
-            candidates = provider(intent) or []
-        except Exception as exc:
-            failures.append({"provider": provider_name, "error": type(exc).__name__})
-            continue
-        if candidates:
-            return candidates, provider_name, failures
+        # Public search can occasionally return an empty citation set for an
+        # otherwise identical domain-scoped request. Retry that empty response
+        # once; URL/domain verification below remains fully fail-closed.
+        for attempt in range(2):
+            try:
+                candidates = provider(intent) or []
+            except Exception as exc:
+                failures.append({"provider": provider_name, "error": type(exc).__name__})
+                break
+            if candidates:
+                return candidates, provider_name, failures
     return [], providers[-1][0], failures
 
 

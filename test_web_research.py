@@ -378,9 +378,32 @@ class WebResearchTests(unittest.TestCase):
             ("second",lambda _intent:(calls.append("second") or [{"url":"https://www.alibaba.com/product-detail/candle.html"}])),
         ]
         results,name,failures=self.research.provider_search(intent,providers=providers)
-        self.assertEqual((calls,name,failures),(["first","second"],"second",[]))
+        self.assertEqual((calls,name,failures),(["first","first","second"],"second",[]))
         self.assertEqual(len(results),1)
         self.assertEqual(self.research.configured_search_providers({}),[])
+
+    def test_provider_retries_one_transient_empty_result_without_relaxing_domain(self):
+        intent=self.research.build_search_plan("Atrodi BMW X3 reklama.lv TESTS JAUNS")
+        calls=[]
+        def provider(actual_intent):
+            calls.append(actual_intent.target_domains)
+            if len(calls) == 1:
+                return []
+            return [{"url":"https://reklama.lv/transport/bmw-x3","provider":"test"}]
+        results,name,failures=self.research.provider_search(intent,providers=[("test",provider)])
+        self.assertEqual(calls,[("reklama.lv",),("reklama.lv",)])
+        self.assertEqual([item["url"] for item in results],["https://reklama.lv/transport/bmw-x3"])
+        self.assertEqual((name,failures),("test",[]))
+
+    def test_provider_stops_after_two_empty_domain_scoped_attempts(self):
+        intent=self.research.build_search_plan("Atrodi BMW X3 reklama.lv TESTS JAUNS")
+        calls=[]
+        results,name,failures=self.research.provider_search(
+            intent,
+            providers=[("test",lambda actual:(calls.append(actual.target_domains) or []))],
+        )
+        self.assertEqual(calls,[("reklama.lv",),("reklama.lv",)])
+        self.assertEqual((results,name,failures),([],"test",[]))
 
     def test_explicit_reklama_domain_never_routes_to_ss(self):
         intent=self.research.build_search_plan("Atrodi BMW X3 reklama.lv")
