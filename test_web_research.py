@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib import error
 
@@ -171,7 +172,7 @@ class WebResearchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"research_session_not_found"): self.research.get_research_session("b","one",sid)
 
     def test_ssrf_localhost_private_and_unsupported_domain_blocked(self):
-        with self.assertRaisesRegex(ValueError,"unsupported_domain"): self.research.validate_public_url("https://example.com/")
+        with self.assertRaisesRegex(ValueError,"unsupported_domain"): self.research.validate_public_url("https://example.com/",allowed_domains=("ss.lv",))
         for address in ("127.0.0.1","10.1.2.3","169.254.169.254","::1"):
             with self.subTest(address=address), self.assertRaisesRegex(ValueError,"ssrf_address_blocked"):
                 self.research.validate_public_url("https://www.ss.lv/",resolver=lambda *_a,addr=address,**_k:[(2,1,6,"",(addr,443))])
@@ -314,6 +315,120 @@ class WebResearchTests(unittest.TestCase):
         self.assertEqual(len(payload["results"]),1)
         self.assertEqual(payload["results"][0]["source_url"],"https://www.ss.lv/msg/lv/transport/cars/bmw/x5/valid.html")
         self.assertEqual((payload["results"][0]["price"],payload["results"][0]["year"],payload["results"][0]["mileage"]),(17490,2019,151000))
+
+    def test_generic_provider_uses_only_url_citations_and_exact_domain(self):
+        annotations=[
+            SimpleNamespace(type="url_citation",url="https://www.alibaba.com/product-detail/candle-a.html",title="Candle A"),
+            SimpleNamespace(type="url_citation",url="https://www.alibaba.com/product-detail/candle-b.html",title="Candle B"),
+        ]
+        response=SimpleNamespace(output=[SimpleNamespace(content=[SimpleNamespace(annotations=annotations,text="Invented 1 EUR product https://fake.example/")])])
+        calls=[]
+        client=SimpleNamespace(responses=SimpleNamespace(create=lambda **kwargs:(calls.append(kwargs) or response)))
+        intent=self.research.build_search_plan("Atrodi Alibaba.com lētas aromātiskās sveces")
+        results=self.research.openai_web_search_provider(intent,client=client)
+        self.assertEqual(intent.target_domains,("alibaba.com",))
+        self.assertEqual([item["url"] for item in results],[annotation.url for annotation in annotations])
+        self.assertNotIn("filters",calls[0]["tools"][0])
+        self.assertIn("site:alibaba.com",calls[0]["input"])
+        self.assertNotIn("fake.example",str(results))
+        self.assertNotIn("1 EUR",str(results))
+
+    def test_generic_verified_fetch_and_honest_empty_result(self):
+        intent=self.research.build_search_plan("Atrodi Alibaba.com lētas aromātiskās sveces")
+        provider=lambda _intent:[
+            {"url":"https://www.alibaba.com/product-detail/a.html","provider":"fake_search"},
+            {"url":"https://www.alibaba.com/product-detail/b.html","provider":"fake_search"},
+        ]
+        def fetcher(url,**_kwargs):
+            return {"url":url,"title":"Aromātiskās sveces","html":"<meta name='description' content='Aromātiskās sveces from HTML'>","fetched_at":"2026-08-05T10:00:00+00:00"}
+        payload=self.research.search_public_web(intent,search_provider=provider,fetcher=fetcher)
+        self.assertEqual(len(self.research.verified_results(payload)),2)
+        self.assertTrue(all(item["extracted_snippet"] == "Aromātiskās sveces from HTML" for item in payload["results"]))
+        empty=self.research.search_public_web(intent,search_provider=lambda _intent:[],fetcher=fetcher)
+        self.assertIn("Negribu tev izdomāt",self.research.summarize_sources(empty))
+        unreadable=self.research.search_public_web(intent,search_provider=provider,fetcher=lambda *_args,**_kwargs:(_ for _ in ()).throw(self.research.WebResearchError("robots_disallowed")))
+        self.assertEqual(unreadable["results"],[])
+        self.assertNotIn("product",self.research.summarize_sources(unreadable).casefold())
+
+    def test_generic_domain_is_preserved_and_persisted_links_are_verified_only(self):
+        intent=self.research.build_search_plan("Atrodi reklama.lv drukas pakalpojumus")
+        self.assertEqual(intent.target_domains,("reklama.lv",))
+        self.assertNotIn("latvijasreklama",str(intent))
+        missing=self.research.build_search_plan("Atrodi neeksistejosais-tests.invalid preci")
+        payload=self.research.search_public_web(missing,search_provider=lambda _intent:[],fetcher=lambda *_args,**_kwargs:None)
+        self.assertEqual(payload["results"],[])
+        self.assertNotIn("https://",self.research.summarize_sources(payload))
+        verified_intent=self.research.build_search_plan("Atrodi reklama.lv drukas pakalpojumus")
+        verified=self.research.search_public_web(
+            verified_intent,
+            search_provider=lambda _intent:[{"url":"https://reklama.lv/pakalpojums","provider":"fake_search"}],
+            fetcher=lambda url,**_kwargs:{"url":url,"title":"Reklāma","html":"<p>Drukas pakalpojums</p>","fetched_at":"2026-08-05T10:00:00+00:00"},
+        )
+        self.research.save_research_session("generic","contact","conversation",verified)
+        persisted=self.research.latest_research_session("generic","contact","conversation")
+        links=self.research.summarize_verified_links(persisted)
+        self.assertIn("https://reklama.lv/pakalpojums",links)
+        self.assertNotIn("latvijasreklama",links)
+
+    def test_provider_abstraction_uses_only_configured_fallbacks(self):
+        intent=self.research.build_search_plan("Atrodi Alibaba.com lētas aromātiskās sveces")
+        calls=[]
+        providers=[
+            ("first",lambda _intent:(calls.append("first") or [])),
+            ("second",lambda _intent:(calls.append("second") or [{"url":"https://www.alibaba.com/product-detail/candle.html"}])),
+        ]
+        results,name,failures=self.research.provider_search(intent,providers=providers)
+        self.assertEqual((calls,name,failures),(["first","second"],"second",[]))
+        self.assertEqual(len(results),1)
+        self.assertEqual(self.research.configured_search_providers({}),[])
+
+    def test_product_blog_rejected_and_search_page_allowed(self):
+        intent=self.research.build_search_plan("Atrodi Alibaba.com lētas aromātiskās sveces")
+        candidates=[
+            {"url":"https://seller.alibaba.com/blogs/candle-guide","provider":"test"},
+            {"url":"https://www.alibaba.com/trade/search?SearchText=scented+candles","provider":"test"},
+        ]
+        def fetcher(url,**_kwargs):
+            return {"url":url,"title":"Scented candles","html":"<h1>Aromātiskās sveces</h1>","fetched_at":"2026-08-05T10:00:00+00:00"}
+        payload=self.research.search_public_web(intent,search_provider=lambda _intent:candidates,fetcher=fetcher)
+        self.assertEqual(payload["results"],[])
+        self.assertEqual(len(payload["verified_search_pages"]),1)
+        self.assertEqual(payload["rejected_results"][0]["reason"],"product_query_blog_page")
+        rendered=self.research.summarize_sources(payload)
+        self.assertIn("verificēta meklēšanas lapa",rendered)
+        self.assertNotIn("piedāvājumi.\n",rendered)
+        self.assertIn("https://www.alibaba.com/trade/search",self.research.summarize_verified_links(payload))
+
+    def test_irrelevant_provider_url_and_not_found_fail_closed(self):
+        intent=self.research.build_search_plan("Atrodi reklama.lv BMW X5")
+        candidates=[
+            {"url":"https://latvijasreklama.lv/bmw-x5","provider":"test"},
+            {"url":"https://reklama.lv/other","provider":"test"},
+            {"url":"https://reklama.lv/bmw-x5","provider":"test"},
+        ]
+        def fetcher(url,**_kwargs):
+            if url.endswith("/other"):
+                return {"url":url,"title":"Cits saturs","html":"<p>Printeru remonts</p>"}
+            return {"url":url,"title":"Page not found","html":"<h1>404 Page not found</h1>"}
+        payload=self.research.search_public_web(intent,search_provider=lambda _intent:candidates,fetcher=fetcher)
+        self.assertEqual(payload["results"],[])
+        self.assertEqual({item["reason"] for item in payload["rejected_results"]},{"domain_or_url_rejected","query_terms_absent","not_found"})
+        summary=self.research.summarize_sources(payload)
+        self.assertIn("reklama.lv",summary)
+        self.assertNotIn("latvijasreklama.lv",summary)
+
+    def test_verified_product_is_persisted_deduped_and_llm_cannot_extend_it(self):
+        intent=self.research.build_search_plan("Atrodi Alibaba.com lētas aromātiskās sveces")
+        url="https://www.alibaba.com/product-detail/scented-candle.html"
+        fetcher=lambda candidate,**_kwargs:{"url":candidate,"title":"Aromātiskās sveces","html":"<h1>Lētas aromātiskās sveces</h1>","fetched_at":"2026-08-05T10:00:00+00:00"}
+        payload=self.research.search_public_web(intent,search_provider=lambda _intent:[{"url":url},{"url":url}],fetcher=fetcher)
+        self.assertEqual(len(payload["results"]),1)
+        payload["results"].append(dict(payload["results"][0],source_url="https://fake.example/product",page_title="LLM product 1 EUR"))
+        self.assertEqual([item["source_url"] for item in self.research.verified_results(payload)],[url])
+        self.research.save_research_session("generic2","contact","conversation",payload)
+        links=self.research.summarize_verified_links(self.research.latest_research_session("generic2","contact","conversation"))
+        self.assertIn(url,links)
+        self.assertNotIn("fake.example",links)
 
 
 if __name__ == "__main__": unittest.main()

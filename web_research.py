@@ -13,6 +13,7 @@ from html.parser import HTMLParser
 import hashlib
 import ipaddress
 import json
+import os
 import re
 import secrets
 import socket
@@ -40,6 +41,11 @@ MAX_RESPONSE_BYTES = 1_000_000
 FETCH_TIMEOUT_SECONDS = 8
 MAX_REDIRECTS = 3
 MAX_LISTING_URL_VERIFICATIONS = 5
+RESULT_VERIFIED = "VERIFIED_RESULT"
+SEARCH_PAGE_VERIFIED = "VERIFIED_SEARCH_PAGE"
+RESULT_IRRELEVANT = "IRRELEVANT"
+RESULT_UNAVAILABLE = "UNAVAILABLE"
+RESULT_BLOCKED = "BLOCKED"
 USER_AGENT = "NinaOS-PublicResearch/1.0 (+controlled user-requested fetch)"
 CONTACT_BULK_PATTERN = re.compile(r"(?:\+?\d[\d\s().-]{7,}\d|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,})")
 _RATE_LOCK = threading.Lock()
@@ -86,10 +92,21 @@ def build_search_plan(user_text, previous_intent=None):
     previous = dict(previous_intent or {})
     filters = dict(previous.get("filters") or {})
     is_followup = bool(previous) and any(x in folded for x in ("rādi tikai", "radi tikai", "izmet", "salīdzini", "salidzini", "kurš", "kurs"))
+    domain_match = re.search(r"(?<![\w.-])(?:https?://)?(?:www\.)?([a-z0-9](?:[a-z0-9-]{0,62})(?:\.[a-z0-9](?:[a-z0-9-]{0,62}))+)(?![\w.-])", folded)
+    explicit_domain = domain_match.group(1) if domain_match else ""
     vehicle_signal = any(x in folded for x in ("ss.lv", "ss.com", "auto", "bmw", "audi", "volvo", "mercedes", "toyota", "volkswagen"))
     search_signal = any(x in folded for x in ("atrodi", "meklē", "mekle", "search", "find")) or is_followup
-    if not ((vehicle_signal or is_followup) and search_signal):
+    if not search_signal:
         return None
+    if (explicit_domain and explicit_domain not in {"ss.lv", "ss.com"}) or not (vehicle_signal or is_followup):
+        target_domains = (explicit_domain,) if explicit_domain else ()
+        return SearchIntent(
+            search_type="PRODUCT_SEARCH" if any(x in folded for x in ("lētas", "letas", "cena", "price", "buy", "pirkt")) else "GENERAL_WEB_RESEARCH",
+            query=text, target_domains=target_domains, category="public_web",
+            required_fields=("source_url", "source_domain", "page_title", "fetched_at"),
+            preferred_fields=("extracted_snippet",), max_results=5,
+            language="lv", confidence=.9,
+        )
     make_model = re.search(r"\b(BMW|Audi|Volvo|Mercedes(?:-Benz)?|Toyota|Volkswagen|VW)\s+([A-Za-z0-9-]{1,16})\b", text, re.I)
     if make_model:
         filters["make"] = make_model.group(1).upper().replace("MERCEDES-BENZ", "MERCEDES")
@@ -144,11 +161,17 @@ def _host_allowed(host):
     return host in DOMAIN_POLICY
 
 
-def validate_public_url(url, resolver=socket.getaddrinfo):
+def _matches_allowed_domain(host, allowed_domains=()):
+    host = str(host or "").lower().rstrip(".")
+    allowed = tuple(str(value or "").lower().rstrip(".") for value in allowed_domains if value)
+    return not allowed or any(host == domain or host.endswith("." + domain) for domain in allowed)
+
+
+def validate_public_url(url, resolver=socket.getaddrinfo, allowed_domains=()):
     parsed = parse.urlsplit(str(url or ""))
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
         raise WebResearchError("public_url_invalid")
-    if not _host_allowed(parsed.hostname):
+    if not re.fullmatch(r"[a-z0-9.-]+", parsed.hostname, re.I) or not _matches_allowed_domain(parsed.hostname, allowed_domains):
         raise WebResearchError("unsupported_domain")
     if parsed.port not in (None, 443):
         raise WebResearchError("public_url_port_blocked")
@@ -190,8 +213,8 @@ def _robots_allowed(url, opener, timeout):
 
 def fetch_public_page(url, *, timeout=FETCH_TIMEOUT_SECONDS, max_bytes=MAX_RESPONSE_BYTES,
                       max_redirects=MAX_REDIRECTS, opener=None, resolver=socket.getaddrinfo,
-                      enforce_robots=True):
-    current = validate_public_url(url, resolver=resolver)
+                      enforce_robots=True, allowed_domains=()):
+    current = validate_public_url(url, resolver=resolver, allowed_domains=allowed_domains)
     opener = opener or request.build_opener(_NoRedirect())
     if enforce_robots and not _robots_allowed(current, opener, timeout):
         raise WebResearchError("robots_disallowed")
@@ -209,7 +232,7 @@ def fetch_public_page(url, *, timeout=FETCH_TIMEOUT_SECONDS, max_bytes=MAX_RESPO
                 if redirect_count >= max_redirects:
                     raise WebResearchError("redirect_limit_exceeded")
                 location = exc.headers.get("Location") or ""
-                current = validate_public_url(parse.urljoin(current, location), resolver=resolver)
+                current = validate_public_url(parse.urljoin(current, location), resolver=resolver, allowed_domains=allowed_domains)
                 continue
             raise WebResearchError(f"source_http_{exc.code}") from exc
         content_type = (response.headers.get("Content-Type") or "").split(";", 1)[0].lower()
@@ -306,9 +329,20 @@ def extract_ss_listing_hrefs(html, base_url):
     return list(unique.values())
 
 
+def _canonical_result_url(item):
+    provenance = item.get("source_url_provenance")
+    if provenance == "parsed_html":
+        return _ss_listing_url(item.get("source_url"), item.get("source_url"))
+    if provenance == "search_provider":
+        parsed = parse.urlsplit(str(item.get("source_url") or ""))
+        if parsed.scheme == "https" and parsed.hostname and not parsed.username and not parsed.password:
+            return parse.urlunsplit(("https", parsed.netloc.lower(), parsed.path or "/", parsed.query, ""))
+    return None
+
+
 def _verified_result_id(item):
     """Bind a verified result to its parser-provided URL and structured fields."""
-    canonical_url = _ss_listing_url(item.get("source_url"), item.get("source_url"))
+    canonical_url = _canonical_result_url(item)
     if not canonical_url:
         return ""
     fields = {
@@ -317,6 +351,8 @@ def _verified_result_id(item):
             "result_id", "title", "make", "model", "year", "price", "currency",
             "mileage", "fuel", "transmission", "engine", "body_type", "location",
             "published_at", "seller_type", "description_summary",
+            "source_domain", "page_title", "fetched_at", "extracted_snippet", "provider",
+            "result_status",
         )
     }
     fields["source_url"] = canonical_url
@@ -329,11 +365,11 @@ def verified_results(payload):
     unique = {}
     for raw in (payload or {}).get("results") or ():
         item = dict(raw)
-        canonical_url = _ss_listing_url(item.get("source_url"), item.get("source_url"))
+        canonical_url = _canonical_result_url(item)
         expected_id = _verified_result_id(item)
         if (
             not canonical_url
-            or item.get("source_url_provenance") != "parsed_html"
+            or item.get("source_url_provenance") not in {"parsed_html", "search_provider"}
             or item.get("source_url_verified") is not True
             or item.get("verified_result_id") != expected_id
         ):
@@ -438,6 +474,189 @@ def compare_results(results, selected_ids=None):
     }
 
 
+def _object_value(value, key, default=None):
+    return value.get(key, default) if isinstance(value, dict) else getattr(value, key, default)
+
+
+def openai_web_search_provider(intent, client=None):
+    """Return only URL citations emitted by OpenAI's public web search tool."""
+    if client is None:
+        api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+        if not api_key:
+            raise WebResearchError("search_provider_not_configured")
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+    tool = {"type": "web_search", "search_context_size": "medium"}
+    provider_query = intent.query
+    if intent.target_domains:
+        provider_query += " " + " ".join("site:" + domain for domain in intent.target_domains)
+    response = client.responses.create(
+        model="gpt-4.1-mini", tools=[tool], store=False,
+        input="Find up to five distinct public source pages for this exact query. Prefer direct result or product pages. Cite every source and do not invent examples: " + provider_query,
+    )
+    unique = {}
+    for output in _object_value(response, "output", ()) or ():
+        for content in _object_value(output, "content", ()) or ():
+            for annotation in _object_value(content, "annotations", ()) or ():
+                if _object_value(annotation, "type") != "url_citation":
+                    continue
+                raw_url = str(_object_value(annotation, "url", "") or "").strip()
+                parsed = parse.urlsplit(raw_url)
+                if parsed.scheme != "https" or not parsed.hostname or not _matches_allowed_domain(parsed.hostname, intent.target_domains):
+                    continue
+                canonical = parse.urlunsplit(("https", parsed.netloc.lower(), parsed.path or "/", parsed.query, ""))
+                unique.setdefault(canonical, {
+                    "url": canonical,
+                    "provider_title": str(_object_value(annotation, "title", "") or "")[:240],
+                    "provider": "openai_web_search",
+                })
+    return list(unique.values())[:min(MAX_RESULTS_HARD, max(1, int(intent.max_results)))]
+
+
+def configured_search_providers(environ=None):
+    """Return only public-search providers already configured in this runtime."""
+    environ = os.environ if environ is None else environ
+    providers = []
+    if str(environ.get("OPENAI_API_KEY") or "").strip():
+        providers.append(("openai_web_search", openai_web_search_provider))
+    return providers
+
+
+def provider_search(intent, providers=None):
+    """Try configured providers in order and retain only their literal URL results."""
+    providers = configured_search_providers() if providers is None else list(providers)
+    if not providers:
+        raise WebResearchError("search_provider_not_configured")
+    failures = []
+    for provider_name, provider in providers:
+        try:
+            candidates = provider(intent) or []
+        except Exception as exc:
+            failures.append({"provider": provider_name, "error": type(exc).__name__})
+            continue
+        if candidates:
+            return candidates, provider_name, failures
+    return [], providers[-1][0], failures
+
+
+def _generic_page_facts(page):
+    html = str((page or {}).get("html") or "")
+    description = re.search(r"<meta\b[^>]*name=[\"']description[\"'][^>]*content=[\"']([^\"']*)", html, re.I)
+    if not description:
+        description = re.search(r"<meta\b[^>]*content=[\"']([^\"']*)[\"'][^>]*name=[\"']description[\"']", html, re.I)
+    cleaned = re.sub(r"<(?:script|style|noscript)\b[^>]*>.*?</(?:script|style|noscript)>", " ", html, flags=re.I | re.S)
+    snippet = _redact_contacts(_plain(description.group(1) if description else cleaned))[:600]
+    return {
+        "page_title": _redact_contacts((page or {}).get("title") or "unknown")[:240] or "unknown",
+        "extracted_snippet": snippet or "unknown",
+        "fetched_at": (page or {}).get("fetched_at") or _now(),
+    }
+
+
+def _query_terms(intent):
+    ignored = {
+        "atrodi", "mekle", "meklē", "find", "search", "letas", "lētas", "cena",
+        "price", "buy", "pirkt", "com", "www", "no", "lidz", "līdz", "gada",
+    }
+    domain_parts = {part for domain in intent.target_domains for part in domain.split(".")}
+    terms = {
+        term for term in re.findall(r"[a-zāčēģīķļņōŗšūž0-9]{3,}", intent.query.casefold())
+        if term not in ignored and term not in domain_parts
+    }
+    expansions = set(terms)
+    for term in terms:
+        if term.startswith("svec"):
+            expansions.update(("candle", "candles"))
+        if term.startswith("aromāt") or term.startswith("aromat"):
+            expansions.update(("aromatic", "scented", "fragrance"))
+    return expansions
+
+
+def classify_public_page(intent, candidate, page):
+    """Classify fetched evidence without deriving claims from provider or LLM prose."""
+    html = str((page or {}).get("html") or "")
+    title = str((page or {}).get("title") or "")
+    url = str((page or {}).get("url") or candidate.get("url") or "")
+    folded = _plain(html).casefold()
+    title_folded = title.casefold()
+    path = parse.urlsplit(url).path.casefold()
+    if not html.strip():
+        return RESULT_UNAVAILABLE, "empty_page"
+    if any(marker in (title_folded + " " + folded[:5000]) for marker in (
+        "not found", "page not found", "404 error", "sludinājums nav atrasts",
+        "lapa nav atrasta", "does not exist",
+    )):
+        return RESULT_UNAVAILABLE, "not_found"
+    if any(marker in folded[:5000] for marker in ("captcha", "sign in to continue", "type=\"password\"")):
+        return RESULT_BLOCKED, "access_challenge"
+    terms = _query_terms(intent)
+    evidence = (title_folded + " " + folded[:20000])
+    matched = {term for term in terms if term in evidence}
+    if terms and not matched:
+        return RESULT_IRRELEVANT, "query_terms_absent"
+    if intent.search_type == "PRODUCT_SEARCH":
+        blog_path = any(token in path for token in ("/blog/", "/blogs/", "/article/", "/news/", "/guide"))
+        search_path = any(token in path for token in ("/search", "/category", "/catalog", "/products", "/wholesale"))
+        product_path = any(token in path for token in ("/product-detail", "/product/", "/item/", "/offer/"))
+        if blog_path:
+            return RESULT_IRRELEVANT, "product_query_blog_page"
+        if product_path:
+            return RESULT_VERIFIED, "product_page"
+        if search_path:
+            return SEARCH_PAGE_VERIFIED, "search_or_category_page"
+        return RESULT_IRRELEVANT, "not_product_or_search_page"
+    return RESULT_VERIFIED, "relevant_public_page"
+
+
+def search_verified_web(intent, search_provider=None, fetcher=fetch_public_page, providers=None):
+    if search_provider is not None:
+        provider_results, provider_name, provider_failures = search_provider(intent) or [], getattr(search_provider, "__name__", "public_web_search"), []
+    else:
+        provider_results, provider_name, provider_failures = provider_search(intent, providers=providers)
+    verified, search_pages, rejected, seen = [], [], [], set()
+    previous_host = ""
+    for index, candidate in enumerate(provider_results[:min(MAX_RESULTS_HARD, max(1, int(intent.max_results)))]):
+        raw_url = str(candidate.get("url") or "")
+        parsed = parse.urlsplit(raw_url)
+        canonical = parse.urlunsplit(("https", parsed.netloc.lower(), parsed.path or "/", parsed.query, "")) if parsed.scheme == "https" and parsed.hostname else ""
+        if not canonical or canonical in seen or not _matches_allowed_domain(parsed.hostname, intent.target_domains):
+            rejected.append({"source_url": canonical or raw_url, "status": RESULT_IRRELEVANT, "reason": "domain_or_url_rejected"})
+            continue
+        seen.add(canonical)
+        if previous_host == parsed.hostname:
+            time.sleep(.51)
+        previous_host = parsed.hostname or ""
+        try:
+            page = fetcher(canonical, allowed_domains=intent.target_domains)
+        except (WebResearchError, OSError, ValueError) as exc:
+            error_code = str(exc)
+            status = RESULT_BLOCKED if error_code in {"robots_disallowed", "source_access_challenge"} else RESULT_UNAVAILABLE
+            rejected.append({"source_url": canonical, "source_domain": parsed.hostname or "", "status": status, "reason": error_code})
+            continue
+        status, reason = classify_public_page(intent, candidate, page)
+        if status not in {RESULT_VERIFIED, SEARCH_PAGE_VERIFIED}:
+            rejected.append({"source_url": canonical, "source_domain": parsed.hostname or "", "status": status, "reason": reason})
+            continue
+        facts = _generic_page_facts(page)
+        item = {
+            "result_id": "result_" + hashlib.sha256(canonical.encode()).hexdigest()[:20],
+            "source_url": canonical, "source_url_provenance": "search_provider",
+            "source_url_verified": True, "source_domain": parsed.hostname or "",
+            "provider": str(candidate.get("provider") or provider_name),
+            "provider_result_index": index, "result_status": status, **facts,
+        }
+        item["verified_result_id"] = _verified_result_id(item)
+        (verified if status == RESULT_VERIFIED else search_pages).append(item)
+    return {
+        "ok": True, "intent": asdict(intent), "results": verified,
+        "comparison": compare_results([]), "source_url": "",
+        "source_access": "read" if verified or search_pages else "limited",
+        "verified_search_pages": search_pages, "rejected_results": rejected,
+        "provider_candidates": len(provider_results), "search_provider": provider_name,
+        "provider_failures": provider_failures, "unverified_results": rejected, "fetched_at": _now(),
+    }
+
+
 def build_source_url(intent):
     if intent.search_type != "VEHICLE_SEARCH":
         raise WebResearchError("search_type_not_supported")
@@ -448,7 +667,9 @@ def build_source_url(intent):
     return f"https://www.ss.lv/lv/transport/cars/{make}/{model}/"
 
 
-def search_public_web(intent, fetcher=fetch_public_page, result_verifier=None):
+def search_public_web(intent, fetcher=fetch_public_page, result_verifier=None, search_provider=None, providers=None):
+    if intent.search_type != "VEHICLE_SEARCH":
+        return search_verified_web(intent, search_provider=search_provider, fetcher=fetcher, providers=providers)
     source_url = build_source_url(intent)
     try:
         page = fetcher(source_url)
@@ -562,7 +783,19 @@ def summarize_sources(payload):
     if not payload.get("ok"):
         return f"Avota automātiska nolasīšana nav pieejama ({payload.get('error')}). Atver publisko meklēšanu: {payload.get('source_url')}"
     if not results:
+        if (payload.get("intent") or {}).get("search_type") != "VEHICLE_SEARCH":
+            search_pages = verified_results({"results": payload.get("verified_search_pages") or []})
+            domain = ((payload.get("intent") or {}).get("target_domains") or ["publiskā interneta"])[0]
+            if search_pages:
+                page = search_pages[0]
+                return f"Individuālus piedāvājumus droši iegūt neizdevās. Te ir verificēta meklēšanas lapa: {page['source_url']}"
+            return f"Nespēju iegūt verificētus rezultātus no {domain}. Negribu tev izdomāt saites vai piedāvājumus."
         return f"Neizdevās iegūt verificētus sludinājumus. Meklēšanas lapa: {payload.get('source_url')}"
+    if (payload.get("intent") or {}).get("search_type") != "VEHICLE_SEARCH":
+        lines = [f"Atradu {len(results)} verificētus publiskus avotus."]
+        for index, item in enumerate(results, 1):
+            lines.append(f"{index}. {item.get('page_title') or 'unknown'} — {item.get('source_domain') or 'unknown'} — {item.get('extracted_snippet') or 'unknown'} — {item['source_url']}")
+        return "\n".join(lines)[:4000]
     lines = [f"Atradu {len(results)} publiskus piedāvājumus. Trūkstošos laukus atzīmēju kā unknown."]
     for index, item in enumerate(results[:5], 1):
         direct_url = item.get("source_url") if item.get("source_url_verified") else None
@@ -574,10 +807,15 @@ def summarize_sources(payload):
 
 def summarize_verified_links(payload):
     results = verified_results(payload)
+    if not results and (payload.get("intent") or {}).get("search_type") != "VEHICLE_SEARCH":
+        results = verified_results({"results": payload.get("verified_search_pages") or []})
     if not results:
+        if (payload.get("intent") or {}).get("search_type") != "VEHICLE_SEARCH":
+            domain = ((payload.get("intent") or {}).get("target_domains") or ["publiskā interneta"])[0]
+            return f"Nespēju iegūt verificētas saites no {domain}. Negribu tev izdomāt saites."
         return f"Neizdevās iegūt verificētus sludinājumus. Meklēšanas lapa: {payload.get('source_url')}"
     return "\n".join(
-        f"{index}. {item['title']} — {item['source_url']}"
+        f"{index}. {item.get('page_title') or item.get('title') or 'unknown'} — {item['source_url']}"
         for index, item in enumerate(results, 1)
     )[:4000]
 
