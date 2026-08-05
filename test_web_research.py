@@ -399,6 +399,19 @@ class WebResearchTests(unittest.TestCase):
         self.assertNotIn("piedāvājumi.\n",rendered)
         self.assertIn("https://www.alibaba.com/trade/search",self.research.summarize_verified_links(payload))
 
+    def test_product_page_must_match_every_material_query_concept(self):
+        intent=self.research.build_search_plan("Atrodi Alibaba.com lētas aromātiskās sveces")
+        candidate={"url":"https://www.alibaba.com/product-detail/fragrance-lamp.html","provider":"test"}
+        payload=self.research.search_public_web(
+            intent, search_provider=lambda _intent:[candidate],
+            fetcher=lambda url,**_kwargs:{
+                "url":url,"title":"Aromatic fragrance lamp",
+                "html":"<h1>Aromatic fragrance lamp</h1>","fetched_at":"2026-08-05T10:00:00+00:00",
+            },
+        )
+        self.assertEqual(payload["results"],[])
+        self.assertEqual(payload["rejected_results"][0]["reason"],"query_terms_absent")
+
     def test_irrelevant_provider_url_and_not_found_fail_closed(self):
         intent=self.research.build_search_plan("Atrodi reklama.lv BMW X5")
         candidates=[

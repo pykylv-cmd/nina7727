@@ -553,23 +553,25 @@ def _generic_page_facts(page):
     }
 
 
-def _query_terms(intent):
+def _query_term_groups(intent):
     ignored = {
         "atrodi", "mekle", "meklē", "find", "search", "letas", "lētas", "cena",
         "price", "buy", "pirkt", "com", "www", "no", "lidz", "līdz", "gada",
     }
     domain_parts = {part for domain in intent.target_domains for part in domain.split(".")}
-    terms = {
+    terms = [
         term for term in re.findall(r"[a-zāčēģīķļņōŗšūž0-9]{3,}", intent.query.casefold())
         if term not in ignored and term not in domain_parts
-    }
-    expansions = set(terms)
+    ]
+    groups = []
     for term in terms:
+        equivalents = {term, term[:5]} if len(term) >= 6 else {term}
         if term.startswith("svec"):
-            expansions.update(("candle", "candles"))
+            equivalents.update(("candle", "candles"))
         if term.startswith("aromāt") or term.startswith("aromat"):
-            expansions.update(("aromatic", "scented", "fragrance"))
-    return expansions
+            equivalents.update(("aromatic", "scented", "fragrance"))
+        groups.append(equivalents)
+    return groups
 
 
 def classify_public_page(intent, candidate, page):
@@ -589,10 +591,9 @@ def classify_public_page(intent, candidate, page):
         return RESULT_UNAVAILABLE, "not_found"
     if any(marker in folded[:5000] for marker in ("captcha", "sign in to continue", "type=\"password\"")):
         return RESULT_BLOCKED, "access_challenge"
-    terms = _query_terms(intent)
+    term_groups = _query_term_groups(intent)
     evidence = (title_folded + " " + folded[:20000])
-    matched = {term for term in terms if term in evidence}
-    if terms and not matched:
+    if term_groups and any(not any(term in evidence for term in group) for group in term_groups):
         return RESULT_IRRELEVANT, "query_terms_absent"
     if intent.search_type == "PRODUCT_SEARCH":
         blog_path = any(token in path for token in ("/blog/", "/blogs/", "/article/", "/news/", "/guide"))
