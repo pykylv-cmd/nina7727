@@ -7080,6 +7080,18 @@ def admin_system():
 
 def _developer_investigation_plan(command):
     normalized = " ".join(str(command or "").strip().casefold().split())
+    if ("developer console" in normalized and "diff preview" in normalized
+            and ("connected" in normalized or "disconnected" in normalized)):
+        return "developer_status_diff_preview", (
+            ("backend_status", "def connection_" + "status", "developer_control.py"),
+            ("freshness_gate", "connected = seen >=", "developer_control.py"),
+            ("render_entry", "def _admin_developer_" + "body", "web_app.py"),
+            ("render_gate", "developer_ready = connection[\"agent\"]", "web_app.py"),
+            ("agent_card", "(\"Local Developer Agent\", \"Connected\"", "web_app.py"),
+            ("repository_card", "(\"Repository\", \"Connected\"", "web_app.py"),
+            ("post_gate", "if status[\"agent\"] != \"connected\"", "web_app.py"),
+            ("regression_test", "def test_connected_status_and_message_input", "test_admin_developer_console.py"),
+        )
     if "kur tiek definēts send_message_to_nina" in normalized or "kur tiek definets send_message_to_nina" in normalized:
         return "send_message_definition", (
             ("main_definition", "def send_message_to_nina", "nina_message_service.py"),
@@ -7111,6 +7123,10 @@ def _developer_investigation_answer(kind, jobs):
         if role and matches:
             evidence[role] = matches[0]
     required = {
+        "developer_status_diff_preview": (
+            "backend_status", "freshness_gate", "render_entry", "render_gate",
+            "agent_card", "repository_card", "post_gate", "regression_test",
+        ),
         "send_message_definition": ("main_definition",),
         "company_whatsapp_flow": ("bridge_event", "bridge_intake", "web_endpoint", "shared_nina_call",
                                   "shared_definition", "bridge_reply"),
@@ -7123,11 +7139,79 @@ def _developer_investigation_answer(kind, jobs):
         for role in required if role in evidence
     ]
     if missing:
+        if kind == "developer_status_diff_preview":
+            return {
+                "answer": "INSUFFICIENT EVIDENCE",
+                "reason": "A safe diff preview was not generated because required repository evidence is missing.",
+                "missing_evidence": missing, "evidence": cited, "write_executed": False,
+            }
         return {
             "answer": "Repository evidence is insufficient to answer safely; no architectural claim was guessed.",
             "missing_evidence": missing, "evidence": cited,
         }
     location = lambda role: f"{evidence[role]['path']}:{evidence[role]['line']}"
+    if kind == "developer_status_diff_preview":
+        old_render_gate = str(evidence["render_gate"].get("text") or "")
+        old_post_gate = str(evidence["post_gate"].get("text") or "")
+        helper_name = "_developer_" + "connection_ready"
+        render_line = int(evidence["render_entry"]["line"])
+        post_line = int(evidence["post_gate"]["line"])
+        test_line = int(evidence["regression_test"]["line"])
+        diff_preview = "\n".join((
+            "--- a/web_app.py",
+            "+++ b/web_app.py",
+            f"@@ -{render_line},3 +{render_line},8 @@",
+            "+def " + helper_name + "(connection):",
+            "+    return (connection[\"agent\"] == \"connected\"",
+            "+            and connection[\"repository\"] == \"connected\")",
+            "+",
+            " " + str(evidence["render_entry"].get("text") or ""),
+            "-" + old_render_gate,
+            "+    developer_ready = " + helper_name + "(connection)",
+            f"@@ -{post_line},1 +{post_line},1 @@",
+            "-" + old_post_gate,
+            "+        if not " + helper_name + "(status):",
+            "--- a/test_admin_developer_console.py",
+            "+++ b/test_admin_developer_console.py",
+            f"@@ -{test_line},0 +{test_line + 1},12 @@",
+            "+    def test_repository_disconnected_blocks_direct_post(self):",
+            "+        client = self.admin_client()",
+            "+        with patch.object(web_app, \"developer_connection_status\",",
+            "+                          return_value={\"agent\": \"connected\", \"repository\": \"not_connected\"}), \\",
+            "+             patch.object(web_app, \"create_developer_job\") as create:",
+            "+            response = client.post(\"/admin/developer\", headers={\"Accept\": \"application/json\"},",
+            "+                data={\"csrf_token\": web_app._channel_csrf(\"developer:send\"),",
+            "+                      \"message\": \"Developer: paradi git status\"})",
+            "+        self.assertEqual(response.status_code, 409)",
+            "+        create.assert_not_called()",
+            "+",
+        ))
+        return {
+            "answer": (
+                "The backend status is defined at " + location("backend_status") +
+                " and expires through the heartbeat freshness gate at " + location("freshness_gate") +
+                ". The UI derives readiness from both Agent and Repository at " + location("render_gate") +
+                ", but the POST handler checks only Agent at " + location("post_gate") +
+                ". This is the proven consistency gap: a direct POST could queue work while Repository is disconnected."
+            ),
+            "proposed_change": {
+                "files": ["web_app.py", "test_admin_developer_console.py"],
+                "functions": ["_admin_developer_body", "admin_developer"],
+                "reason": "Use one Agent+Repository readiness predicate for cards/input state and POST gating.",
+                "risk": "LOW",
+                "diff": diff_preview,
+                "focused_tests": [
+                    "connected Agent + connected Repository enables input and POST",
+                    "connected Agent + disconnected Repository disables input and rejects POST",
+                    "disconnected Agent rejects POST",
+                    "owner-only access remains enforced",
+                ],
+            },
+            "evidence": cited,
+            "approval_required": True,
+            "write_executed": False,
+            "safety_notice": "WRITE NOT EXECUTED.",
+        }
     if kind == "send_message_definition":
         answer = (
             "Galvenā send_message_to_nina definīcija ir " + location("main_definition") +
