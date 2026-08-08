@@ -953,6 +953,20 @@ def _create_web_research_v1(conn):
     cur.close()
 
 
+def _create_developer_read_only_v0(conn):
+    cur = conn.cursor()
+    statements = (
+        """CREATE TABLE IF NOT EXISTS nina_developer_agents (agent_id TEXT PRIMARY KEY,status TEXT NOT NULL,repository_status TEXT NOT NULL,repository_root_label TEXT NOT NULL,last_seen_at TEXT NOT NULL,safe_metadata_json TEXT NOT NULL DEFAULT '{}')""",
+        """CREATE TABLE IF NOT EXISTS nina_developer_jobs (job_id TEXT PRIMARY KEY,operation TEXT NOT NULL,arguments_json TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL,result_json TEXT NOT NULL DEFAULT '{}',error_code TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,claimed_at TEXT NOT NULL DEFAULT '',completed_at TEXT NOT NULL DEFAULT '')""",
+        """CREATE TABLE IF NOT EXISTS nina_developer_events (event_id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,job_id TEXT NOT NULL DEFAULT '',event_type TEXT NOT NULL,safe_metadata_json TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL)""",
+        "CREATE INDEX IF NOT EXISTS idx_nina_developer_jobs_status ON nina_developer_jobs(status,created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_nina_developer_events_created ON nina_developer_events(created_at)",
+    )
+    for statement in statements:
+        cur.execute(statement)
+    cur.close()
+
+
 MIGRATIONS = (
     Migration(
         identifier="0001_shared_conversation_state",
@@ -1165,6 +1179,14 @@ MIGRATIONS = (
         checksum_source=("0017|EXPAND|nina_web_research_sessions+nina_saved_searches|"
             "workspace-contact-conversation-scope|explicit-save|query-deduplication|"
             "public-source-provenance|additive-only"),
+    ),
+    Migration(
+        identifier="0018_developer_read_only_v0", version=18,
+        name="Add owner-only outbound Developer read-only control records",
+        phase=PHASE_EXPAND, operation=_create_developer_read_only_v0,
+        checksum_source=("0018|EXPAND|nina_developer_agents+nina_developer_jobs+"
+            "nina_developer_events|outbound-polling|allowlisted-read-only|"
+            "authenticated-agent|safe-audit|additive-only"),
     ),
 )
 

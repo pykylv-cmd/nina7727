@@ -17,6 +17,15 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from urllib.parse import quote_plus, unquote_plus
 from flask import Flask, Response, g, has_request_context, jsonify, redirect, request
+from developer_control import (
+    authorize_agent as authorize_developer_agent,
+    claim_job as claim_developer_job,
+    complete_job as complete_developer_job,
+    connection_status as developer_connection_status,
+    create_job as create_developer_job,
+    heartbeat as developer_heartbeat,
+    list_jobs as list_developer_jobs,
+)
 from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, generate_with_nina, load_channel_conversation, load_web_conversation, save_channel_turn, send_message_to_nina
 from voice_engine import transcribe_audio_with_openai
 from channel_connections import claim_channel_message, consume_whatsapp_onboarding_state, create_telegram_token, create_whatsapp_onboarding_state, disconnect as disconnect_channel, get_connection, set_connection_for_test, update_whatsapp_verification
@@ -7070,10 +7079,11 @@ def admin_system():
 
 
 def _admin_developer_body(notice=""):
+    connection = developer_connection_status()
     statuses = (
         ("Developer Console", "Online"),
-        ("Local Developer Agent", "Not connected"),
-        ("Repository", "Not connected"),
+        ("Local Developer Agent", "Connected" if connection["agent"] == "connected" else "Not connected"),
+        ("Repository", "Connected" if connection["repository"] == "connected" else "Not connected"),
         ("AI Coding Model", "Not configured"),
         ("Write Access", "Disabled"),
         ("Deploy Access", "Disabled"),
@@ -7087,13 +7097,28 @@ def _admin_developer_body(notice=""):
     message = (
         "<div class='channel-message'>Developer Agent vēl nav pieslēgts. "
         "Šobrīd šī konsole ir read-only setup režīmā.</div><br>"
-        if notice else ""
+        if notice == "agent_not_connected" else
+        ("<div class='channel-message'>Komanda pieņemta drošai read-only izpildei.</div><br>"
+         if notice == "job_created" else "")
     )
+    job_rows = []
+    for job in list_developer_jobs(10):
+        result = job.get("result") or {}
+        rendered = json.dumps(result, ensure_ascii=False, indent=2) if result else (job.get("error_code") or job["status"])
+        job_rows.append(
+            "<div class='list-item'><div><b>" + html_escape(job["operation"]) + "</b>"
+            "<small>" + html_escape(job["status"]) + "</small></div><pre>" +
+            html_escape(rendered[:20000]) + "</pre></div>"
+        )
+    jobs_html = "<section class='card card-pad'><h2>Read-only results</h2><div class='list'>" + (
+        "".join(job_rows) if job_rows else "<p>No developer jobs yet.</p>"
+    ) + "</div></section><br>"
     return (
         _admin_subnav()
         + "<div class='page-title'><h1>NINA DEVELOPER</h1><p>Owner-only Developer Console setup shell for ONE NINA.</p></div><br>"
         + f"<section class='card card-pad'><div class='metric-strip'>{status_cards}</div></section><br>"
         + message
+        + jobs_html
         + "<section class='card card-pad'><h2>Developer Console</h2>"
         "<form method='post' action='/admin/developer' class='channel-form'>"
         f"<input type='hidden' name='csrf_token' value='{_channel_csrf('developer:send')}'>"
@@ -7118,11 +7143,33 @@ def admin_developer():
     if request.method == "POST":
         if not _valid_channel_csrf("developer:send"):
             return Response("Forbidden", status=403)
-        notice = "agent_not_connected"
+        status = developer_connection_status()
+        command = (request.form.get("message") or "").strip()
+        operation, arguments = _developer_command(command)
+        if status["agent"] != "connected":
+            notice = "agent_not_connected"
+        elif not operation:
+            notice = "agent_not_connected"
+        else:
+            create_developer_job(operation, arguments)
+            notice = "job_created"
     return Response(
         page("Nina Developer", _admin_developer_body(notice), active="admin"),
         mimetype="text/html",
     )
+
+
+def _developer_command(command):
+    normalized = " ".join(str(command or "").strip().casefold().split())
+    if normalized in {"developer: parādi projekta failus", "developer: paradi projekta failus"}:
+        return "list_root", {}
+    prefix = "developer: atrodi "
+    if normalized.startswith(prefix):
+        query = str(command).strip()[len(prefix):].strip()
+        return ("search_text", {"query": query}) if query else ("", {})
+    if normalized in {"developer: parādi git status", "developer: paradi git status"}:
+        return "git_status", {}
+    return "", {}
 
 
 @app.post("/channels/telegram/connect")
@@ -8150,6 +8197,41 @@ def internal_runtime_compatibility():
             "internal_api_compatibility_version": 1,
         },
     })
+
+
+def _developer_agent_json():
+    if not authorize_developer_agent(request.headers.get("Authorization")):
+        return None
+    payload = request.get_json(silent=True)
+    return payload if isinstance(payload, dict) else {}
+
+
+@app.post("/internal/developer-agent/heartbeat")
+def internal_developer_agent_heartbeat():
+    payload = _developer_agent_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    developer_heartbeat(str(payload.get("repository") or "nina7727")[:80])
+    return jsonify({"ok": True})
+
+
+@app.post("/internal/developer-agent/jobs/claim")
+def internal_developer_agent_jobs_claim():
+    if _developer_agent_json() is None:
+        return jsonify({"ok": False}), 401
+    return jsonify({"ok": True, "job": claim_developer_job()})
+
+
+@app.post("/internal/developer-agent/jobs/result")
+def internal_developer_agent_jobs_result():
+    payload = _developer_agent_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    accepted = complete_developer_job(
+        str(payload.get("job_id") or ""), payload.get("result"),
+        str(payload.get("error_code") or "")[:80],
+    )
+    return (jsonify({"ok": True}) if accepted else (jsonify({"ok": False}), 409))
 
 
 @app.post("/internal/personal-whatsapp/auth/load")

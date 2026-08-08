@@ -72,6 +72,7 @@ class ManagedMigrationTests(unittest.TestCase):
                 "0015_web_push_notifications_v1",
                 "0016_vision_document_intelligence_v1",
                 "0017_web_research_market_search_v1",
+                "0018_developer_read_only_v0",
             ],
         )
         self.assertIn(managed_migrations.LEDGER_TABLE, self._tables())
@@ -108,6 +109,7 @@ class ManagedMigrationTests(unittest.TestCase):
                 "0015_web_push_notifications_v1",
                 "0016_vision_document_intelligence_v1",
                 "0017_web_research_market_search_v1",
+                "0018_developer_read_only_v0",
             ],
         )
 
@@ -204,6 +206,7 @@ class ManagedMigrationTests(unittest.TestCase):
                 "0015_web_push_notifications_v1",
                 "0016_vision_document_intelligence_v1",
                 "0017_web_research_market_search_v1",
+                "0018_developer_read_only_v0",
             ],
         )
 
