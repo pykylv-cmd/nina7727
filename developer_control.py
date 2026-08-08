@@ -352,12 +352,20 @@ def create_approved_release_job(source_patch_job_id, submitted_hash, branch, tar
         selected = select_release_services(files)
         if sorted({str(value) for value in (target_services or [])}) != selected:
             raise ValueError("developer_release_services_changed")
-        cur.execute(_sql("SELECT arguments_json,status FROM nina_developer_jobs WHERE operation=%s"),
+        cur.execute(_sql("SELECT arguments_json,status,result_json FROM nina_developer_jobs WHERE operation=%s"),
                     ("execute_approved_release",))
-        if any(item[1] != "failed" and
-               str(json.loads(item[0] or "{}").get("source_patch_job_id") or "") == str(source_patch_job_id)
-               for item in cur.fetchall()):
+        previous_releases = cur.fetchall()
+        if any(item[1] != "failed" and str(json.loads(item[0] or "{}").get("source_patch_job_id") or "") == str(source_patch_job_id)
+               for item in previous_releases):
             raise ValueError("developer_release_replayed")
+        resumable = None
+        for item in previous_releases:
+            prior_args, prior_result = json.loads(item[0] or "{}"), json.loads(item[2] or "{}")
+            prior_stages = prior_result.get("stages") if isinstance(prior_result.get("stages"), dict) else {}
+            if (item[1] == "failed" and prior_args.get("source_patch_job_id") == str(source_patch_job_id)
+                    and prior_result.get("failed_stage") == "health"
+                    and prior_stages.get("commit") == "pass" and prior_stages.get("push") == "pass"):
+                resumable = prior_result
         approved_at = now or _now()
         release_id = "devrelease_" + uuid.uuid4().hex
         job_id = "devjob_" + uuid.uuid4().hex
@@ -370,6 +378,8 @@ def create_approved_release_job(source_patch_job_id, submitted_hash, branch, tar
             "tests": validation.get("checks") or [],
             "expected_deployment_impact": "Railway webhook redeploys only selected affected services.",
             "live_verification": "developer_console_safety",
+            "resume_after_push": bool(resumable),
+            "resume_commit_sha": str((resumable or {}).get("commit_sha") or "")[:40],
             "approved_at": _iso(approved_at),
             "expires_at": _iso(approved_at + timedelta(minutes=10)),
             "owner_identity": str(owner_identity or "platform_admin")[:80], "one_time": True,

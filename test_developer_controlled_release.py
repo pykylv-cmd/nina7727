@@ -105,6 +105,23 @@ class DeveloperControlledReleaseTests(unittest.TestCase):
         second = self._approve()
         self.assertNotEqual(first["release_id"], second["release_id"])
 
+    def test_health_failure_after_push_resumes_without_second_commit(self):
+        first = self._approve()
+        conn = developer_control._connect()
+        try:
+            prior = {"failed_stage": "health", "commit_sha": "abc1234",
+                     "stages": {"commit": "pass", "push": "pass", "deploy": "pass"}}
+            conn.execute(developer_control._sql(
+                "UPDATE nina_developer_jobs SET status=%s,error_code=%s,result_json=%s WHERE job_id=%s"),
+                ("failed", "release_health", json.dumps(prior), first["job_id"]))
+            conn.commit()
+        finally:
+            conn.close()
+        second = self._approve()
+        retry = next(job for job in developer_control.list_jobs(10) if job["job_id"] == second["job_id"])
+        self.assertTrue(retry["arguments"]["resume_after_push"])
+        self.assertEqual(retry["arguments"]["resume_commit_sha"], "abc1234")
+
     def test_quality_block_prevents_release(self):
         blocked = self._ready_patch(quality="BLOCK")
         with self.assertRaisesRegex(ValueError, "developer_release_quality_not_approved"):
@@ -150,7 +167,7 @@ class DeveloperControlledReleaseTests(unittest.TestCase):
             ]
             proof = {"ok": True, "developer_agent": "connected", "repository": "connected",
                      "write_access": "disabled", "deploy_access": "disabled"}
-            health = {"status": "ok", "deployment_compatibility": True}
+            health = {"status": "ok", "checks": {"deployment_compatibility": True}}
             with patch.object(agent, "_run_fixed", side_effect=commands) as run, \
                  patch.object(agent, "_read_json_url", side_effect=[(200, health)] * 3 + [(200, proof)]), \
                  patch.dict(os.environ, {"NINA_DEVELOPER_WEB_URL": "https://web.example",

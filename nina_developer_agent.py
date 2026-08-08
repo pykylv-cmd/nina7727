@@ -336,24 +336,32 @@ class ReadOnlyDeveloperAgent:
         if changed.returncode:
             raise DeveloperAgentError("release_diff_read_failed")
         changed_files = {line.strip().replace("\\", "/") for line in changed.stdout.splitlines() if line.strip()}
-        if changed_files != {value.replace("\\", "/") for value in files}:
+        if args.get("resume_after_push"):
+            if changed_files or not str(args.get("resume_commit_sha") or ""):
+                raise DeveloperAgentError("release_resume_state_changed")
+            stages["commit"] = "pass"; stages["push"] = "pass"; stages["deploy"] = "pass"
+            commit_sha = str(args.get("resume_commit_sha") or "")
+        else:
+            commit_sha = ""
+        if not args.get("resume_after_push") and changed_files != {value.replace("\\", "/") for value in files}:
             raise DeveloperAgentError("release_unauthorized_files")
-        diff = self._run_fixed(["git", "diff", "--", *files], self.root)
-        if diff.returncode or self._sha256_text(diff.stdout) != str(args.get("content_hash") or ""):
-            raise DeveloperAgentError("release_diff_changed")
-        added = self._run_fixed(["git", "add", "--", *files], self.root)
-        if added.returncode:
-            raise DeveloperAgentError("release_git_add_failed")
-        commit_message = str(args.get("commit_message") or "Nina Developer approved change")[:72]
-        committed = self._run_fixed(["git", "commit", "-m", commit_message], self.root)
-        if committed.returncode:
-            raise DeveloperAgentError("release_commit_failed")
-        stages["commit"] = "pass"
-        self._run_fixed(["git", "status", "--short", "--branch"], self.root)
-        pushed = self._run_fixed(["git", "push", "origin", branch], self.root)
-        if pushed.returncode:
-            return {"release_id": release_id, "stages": stages, "failed_stage": "push"}
-        stages["push"] = "pass"; stages["deploy"] = "webhook_triggered"
+        if not args.get("resume_after_push"):
+            diff = self._run_fixed(["git", "diff", "--", *files], self.root)
+            if diff.returncode or self._sha256_text(diff.stdout) != str(args.get("content_hash") or ""):
+                raise DeveloperAgentError("release_diff_changed")
+            added = self._run_fixed(["git", "add", "--", *files], self.root)
+            if added.returncode:
+                raise DeveloperAgentError("release_git_add_failed")
+            commit_message = str(args.get("commit_message") or "Nina Developer approved change")[:72]
+            committed = self._run_fixed(["git", "commit", "-m", commit_message], self.root)
+            if committed.returncode:
+                raise DeveloperAgentError("release_commit_failed")
+            stages["commit"] = "pass"
+            self._run_fixed(["git", "status", "--short", "--branch"], self.root)
+            pushed = self._run_fixed(["git", "push", "origin", branch], self.root)
+            if pushed.returncode:
+                return {"release_id": release_id, "stages": stages, "failed_stage": "push"}
+            stages["push"] = "pass"; stages["deploy"] = "webhook_triggered"
         base_url = (os.environ.get("NINA_DEVELOPER_WEB_URL") or "").rstrip("/")
         if "web" not in services or not base_url.startswith(("https://", "http://127.0.0.1:", "http://localhost:")):
             return {"release_id": release_id, "stages": stages, "failed_stage": "health"}
@@ -367,7 +375,8 @@ class ReadOnlyDeveloperAgent:
                     health_payloads[path] = {"status": code, "body": payload}
                     ok = ok and code == 200
                 ready = health_payloads["/ready"]["body"]
-                ok = ok and ready.get("deployment_compatibility") is True
+                ok = ok and (ready.get("deployment_compatibility") is True
+                             or (ready.get("checks") or {}).get("deployment_compatibility") is True)
                 if ok:
                     break
             except (HTTPError, URLError, TimeoutError, ValueError):
@@ -386,11 +395,11 @@ class ReadOnlyDeveloperAgent:
         if code != 200 or not proof.get("ok"):
             return {"release_id": release_id, "stages": stages, "failed_stage": "live_verify"}
         stages["live_verify"] = "pass"
-        commit_sha = ""
-        for line in (committed.stdout + committed.stderr).splitlines():
-            match = re.search(r"\[.+ ([0-9a-f]{7,40})\]", line)
-            if match:
-                commit_sha = match.group(1); break
+        if not args.get("resume_after_push"):
+            for line in (committed.stdout + committed.stderr).splitlines():
+                match = re.search(r"\[.+ ([0-9a-f]{7,40})\]", line)
+                if match:
+                    commit_sha = match.group(1); break
         return {"release_id": release_id, "stages": stages, "commit_sha": commit_sha,
                 "health": health_payloads, "live_verification": proof,
                 "write_access": "disabled", "deploy_access": "disabled"}
