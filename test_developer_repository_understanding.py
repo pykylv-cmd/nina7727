@@ -51,6 +51,9 @@ class DeveloperRepositoryUnderstandingTests(unittest.TestCase):
         self.assertIn("nina_message_service.py", paths)
         self.assertIn("personal_whatsapp_bridge/src/company_session_manager.js", paths)
         self.assertIn("messages.upsert", answer["answer"])
+        by_role = {item["role"]: item["symbol"] for item in answer["evidence"]}
+        self.assertTrue(by_role["web_endpoint"].startswith("def internal_company_whatsapp_inbound"))
+        self.assertTrue(by_role["shared_nina_call"].startswith("result = send_message_to_nina("))
 
     def test_insufficient_evidence_fails_without_guessing(self):
         answer = web_app._developer_investigation_answer("company_whatsapp_flow", [])

@@ -7088,17 +7088,17 @@ def _developer_investigation_plan(command):
         return "company_whatsapp_flow", (
             ("bridge_event", "messages.upsert", "personal_whatsapp_bridge/src/company_session_manager.js"),
             ("bridge_intake", "companyInbound", "personal_whatsapp_bridge/src/company_session_manager.js"),
-            ("web_endpoint", "def internal_company_whatsapp_inbound", "web_app.py"),
-            ("shared_nina_call", "result = send_message_to_nina", "web_app.py"),
+            ("web_endpoint", "def internal_" + "company_whatsapp_inbound", "web_app.py"),
+            ("shared_nina_call", "result = send_message_" + "to_nina(", "web_app.py"),
             ("shared_definition", "def send_message_to_nina", "nina_message_service.py"),
             ("bridge_reply", "socket.sendMessage(remote", "personal_whatsapp_bridge/src/company_session_manager.js"),
         )
     if "developer:" in normalized and "web research" in normalized and ("kāpēc" in normalized or "kapec" in normalized):
         return "developer_routing", (
-            ("developer_route", "def admin_developer", "web_app.py"),
-            ("developer_router", "def _developer_command", "web_app.py"),
-            ("generic_nina_call", "nina_result = send_message_to_nina", "web_app.py"),
-            ("research_router", "intent = build_search_plan(clean", "nina_message_service.py"),
+            ("developer_route", "def admin_" + "developer", "web_app.py"),
+            ("developer_router", "def _developer_" + "command", "web_app.py"),
+            ("generic_nina_call", "nina_result = send_message_" + "to_nina(", "web_app.py"),
+            ("research_router", "intent = build_search_" + "plan(clean", "nina_message_service.py"),
         )
     return "", ()
 
