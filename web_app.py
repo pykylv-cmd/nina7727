@@ -7082,18 +7082,19 @@ def admin_system():
 
 def _developer_investigation_plan(command):
     normalized = " ".join(str(command or "").strip().casefold().split())
-    if ("developer console" in normalized and "diff preview" in normalized
+    if ("developer console" in normalized
+            and ("diff preview" in normalized or "sagatavo" in normalized or "minimal" in normalized)
             and ("connected" in normalized or "disconnected" in normalized)):
         return "developer_status_diff_preview", (
             ("backend_status", "def connection_" + "status", "developer_control.py"),
             ("freshness_gate", "connected = seen >=", "developer_control.py"),
-            ("render_entry", "def _admin_developer_" + "body", "web_app.py"),
-            ("body_connection", "connection = developer_connection_" + "status()", "web_app.py"),
-            ("render_gate", "developer_ready = connection[\"agent\"]", "web_app.py"),
+            ("readiness_helper", "def _developer_" + "connection_ready", "web_app.py"),
+            ("render_gate", "developer_ready = _developer_" + "connection_ready(connection)", "web_app.py"),
+            ("send_gate", "if not _developer_" + "connection_ready(status):", "web_app.py"),
+            ("approval_gate", "if approval_status[\"agent\"] != \"connected\"", "web_app.py"),
             ("agent_card", "(\"Local Developer Agent\", \"Connected\"", "web_app.py"),
             ("repository_card", "(\"Repository\", \"Connected\"", "web_app.py"),
-            ("post_gate", "if status[\"agent\"] != \"connected\"", "web_app.py"),
-            ("regression_test", "def test_connected_status_and_message_input", "test_admin_developer_console.py"),
+            ("regression_test", "def test_repository_disconnected_blocks_direct_post", "test_admin_developer_console.py"),
         )
     if "kur tiek definēts send_message_to_nina" in normalized or "kur tiek definets send_message_to_nina" in normalized:
         return "send_message_definition", (
@@ -7102,9 +7103,9 @@ def _developer_investigation_plan(command):
     if "company whatsapp" in normalized and "message flow" in normalized:
         return "company_whatsapp_flow", (
             ("bridge_event", "messages.upsert", "personal_whatsapp_bridge/src/company_session_manager.js"),
-            ("bridge_intake", "companyInbound", "personal_whatsapp_bridge/src/company_session_manager.js"),
+            ("bridge_intake", "export async function processCompanyMessageUpsert", "personal_whatsapp_bridge/src/company_session_manager.js"),
             ("web_endpoint", "def internal_" + "company_whatsapp_inbound", "web_app.py"),
-            ("shared_nina_call", "result = send_message_" + "to_nina(", "web_app.py"),
+            ("shared_nina_call", "delivery_" + "recipient=sender_jid", "web_app.py"),
             ("shared_definition", "def send_message_to_nina", "nina_message_service.py"),
             ("bridge_reply", "socket.sendMessage(remote", "personal_whatsapp_bridge/src/company_session_manager.js"),
         )
@@ -7132,8 +7133,8 @@ def _developer_investigation_answer(kind, jobs):
                 source_hashes[path] = source_hash
     required = {
         "developer_status_diff_preview": (
-            "backend_status", "freshness_gate", "render_entry", "body_connection", "render_gate",
-            "agent_card", "repository_card", "post_gate", "regression_test",
+            "backend_status", "freshness_gate", "readiness_helper", "render_gate", "send_gate",
+            "approval_gate", "agent_card", "repository_card", "regression_test",
         ),
         "send_message_definition": ("main_definition",),
         "company_whatsapp_flow": ("bridge_event", "bridge_intake", "web_endpoint", "shared_nina_call",
@@ -7150,7 +7151,7 @@ def _developer_investigation_answer(kind, jobs):
     if missing:
         if kind == "developer_status_diff_preview":
             return {
-                "answer": "INSUFFICIENT EVIDENCE",
+                "answer": "INSUFFICIENT ARCHITECTURE EVIDENCE",
                 "reason": "A safe diff preview was not generated because required repository evidence is missing.",
                 "missing_evidence": missing, "evidence": cited, "write_executed": False,
             }
@@ -7161,61 +7162,88 @@ def _developer_investigation_answer(kind, jobs):
     location = lambda role: f"{evidence[role]['path']}:{evidence[role]['line']}"
     if kind == "developer_status_diff_preview":
         raw = lambda role: str(evidence[role].get("raw_text") or evidence[role].get("text") or "")
-        old_render_gate = raw("render_gate")
-        old_post_gate = raw("post_gate")
         helper_name = "_developer_" + "connection_ready"
-        render_line = int(evidence["render_entry"]["line"])
-        post_line = int(evidence["post_gate"]["line"])
+        approval_line = int(evidence["approval_gate"]["line"])
         test_line = int(evidence["regression_test"]["line"])
         diff_preview = "\n".join((
             "--- a/web_app.py",
             "+++ b/web_app.py",
-            f"@@ -{render_line},3 +{render_line},7 @@",
-            "+def " + helper_name + "(connection):",
-            "+    return (connection[\"agent\"] == \"connected\"",
-            "+            and connection[\"repository\"] == \"connected\")",
-            "+",
-            " " + raw("render_entry"),
-            " " + raw("body_connection"),
-            "-" + old_render_gate,
-            "+    developer_ready = " + helper_name + "(connection)",
-            f"@@ -{post_line},1 +{post_line},1 @@",
-            "-" + old_post_gate,
-            "+        if not " + helper_name + "(status):",
+            f"@@ -{approval_line},1 +{approval_line},1 @@",
+            "-" + raw("approval_gate"),
+            "+            if not " + helper_name + "(approval_status):",
             "--- a/test_admin_developer_console.py",
             "+++ b/test_admin_developer_console.py",
-            f"@@ -{test_line},1 +{test_line},12 @@",
-            "+    def test_repository_disconnected_blocks_direct_post(self):",
+            f"@@ -{test_line},1 +{test_line},13 @@",
+            "+    def test_repository_disconnected_blocks_diff_approval(self):",
             "+        client = self.admin_client()",
             "+        with patch.object(web_app, \"developer_connection_status\",",
             "+                          return_value={\"agent\": \"connected\", \"repository\": \"not_connected\"}), \\",
-            "+             patch.object(web_app, \"create_developer_job\") as create:",
-            "+            response = client.post(\"/admin/developer\", headers={\"Accept\": \"application/json\"},",
-            "+                data={\"csrf_token\": web_app._channel_csrf(\"developer:send\"),",
-            "+                      \"message\": \"Developer: paradi git status\"})",
+            "+             patch.object(web_app, \"create_developer_approval_job\") as create:",
+            "+            response = client.post(\"/admin/developer\", data={",
+            "+                \"csrf_token\": web_app._channel_csrf(\"developer:approve\"),",
+            "+                \"action\": \"approve_diff\", \"investigation_id\": \"devinvest_test\",",
+            "+                \"diff_hash\": \"0\" * 64,",
+            "+            })",
             "+        self.assertEqual(response.status_code, 409)",
             "+        create.assert_not_called()",
             "+",
             " " + raw("regression_test"),
         ))
+        developer_analysis = {
+            "problem": "Keep Developer Agent and Repository readiness decisions consistent across every owner-only Developer Console action.",
+            "repository_evidence": cited,
+            "architecture_boundary": "Owner-authenticated Web Developer capability; status originates in developer_control and is consumed by web_app.",
+            "affected_modules": {
+                "direct": ["web_app.py", "test_admin_developer_console.py"],
+                "dependencies": ["developer_control.py"],
+            },
+            "call_chain_dependencies": [
+                "developer_control.connection_status",
+                "web_app._developer_connection_ready",
+                "web_app._admin_developer_body / web_app.admin_developer",
+                "developer job creation or owner approval",
+            ],
+            "risks": {
+                "classification": "LOW",
+                "items": [
+                    "A duplicated readiness condition can drift from the shared predicate.",
+                    "An incorrect approval gate could expose a one-time write action while Repository is unavailable.",
+                    "Changing heartbeat freshness semantics would affect all Developer Console readiness consumers.",
+                ],
+            },
+            "alternatives": [
+                {"option": "Leave the approval condition duplicated", "risk": "Future status drift remains possible."},
+                {"option": "Reuse the existing readiness helper", "risk": "Minimal; behavior remains fail-closed."},
+            ],
+            "chosen_solution": "Reuse _developer_connection_ready for the approval gate and add one focused regression test.",
+            "why": "It removes the last duplicated Agent+Repository policy without changing status persistence, authentication, Developer Agent, or write permissions.",
+            "focused_validation_plan": [
+                "connected Agent + Repository permits normal Developer Console work",
+                "Repository-disconnected Send remains blocked",
+                "Repository-disconnected owner approval is blocked",
+                "Sprint 5 controlled-write safety tests remain passing",
+            ],
+        }
         return {
+            "developer_analysis": developer_analysis,
             "answer": (
                 "The backend status is defined at " + location("backend_status") +
                 " and expires through the heartbeat freshness gate at " + location("freshness_gate") +
-                ". The UI derives readiness from both Agent and Repository at " + location("render_gate") +
-                ", but the POST handler checks only Agent at " + location("post_gate") +
-                ". This is the proven consistency gap: a direct POST could queue work while Repository is disconnected."
+                ". The shared readiness predicate is defined at " + location("readiness_helper") +
+                " and is used by rendering and Send at " + location("render_gate") + " and " +
+                location("send_gate") + ". The owner approval path still duplicates that policy at " +
+                location("approval_gate") + ", creating a small future consistency risk."
             ),
             "proposed_change": {
                 "files": ["web_app.py", "test_admin_developer_console.py"],
-                "functions": ["_admin_developer_body", "admin_developer"],
-                "reason": "Use one Agent+Repository readiness predicate for cards/input state and POST gating.",
+                "functions": ["_developer_connection_ready", "admin_developer"],
+                "reason": "Use the existing Agent+Repository readiness predicate for owner approval gating too.",
                 "risk": "LOW",
                 "diff": diff_preview,
                 "focused_tests": [
-                    "connected Agent + connected Repository enables input and POST",
-                    "connected Agent + disconnected Repository disables input and rejects POST",
-                    "disconnected Agent rejects POST",
+                    "connected Agent + connected Repository preserves approval behavior",
+                    "connected Agent + disconnected Repository rejects owner approval",
+                    "Repository-disconnected Send remains rejected",
                     "owner-only access remains enforced",
                 ],
                 "expected_source_hashes": {
@@ -7255,7 +7283,32 @@ def _developer_investigation_answer(kind, jobs):
             "). Therefore a Developer: request entered through the generic Nina surface could reach Web Research; "
             "the repository alone cannot prove which historical surface handled a specific old request."
         )
-    return {"answer": answer, "evidence": cited}
+    analysis = {
+        "problem": "Explain the requested repository behavior from verified code evidence.",
+        "repository_evidence": cited,
+        "architecture_boundary": (
+            "Company WhatsApp bridge, authenticated Web intake, and the shared ONE NINA message service"
+            if kind == "company_whatsapp_flow" else "ONE NINA Developer repository capability"
+        ),
+        "affected_modules": sorted({item["path"] for item in cited}),
+        "call_chain_dependencies": [item["symbol"] for item in cited],
+        "risks": {
+            "classification": "HIGH" if kind == "company_whatsapp_flow" else "LOW",
+            "items": ([
+                "Changing send_message_to_nina can affect every channel sharing the canonical Nina reply path.",
+                "Workspace, contact, conversation, and delivery-recipient context must remain intact.",
+                "Bridge acknowledgement and outbound reply behavior depend on the Web result contract.",
+            ] if kind == "company_whatsapp_flow" else [
+                "Repository claims must remain limited to cited evidence.",
+            ]),
+        },
+        "alternatives": ["No code change was requested; retain the current architecture and report evidence only."],
+        "chosen_solution": "Provide a repository-grounded explanation without generating or applying a patch.",
+        "why": "A descriptive investigation does not justify a code change.",
+        "focused_validation_plan": ["Verify every stated file/function against the returned evidence."],
+    }
+    return {"developer_analysis": analysis, "answer": answer, "evidence": cited,
+            "write_executed": False, "safety_notice": "WRITE NOT EXECUTED."}
 
 
 def _admin_developer_jobs_html():
@@ -7326,7 +7379,17 @@ def _admin_developer_jobs_html():
             else:
                 label = item["operation"]
         latest_status = status
-        rendered = json.dumps(payload, ensure_ascii=False, indent=2) if isinstance(payload, dict) else str(payload)
+        display_payload = payload
+        if isinstance(payload, dict) and isinstance(payload.get("developer_analysis"), dict):
+            display_payload = {
+                "DEVELOPER ANALYSIS": payload["developer_analysis"],
+                "ANSWER": payload.get("answer"),
+            }
+            if isinstance(payload.get("proposed_change"), dict):
+                display_payload["DIFF PREVIEW"] = payload["proposed_change"]
+            display_payload["WRITE NOT EXECUTED"] = not bool(payload.get("write_executed"))
+        rendered = (json.dumps(display_payload, ensure_ascii=False, indent=2)
+                    if isinstance(display_payload, dict) else str(display_payload))
         rows.append(
             "<div class='list-item developer-result' data-job-status='" + html_escape(status) + "'><div><b>" +
             html_escape(label) + "</b><small>" + html_escape(status) +

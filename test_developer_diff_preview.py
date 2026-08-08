@@ -55,7 +55,10 @@ class DeveloperDiffPreviewTests(unittest.TestCase):
         self.assertIn("developer_control.py", result["answer"])
         self.assertIn("web_app.py", result["answer"])
         self.assertIn("--- a/web_app.py", result["proposed_change"]["diff"])
-        self.assertIn("if not _developer_connection_ready(status):", result["proposed_change"]["diff"])
+        self.assertIn(
+            "if not _developer_connection_ready(approval_status):",
+            result["proposed_change"]["diff"],
+        )
         self.assertTrue(all(item["path"] for item in result["evidence"]))
 
     def test_preview_does_not_write_repository(self):
@@ -94,7 +97,7 @@ class DeveloperDiffPreviewTests(unittest.TestCase):
 
     def test_insufficient_evidence_fails_closed_without_diff(self):
         result = web_app._developer_investigation_answer("developer_status_diff_preview", [])
-        self.assertEqual(result["answer"], "INSUFFICIENT EVIDENCE")
+        self.assertEqual(result["answer"], "INSUFFICIENT ARCHITECTURE EVIDENCE")
         self.assertNotIn("proposed_change", result)
         self.assertFalse(result["write_executed"])
 
