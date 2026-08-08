@@ -6812,6 +6812,7 @@ def _admin_subnav():
         f"<a href='/admin/workers?lang={lang}'>Workers</a>"
         f"<a href='/admin/system?lang={lang}'>System</a>"
         f"<a href='/admin/billing?lang={lang}'>Billing</a>"
+        f"<a href='/admin/developer?lang={lang}'>Developer</a>"
         f"<form method='post' action='/admin/logout?lang={lang}'><button class='btn' type='submit'>Sign out</button></form>"
         "</div>"
     )
@@ -7066,6 +7067,62 @@ def admin_system():
         "<p>Safe platform service status.</p></div><div class='list'>" + rows + "</div></section>"
     )
     return Response(page("Admin System", body, active="admin"), mimetype="text/html")
+
+
+def _admin_developer_body(notice=""):
+    statuses = (
+        ("Developer Console", "Online"),
+        ("Local Developer Agent", "Not connected"),
+        ("Repository", "Not connected"),
+        ("AI Coding Model", "Not configured"),
+        ("Write Access", "Disabled"),
+        ("Deploy Access", "Disabled"),
+    )
+    status_cards = "".join(
+        "<div class='metric-mini'>"
+        f"<small>{html_escape(label)}</small><b>{html_escape(value)}</b>"
+        "</div>"
+        for label, value in statuses
+    )
+    message = (
+        "<div class='channel-message'>Developer Agent vēl nav pieslēgts. "
+        "Šobrīd šī konsole ir read-only setup režīmā.</div><br>"
+        if notice else ""
+    )
+    return (
+        _admin_subnav()
+        + "<div class='page-title'><h1>NINA DEVELOPER</h1><p>Owner-only Developer Console setup shell for ONE NINA.</p></div><br>"
+        + f"<section class='card card-pad'><div class='metric-strip'>{status_cards}</div></section><br>"
+        + message
+        + "<section class='card card-pad'><h2>Developer Console</h2>"
+        "<form method='post' action='/admin/developer' class='channel-form'>"
+        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('developer:send')}'>"
+        "<label for='developer-message'>Message</label>"
+        "<textarea id='developer-message' name='message' maxlength='2000' "
+        "placeholder='Developer Agent is not connected'></textarea>"
+        "<button class='btn primary' type='submit'>Send</button></form>"
+        "<p class='safe-note'>No filesystem, shell, Git, AI provider, write or deploy access is enabled.</p></section><br>"
+        "<section class='card card-pad'><h2>Planned capabilities</h2>"
+        "<div class='two-col'><div><h3>READ</h3><ul>"
+        "<li>List repository files</li><li>Read source file</li><li>Search code</li><li>Git status</li>"
+        "</ul></div><div><h3>LATER WITH OWNER APPROVAL</h3><ul>"
+        "<li>Prepare diff</li><li>Run tests</li><li>Apply patch</li><li>Commit</li><li>Push</li><li>Deploy</li>"
+        "</ul></div></div></section>"
+    )
+
+
+@app.route("/admin/developer", methods=["GET", "POST"])
+@platform_admin_required
+def admin_developer():
+    notice = ""
+    if request.method == "POST":
+        if not _valid_channel_csrf("developer:send"):
+            return Response("Forbidden", status=403)
+        notice = "agent_not_connected"
+    return Response(
+        page("Nina Developer", _admin_developer_body(notice), active="admin"),
+        mimetype="text/html",
+    )
 
 
 @app.post("/channels/telegram/connect")
