@@ -7679,7 +7679,7 @@ def admin_developer():
                         }, {"developer_job_id": str(grouped[0].get("job_id") or investigation_id)})
                 return redirect(q("/admin/developer"))
             approval_status = developer_connection_status()
-            if approval_status["agent"] != "connected" or approval_status["repository"] != "connected":
+            if not _developer_connection_ready(approval_status):
                 return Response("Developer Agent unavailable", status=409)
             grouped = [job for job in list_developer_jobs(25)
                        if str((job.get("arguments") or {}).get("investigation_id") or "") == investigation_id]

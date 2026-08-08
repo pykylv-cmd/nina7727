@@ -47,6 +47,19 @@ class AdminDeveloperConsoleTests(unittest.TestCase):
             self.assertIn(expected, page)
         self.assertIn("placeholder='Developer Agent is not connected' disabled", page)
 
+    def test_repository_disconnected_blocks_diff_approval(self):
+        client = self.admin_client()
+        with patch.object(web_app, "developer_connection_status",
+                          return_value={"agent": "connected", "repository": "not_connected"}), \
+             patch.object(web_app, "create_developer_approval_job") as create:
+            response = client.post("/admin/developer", data={
+                "csrf_token": web_app._channel_csrf("developer:approve"),
+                "action": "approve_diff", "investigation_id": "devinvest_test",
+                "diff_hash": "0" * 64,
+            })
+        self.assertEqual(response.status_code, 409)
+        create.assert_not_called()
+
     def test_repository_disconnected_blocks_direct_post(self):
         client = self.admin_client()
         with patch.object(web_app, "developer_connection_status",
