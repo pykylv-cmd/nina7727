@@ -7078,6 +7078,23 @@ def admin_system():
     return Response(page("Admin System", body, active="admin"), mimetype="text/html")
 
 
+def _admin_developer_jobs_html():
+    job_rows = []
+    jobs = list(reversed(list_developer_jobs(10)))
+    for job in jobs:
+        result = job.get("result") or {}
+        rendered = json.dumps(result, ensure_ascii=False, indent=2) if result else (job.get("error_code") or job["status"])
+        job_rows.append(
+            "<div class='list-item developer-result' data-job-status='" + html_escape(job["status"]) + "'><div><b>" +
+            html_escape(job["operation"]) + "</b><small>" + html_escape(job["status"]) +
+            "</small></div><pre>" + html_escape(rendered[:20000]) + "</pre></div>"
+        )
+    return (
+        "".join(job_rows) if job_rows else "<p>No developer jobs yet.</p>",
+        jobs[-1]["status"] if jobs else "",
+    )
+
+
 def _admin_developer_body(notice=""):
     connection = developer_connection_status()
     statuses = (
@@ -7101,38 +7118,39 @@ def _admin_developer_body(notice=""):
         ("<div class='channel-message'>Komanda pieņemta drošai read-only izpildei.</div><br>"
          if notice == "job_created" else "")
     )
-    job_rows = []
-    for job in list_developer_jobs(10):
-        result = job.get("result") or {}
-        rendered = json.dumps(result, ensure_ascii=False, indent=2) if result else (job.get("error_code") or job["status"])
-        job_rows.append(
-            "<div class='list-item'><div><b>" + html_escape(job["operation"]) + "</b>"
-            "<small>" + html_escape(job["status"]) + "</small></div><pre>" +
-            html_escape(rendered[:20000]) + "</pre></div>"
-        )
-    jobs_html = "<section class='card card-pad'><h2>Read-only results</h2><div class='list'>" + (
-        "".join(job_rows) if job_rows else "<p>No developer jobs yet.</p>"
-    ) + "</div></section><br>"
-    return (
-        _admin_subnav()
-        + "<div class='page-title'><h1>NINA DEVELOPER</h1><p>Owner-only Developer Console setup shell for ONE NINA.</p></div><br>"
-        + f"<section class='card card-pad'><div class='metric-strip'>{status_cards}</div></section><br>"
-        + message
-        + jobs_html
-        + "<section class='card card-pad'><h2>Developer Console</h2>"
-        "<form method='post' action='/admin/developer' class='channel-form'>"
+    job_rows, _ = _admin_developer_jobs_html()
+    jobs_html = (
+        "<section class='card card-pad developer-results-card'><h2>Read-only results</h2>"
+        "<div id='developer-results' class='list developer-results' aria-live='polite'>" +
+        job_rows + "</div></section><br>"
+    )
+    console_html = (
+        "<section class='card card-pad developer-console'><h2>Developer Console</h2>"
+        "<form id='developer-form' method='post' action='/admin/developer' class='channel-form'>"
         f"<input type='hidden' name='csrf_token' value='{_channel_csrf('developer:send')}'>"
         "<label for='developer-message'>Message</label>"
         "<textarea id='developer-message' name='message' maxlength='2000' "
         "placeholder='Developer Agent is not connected'></textarea>"
         "<button class='btn primary' type='submit'>Send</button></form>"
+        "<div id='developer-notice' aria-live='polite'></div>"
         "<p class='safe-note'>No filesystem, shell, Git, AI provider, write or deploy access is enabled.</p></section><br>"
-        "<section class='card card-pad'><h2>Planned capabilities</h2>"
+    )
+    ux = """<style>
+.developer-console{position:sticky;top:12px;z-index:20;box-shadow:0 18px 50px rgba(0,0,0,.32)}
+.developer-results{max-height:52vh;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.developer-result{scroll-margin-block:12px}.developer-console textarea{min-height:88px;resize:vertical}
+</style><script>(()=>{const form=document.getElementById('developer-form'),input=document.getElementById('developer-message'),results=document.getElementById('developer-results'),notice=document.getElementById('developer-notice');if(!form||!input||!results)return;const bottom=()=>{results.scrollTop=results.scrollHeight};const refresh=async()=>{const response=await fetch('/admin/developer?format=results',{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});if(!response.ok)throw new Error('results');const payload=await response.json();results.innerHTML=payload.html;bottom();return payload.latest_status};form.addEventListener('submit',async event=>{event.preventDefault();const button=form.querySelector('button[type="submit"]');button.disabled=true;notice.textContent='';try{const response=await fetch(form.action,{method:'POST',body:new FormData(form),credentials:'same-origin',headers:{Accept:'application/json'}});const payload=await response.json();if(!response.ok)throw new Error(payload.error||'submit');notice.textContent=payload.message||'';input.value='';let status=await refresh();for(let attempt=0;attempt<15&&['pending','claimed'].includes(status);attempt++){await new Promise(resolve=>setTimeout(resolve,1000));status=await refresh();}}catch(error){notice.textContent='Developer command could not be completed.'}finally{button.disabled=false;input.focus();bottom();}});bottom();input.focus();})();</script>"""
+    return (
+        _admin_subnav()
+        + "<div class='page-title'><h1>NINA DEVELOPER</h1><p>Owner-only Developer Console setup shell for ONE NINA.</p></div><br>"
+        + f"<section class='card card-pad'><div class='metric-strip'>{status_cards}</div></section><br>"
+        + message + console_html + jobs_html
+        + "<section class='card card-pad'><h2>Planned capabilities</h2>"
         "<div class='two-col'><div><h3>READ</h3><ul>"
         "<li>List repository files</li><li>Read source file</li><li>Search code</li><li>Git status</li>"
         "</ul></div><div><h3>LATER WITH OWNER APPROVAL</h3><ul>"
         "<li>Prepare diff</li><li>Run tests</li><li>Apply patch</li><li>Commit</li><li>Push</li><li>Deploy</li>"
-        "</ul></div></div></section>"
+        "</ul></div></div></section>" + ux
     )
 
 
@@ -7140,6 +7158,9 @@ def _admin_developer_body(notice=""):
 @platform_admin_required
 def admin_developer():
     notice = ""
+    if request.method == "GET" and request.args.get("format") == "results":
+        jobs_html, latest_status = _admin_developer_jobs_html()
+        return jsonify({"ok": True, "html": jobs_html, "latest_status": latest_status})
     if request.method == "POST":
         if not _valid_channel_csrf("developer:send"):
             return Response("Forbidden", status=403)
@@ -7153,6 +7174,13 @@ def admin_developer():
         else:
             create_developer_job(operation, arguments)
             notice = "job_created"
+        if request.accept_mimetypes.best == "application/json":
+            messages = {
+                "agent_not_connected": "Developer Agent vēl nav pieslēgts. Šobrīd šī konsole ir read-only setup režīmā.",
+                "job_created": "Komanda pieņemta drošai read-only izpildei.",
+            }
+            return jsonify({"ok": notice == "job_created", "notice": notice,
+                            "message": messages.get(notice, "")}), (200 if notice == "job_created" else 409)
     return Response(
         page("Nina Developer", _admin_developer_body(notice), active="admin"),
         mimetype="text/html",

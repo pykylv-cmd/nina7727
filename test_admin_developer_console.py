@@ -70,6 +70,58 @@ class AdminDeveloperConsoleTests(unittest.TestCase):
         self.assertEqual(client.post("/channels/whatsapp-company/connect").status_code, 403)
         self.assertEqual(client.get("/channels/whatsapp-company/status").status_code, 403)
 
+    def test_console_is_sticky_and_results_scroll_independently(self):
+        page = self.admin_client().get("/admin/developer?lang=en").get_data(as_text=True)
+        self.assertIn("class='card card-pad developer-console'", page)
+        self.assertIn(".developer-console{position:sticky", page)
+        self.assertIn("id='developer-results'", page)
+        self.assertIn(".developer-results{max-height:52vh;overflow-y:auto", page)
+        self.assertLess(page.index("id='developer-form'"), page.index("id='developer-results'"))
+
+    def test_console_uses_ajax_and_restores_focus_and_result_scroll(self):
+        page = self.admin_client().get("/admin/developer?lang=en").get_data(as_text=True)
+        self.assertIn("form.addEventListener('submit'", page)
+        self.assertIn("event.preventDefault()", page)
+        self.assertIn("fetch(form.action", page)
+        self.assertIn("fetch('/admin/developer?format=results'", page)
+        self.assertIn("input.focus()", page)
+        self.assertIn("results.scrollTop=results.scrollHeight", page)
+        self.assertNotIn("window.location", page)
+
+    def test_ajax_submit_queues_only_read_only_job(self):
+        client = self.admin_client()
+        with patch.object(web_app, "developer_connection_status",
+                          return_value={"agent": "connected", "repository": "connected"}), \
+             patch.object(web_app, "create_developer_job", return_value="devjob_test") as create:
+            response = client.post(
+                "/admin/developer",
+                data={"csrf_token": web_app._channel_csrf("developer:send"),
+                      "message": "Developer: paradi projekta failus"},
+                headers={"Accept": "application/json"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["ok"])
+        create.assert_called_once_with("list_root", {})
+
+    def test_ajax_results_endpoint_remains_admin_only(self):
+        denied = web_app.app.test_client().get(
+            "/admin/developer?format=results", headers={"Accept": "application/json"}
+        )
+        self.assertEqual(denied.status_code, 403)
+        allowed = self.admin_client().get(
+            "/admin/developer?format=results", headers={"Accept": "application/json"}
+        )
+        self.assertEqual(allowed.status_code, 200)
+        self.assertIn("html", allowed.get_json())
+
+    def test_results_render_oldest_to_newest_for_bottom_scroll(self):
+        newest = {"operation": "git_status", "status": "completed", "result": {"status": "newest"}}
+        oldest = {"operation": "list_root", "status": "completed", "result": {"path": "oldest"}}
+        with patch.object(web_app, "list_developer_jobs", return_value=[newest, oldest]):
+            rendered, latest_status = web_app._admin_developer_jobs_html()
+        self.assertLess(rendered.index("list_root"), rendered.index("git_status"))
+        self.assertEqual(latest_status, "completed")
+
 
 if __name__ == "__main__":
     unittest.main()
