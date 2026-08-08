@@ -4412,6 +4412,7 @@ def css():
 def page(title, body, active="dashboard"):
     lang = current_language()
     admin_role = current_web_role() == ADMIN_ROLE
+    admin_surface = admin_role and request.path.startswith("/admin/")
     channels_label = {"en": "Channels", "lv": "Kanāli", "ru": "Каналы"}[lang]
     nav = [
         ("nina", tx("talk_to_nina", lang), "/nina", "N"),
@@ -4420,14 +4421,14 @@ def page(title, body, active="dashboard"):
         ("inbox", tx("inbox", lang), "/inbox", "✦"),
         ("workers", tx("workers", lang), "/workers", "♙"),
         ("tasks", tx("tasks", lang), "/tasks", "☑"),
-        ("clients", tx("clients", lang), "/admin/clients" if admin_role else "/clients", "●"),
+        ("clients", tx("clients", lang), "/admin/clients" if admin_surface else "/clients", "●"),
         ("projects", tx("projects", lang), "/projects", "▣"),
         ("calendar", tx("calendar", lang), "/calendar", "◫"),
         ("files", tx("files", lang), "/files", "▤"),
         ("analytics", tx("analytics", lang), "/analytics", "⌁"),
         ("exchange", tx("exchange", lang), "/exchange", "◎"),
     ]
-    if admin_role:
+    if admin_surface:
         nav.append(("admin", "Admin", "/admin/channels", "A"))
     nav_html = ""
     for key, label, href, icon in nav:
@@ -6834,18 +6835,12 @@ def nina_voice():
 
 @app.get("/channels")
 def channels():
-    if current_web_role() == ADMIN_ROLE:
-        notice = (request.args.get("notice") or "").strip()
-        notice = notice if notice in {"whatsapp_failed"} else ""
-        whatsapp_view = (request.args.get("whatsapp") or "").strip()
-        whatsapp_view = whatsapp_view if whatsapp_view in {"prepare", "switch"} else ""
-        return Response(page("Admin Channels", _admin_subnav() + channels_body(notice=notice, whatsapp_view=whatsapp_view), active="admin"), mimetype="text/html")
     current_workspace_id()
     return Response(page(_channels_copy(current_language())["title"], client_channels_body(), active="channels"), mimetype="text/html")
 
 
 def _admin_subnav():
-    if current_web_role() != ADMIN_ROLE:
+    if current_web_role() != ADMIN_ROLE or not request.path.startswith("/admin/"):
         return ""
     lang = current_language()
     return (

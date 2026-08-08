@@ -30,6 +30,25 @@ class AdminPanelSeparationTests(unittest.TestCase):
         client_page = web_app.app.test_client().get("/channels?lang=en")
         self.assertNotIn(b">Admin<", client_page.data)
 
+    def test_owner_session_on_client_surfaces_never_renders_admin_navigation(self):
+        owner = self.admin_client()
+        for route in ("/channels", "/tasks", "/dashboard"):
+            with self.subTest(route=route):
+                page = owner.get(route + "?lang=en").get_data(as_text=True)
+                self.assertNotIn("/admin/developer", page)
+                self.assertNotIn(">Developer<", page)
+                self.assertNotIn("href='/admin/channels", page)
+        channels = owner.get("/channels?lang=en").get_data(as_text=True)
+        self.assertNotIn("NinaOS Company WhatsApp", channels)
+        self.assertNotIn("Connect company phone", channels)
+        self.assertNotIn("Disconnect", channels)
+
+    def test_company_whatsapp_management_stays_on_admin_surface(self):
+        owner = self.admin_client()
+        admin_channels = owner.get("/admin/channels?lang=en").get_data(as_text=True)
+        self.assertIn("NinaOS Company WhatsApp", admin_channels)
+        self.assertIn("/admin/developer", admin_channels)
+
     def test_clients_sidebar_link_is_role_aware(self):
         admin_page = self.admin_client().get("/admin/channels?lang=en").get_data(as_text=True)
         client_page = web_app.app.test_client().get("/channels?lang=en").get_data(as_text=True)
