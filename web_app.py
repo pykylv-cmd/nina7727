@@ -7089,17 +7089,18 @@ def _developer_investigation_plan(command):
     normalized = " ".join(str(command or "").strip().casefold().split())
     if ("developer console" in normalized
             and ("diff preview" in normalized or "sagatavo" in normalized or "minimal" in normalized)
-            and ("connected" in normalized or "disconnected" in normalized)):
+            and ("connected" in normalized or "disconnected" in normalized
+                 or "statusu kartītes" in normalized or "status cards" in normalized)):
         return "developer_status_diff_preview", (
             ("backend_status", "def connection_" + "status", "developer_control.py"),
             ("freshness_gate", "connected = seen >=", "developer_control.py"),
             ("readiness_helper", "def _developer_" + "connection_ready", "web_app.py"),
             ("render_gate", "developer_ready = _developer_" + "connection_ready(connection)", "web_app.py"),
             ("send_gate", "if not _developer_" + "connection_ready(status):", "web_app.py"),
-            ("approval_gate", "if approval_status[\"agent\"] != \"connected\"", "web_app.py"),
+            ("approval_gate", "if not _developer_" + "connection_ready(approval_status):", "web_app.py"),
             ("agent_card", "(\"Local Developer Agent\", \"Connected\"", "web_app.py"),
             ("repository_card", "(\"Repository\", \"Connected\"", "web_app.py"),
-            ("regression_test", "def test_repository_disconnected_blocks_direct_post", "test_admin_developer_console.py"),
+            ("regression_test", "def test_repository_disconnected_blocks_" + "diff_approval", "test_admin_developer_console.py"),
         )
     if "kur tiek definēts send_message_to_nina" in normalized or "kur tiek definets send_message_to_nina" in normalized:
         return "send_message_definition", (
@@ -7241,35 +7242,22 @@ def _developer_investigation_answer(kind, jobs):
     location = lambda role: f"{evidence[role]['path']}:{evidence[role]['line']}"
     if kind == "developer_status_diff_preview":
         raw = lambda role: str(evidence[role].get("raw_text") or evidence[role].get("text") or "")
-        helper_name = "_developer_" + "connection_ready"
-        approval_line = int(evidence["approval_gate"]["line"])
-        test_line = int(evidence["regression_test"]["line"])
+        agent_card_line = int(evidence["agent_card"]["line"])
+        repository_card_line = int(evidence["repository_card"]["line"])
+        agent_card = raw("agent_card")
+        repository_card = raw("repository_card")
         diff_preview = "\n".join((
             "--- a/web_app.py",
             "+++ b/web_app.py",
-            f"@@ -{approval_line},1 +{approval_line},1 @@",
-            "-" + raw("approval_gate"),
-            "+            if not " + helper_name + "(approval_status):",
-            "--- a/test_admin_developer_console.py",
-            "+++ b/test_admin_developer_console.py",
-            f"@@ -{test_line},1 +{test_line},13 @@",
-            "+    def test_repository_disconnected_blocks_diff_approval(self):",
-            "+        client = self.admin_client()",
-            "+        with patch.object(web_app, \"developer_connection_status\",",
-            "+                          return_value={\"agent\": \"connected\", \"repository\": \"not_connected\"}), \\",
-            "+             patch.object(web_app, \"create_developer_approval_job\") as create:",
-            "+            response = client.post(\"/admin/developer\", data={",
-            "+                \"csrf_token\": web_app._channel_csrf(\"developer:approve\"),",
-            "+                \"action\": \"approve_diff\", \"investigation_id\": \"devinvest_test\",",
-            "+                \"diff_hash\": \"0\" * 64,",
-            "+            })",
-            "+        self.assertEqual(response.status_code, 409)",
-            "+        create.assert_not_called()",
-            "+",
-            " " + raw("regression_test"),
+            f"@@ -{agent_card_line},1 +{agent_card_line},1 @@",
+            "-" + agent_card,
+            "+" + agent_card.replace("\"Local Developer Agent\"", "\"Developer Agent connection\"", 1),
+            f"@@ -{repository_card_line},1 +{repository_card_line},1 @@",
+            "-" + repository_card,
+            "+" + repository_card.replace("\"Repository\"", "\"Repository access\"", 1),
         ))
         developer_analysis = {
-            "problem": "Keep Developer Agent and Repository readiness decisions consistent across every owner-only Developer Console action.",
+            "problem": "Make Developer Console status cards clearer without changing canonical readiness behavior.",
             "repository_evidence": cited,
             "architecture_boundary": "Owner-authenticated Web Developer capability; status originates in developer_control and is consumed by web_app.",
             "affected_modules": {
@@ -7285,19 +7273,19 @@ def _developer_investigation_answer(kind, jobs):
             "risks": {
                 "classification": "LOW",
                 "items": [
-                    "A duplicated readiness condition can drift from the shared predicate.",
-                    "An incorrect approval gate could expose a one-time write action while Repository is unavailable.",
+                    "Status labels must not imply that UI presentation owns readiness state.",
+                    "The canonical readiness helper must remain unchanged across render, Send, and approval paths.",
                     "Changing heartbeat freshness semantics would affect all Developer Console readiness consumers.",
                 ],
             },
             "Relevant previous lessons": [],
             "Evidence precedence": "Current repository evidence is authoritative; historical lessons may only refine risk and solution selection.",
             "alternatives": [
-                {"option": "Leave the approval condition duplicated", "risk": "Future status drift remains possible."},
-                {"option": "Reuse the existing readiness helper", "risk": "Minimal; behavior remains fail-closed."},
+                {"option": "Keep the shorter status labels", "risk": "The connection/access meaning remains less explicit."},
+                {"option": "Clarify labels only", "risk": "Minimal; no readiness or permission behavior changes."},
             ],
-            "chosen_solution": "Reuse _developer_connection_ready for the approval gate and add one focused regression test.",
-            "why": "It removes the last duplicated Agent+Repository policy without changing status persistence, authentication, Developer Agent, or write permissions.",
+            "chosen_solution": "Keep _developer_connection_ready canonical and clarify only the two status-card labels.",
+            "why": "Current evidence proves render, Send, and approval already share the helper, so a label-only preview is the smallest safe improvement.",
             "focused_validation_plan": [
                 "connected Agent + Repository permits normal Developer Console work",
                 "Repository-disconnected Send remains blocked",
@@ -7322,23 +7310,23 @@ def _developer_investigation_answer(kind, jobs):
             for lesson in lesson_matches
         ] or ["None found."])
         proposal = {
-            "files": ["web_app.py", "test_admin_developer_console.py"],
-            "functions": ["_developer_connection_ready", "admin_developer"],
-            "reason": "Use the existing Agent+Repository readiness predicate for owner approval gating too.",
+            "files": ["web_app.py"],
+            "functions": ["_admin_developer_body"],
+            "reason": "Clarify that the status cards describe the Agent connection and Repository access.",
             "risk": "LOW",
             "diff": diff_preview,
             "focused_tests": [
                 "connected Agent + connected Repository preserves approval behavior",
                 "connected Agent + disconnected Repository rejects owner approval",
-                "Repository-disconnected Send remains rejected",
-                "owner-only access remains enforced",
+                "status-card labels remain derived from canonical backend status",
+                "owner-only access and disabled write/deploy status remain enforced",
             ],
             "expected_source_hashes": {
                 path: source_hashes.get(path, "")
-                for path in ("web_app.py", "test_admin_developer_console.py")
+                for path in ("web_app.py",)
             },
             "validation": {
-                "py_compile": ["web_app.py", "test_admin_developer_console.py"],
+                "py_compile": ["web_app.py"],
                 "pytest": [],
             },
         }
@@ -7349,9 +7337,9 @@ def _developer_investigation_answer(kind, jobs):
                 "The backend status is defined at " + location("backend_status") +
                 " and expires through the heartbeat freshness gate at " + location("freshness_gate") +
                 ". The shared readiness predicate is defined at " + location("readiness_helper") +
-                " and is used by rendering and Send at " + location("render_gate") + " and " +
-                location("send_gate") + ". The owner approval path still duplicates that policy at " +
-                location("approval_gate") + ", creating a small future consistency risk."
+                " and is used by rendering, Send, and approval at " + location("render_gate") + ", " +
+                location("send_gate") + ", and " + location("approval_gate") +
+                ". The smallest supported clarity improvement is limited to the status-card labels."
             ),
             "proposed_change": proposal,
             "quality_review": quality_review,
@@ -7574,8 +7562,10 @@ def _admin_developer_body(notice=""):
         "<div class='channel-message'>Developer Agent vēl nav pieslēgts. "
         "Šobrīd šī konsole ir read-only setup režīmā.</div><br>"
         if notice == "agent_not_connected" else
+        ("<div class='channel-message'>Šo Developer komandu vēl neatpazīstu.</div><br>"
+         if notice == "unsupported_developer_command" else
         ("<div class='channel-message'>Komanda pieņemta drošai read-only izpildei.</div><br>"
-         if notice == "job_created" else "")
+         if notice == "job_created" else ""))
     )
     job_rows, _ = _admin_developer_jobs_html()
     jobs_html = (
@@ -7608,7 +7598,7 @@ def _admin_developer_body(notice=""):
 .developer-console{position:sticky;top:12px;z-index:20;box-shadow:0 18px 50px rgba(0,0,0,.32)}
 .developer-results{max-height:52vh;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
 .developer-result{scroll-margin-block:12px}.developer-console textarea{min-height:88px;resize:vertical}
-</style><script>(()=>{const form=document.getElementById('developer-form'),input=document.getElementById('developer-message'),results=document.getElementById('developer-results'),notice=document.getElementById('developer-notice');if(!form||!input||!results)return;const bottom=()=>{results.scrollTop=results.scrollHeight};const refresh=async()=>{const response=await fetch('/admin/developer?format=results',{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});if(!response.ok)throw new Error('results');const payload=await response.json();results.innerHTML=payload.html;bottom();return payload.latest_status};form.addEventListener('submit',async event=>{event.preventDefault();const button=form.querySelector('button[type="submit"]');button.disabled=true;notice.textContent='';try{const response=await fetch(form.action,{method:'POST',body:new FormData(form),credentials:'same-origin',headers:{Accept:'application/json'}});const payload=await response.json();if(!response.ok)throw new Error(payload.error||'submit');notice.textContent=payload.message||'';input.value='';let status=await refresh();for(let attempt=0;attempt<15&&['pending','claimed'].includes(status);attempt++){await new Promise(resolve=>setTimeout(resolve,1000));status=await refresh();}}catch(error){notice.textContent='Developer command could not be completed.'}finally{button.disabled=false;input.focus();bottom();}});bottom();input.focus();})();</script>"""
+</style><script>(()=>{const form=document.getElementById('developer-form'),input=document.getElementById('developer-message'),results=document.getElementById('developer-results'),notice=document.getElementById('developer-notice');if(!form||!input||!results)return;const bottom=()=>{results.scrollTop=results.scrollHeight};const refresh=async()=>{const response=await fetch('/admin/developer?format=results',{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});if(!response.ok)throw new Error('results');const payload=await response.json();results.innerHTML=payload.html;bottom();return payload.latest_status};form.addEventListener('submit',async event=>{event.preventDefault();const button=form.querySelector('button[type="submit"]');button.disabled=true;notice.textContent='';try{const response=await fetch(form.action,{method:'POST',body:new FormData(form),credentials:'same-origin',headers:{Accept:'application/json'}});let payload={};try{payload=await response.json();}catch(parseError){}if(!response.ok){const failure=new Error('submit');failure.safeMessage=payload.message||payload.error||'';throw failure;}notice.textContent=payload.message||'';input.value='';let status=await refresh();for(let attempt=0;attempt<15&&['pending','claimed'].includes(status);attempt++){await new Promise(resolve=>setTimeout(resolve,1000));status=await refresh();}}catch(error){notice.textContent=error.safeMessage||'Developer command could not be completed.'}finally{button.disabled=false;input.focus();bottom();}});bottom();input.focus();})();</script>"""
     return (
         _admin_subnav()
         + "<div class='page-title'><h1>NINA DEVELOPER</h1><p>Owner-only Developer Console setup shell for ONE NINA.</p></div><br>"
@@ -7750,13 +7740,14 @@ def admin_developer():
                 })
             notice = "job_created"
         elif not operation:
-            notice = "agent_not_connected"
+            notice = "unsupported_developer_command"
         else:
             create_developer_job(operation, arguments)
             notice = "job_created"
         if request.accept_mimetypes.best == "application/json":
             messages = {
                 "agent_not_connected": "Developer Agent vēl nav pieslēgts. Šobrīd šī konsole ir read-only setup režīmā.",
+                "unsupported_developer_command": "Šo Developer komandu vēl neatpazīstu.",
                 "job_created": "Komanda pieņemta drošai read-only izpildei.",
             }
             return jsonify({"ok": notice == "job_created", "notice": notice,

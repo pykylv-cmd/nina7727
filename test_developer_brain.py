@@ -61,6 +61,25 @@ class DeveloperBrainTests(unittest.TestCase):
         self.assertEqual(analysis["risks"]["classification"], "LOW")
         self.assertIn("_developer_connection_ready", analysis["chosen_solution"])
 
+    def test_current_canonical_readiness_evidence_is_distinct_and_self_match_safe(self):
+        kind, plan = web_app._developer_investigation_plan(STATUS_QUESTION)
+        jobs = []
+        for role, query, path in plan:
+            result = self.agent.execute("search_text", {"query": query, "path": path})
+            jobs.append({"status": "completed", "result": result,
+                         "arguments": {"evidence_role": role, "investigation_kind": kind}})
+        payload = web_app._developer_investigation_answer(kind, jobs)
+        by_role = {item["role"]: item for item in payload["evidence"]}
+        self.assertIn("def _developer_connection_ready", by_role["readiness_helper"]["symbol"])
+        self.assertIn("developer_ready = _developer_connection_ready", by_role["render_gate"]["symbol"])
+        self.assertIn("_developer_connection_ready(status)", by_role["send_gate"]["symbol"])
+        self.assertIn("_developer_connection_ready(approval_status)", by_role["approval_gate"]["symbol"])
+        self.assertIn("test_repository_disconnected_blocks_diff_approval",
+                      by_role["regression_test"]["symbol"])
+        self.assertNotEqual(by_role["readiness_helper"]["line"], by_role["render_gate"]["line"])
+        self.assertTrue(all(item["line"] > 7105 for item in by_role.values()
+                            if item["path"] == "web_app.py"))
+
     def test_repository_evidence_and_multi_file_dependencies_are_real(self):
         _, _, result = self.investigate(FLOW_QUESTION)
         analysis = result["developer_analysis"]

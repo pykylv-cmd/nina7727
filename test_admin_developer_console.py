@@ -140,6 +140,71 @@ class AdminDeveloperConsoleTests(unittest.TestCase):
         self.assertTrue(response.get_json()["ok"])
         create.assert_called_once_with("list_root", {})
 
+    def test_connected_unsupported_command_is_not_misclassified_as_disconnected(self):
+        with patch.object(web_app, "developer_connection_status",
+                          return_value={"agent": "connected", "repository": "connected"}), \
+             patch.object(web_app, "create_developer_job") as create:
+            response = self.admin_client().post(
+                "/admin/developer", headers={"Accept": "application/json"},
+                data={"csrf_token": web_app._channel_csrf("developer:send"),
+                      "message": "Developer: nezināma komanda"},
+            )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["notice"], "unsupported_developer_command")
+        self.assertNotEqual(response.get_json()["notice"], "agent_not_connected")
+        create.assert_not_called()
+
+    def test_actually_disconnected_agent_keeps_disconnected_error(self):
+        with patch.object(web_app, "developer_connection_status",
+                          return_value={"agent": "not_connected", "repository": "not_connected"}), \
+             patch.object(web_app, "create_developer_job") as create:
+            response = self.admin_client().post(
+                "/admin/developer", headers={"Accept": "application/json"},
+                data={"csrf_token": web_app._channel_csrf("developer:send"),
+                      "message": "Developer: parādi projekta failus"},
+            )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["notice"], "agent_not_connected")
+        create.assert_not_called()
+
+    def test_exact_status_cards_live_intent_routes_to_existing_investigation(self):
+        command = (
+            "Analizē Developer Console statusu kartītes. Atrodi vienu zema riska uzlabojumu, "
+            "kas padara statusu saprotamāku. Pirms jebkādas izmaiņas parādi Developer Analysis, "
+            "Quality Review un Diff Preview."
+        )
+        kind, steps = web_app._developer_investigation_plan(command)
+        self.assertEqual(kind, "developer_status_diff_preview")
+        self.assertTrue(steps)
+        with patch.object(web_app, "developer_connection_status",
+                          return_value={"agent": "connected", "repository": "connected"}), \
+             patch.object(web_app, "create_developer_job") as create:
+            response = self.admin_client().post(
+                "/admin/developer", headers={"Accept": "application/json"},
+                data={"csrf_token": web_app._channel_csrf("developer:send"), "message": command},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(create.called)
+        self.assertTrue(all(call.args[0] == "search_text" for call in create.call_args_list))
+
+    def test_frontend_preserves_safe_backend_error_and_has_generic_fallback(self):
+        page = self.admin_client().get("/admin/developer").get_data(as_text=True)
+        self.assertIn("failure.safeMessage=payload.message||payload.error||''", page)
+        self.assertIn("error.safeMessage||'Developer command could not be completed.'", page)
+
+    def test_write_and_deploy_access_remain_disabled_for_unsupported_command(self):
+        with patch.object(web_app, "developer_connection_status",
+                          return_value={"agent": "connected", "repository": "connected"}), \
+             patch.object(web_app, "create_developer_job") as create:
+            self.admin_client().post(
+                "/admin/developer", headers={"Accept": "application/json"},
+                data={"csrf_token": web_app._channel_csrf("developer:send"), "message": "unsupported"},
+            )
+            page = self.admin_client().get("/admin/developer").get_data(as_text=True)
+        create.assert_not_called()
+        self.assertIn("Write Access</small><b>Disabled", page)
+        self.assertIn("Deploy Access</small><b>Disabled", page)
+
     def test_ajax_results_endpoint_remains_admin_only(self):
         denied = web_app.app.test_client().get(
             "/admin/developer?format=results", headers={"Accept": "application/json"}
