@@ -4576,8 +4576,24 @@ def _web_push_client_script():
 """.strip()
 
 
+def _verified_source_links_html(text, verified_urls):
+    rendered = html_escape(text or "")
+    for url in sorted({str(value) for value in verified_urls if str(value).startswith("https://")}, key=len, reverse=True):
+        escaped_url = html_escape(url)
+        rendered = rendered.replace(escaped_url, "<a href='" + escaped_url + "' target='_blank' rel='noopener noreferrer'>" + escaped_url + "</a>")
+    return rendered
+
+
 def nina_chat_body(messages):
     lang = current_language()
+    verified_source_urls = set()
+    try:
+        from web_research import latest_research_session, verified_results
+        research_contact = current_web_contact()
+        latest_research = latest_research_session(NINA_WEB_WORKSPACE_ID, research_contact["contact_id"], research_contact["conversation_id"])
+        verified_source_urls = {item["source_url"] for item in verified_results(latest_research or {})}
+    except Exception:
+        verified_source_urls = set()
     copy = {
         "en": {"title": "Talk to Nina", "sub": "Ask a question, plan work, or tell Nina what needs attention.", "empty": "Start a conversation with Nina.", "placeholder": "Write a message...", "send": "Send", "channels": "Channels", "active": "Active", "connected": "Connected", "connect": "Connect", "next": "Coming next", "ready": "Ready", "recording": "Recording", "processing": "Processing", "error": "Voice input could not be processed.", "denied": "Microphone permission was denied.", "unsupported": "Voice recording is not supported in this browser.", "stop": "Stop", "cancel": "Cancel", "mic": "Start voice input"},
         "lv": {"title": "Runā ar Ninu", "sub": "Uzdod jautājumu, plāno darbu vai pasaki, kam jāpievērš uzmanība.", "empty": "Sāc sarunu ar Ninu.", "placeholder": "Raksti ziņu...", "send": "Sūtīt", "channels": "Kanāli", "active": "Aktīvs", "connected": "Savienots", "connect": "Savienot", "next": "Drīzumā", "ready": "Gatavs", "recording": "Ieraksta", "processing": "Apstrādā", "error": "Balss ziņu neizdevās apstrādāt.", "denied": "Mikrofona atļauja tika liegta.", "unsupported": "Šī pārlūkprogramma neatbalsta balss ierakstu.", "stop": "Apturēt", "cancel": "Atcelt", "mic": "Sākt balss ievadi"},
@@ -4589,7 +4605,9 @@ def nina_chat_body(messages):
         label = "You" if role == "user" and lang == "en" else ("Tu" if role == "user" else "Nina")
         message_id = html_escape(message.get("message_id") or "")
         timeline_key = html_escape(message.get("timeline_key") or "")
-        bubbles += f"<div class='chat-message {role}' data-message-id='{message_id}' data-timeline-key='{timeline_key}'>{html_escape(message.get('text'))}<small>{label}</small></div>"
+        rendered_text = (_verified_source_links_html(message.get("text"), verified_source_urls)
+                         if role == "nina" else html_escape(message.get("text")))
+        bubbles += f"<div class='chat-message {role}' data-message-id='{message_id}' data-timeline-key='{timeline_key}'>{rendered_text}<small>{label}</small></div>"
     if not bubbles:
         bubbles = f"<div class='chat-message nina'>{html_escape(copy['empty'])}<small>Nina</small></div>"
 

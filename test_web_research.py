@@ -199,6 +199,18 @@ class WebResearchTests(unittest.TestCase):
         source=Path("web_research.py").read_text(encoding="utf-8")
         self.assertNotIn("send_whatsapp",source); self.assertNotIn("send_email",source)
 
+    def test_nina_chat_links_only_persisted_verified_sources(self):
+        import web_app
+        payload = self.research.search_public_web(self.full_intent(), fetcher=lambda _url: self.page(), result_verifier=self.verify_item)
+        self.research.save_research_session("links", "one", "conv", payload)
+        real_url = payload["results"][0]["source_url"]
+        contact = {"contact_id": "one", "conversation_id": "conv"}
+        with patch.object(web_app, "NINA_WEB_WORKSPACE_ID", "links"), patch.object(web_app, "current_web_contact", return_value=contact):
+            with web_app.app.test_request_context("/nina"):
+                html = web_app.nina_chat_body([{"role": "assistant", "text": f"Sources: {real_url} https://fake.example/item"}])
+        self.assertIn("href='" + real_url + "'", html)
+        self.assertNotIn("href='https://fake.example/item'", html)
+
     def test_web_ui_cards_csrf_and_server_owner(self):
         import web_app
         payload=self.research.search_public_web(self.full_intent(),fetcher=lambda _url:self.page(),result_verifier=self.verify_item)
@@ -524,7 +536,7 @@ class WebResearchTests(unittest.TestCase):
         self.assertEqual(len(payload["verified_search_pages"]),1)
         self.assertEqual(payload["rejected_results"][0]["reason"],"product_query_blog_page")
         rendered=self.research.summarize_sources(payload)
-        self.assertIn("verificēta meklēšanas lapa",rendered)
+        self.assertIn("Atradu verificētu kategorijas lapu",rendered)
         self.assertNotIn("piedāvājumi.\n",rendered)
         self.assertIn("https://www.alibaba.com/trade/search",self.research.summarize_verified_links(payload))
 
