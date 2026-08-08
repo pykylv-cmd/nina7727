@@ -205,6 +205,17 @@ class DeveloperControlledReleaseTests(unittest.TestCase):
         response = web_app.app.test_client().get("/internal/developer-release/verify")
         self.assertEqual(response.status_code, 401)
 
+    def test_current_head_sha_is_read_without_arbitrary_git(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); (root / ".git" / "refs" / "heads" / "feature").mkdir(parents=True)
+            (root / ".git" / "HEAD").write_text("ref: refs/heads/feature/web-chat-v1\n", encoding="ascii")
+            expected = "a" * 40
+            (root / ".git" / "refs" / "heads" / "feature" / "web-chat-v1").write_text(
+                expected + "\n", encoding="ascii"
+            )
+            agent = nina_developer_agent.ReadOnlyDeveloperAgent(root)
+            self.assertEqual(agent._current_head_sha("feature/web-chat-v1"), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

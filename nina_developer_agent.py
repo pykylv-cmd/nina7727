@@ -137,6 +137,17 @@ class ReadOnlyDeveloperAgent:
     def _sha256_text(value):
         return hashlib.sha256(str(value).encode("utf-8")).hexdigest()
 
+    def _current_head_sha(self, branch):
+        git_dir = self.root / ".git"
+        head = (git_dir / "HEAD").read_text(encoding="ascii").strip()
+        expected_ref = "refs/heads/" + str(branch)
+        if head != "ref: " + expected_ref:
+            raise DeveloperAgentError("release_wrong_branch")
+        value = (git_dir / Path(expected_ref)).read_text(encoding="ascii").strip().casefold()
+        if len(value) != 40 or any(character not in "0123456789abcdef" for character in value):
+            raise DeveloperAgentError("release_head_unavailable")
+        return value
+
     def _safe_write_path(self, relative, allow_new=False):
         path = self._path(relative)
         if path.suffix.lower() not in SAFE_WRITE_SUFFIXES:
@@ -337,10 +348,10 @@ class ReadOnlyDeveloperAgent:
             raise DeveloperAgentError("release_diff_read_failed")
         changed_files = {line.strip().replace("\\", "/") for line in changed.stdout.splitlines() if line.strip()}
         if args.get("resume_after_push"):
-            if changed_files or not str(args.get("resume_commit_sha") or ""):
+            if changed_files:
                 raise DeveloperAgentError("release_resume_state_changed")
             stages["commit"] = "pass"; stages["push"] = "pass"; stages["deploy"] = "pass"
-            commit_sha = str(args.get("resume_commit_sha") or "")
+            commit_sha = str(args.get("resume_commit_sha") or "") or self._current_head_sha(branch)
         else:
             commit_sha = ""
         if not args.get("resume_after_push") and changed_files != {value.replace("\\", "/") for value in files}:
@@ -357,6 +368,12 @@ class ReadOnlyDeveloperAgent:
             if committed.returncode:
                 raise DeveloperAgentError("release_commit_failed")
             stages["commit"] = "pass"
+            for line in (committed.stdout + committed.stderr).splitlines():
+                match = re.search(r"\[.+ ([0-9a-f]{7,40})\]", line)
+                if match:
+                    commit_sha = match.group(1); break
+            if not commit_sha:
+                raise DeveloperAgentError("release_commit_sha_missing")
             self._run_fixed(["git", "status", "--short", "--branch"], self.root)
             pushed = self._run_fixed(["git", "push", "origin", branch], self.root)
             if pushed.returncode:
@@ -395,11 +412,6 @@ class ReadOnlyDeveloperAgent:
         if code != 200 or not proof.get("ok"):
             return {"release_id": release_id, "stages": stages, "failed_stage": "live_verify"}
         stages["live_verify"] = "pass"
-        if not args.get("resume_after_push"):
-            for line in (committed.stdout + committed.stderr).splitlines():
-                match = re.search(r"\[.+ ([0-9a-f]{7,40})\]", line)
-                if match:
-                    commit_sha = match.group(1); break
         return {"release_id": release_id, "stages": stages, "commit_sha": commit_sha,
                 "health": health_payloads, "live_verification": proof,
                 "write_access": "disabled", "deploy_access": "disabled"}
