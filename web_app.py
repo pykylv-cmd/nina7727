@@ -6736,18 +6736,24 @@ def client_channels_body():
     """Product communication choices without private connection controls or state."""
     lang = current_language()
     copy = {
-        "en": {"title":"Talk to Nina","sub":"Open your private Nina workspace.","web":"Talk to Nina","web_text":"Continue in your private Web Chat.","open":"Open Web Chat","available":"Available"},
-        "lv": {"title":"Runāt ar Ninu","sub":"Atver savu privāto Ninas darba vidi.","web":"Runāt ar Ninu","web_text":"Turpini savā privātajā Web Chat.","open":"Atvērt Web Chat","available":"Pieejams"},
-        "ru": {"title":"Поговорить с Ниной","sub":"Откройте своё личное пространство Нины.","web":"Поговорить с Ниной","web_text":"Продолжите в своём приватном Web Chat.","open":"Открыть Web Chat","available":"Доступно"},
+        "en": {"title":"Talk to Nina","sub":"Choose where you want to talk to Nina.","web":"Web","web_text":"Continue in your private Web Chat.","telegram":"Telegram","telegram_text":"Open Nina's public Telegram bot.","whatsapp":"WhatsApp","whatsapp_text":"Open a private conversation with Nina in WhatsApp.","open_web":"Open Web Chat","open_telegram":"Open Telegram","open_whatsapp":"Open WhatsApp","available":"Available"},
+        "lv": {"title":"Runāt ar Ninu","sub":"Izvēlies, kur vēlies sarunāties ar Ninu.","web":"Web","web_text":"Turpini savā privātajā Web Chat.","telegram":"Telegram","telegram_text":"Atver Ninas publisko Telegram botu.","whatsapp":"WhatsApp","whatsapp_text":"Atver privātu sarunu ar Ninu WhatsApp.","open_web":"Atvērt Web Chat","open_telegram":"Atvērt Telegram","open_whatsapp":"Atvērt WhatsApp","available":"Pieejams"},
+        "ru": {"title":"Поговорить с Ниной","sub":"Выберите, где хотите общаться с Ниной.","web":"Web","web_text":"Продолжите в своём приватном Web Chat.","telegram":"Telegram","telegram_text":"Откройте публичного Telegram-бота Нины.","whatsapp":"WhatsApp","whatsapp_text":"Откройте приватный разговор с Ниной в WhatsApp.","open_web":"Открыть Web Chat","open_telegram":"Открыть Telegram","open_whatsapp":"Открыть WhatsApp","available":"Доступно"},
     }[lang]
+    try:
+        public_contact = public_ninaos_contact(primary_ninaos_number()) or {}
+    except ValueError:
+        public_contact = {}
     choices = [
-        (copy["web"], copy["web_text"], f"/nina?lang={lang}", ""),
+        (copy["web"], copy["web_text"], f"/nina?lang={lang}", copy["open_web"], ""),
+        (copy["telegram"], copy["telegram_text"], f"https://t.me/{_telegram_bot_username()}", copy["open_telegram"], " target='_blank' rel='noopener noreferrer'"),
+        (copy["whatsapp"], copy["whatsapp_text"], str(public_contact.get("whatsapp_url") or f"/nina?lang={lang}"), copy["open_whatsapp"], " target='_blank' rel='noopener noreferrer'"),
     ]
     cards = "".join(
         "<section class='card card-pad connection-card'>"
         f"<div class='connection-head'><h2>{html_escape(title)}</h2><span class='connection-status active'>{html_escape(copy['available'])}</span></div>"
-        f"<p class='muted'>{html_escape(text)}</p><div class='connection-actions'><a class='btn primary' href='{html_escape(href)}'{extra}>{html_escape(copy['open'])}</a></div></section>"
-        for title, text, href, extra in choices
+        f"<p class='muted'>{html_escape(text)}</p><div class='connection-actions'><a class='btn primary' href='{html_escape(href)}'{extra}>{html_escape(action)}</a></div></section>"
+        for title, text, href, action, extra in choices
     )
     return (
         f"<div class='page-title'><h1>{html_escape(copy['title'])}</h1><p>{html_escape(copy['sub'])}</p></div><br>"

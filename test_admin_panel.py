@@ -39,6 +39,8 @@ class AdminPanelSeparationTests(unittest.TestCase):
                 self.assertNotIn(">Developer<", page)
                 self.assertNotIn("href='/admin/channels", page)
         channels = owner.get("/channels?lang=en").get_data(as_text=True)
+        for channel in ("Telegram", "WhatsApp", "Web"):
+            self.assertIn(f"<h2>{channel}</h2>", channels)
         self.assertNotIn("NinaOS Company WhatsApp", channels)
         self.assertNotIn("Connect company phone", channels)
         self.assertNotIn("Disconnect", channels)
@@ -110,12 +112,15 @@ class AdminPanelSeparationTests(unittest.TestCase):
     def test_client_channels_are_product_facing_only(self):
         with patch.dict(os.environ, {"NINA_COMPANY_WHATSAPP_NUMBER": "+37120714711"}):
             page = web_app.app.test_client().get("/channels?lang=en").get_data(as_text=True)
-        self.assertIn("Talk to Nina", page)
+        for channel in ("Telegram", "WhatsApp", "Web"):
+            self.assertIn(f"<h2>{channel}</h2>", page)
         self.assertIn("href='/nina?lang=en'", page)
+        self.assertIn("href='https://t.me/", page)
+        self.assertIn("href='https://wa.me/", page)
         for forbidden in (
             "Connect company phone", "Disconnect", "Linked Devices",
             "bridge", "workspace_id", "qr_svg", "NinaOS Company WhatsApp",
-            "WhatsApp", "wa.me", "/nina/contact-qr.svg", "/nina/contact.vcf",
+            "/nina/contact-qr.svg", "/nina/contact.vcf", "+371 20714711",
         ):
             self.assertNotIn(forbidden, page)
 
