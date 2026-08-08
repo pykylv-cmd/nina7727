@@ -33,6 +33,7 @@ from developer_control import (
     select_release_services as select_developer_release_services,
     write_access_status as developer_write_access_status,
 )
+from developer_router import developer_intents as _developer_intents
 from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, generate_with_nina, load_channel_conversation, load_web_conversation, save_channel_turn, send_message_to_nina
 from voice_engine import transcribe_audio_with_openai
 from channel_connections import claim_channel_message, consume_whatsapp_onboarding_state, create_telegram_token, create_whatsapp_onboarding_state, disconnect as disconnect_channel, get_connection, set_connection_for_test, update_whatsapp_verification
@@ -7087,8 +7088,9 @@ def admin_system():
 
 def _developer_investigation_plan(command):
     normalized = " ".join(str(command or "").strip().casefold().split())
+    intents = set(_developer_intents(command))
     if ("developer console" in normalized
-            and ("diff preview" in normalized or "sagatavo" in normalized or "minimal" in normalized)
+            and "ui_analysis" in intents and "diff_request" in intents
             and ("connected" in normalized or "disconnected" in normalized
                  or "statusu kartītes" in normalized or "status cards" in normalized)):
         return "developer_status_diff_preview", (
@@ -7102,11 +7104,11 @@ def _developer_investigation_plan(command):
             ("repository_card", "(\"Repository\", \"Connected\"", "web_app.py"),
             ("regression_test", "def test_repository_disconnected_blocks_" + "diff_approval", "test_admin_developer_console.py"),
         )
-    if "kur tiek definēts send_message_to_nina" in normalized or "kur tiek definets send_message_to_nina" in normalized:
+    if "code_search" in intents and "send_message_to_nina" in normalized:
         return "send_message_definition", (
             ("main_definition", "def send_message_to_nina", "nina_message_service.py"),
         )
-    if "company whatsapp" in normalized and "message flow" in normalized:
+    if "company whatsapp" in normalized and "architecture_analysis" in intents:
         return "company_whatsapp_flow", (
             ("bridge_event", "messages.upsert", "personal_whatsapp_bridge/src/company_session_manager.js"),
             ("bridge_intake", "export async function processCompanyMessageUpsert", "personal_whatsapp_bridge/src/company_session_manager.js"),
@@ -7115,7 +7117,8 @@ def _developer_investigation_plan(command):
             ("shared_definition", "def send_message_to_nina", "nina_message_service.py"),
             ("bridge_reply", "socket.sendMessage(remote", "personal_whatsapp_bridge/src/company_session_manager.js"),
         )
-    if "developer:" in normalized and "web research" in normalized and ("kāpēc" in normalized or "kapec" in normalized):
+    if "developer" in normalized and "web research" in normalized and (
+            "architecture_analysis" in intents or "risk_analysis" in intents):
         return "developer_routing", (
             ("developer_route", "def admin_" + "developer", "web_app.py"),
             ("developer_router", "def _developer_" + "command", "web_app.py"),
@@ -7726,6 +7729,7 @@ def admin_developer():
         command = (request.form.get("message") or "").strip()
         investigation_kind, investigation_steps = _developer_investigation_plan(command)
         operation, arguments = _developer_command(command)
+        intents = _developer_intents(command)
         if not _developer_connection_ready(status):
             notice = "agent_not_connected"
         elif investigation_steps:
@@ -7740,7 +7744,9 @@ def admin_developer():
                 })
             notice = "job_created"
         elif not operation:
-            notice = "unsupported_developer_command"
+            notice = ("developer_release_requires_owner_approval"
+                      if "release_request" in intents else
+                      ("developer_intent_requires_context" if intents else "unsupported_developer_command"))
         else:
             create_developer_job(operation, arguments)
             notice = "job_created"
@@ -7748,6 +7754,8 @@ def admin_developer():
             messages = {
                 "agent_not_connected": "Developer Agent vēl nav pieslēgts. Šobrīd šī konsole ir read-only setup režīmā.",
                 "unsupported_developer_command": "Šo Developer komandu vēl neatpazīstu.",
+                "developer_intent_requires_context": "Developer nodoms ir atpazīts, bet drošai analīzei vajag precīzāku moduļa vai problēmas kontekstu.",
+                "developer_release_requires_owner_approval": "Release pieprasījums ir atpazīts, bet to drīkst turpināt tikai ar esošo one-time owner approval plūsmu.",
                 "job_created": "Komanda pieņemta drošai read-only izpildei.",
             }
             return jsonify({"ok": notice == "job_created", "notice": notice,
