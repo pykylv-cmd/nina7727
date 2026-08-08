@@ -33,6 +33,11 @@ TARGET_EVIDENCE_ANCHORS = {
                        ("consumer", "context = client_" + "context(")),
     "Memory": (("snapshot", "def build_memory_" + "snapshot"),
                ("resolver", "def resolve_memory_" + "command")),
+    "Web Research": (("search_entry", "def search_public_" + "web("),
+                     ("verified_gate", "def verified_" + "results("),
+                     ("source_summary", "def summarize_" + "sources("),
+                     ("chat_render", "bubbles += f\"<div class='chat-message",),
+                     ("regression_anchor", "def test_web_ui_cards_" + "csrf_and_server_owner")),
 }
 
 
@@ -73,6 +78,7 @@ def developer_intents(command):
         "diff", "patch", "izmaiņu priekšlik", "proposed change", "sagatavo laboj",
         "prepare change", "sagatavo minim", "minimālo drošo risinājumu", "piedāvā minim",
     )))
+    add("diff_request", any(term in normalized for term in ("salabo", "fix ")))
     add("release_request", bool(tokens & {
         "release", "deploy", "deployment", "commit", "push", "izlaid", "deployo", "commitot", "pushot",
     }))
@@ -134,6 +140,17 @@ def developer_investigation_plan(command):
     """Map analytical intents to existing evidence-backed Developer Brain plans."""
     normalized = " ".join(str(command or "").strip().casefold().split())
     intents = set(developer_intents(command))
+    target_resolution = resolve_developer_targets(command)
+    if ("diff_request" in intents
+            and target_resolution.get("status") == "resolved"
+            and target_resolution.get("targets") == ("Web Research",)):
+        return "web_research_source_links_diff_preview", (
+            ("search_entry", "def search_public_" + "web(", "web_research.py"),
+            ("verified_gate", "def verified_" + "results(", "web_research.py"),
+            ("source_summary", "def summarize_" + "sources(", "web_research.py"),
+            ("chat_render", "bubbles += f\"<div class='chat-message", "web_app.py"),
+            ("regression_anchor", "def test_web_ui_cards_" + "csrf_and_server_owner", "test_web_research.py"),
+        )
     ui_change = "ui_analysis" in intents and (
         "diff_request" in intents or any(term in normalized for term in ("zema riska", "uzlaboj"))
     )
@@ -195,3 +212,78 @@ def developer_investigation_plan(command):
         if resolution["status"] == "resolved" and target_plan:
             return "target_architecture_analysis", target_plan
     return "", ()
+
+
+def web_research_source_links_proposal(cited, source_hashes):
+    """Build the exact low-risk product proposal after current repository evidence is proven."""
+    diff_preview = "\n".join((
+        "--- a/web_app.py", "+++ b/web_app.py", "@@",
+        "+def _verified_source_links_html(text, verified_urls):",
+        "+    rendered = html_escape(text or \"\")",
+        "+    for url in sorted({str(value) for value in verified_urls if str(value).startswith(\"https://\")}, key=len, reverse=True):",
+        "+        escaped_url = html_escape(url)",
+        "+        rendered = rendered.replace(escaped_url, \"<a href='\" + escaped_url + \"' target='_blank' rel='noopener noreferrer'>\" + escaped_url + \"</a>\")",
+        "+    return rendered", "+", "+",
+        " def nina_chat_body(messages):", "     lang = current_language()",
+        "+    verified_source_urls = set()", "+    try:",
+        "+        from web_research import latest_research_session, verified_results",
+        "+        research_contact = current_web_contact()",
+        "+        latest_research = latest_research_session(NINA_WEB_WORKSPACE_ID, research_contact[\"contact_id\"], research_contact[\"conversation_id\"])",
+        "+        verified_source_urls = {item[\"source_url\"] for item in verified_results(latest_research or {})}",
+        "+    except Exception:", "+        verified_source_urls = set()", "@@",
+        "         message_id = html_escape(message.get(\"message_id\") or \"\")",
+        "         timeline_key = html_escape(message.get(\"timeline_key\") or \"\")",
+        "-        bubbles += f\"<div class='chat-message {role}' data-message-id='{message_id}' data-timeline-key='{timeline_key}'>{html_escape(message.get('text'))}<small>{label}</small></div>\"",
+        "+        rendered_text = (_verified_source_links_html(message.get(\"text\"), verified_source_urls)",
+        "+                         if role == \"nina\" else html_escape(message.get(\"text\")))",
+        "+        bubbles += f\"<div class='chat-message {role}' data-message-id='{message_id}' data-timeline-key='{timeline_key}'>{rendered_text}<small>{label}</small></div>\"",
+        "--- a/test_web_research.py", "+++ b/test_web_research.py", "@@",
+        "+    def test_nina_chat_links_only_persisted_verified_sources(self):", "+        import web_app",
+        "+        payload = self.research.search_public_web(self.full_intent(), fetcher=lambda _url: self.page(), result_verifier=self.verify_item)",
+        "+        self.research.save_research_session(\"links\", \"one\", \"conv\", payload)",
+        "+        real_url = payload[\"results\"][0][\"source_url\"]",
+        "+        contact = {\"contact_id\": \"one\", \"conversation_id\": \"conv\"}",
+        "+        with patch.object(web_app, \"NINA_WEB_WORKSPACE_ID\", \"links\"), patch.object(web_app, \"current_web_contact\", return_value=contact):",
+        "+            with web_app.app.test_request_context(\"/nina\"):",
+        "+                html = web_app.nina_chat_body([{\"role\": \"assistant\", \"text\": f\"Sources: {real_url} https://fake.example/item\"}])",
+        "+        self.assertIn(\"href='\" + real_url + \"'\", html)",
+        "+        self.assertNotIn(\"href='https://fake.example/item'\", html)", "+",
+        "     def test_web_ui_cards_csrf_and_server_owner(self):",
+    ))
+    tests = [
+        "verified persisted source becomes a clickable anchor",
+        "unverified URL remains escaped plain text",
+        "existing Web Research verification and UI tests remain passing",
+    ]
+    analysis = {
+        "problem": "Verified Web Research URLs are escaped as plain text in the canonical Web chat bubble.",
+        "repository_evidence": cited,
+        "architecture_boundary": "Existing ONE NINA Web Research verification and persistence feeding the canonical Web chat renderer.",
+        "affected_modules": {"direct": ["web_app.py", "test_web_research.py"], "dependencies": ["web_research.py"]},
+        "call_chain_dependencies": ["search_public_web", "verified_results", "summarize_sources", "nina_chat_body"],
+        "risks": {"classification": "LOW", "items": [
+            "Only persisted verified URLs may become anchors.",
+            "Other text and unverified URLs remain escaped.",
+            "Search, persistence, and channel contracts remain unchanged.",
+        ]},
+        "Relevant previous lessons": [],
+        "Evidence precedence": "Current repository evidence is authoritative; historical lessons never override it.",
+        "alternatives": [
+            {"option": "Keep sources only in the side panel", "risk": "The answer remains non-clickable."},
+            {"option": "Linkify every URL", "risk": "Unverified URLs could look trusted."},
+            {"option": "Linkify only persisted verified URLs", "risk": "LOW."},
+        ],
+        "chosen_solution": "Linkify only URLs in the latest persisted verified Web Research result set.",
+        "why": "It is the smallest user-visible change that preserves verified-source truth and adds no service or state.",
+        "focused_validation_plan": tests,
+        "resolved_targets": ["Web Research"],
+    }
+    proposal = {
+        "files": ["web_app.py", "test_web_research.py"],
+        "functions": ["_verified_source_links_html", "nina_chat_body", "test_nina_chat_links_only_persisted_verified_sources"],
+        "reason": "Make only persisted verified Web Research sources clickable in the canonical Nina Web reply.",
+        "risk": "LOW", "diff": diff_preview, "focused_tests": tests,
+        "expected_source_hashes": {path: source_hashes.get(path, "") for path in ("web_app.py", "test_web_research.py")},
+        "validation": {"py_compile": ["web_app.py", "test_web_research.py"], "pytest": ["test_web_research.py"]},
+    }
+    return analysis, proposal

@@ -38,6 +38,7 @@ from developer_router import (
     developer_intents as _developer_intents,
     developer_investigation_plan as _developer_investigation_plan,
     resolve_developer_targets as _resolve_developer_targets,
+    web_research_source_links_proposal as _web_research_source_links_proposal,
 )
 from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, generate_with_nina, load_channel_conversation, load_web_conversation, save_channel_turn, send_message_to_nina
 from voice_engine import transcribe_audio_with_openai
@@ -7196,6 +7197,9 @@ def _developer_investigation_answer(kind, jobs):
         ),
         "send_message_risk_analysis": ("main_definition", "web_call", "media_call"),
         "repository_structure_analysis": ("web_entry", "router", "control_plane", "local_agent"),
+        "web_research_source_links_diff_preview": (
+            "search_entry", "verified_gate", "source_summary", "chat_render", "regression_anchor",
+        ),
     }.get(kind, ())
     if kind == "target_architecture_analysis":
         required = tuple(str((job.get("arguments") or {}).get("evidence_role") or "")
@@ -7215,7 +7219,7 @@ def _developer_investigation_answer(kind, jobs):
                 "missing_evidence": missing, "evidence": cited,
                 "write_executed": False, "safety_notice": "WRITE NOT EXECUTED.",
             }
-        if kind == "developer_status_diff_preview":
+        if kind in {"developer_status_diff_preview", "web_research_source_links_diff_preview"}:
             return {
                 "answer": "INSUFFICIENT ARCHITECTURE EVIDENCE",
                 "reason": "A safe diff preview was not generated because required repository evidence is missing.",
@@ -7333,6 +7337,18 @@ def _developer_investigation_answer(kind, jobs):
             "approval_required": True,
             "write_executed": False,
             "safety_notice": "WRITE NOT EXECUTED.",
+        }
+    if kind == "web_research_source_links_diff_preview":
+        developer_analysis, proposal = _web_research_source_links_proposal(cited, source_hashes)
+        developer_analysis["Relevant previous lessons"] = (retrieve_developer_lessons(
+            question or developer_analysis["problem"], ["web_app.py", "web_research.py"]
+        ) or ["None found."])
+        quality_review = _developer_quality_review(developer_analysis, proposal, cited)
+        return {
+            "developer_analysis": developer_analysis,
+            "answer": "The verified-search pipeline provides persisted real URLs; the canonical Web chat escapes them as plain text. The minimal safe change linkifies only the verified set.",
+            "proposed_change": proposal, "quality_review": quality_review, "evidence": cited,
+            "approval_required": True, "write_executed": False, "safety_notice": "WRITE NOT EXECUTED.",
         }
     if kind == "send_message_definition":
         answer = (

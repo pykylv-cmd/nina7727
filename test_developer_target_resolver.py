@@ -72,6 +72,30 @@ class DeveloperTargetResolverTests(unittest.TestCase):
         self.assertEqual(payload["answer"], "TARGET NOT PROVEN")
         self.assertFalse(payload["write_executed"])
 
+    def test_web_research_product_fix_routes_to_evidence_backed_diff(self):
+        question = (
+            "Salabo NinaOS Web Research tā, lai Nina pēc lietotāja jautājuma spētu "
+            "atrast publiskus avotus un atbildē atdot reālas klikšķināmas avotu saites. "
+            "Izmanto esošo arhitektūru un bez jauna maksas servisa."
+        )
+        kind, _, payload = self.investigate(question)
+        self.assertEqual(kind, "web_research_source_links_diff_preview")
+        self.assertEqual(payload["developer_analysis"]["resolved_targets"], ["Web Research"])
+        self.assertEqual(payload["quality_review"]["Verdict"], "APPROVE FOR OWNER REVIEW")
+        self.assertEqual(payload["proposed_change"]["files"], ["web_app.py", "test_web_research.py"])
+        self.assertIn("_verified_source_links_html", payload["proposed_change"]["diff"])
+        self.assertFalse(payload["write_executed"])
+
+    def test_web_research_product_diff_fails_closed_without_current_evidence(self):
+        payload = web_app._developer_investigation_answer(
+            "web_research_source_links_diff_preview", [{
+                "status": "completed", "result": {"matches": []},
+                "arguments": {"evidence_role": "search_entry", "question": "Salabo Web Research"},
+            }],
+        )
+        self.assertEqual(payload["answer"], "INSUFFICIENT ARCHITECTURE EVIDENCE")
+        self.assertFalse(payload["write_executed"])
+
 
 if __name__ == "__main__":
     unittest.main()
