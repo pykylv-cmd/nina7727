@@ -191,6 +191,23 @@ class AdminPanelSeparationTests(unittest.TestCase):
             self.assertEqual(response.headers["Location"], "/admin/channels?lang=en")
             self.assertEqual(client.get("/admin/channels?lang=en").status_code, 200)
 
+    def test_invalid_bootstrap_login_redirects_to_fresh_empty_form(self):
+        token = "test-admin-bootstrap-token-at-least-32"
+        with patch.dict(os.environ, {"NINA_PLATFORM_ADMIN_BOOTSTRAP_TOKEN": token}):
+            client = web_app.app.test_client()
+            response = client.post(
+                "/admin/login?lang=en",
+                data={"bootstrap_token": "stale-invalid-token"},
+            )
+            self.assertEqual(response.status_code, 302)
+            self.assertEqual(response.headers["Location"], "/admin/login?lang=en&notice=invalid")
+            page = client.get(response.headers["Location"])
+            self.assertEqual(page.status_code, 200)
+            self.assertIn(b"Invalid admin access token. Please try again.", page.data)
+            self.assertIn(b"name='bootstrap_token'", page.data)
+            self.assertNotIn(b"value='stale-invalid-token'", page.data)
+            self.assertIsNone(client.get_cookie(web_app.ADMIN_COOKIE))
+
 
 if __name__ == "__main__":
     unittest.main()

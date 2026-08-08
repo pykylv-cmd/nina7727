@@ -6962,7 +6962,7 @@ def admin_login():
     if request.method == "POST":
         submitted_token = request.form.get("bootstrap_token", "").strip()
         if not verify_bootstrap_token(submitted_token):
-            return Response("Forbidden", status=403)
+            return redirect(q("/admin/login") + "&notice=invalid")
         response = redirect(q("/admin/channels"))
         response.set_cookie(
             ADMIN_COOKIE,
@@ -6974,7 +6974,13 @@ def admin_login():
         )
         logger.info("Platform admin session issued")
         return response
-    status = "" if bootstrap_configured() else "<div class='channel-message'>Admin bootstrap is not configured.</div>"
+    notice = (request.args.get("notice") or "").strip()
+    if not bootstrap_configured():
+        status = "<div class='channel-message'>Admin bootstrap is not configured.</div>"
+    elif notice == "invalid":
+        status = "<div class='channel-message'>Invalid admin access token. Please try again.</div>"
+    else:
+        status = ""
     body = (
         "<div class='page-title'><h1>Platform Admin</h1><p>Authorized NinaOS operators only.</p></div><br>"
         f"{status}<section class='card card-pad'><form method='post' class='channel-form'>"
