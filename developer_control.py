@@ -172,9 +172,10 @@ def list_jobs(limit=10):
     ensure_schema(); conn = _connect()
     try:
         cur = conn.cursor()
-        cur.execute(_sql("SELECT job_id,operation,status,result_json,error_code,created_at FROM nina_developer_jobs ORDER BY created_at DESC,job_id DESC LIMIT %s"), (max(1, min(int(limit), 25)),))
+        cur.execute(_sql("SELECT job_id,operation,status,result_json,error_code,created_at,arguments_json FROM nina_developer_jobs ORDER BY created_at DESC,job_id DESC LIMIT %s"), (max(1, min(int(limit), 25)),))
         rows = cur.fetchall(); cur.close()
     finally:
         conn.close()
     return [{"job_id": r[0], "operation": r[1], "status": r[2],
-             "result": json.loads(r[3] or "{}"), "error_code": r[4], "created_at": r[5]} for r in rows]
+             "result": json.loads(r[3] or "{}"), "error_code": r[4], "created_at": r[5],
+             "arguments": json.loads(r[6] or "{}")} for r in rows]

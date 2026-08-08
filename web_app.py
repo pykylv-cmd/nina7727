@@ -7078,21 +7078,120 @@ def admin_system():
     return Response(page("Admin System", body, active="admin"), mimetype="text/html")
 
 
-def _admin_developer_jobs_html():
-    job_rows = []
-    jobs = list(reversed(list_developer_jobs(10)))
+def _developer_investigation_plan(command):
+    normalized = " ".join(str(command or "").strip().casefold().split())
+    if "kur tiek definēts send_message_to_nina" in normalized or "kur tiek definets send_message_to_nina" in normalized:
+        return "send_message_definition", (
+            ("main_definition", "def send_message_to_nina", "nina_message_service.py"),
+        )
+    if "company whatsapp" in normalized and "message flow" in normalized:
+        return "company_whatsapp_flow", (
+            ("bridge_event", "messages.upsert", "personal_whatsapp_bridge/src/company_session_manager.js"),
+            ("bridge_intake", "companyInbound", "personal_whatsapp_bridge/src/company_session_manager.js"),
+            ("web_endpoint", "def internal_company_whatsapp_inbound", "web_app.py"),
+            ("shared_nina_call", "result = send_message_to_nina", "web_app.py"),
+            ("shared_definition", "def send_message_to_nina", "nina_message_service.py"),
+            ("bridge_reply", "socket.sendMessage(remote", "personal_whatsapp_bridge/src/company_session_manager.js"),
+        )
+    if "developer:" in normalized and "web research" in normalized and ("kāpēc" in normalized or "kapec" in normalized):
+        return "developer_routing", (
+            ("developer_route", "def admin_developer", "web_app.py"),
+            ("developer_router", "def _developer_command", "web_app.py"),
+            ("generic_nina_call", "nina_result = send_message_to_nina", "web_app.py"),
+            ("research_router", "intent = build_search_plan(clean", "nina_message_service.py"),
+        )
+    return "", ()
+
+
+def _developer_investigation_answer(kind, jobs):
+    evidence = {}
     for job in jobs:
-        result = job.get("result") or {}
-        rendered = json.dumps(result, ensure_ascii=False, indent=2) if result else (job.get("error_code") or job["status"])
-        job_rows.append(
-            "<div class='list-item developer-result' data-job-status='" + html_escape(job["status"]) + "'><div><b>" +
-            html_escape(job["operation"]) + "</b><small>" + html_escape(job["status"]) +
+        role = str((job.get("arguments") or {}).get("evidence_role") or "")
+        matches = (job.get("result") or {}).get("matches") or []
+        if role and matches:
+            evidence[role] = matches[0]
+    required = {
+        "send_message_definition": ("main_definition",),
+        "company_whatsapp_flow": ("bridge_event", "bridge_intake", "web_endpoint", "shared_nina_call",
+                                  "shared_definition", "bridge_reply"),
+        "developer_routing": ("developer_route", "developer_router", "generic_nina_call", "research_router"),
+    }.get(kind, ())
+    missing = [role for role in required if role not in evidence]
+    cited = [
+        {"role": role, "path": evidence[role]["path"], "line": evidence[role]["line"],
+         "symbol": str(evidence[role].get("text") or "")[:220]}
+        for role in required if role in evidence
+    ]
+    if missing:
+        return {
+            "answer": "Repository evidence is insufficient to answer safely; no architectural claim was guessed.",
+            "missing_evidence": missing, "evidence": cited,
+        }
+    location = lambda role: f"{evidence[role]['path']}:{evidence[role]['line']}"
+    if kind == "send_message_definition":
+        answer = (
+            "Galvenā send_message_to_nina definīcija ir " + location("main_definition") +
+            ". Tā ir ONE NINA kopīgā ziņu ieeja, kuru kanālu un Web virsmas izsauc ar workspace, channel un conversation kontekstu."
+        )
+    elif kind == "company_whatsapp_flow":
+        answer = (
+            "Company WhatsApp call chain: Baileys messages.upsert (" + location("bridge_event") +
+            ") → processCompanyMessageUpsert/companyInbound (" + location("bridge_intake") +
+            ") → POST /internal/company-whatsapp/inbound (" + location("web_endpoint") +
+            ") → shared send_message_to_nina call (" + location("shared_nina_call") +
+            ") → send_message_to_nina definition (" + location("shared_definition") +
+            ") → bridge socket.sendMessage reply (" + location("bridge_reply") + ")."
+        )
+    else:
+        answer = (
+            "Current repository evidence shows /admin/developer is isolated and routes commands through "
+            "_developer_command (" + location("developer_route") + ", " + location("developer_router") +
+            "). The generic /nina surface sends text to send_message_to_nina (" + location("generic_nina_call") +
+            "), whose shared path attempts build_search_plan (" + location("research_router") +
+            "). Therefore a Developer: request entered through the generic Nina surface could reach Web Research; "
+            "the repository alone cannot prove which historical surface handled a specific old request."
+        )
+    return {"answer": answer, "evidence": cited}
+
+
+def _admin_developer_jobs_html():
+    rows, latest_status = [], ""
+    jobs = list(reversed(list_developer_jobs(25)))
+    investigations, display_order = {}, []
+    for job in jobs:
+        arguments = job.get("arguments") or {}
+        investigation_id = str(arguments.get("investigation_id") or "")
+        if not investigation_id:
+            display_order.append(("job", job))
+            continue
+        if investigation_id not in investigations:
+            investigations[investigation_id] = []
+            display_order.append(("investigation", investigation_id))
+        investigations[investigation_id].append(job)
+    for item_type, item in display_order:
+        if item_type == "investigation":
+            grouped = investigations[item]
+            statuses = {job["status"] for job in grouped}
+            status = "failed" if "failed" in statuses else ("pending" if statuses & {"pending", "claimed"} else "completed")
+            arguments = grouped[0].get("arguments") or {}
+            payload = (
+                _developer_investigation_answer(str(arguments.get("investigation_kind") or ""), grouped)
+                if status == "completed" else {"question": arguments.get("question"), "status": status}
+            )
+            label = "Repository investigation"
+        else:
+            grouped, status = (), item["status"]
+            result = item.get("result") or {}
+            payload = result if result else (item.get("error_code") or status)
+            label = item["operation"]
+        latest_status = status
+        rendered = json.dumps(payload, ensure_ascii=False, indent=2) if isinstance(payload, dict) else str(payload)
+        rows.append(
+            "<div class='list-item developer-result' data-job-status='" + html_escape(status) + "'><div><b>" +
+            html_escape(label) + "</b><small>" + html_escape(status) +
             "</small></div><pre>" + html_escape(rendered[:20000]) + "</pre></div>"
         )
-    return (
-        "".join(job_rows) if job_rows else "<p>No developer jobs yet.</p>",
-        jobs[-1]["status"] if jobs else "",
-    )
+    return ("".join(rows) if rows else "<p>No developer jobs yet.</p>", latest_status)
 
 
 def _admin_developer_body(notice=""):
@@ -7166,9 +7265,21 @@ def admin_developer():
             return Response("Forbidden", status=403)
         status = developer_connection_status()
         command = (request.form.get("message") or "").strip()
+        investigation_kind, investigation_steps = _developer_investigation_plan(command)
         operation, arguments = _developer_command(command)
         if status["agent"] != "connected":
             notice = "agent_not_connected"
+        elif investigation_steps:
+            investigation_id = "devinvest_" + secrets.token_hex(12)
+            for evidence_role, query, path in investigation_steps:
+                create_developer_job("search_text", {
+                    "query": query, "path": path,
+                    "investigation_id": investigation_id,
+                    "investigation_kind": investigation_kind,
+                    "question": command,
+                    "evidence_role": evidence_role,
+                })
+            notice = "job_created"
         elif not operation:
             notice = "agent_not_connected"
         else:
