@@ -22,9 +22,11 @@ from developer_control import (
     claim_job as claim_developer_job,
     complete_job as complete_developer_job,
     connection_status as developer_connection_status,
+    create_approved_patch_job as create_developer_approval_job,
     create_job as create_developer_job,
     heartbeat as developer_heartbeat,
     list_jobs as list_developer_jobs,
+    write_access_status as developer_write_access_status,
 )
 from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, generate_with_nina, load_channel_conversation, load_web_conversation, save_channel_turn, send_message_to_nina
 from voice_engine import transcribe_audio_with_openai
@@ -7086,6 +7088,7 @@ def _developer_investigation_plan(command):
             ("backend_status", "def connection_" + "status", "developer_control.py"),
             ("freshness_gate", "connected = seen >=", "developer_control.py"),
             ("render_entry", "def _admin_developer_" + "body", "web_app.py"),
+            ("body_connection", "connection = developer_connection_" + "status()", "web_app.py"),
             ("render_gate", "developer_ready = connection[\"agent\"]", "web_app.py"),
             ("agent_card", "(\"Local Developer Agent\", \"Connected\"", "web_app.py"),
             ("repository_card", "(\"Repository\", \"Connected\"", "web_app.py"),
@@ -7116,15 +7119,20 @@ def _developer_investigation_plan(command):
 
 
 def _developer_investigation_answer(kind, jobs):
-    evidence = {}
+    evidence, source_hashes = {}, {}
     for job in jobs:
         role = str((job.get("arguments") or {}).get("evidence_role") or "")
-        matches = (job.get("result") or {}).get("matches") or []
+        result = job.get("result") or {}
+        matches = result.get("matches") or []
         if role and matches:
             evidence[role] = matches[0]
+            path = str(matches[0].get("path") or "")
+            source_hash = str((result.get("file_hashes") or {}).get(path) or "")
+            if source_hash:
+                source_hashes[path] = source_hash
     required = {
         "developer_status_diff_preview": (
-            "backend_status", "freshness_gate", "render_entry", "render_gate",
+            "backend_status", "freshness_gate", "render_entry", "body_connection", "render_gate",
             "agent_card", "repository_card", "post_gate", "regression_test",
         ),
         "send_message_definition": ("main_definition",),
@@ -7135,7 +7143,8 @@ def _developer_investigation_answer(kind, jobs):
     missing = [role for role in required if role not in evidence]
     cited = [
         {"role": role, "path": evidence[role]["path"], "line": evidence[role]["line"],
-         "symbol": str(evidence[role].get("text") or "")[:220]}
+         "symbol": str(evidence[role].get("text") or "")[:220],
+         "source_hash": source_hashes.get(str(evidence[role].get("path") or ""), "")}
         for role in required if role in evidence
     ]
     if missing:
@@ -7151,8 +7160,9 @@ def _developer_investigation_answer(kind, jobs):
         }
     location = lambda role: f"{evidence[role]['path']}:{evidence[role]['line']}"
     if kind == "developer_status_diff_preview":
-        old_render_gate = str(evidence["render_gate"].get("text") or "")
-        old_post_gate = str(evidence["post_gate"].get("text") or "")
+        raw = lambda role: str(evidence[role].get("raw_text") or evidence[role].get("text") or "")
+        old_render_gate = raw("render_gate")
+        old_post_gate = raw("post_gate")
         helper_name = "_developer_" + "connection_ready"
         render_line = int(evidence["render_entry"]["line"])
         post_line = int(evidence["post_gate"]["line"])
@@ -7160,12 +7170,13 @@ def _developer_investigation_answer(kind, jobs):
         diff_preview = "\n".join((
             "--- a/web_app.py",
             "+++ b/web_app.py",
-            f"@@ -{render_line},3 +{render_line},8 @@",
+            f"@@ -{render_line},3 +{render_line},7 @@",
             "+def " + helper_name + "(connection):",
             "+    return (connection[\"agent\"] == \"connected\"",
             "+            and connection[\"repository\"] == \"connected\")",
             "+",
-            " " + str(evidence["render_entry"].get("text") or ""),
+            " " + raw("render_entry"),
+            " " + raw("body_connection"),
             "-" + old_render_gate,
             "+    developer_ready = " + helper_name + "(connection)",
             f"@@ -{post_line},1 +{post_line},1 @@",
@@ -7173,7 +7184,7 @@ def _developer_investigation_answer(kind, jobs):
             "+        if not " + helper_name + "(status):",
             "--- a/test_admin_developer_console.py",
             "+++ b/test_admin_developer_console.py",
-            f"@@ -{test_line},0 +{test_line + 1},12 @@",
+            f"@@ -{test_line},1 +{test_line},12 @@",
             "+    def test_repository_disconnected_blocks_direct_post(self):",
             "+        client = self.admin_client()",
             "+        with patch.object(web_app, \"developer_connection_status\",",
@@ -7185,6 +7196,7 @@ def _developer_investigation_answer(kind, jobs):
             "+        self.assertEqual(response.status_code, 409)",
             "+        create.assert_not_called()",
             "+",
+            " " + raw("regression_test"),
         ))
         return {
             "answer": (
@@ -7206,6 +7218,14 @@ def _developer_investigation_answer(kind, jobs):
                     "disconnected Agent rejects POST",
                     "owner-only access remains enforced",
                 ],
+                "expected_source_hashes": {
+                    path: source_hashes.get(path, "")
+                    for path in ("web_app.py", "test_admin_developer_console.py")
+                },
+                "validation": {
+                    "py_compile": ["web_app.py", "test_admin_developer_console.py"],
+                    "pytest": [],
+                },
             },
             "evidence": cited,
             "approval_required": True,
@@ -7241,7 +7261,12 @@ def _developer_investigation_answer(kind, jobs):
 def _admin_developer_jobs_html():
     rows, latest_status = [], ""
     jobs = list(reversed(list_developer_jobs(25)))
-    investigations, display_order = {}, []
+    investigations, display_order, approvals = {}, [], {}
+    for job in jobs:
+        if job.get("operation") == "apply_approved_patch":
+            source_id = str((job.get("arguments") or {}).get("source_investigation_id") or "")
+            if source_id:
+                approvals[source_id] = job
     for job in jobs:
         arguments = job.get("arguments") or {}
         investigation_id = str(arguments.get("investigation_id") or "")
@@ -7263,17 +7288,49 @@ def _admin_developer_jobs_html():
                 if status == "completed" else {"question": arguments.get("question"), "status": status}
             )
             label = "Repository investigation"
+            controls = ""
+            proposal = payload.get("proposed_change") if isinstance(payload, dict) else None
+            if status == "completed" and isinstance(proposal, dict):
+                approved_job = approvals.get(item)
+                if approved_job:
+                    controls = (
+                        "<div class='channel-message'>Approval " +
+                        html_escape(str((approved_job.get("arguments") or {}).get("approval_id") or "recorded")) +
+                        " — " + html_escape(str(approved_job.get("status") or "pending")) + "</div>"
+                    )
+                else:
+                    diff_hash = hashlib.sha256(str(proposal.get("diff") or "").encode("utf-8")).hexdigest()
+                    controls = (
+                        "<div class='developer-approval-actions'>"
+                        "<form method='post' action='/admin/developer'>"
+                        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('developer:approve')}'>"
+                        "<input type='hidden' name='action' value='approve_diff'>"
+                        "<input type='hidden' name='investigation_id' value='" + html_escape(item) + "'>"
+                        "<input type='hidden' name='diff_hash' value='" + html_escape(diff_hash) + "'>"
+                        "<button class='btn primary' type='submit'>Approve &amp; Apply Locally</button></form>"
+                        "<form method='post' action='/admin/developer'>"
+                        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('developer:reject')}'>"
+                        "<input type='hidden' name='action' value='reject_diff'>"
+                        "<input type='hidden' name='investigation_id' value='" + html_escape(item) + "'>"
+                        "<button class='btn' type='submit'>Reject</button></form></div>"
+                    )
         else:
             grouped, status = (), item["status"]
             result = item.get("result") or {}
             payload = result if result else (item.get("error_code") or status)
-            label = item["operation"]
+            controls = ""
+            if item["operation"] == "apply_approved_patch":
+                label = ("LOCAL CHANGE READY" if status == "completed" else
+                         ("APPLYING → BACKUP → PATCH → VALIDATION" if status in {"pending", "claimed"} else
+                          "VALIDATION FAILED — ROLLBACK COMPLETE"))
+            else:
+                label = item["operation"]
         latest_status = status
         rendered = json.dumps(payload, ensure_ascii=False, indent=2) if isinstance(payload, dict) else str(payload)
         rows.append(
             "<div class='list-item developer-result' data-job-status='" + html_escape(status) + "'><div><b>" +
             html_escape(label) + "</b><small>" + html_escape(status) +
-            "</small></div><pre>" + html_escape(rendered[:20000]) + "</pre></div>"
+            "</small></div><pre>" + html_escape(rendered[:20000]) + "</pre>" + controls + "</div>"
         )
     return ("".join(rows) if rows else "<p>No developer jobs yet.</p>", latest_status)
 
@@ -7286,7 +7343,7 @@ def _admin_developer_body(notice=""):
         ("Local Developer Agent", "Connected" if connection["agent"] == "connected" else "Not connected"),
         ("Repository", "Connected" if connection["repository"] == "connected" else "Not connected"),
         ("AI Coding Model", "Not configured"),
-        ("Write Access", "Disabled"),
+        ("Write Access", "One-time approved" if developer_write_access_status() == "one_time_approved" else "Disabled"),
         ("Deploy Access", "Disabled"),
     )
     status_cards = "".join(
@@ -7326,7 +7383,8 @@ def _admin_developer_body(notice=""):
         "<label for='developer-message'>Message</label>"
         + message_input + send_button + "</form>"
         "<div id='developer-notice' aria-live='polite'></div>"
-        "<p class='safe-note'>No filesystem, shell, Git, AI provider, write or deploy access is enabled.</p></section><br>"
+        "<p class='safe-note'>Write access exists only for one exact owner-approved diff. "
+        "Shell, commit, push and deploy remain disabled.</p></section><br>"
     )
     ux = """<style>
 .developer-console{position:sticky;top:12px;z-index:20;box-shadow:0 18px 50px rgba(0,0,0,.32)}
@@ -7355,6 +7413,39 @@ def admin_developer():
         jobs_html, latest_status = _admin_developer_jobs_html()
         return jsonify({"ok": True, "html": jobs_html, "latest_status": latest_status})
     if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        if action in {"approve_diff", "reject_diff"}:
+            csrf_action = "developer:approve" if action == "approve_diff" else "developer:reject"
+            if not _valid_channel_csrf(csrf_action):
+                return Response("Forbidden", status=403)
+            investigation_id = (request.form.get("investigation_id") or "").strip()
+            if action == "reject_diff":
+                return redirect(q("/admin/developer"))
+            approval_status = developer_connection_status()
+            if approval_status["agent"] != "connected" or approval_status["repository"] != "connected":
+                return Response("Developer Agent unavailable", status=409)
+            grouped = [job for job in list_developer_jobs(25)
+                       if str((job.get("arguments") or {}).get("investigation_id") or "") == investigation_id]
+            if not grouped or any(job.get("status") != "completed" for job in grouped):
+                return Response("Approval unavailable", status=409)
+            kind = str((grouped[0].get("arguments") or {}).get("investigation_kind") or "")
+            payload = _developer_investigation_answer(kind, grouped)
+            proposal = payload.get("proposed_change") if isinstance(payload, dict) else None
+            if not isinstance(proposal, dict):
+                return Response("Approval unavailable", status=409)
+            try:
+                create_developer_approval_job(
+                    investigation_id,
+                    proposal.get("diff"),
+                    request.form.get("diff_hash"),
+                    proposal.get("files"),
+                    proposal.get("expected_source_hashes"),
+                    proposal.get("validation"),
+                    owner_identity="platform_admin_session",
+                )
+            except ValueError as exc:
+                return Response(str(exc), status=409)
+            return redirect(q("/admin/developer"))
         if not _valid_channel_csrf("developer:send"):
             return Response("Forbidden", status=403)
         status = developer_connection_status()

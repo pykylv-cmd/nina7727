@@ -1,6 +1,8 @@
 import hashlib
 import os
+import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -65,6 +67,30 @@ class DeveloperDiffPreviewTests(unittest.TestCase):
         self.assertEqual(before, after)
         self.assertFalse(result["write_executed"])
         self.assertEqual(result["safety_notice"], "WRITE NOT EXECUTED.")
+
+    def test_preview_patch_applies_exactly_in_controlled_fixture(self):
+        kind, jobs = self.completed_jobs()
+        proposal = web_app._developer_investigation_answer(kind, jobs)["proposed_change"]
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Path(directory)
+            for relative in proposal["files"]:
+                (fixture / relative).write_bytes((self.root / relative).read_bytes())
+            agent = nina_developer_agent.ReadOnlyDeveloperAgent(fixture)
+            arguments = {
+                "approval_id": "devapproval_preview_fixture",
+                "diff_hash": hashlib.sha256(proposal["diff"].encode("utf-8")).hexdigest(),
+                "patch": proposal["diff"],
+                "affected_files": proposal["files"],
+                "expected_source_hashes": proposal["expected_source_hashes"],
+                "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+                "validation": {"py_compile": [], "pytest": []},
+            }
+            with patch.object(agent, "_validate_approved_change", return_value={"checks": []}):
+                result = agent.execute("apply_approved_patch", arguments)
+            changed = (fixture / "web_app.py").read_text(encoding="utf-8")
+            self.assertIn("def _developer_connection_ready(connection):", changed)
+            self.assertIn("if not _developer_connection_ready(status):", changed)
+            self.assertEqual(result["write_access"], "disabled")
 
     def test_insufficient_evidence_fails_closed_without_diff(self):
         result = web_app._developer_investigation_answer("developer_status_diff_preview", [])
