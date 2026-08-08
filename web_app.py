@@ -6845,6 +6845,8 @@ def channels():
 
 
 def _admin_subnav():
+    if current_web_role() != ADMIN_ROLE:
+        return ""
     lang = current_language()
     return (
         "<div class='console-nav'>"

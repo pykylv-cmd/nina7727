@@ -31,9 +31,26 @@ class AdminDeveloperConsoleTests(unittest.TestCase):
 
     def test_developer_navigation_is_admin_only(self):
         admin_page = self.admin_client().get("/admin/channels?lang=en").get_data(as_text=True)
-        client_page = web_app.app.test_client().get("/channels?lang=en").get_data(as_text=True)
         self.assertIn("href='/admin/developer?lang=en'", admin_page)
-        self.assertNotIn("/admin/developer", client_page)
+        client = web_app.app.test_client()
+        for route in ("/dashboard", "/channels", "/inbox", "/workers", "/tasks", "/clients",
+                      "/projects", "/calendar", "/files", "/analytics", "/exchange"):
+            with self.subTest(route=route):
+                response = client.get(route + "?lang=en")
+                self.assertNotIn("/admin/developer", response.get_data(as_text=True))
+
+    def test_admin_subnav_fails_closed_outside_admin_context(self):
+        with web_app.app.test_request_context("/dashboard?lang=en"), \
+             patch.object(web_app, "current_web_role", return_value=web_app.CLIENT_ROLE):
+            self.assertEqual(web_app._admin_subnav(), "")
+
+    def test_client_workspace_session_cannot_open_developer_console(self):
+        client = web_app.app.test_client()
+        client.set_cookie(
+            web_app._WORKSPACE_COOKIE,
+            web_app._workspace_cookie_value("client_security_hotfix_test"),
+        )
+        self.assertEqual(client.get("/admin/developer").status_code, 403)
 
     def test_developer_statuses_are_fail_closed(self):
         with patch.object(web_app, "developer_connection_status",
