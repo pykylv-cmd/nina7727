@@ -43,6 +43,7 @@ MAX_REDIRECTS = 3
 MAX_CRAWL_PAGES = 10
 MAX_CRAWL_DEPTH = 2
 MAX_LISTING_URL_VERIFICATIONS = 5
+MIN_GENERIC_PROVIDER_CANDIDATES = 10
 RESULT_VERIFIED = "VERIFIED_RESULT"
 SEARCH_PAGE_VERIFIED = "VERIFIED_SEARCH_PAGE"
 RESULT_IRRELEVANT = "IRRELEVANT"
@@ -769,7 +770,11 @@ def openai_web_search_provider(intent, client=None):
         provider_query += " " + " ".join("site:" + domain for domain in intent.target_domains)
     response = client.responses.create(
         model="gpt-4.1-mini", tools=[tool], store=False,
-        input="Find up to five distinct public source pages for this exact query. Prefer direct result or product pages. Cite every source and do not invent examples: " + provider_query,
+        input=(
+            "Find up to ten distinct public source pages for this exact query. "
+            "Prefer directly accessible, non-paywalled source pages. Cite every source and do not invent examples: "
+            + provider_query
+        ),
     )
     unique = {}
     for output in _object_value(response, "output", ()) or ():
@@ -787,7 +792,8 @@ def openai_web_search_provider(intent, client=None):
                     "provider_title": str(_object_value(annotation, "title", "") or "")[:240],
                     "provider": "openai_web_search",
                 })
-    return list(unique.values())[:min(MAX_RESULTS_HARD, max(1, int(intent.max_results)))]
+    candidate_limit = min(MAX_RESULTS_HARD, max(MIN_GENERIC_PROVIDER_CANDIDATES, int(intent.max_results)))
+    return list(unique.values())[:candidate_limit]
 
 
 def configured_search_providers(environ=None):
@@ -952,7 +958,9 @@ def _query_term_groups(intent):
     ignored = {
         "atrodi", "mekle", "meklē", "find", "search", "letas", "lētas", "cena",
         "price", "buy", "pirkt", "com", "www", "no", "lidz", "līdz", "gada",
-        "latvijā", "latvija", "latvia",
+        "latvijā", "latvija", "latvia", "aktuālus", "aktualus", "aktuālu", "aktualu",
+        "avotus", "avoti", "avotu", "sources", "source", "par", "about",
+        "atsūti", "atsuti", "sūti", "suti", "saites", "saiti", "links", "link", "un", "and",
     }
     domain_parts = {part for domain in intent.target_domains for part in domain.split(".")}
     terms = [
@@ -1033,7 +1041,8 @@ def search_verified_web(intent, search_provider=None, fetcher=fetch_public_page,
         provider_results, provider_name, provider_failures = provider_search(intent, providers=providers)
     verified, search_pages, rejected, seen = [], [], [], set()
     previous_host = ""
-    for index, candidate in enumerate(provider_results[:min(MAX_RESULTS_HARD, max(1, int(intent.max_results)))]):
+    acquisition_limit = min(MAX_RESULTS_HARD, max(MIN_GENERIC_PROVIDER_CANDIDATES, int(intent.max_results)))
+    for index, candidate in enumerate(provider_results[:acquisition_limit]):
         raw_url = str(candidate.get("url") or "")
         parsed = parse.urlsplit(raw_url)
         canonical = parse.urlunsplit(("https", parsed.netloc.lower(), parsed.path or "/", parsed.query, "")) if parsed.scheme == "https" and parsed.hostname else ""
@@ -1076,7 +1085,7 @@ def search_verified_web(intent, search_provider=None, fetcher=fetch_public_page,
                     seen.add(expanded_item["source_url"])
                     verified.append(expanded_item)
     return {
-        "ok": True, "intent": asdict(intent), "results": verified,
+        "ok": True, "intent": asdict(intent), "results": verified[:max(1, int(intent.max_results))],
         "comparison": compare_results([]), "source_url": "",
         "source_access": "read" if verified or search_pages else "limited",
         "verified_search_pages": search_pages, "rejected_results": rejected,

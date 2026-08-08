@@ -418,6 +418,20 @@ class WebResearchTests(unittest.TestCase):
         self.assertEqual(calls,[("reklama.lv",),("reklama.lv",)])
         self.assertEqual((results,name,failures),([],"test",[]))
 
+    def test_broad_topic_acquisition_ignores_command_words_and_checks_later_candidates(self):
+        intent=self.research.build_search_plan("Atrodi 3 aktuālus avotus par AI CRM platformām un atsūti saites.")
+        candidates=[{"url":f"https://source{index}.example/article/ai-crm-platforms","provider":"test"} for index in range(10)]
+        def fetcher(url,**_kwargs):
+            index=int(url.split("source",1)[1].split(".",1)[0])
+            if index < 5:
+                raise self.research.WebResearchError("robots_disallowed")
+            return {"url":url,"title":f"AI CRM platforms source {index}","html":"<h1>AI CRM platforms</h1>","fetched_at":"2026-08-09T00:00:00+00:00"}
+        payload=self.research.search_public_web(intent,search_provider=lambda _intent:candidates,fetcher=fetcher)
+        self.assertEqual(payload["provider_candidates"],10)
+        self.assertEqual(len(payload["results"]),5)
+        self.assertEqual(len(payload["rejected_results"]),5)
+        self.assertTrue(all(item["reason"] == "robots_disallowed" for item in payload["rejected_results"]))
+
     def test_explicit_reklama_domain_never_routes_to_ss(self):
         intent=self.research.build_search_plan("Atrodi BMW X3 reklama.lv")
         self.assertEqual(intent.target_domains,("reklama.lv",))
