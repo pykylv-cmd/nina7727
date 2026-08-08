@@ -59,6 +59,57 @@ class DeveloperRouterV2Tests(unittest.TestCase):
         self.assertEqual(kind, "company_whatsapp_flow")
         self.assertTrue(plan)
 
+    def test_required_production_phrases_map_to_real_downstream_paths(self):
+        deterministic = {
+            "Parādi git status.": ("git_status", {}),
+            "Parādi projekta failus.": ("list_root", {}),
+            "Atrodi _developer_connection_ready.": (
+                "search_text", {"query": "_developer_connection_ready"},
+            ),
+        }
+        for phrase, expected in deterministic.items():
+            with self.subTest(phrase=phrase):
+                self.assertTrue(web_app._developer_intents(phrase))
+                self.assertEqual(web_app._developer_command(phrase), expected)
+
+        investigations = {
+            "Atrodi vienu zema riska UI uzlabojumu.": "developer_status_diff_preview",
+            "Izskaidro Developer Console arhitektūru.": "developer_console_architecture",
+            "Novērtē risku, ja mainītu send_message_to_nina.": "send_message_risk_analysis",
+            "Piedāvā minimālu labojumu šim UI.": "developer_status_diff_preview",
+        }
+        for phrase, expected_kind in investigations.items():
+            with self.subTest(phrase=phrase):
+                kind, plan = web_app._developer_investigation_plan(phrase)
+                self.assertEqual(kind, expected_kind)
+                self.assertTrue(plan)
+                self.assertEqual(web_app._developer_command(phrase), ("", {}))
+
+        self.assertIn("release_request", web_app._developer_intents("Sagatavo release."))
+
+    def test_required_phrases_do_not_fall_back_or_request_unnecessary_context(self):
+        phrases = (
+            "Parādi git status.",
+            "Parādi projekta failus.",
+            "Atrodi vienu zema riska UI uzlabojumu.",
+            "Izskaidro Developer Console arhitektūru.",
+            "Novērtē risku, ja mainītu send_message_to_nina.",
+            "Atrodi _developer_connection_ready.",
+            "Piedāvā minimālu labojumu šim UI.",
+        )
+        for phrase in phrases:
+            with self.subTest(phrase=phrase), \
+                 patch.object(web_app, "developer_connection_status",
+                              return_value={"agent": "connected", "repository": "connected"}), \
+                 patch.object(web_app, "create_developer_job") as create:
+                response = self.admin_client().post(
+                    "/admin/developer", headers={"Accept": "application/json"},
+                    data={"csrf_token": web_app._channel_csrf("developer:send"), "message": phrase},
+                )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()["notice"], "job_created")
+            self.assertTrue(create.called)
+
     def test_release_intent_is_non_executable_and_uses_owner_approval_boundary(self):
         with patch.object(web_app, "developer_connection_status",
                           return_value={"agent": "connected", "repository": "connected"}), \

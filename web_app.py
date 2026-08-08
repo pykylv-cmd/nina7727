@@ -33,7 +33,11 @@ from developer_control import (
     select_release_services as select_developer_release_services,
     write_access_status as developer_write_access_status,
 )
-from developer_router import developer_intents as _developer_intents
+from developer_router import (
+    developer_command as _developer_command,
+    developer_intents as _developer_intents,
+    developer_investigation_plan as _developer_investigation_plan,
+)
 from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, generate_with_nina, load_channel_conversation, load_web_conversation, save_channel_turn, send_message_to_nina
 from voice_engine import transcribe_audio_with_openai
 from channel_connections import claim_channel_message, consume_whatsapp_onboarding_state, create_telegram_token, create_whatsapp_onboarding_state, disconnect as disconnect_channel, get_connection, set_connection_for_test, update_whatsapp_verification
@@ -7086,48 +7090,6 @@ def admin_system():
     return Response(page("Admin System", body, active="admin"), mimetype="text/html")
 
 
-def _developer_investigation_plan(command):
-    normalized = " ".join(str(command or "").strip().casefold().split())
-    intents = set(_developer_intents(command))
-    if ("developer console" in normalized
-            and "ui_analysis" in intents and "diff_request" in intents
-            and ("connected" in normalized or "disconnected" in normalized
-                 or "statusu kartītes" in normalized or "status cards" in normalized)):
-        return "developer_status_diff_preview", (
-            ("backend_status", "def connection_" + "status", "developer_control.py"),
-            ("freshness_gate", "connected = seen >=", "developer_control.py"),
-            ("readiness_helper", "def _developer_" + "connection_ready", "web_app.py"),
-            ("render_gate", "developer_ready = _developer_" + "connection_ready(connection)", "web_app.py"),
-            ("send_gate", "if not _developer_" + "connection_ready(status):", "web_app.py"),
-            ("approval_gate", "if not _developer_" + "connection_ready(approval_status):", "web_app.py"),
-            ("agent_card", "(\"Local Developer Agent\", \"Connected\"", "web_app.py"),
-            ("repository_card", "(\"Repository\", \"Connected\"", "web_app.py"),
-            ("regression_test", "def test_repository_disconnected_blocks_" + "diff_approval", "test_admin_developer_console.py"),
-        )
-    if "code_search" in intents and "send_message_to_nina" in normalized:
-        return "send_message_definition", (
-            ("main_definition", "def send_message_to_nina", "nina_message_service.py"),
-        )
-    if "company whatsapp" in normalized and "architecture_analysis" in intents:
-        return "company_whatsapp_flow", (
-            ("bridge_event", "messages.upsert", "personal_whatsapp_bridge/src/company_session_manager.js"),
-            ("bridge_intake", "export async function processCompanyMessageUpsert", "personal_whatsapp_bridge/src/company_session_manager.js"),
-            ("web_endpoint", "def internal_" + "company_whatsapp_inbound", "web_app.py"),
-            ("shared_nina_call", "delivery_" + "recipient=sender_jid", "web_app.py"),
-            ("shared_definition", "def send_message_to_nina", "nina_message_service.py"),
-            ("bridge_reply", "socket.sendMessage(remote", "personal_whatsapp_bridge/src/company_session_manager.js"),
-        )
-    if "developer" in normalized and "web research" in normalized and (
-            "architecture_analysis" in intents or "risk_analysis" in intents):
-        return "developer_routing", (
-            ("developer_route", "def admin_" + "developer", "web_app.py"),
-            ("developer_router", "def _developer_" + "command", "web_app.py"),
-            ("generic_nina_call", "nina_result = send_message_" + "to_nina(", "web_app.py"),
-            ("research_router", "intent = build_search_" + "plan(clean", "nina_message_service.py"),
-        )
-    return "", ()
-
-
 def _developer_quality_review(analysis, proposal, evidence):
     analysis = analysis if isinstance(analysis, dict) else {}
     proposal = proposal if isinstance(proposal, dict) else {}
@@ -7223,6 +7185,11 @@ def _developer_investigation_answer(kind, jobs):
         "company_whatsapp_flow": ("bridge_event", "bridge_intake", "web_endpoint", "shared_nina_call",
                                   "shared_definition", "bridge_reply"),
         "developer_routing": ("developer_route", "developer_router", "generic_nina_call", "research_router"),
+        "developer_console_architecture": (
+            "admin_route", "brain_plan", "brain_answer", "control_plane", "local_agent",
+        ),
+        "send_message_risk_analysis": ("main_definition", "web_call", "media_call"),
+        "repository_structure_analysis": ("web_entry", "router", "control_plane", "local_agent"),
     }.get(kind, ())
     missing = [role for role in required if role not in evidence]
     cited = [
@@ -7365,6 +7332,28 @@ def _developer_investigation_answer(kind, jobs):
             ") → send_message_to_nina definition (" + location("shared_definition") +
             ") → bridge socket.sendMessage reply (" + location("bridge_reply") + ")."
         )
+    elif kind == "developer_console_architecture":
+        answer = (
+            "Developer Console architecture: owner-only admin route (" + location("admin_route") +
+            ") uses the intent/evidence planner (" + location("brain_plan") +
+            "), persists read-only jobs through the control plane (" + location("control_plane") +
+            "), executes allowlisted repository reads in the local agent (" + location("local_agent") +
+            "), and synthesizes evidence-backed results in the existing Developer Brain (" +
+            location("brain_answer") + ")."
+        )
+    elif kind == "send_message_risk_analysis":
+        answer = (
+            "send_message_to_nina is defined at " + location("main_definition") +
+            " and is consumed by Web/channel intake at " + location("web_call") +
+            " and media intake at " + location("media_call") +
+            ". Changing its contract therefore has cross-surface regression risk; no diff was requested or generated."
+        )
+    elif kind == "repository_structure_analysis":
+        answer = (
+            "The Developer repository path is composed of the owner-only Web entry (" + location("web_entry") +
+            "), deterministic Router V2 (" + location("router") + "), persistent job control plane (" +
+            location("control_plane") + "), and allowlisted local read-only agent (" + location("local_agent") + ")."
+        )
     else:
         answer = (
             "Current repository evidence shows /admin/developer is isolated and routes commands through "
@@ -7379,17 +7368,20 @@ def _developer_investigation_answer(kind, jobs):
         "repository_evidence": cited,
         "architecture_boundary": (
             "Company WhatsApp bridge, authenticated Web intake, and the shared ONE NINA message service"
-            if kind == "company_whatsapp_flow" else "ONE NINA Developer repository capability"
+            if kind == "company_whatsapp_flow" else (
+                "Shared ONE NINA message contract across Web and media/channel consumers"
+                if kind == "send_message_risk_analysis" else "ONE NINA Developer repository capability"
+            )
         ),
         "affected_modules": sorted({item["path"] for item in cited}),
         "call_chain_dependencies": [item["symbol"] for item in cited],
         "risks": {
-            "classification": "HIGH" if kind == "company_whatsapp_flow" else "LOW",
+            "classification": "HIGH" if kind in {"company_whatsapp_flow", "send_message_risk_analysis"} else "LOW",
             "items": ([
                 "Changing send_message_to_nina can affect every channel sharing the canonical Nina reply path.",
                 "Workspace, contact, conversation, and delivery-recipient context must remain intact.",
                 "Bridge acknowledgement and outbound reply behavior depend on the Web result contract.",
-            ] if kind == "company_whatsapp_flow" else [
+            ] if kind in {"company_whatsapp_flow", "send_message_risk_analysis"} else [
                 "Repository claims must remain limited to cited evidence.",
             ]),
         },
@@ -7764,19 +7756,6 @@ def admin_developer():
         page("Nina Developer", _admin_developer_body(notice), active="admin"),
         mimetype="text/html",
     )
-
-
-def _developer_command(command):
-    normalized = " ".join(str(command or "").strip().casefold().split())
-    if normalized in {"developer: parādi projekta failus", "developer: paradi projekta failus"}:
-        return "list_root", {}
-    prefix = "developer: atrodi "
-    if normalized.startswith(prefix):
-        query = str(command).strip()[len(prefix):].strip()
-        return ("search_text", {"query": query}) if query else ("", {})
-    if normalized in {"developer: parādi git status", "developer: paradi git status"}:
-        return "git_status", {}
-    return "", {}
 
 
 @app.post("/channels/telegram/connect")
