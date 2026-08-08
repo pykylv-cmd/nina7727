@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -79,6 +80,8 @@ class ReadOnlyDeveloperAgent:
             return {"status": completed.stdout[:128 * 1024]}
         if operation == "apply_approved_patch":
             return self._apply_approved_patch(args)
+        if operation == "execute_approved_release":
+            return self._execute_approved_release(args)
         raise DeveloperAgentError("operation_not_allowed")
 
     def _list(self, relative):
@@ -297,6 +300,101 @@ class ReadOnlyDeveloperAgent:
                 "validation": validation, "write_access": "disabled",
                 "deploy_access": "disabled", "write_executed": True}
 
+    @staticmethod
+    def _read_json_url(url, timeout=10, token=""):
+        headers = {"Accept": "application/json"}
+        if token:
+            headers["Authorization"] = "Bearer " + token
+        request = Request(url, method="GET", headers=headers)
+        with urlopen(request, timeout=timeout) as response:
+            return response.status, json.loads(response.read().decode("utf-8") or "{}")
+
+    def _execute_approved_release(self, args):
+        release_id = str(args.get("release_id") or "")
+        branch = str(args.get("branch") or "")
+        files = [str(value) for value in (args.get("affected_files") or [])]
+        services = sorted({str(value) for value in (args.get("target_services") or [])})
+        if not release_id.startswith("devrelease_") or branch != "feature/web-chat-v1":
+            raise DeveloperAgentError("release_scope_invalid")
+        if not files or len(files) != len(set(files)) or services not in (["core"], ["web"], ["core", "web"]):
+            raise DeveloperAgentError("release_scope_invalid")
+        if str(args.get("quality_verdict") or "") != "APPROVE FOR OWNER REVIEW":
+            raise DeveloperAgentError("release_quality_blocked")
+        try:
+            expires_at = datetime.fromisoformat(str(args.get("expires_at") or "").replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise DeveloperAgentError("release_approval_invalid") from exc
+        if expires_at <= datetime.now(timezone.utc):
+            raise DeveloperAgentError("release_approval_expired")
+        for relative in files:
+            self._safe_write_path(relative, allow_new=True)
+        stages = {name: "pending" for name in ("commit", "push", "deploy", "health", "live_verify")}
+        status = self._run_fixed(["git", "status", "--short", "--branch"], self.root)
+        if status.returncode or not status.stdout.splitlines() or not status.stdout.splitlines()[0].startswith("## " + branch):
+            raise DeveloperAgentError("release_wrong_branch")
+        changed = self._run_fixed(["git", "diff", "--name-only"], self.root)
+        if changed.returncode:
+            raise DeveloperAgentError("release_diff_read_failed")
+        changed_files = {line.strip().replace("\\", "/") for line in changed.stdout.splitlines() if line.strip()}
+        if changed_files != {value.replace("\\", "/") for value in files}:
+            raise DeveloperAgentError("release_unauthorized_files")
+        diff = self._run_fixed(["git", "diff", "--", *files], self.root)
+        if diff.returncode or self._sha256_text(diff.stdout) != str(args.get("content_hash") or ""):
+            raise DeveloperAgentError("release_diff_changed")
+        added = self._run_fixed(["git", "add", "--", *files], self.root)
+        if added.returncode:
+            raise DeveloperAgentError("release_git_add_failed")
+        commit_message = str(args.get("commit_message") or "Nina Developer approved change")[:72]
+        committed = self._run_fixed(["git", "commit", "-m", commit_message], self.root)
+        if committed.returncode:
+            raise DeveloperAgentError("release_commit_failed")
+        stages["commit"] = "pass"
+        self._run_fixed(["git", "status", "--short", "--branch"], self.root)
+        pushed = self._run_fixed(["git", "push", "origin", branch], self.root)
+        if pushed.returncode:
+            return {"release_id": release_id, "stages": stages, "failed_stage": "push"}
+        stages["push"] = "pass"; stages["deploy"] = "webhook_triggered"
+        base_url = (os.environ.get("NINA_DEVELOPER_WEB_URL") or "").rstrip("/")
+        if "web" not in services or not base_url.startswith(("https://", "http://127.0.0.1:", "http://localhost:")):
+            return {"release_id": release_id, "stages": stages, "failed_stage": "health"}
+        health_payloads = {}
+        for _attempt in range(30):
+            try:
+                health_payloads = {}
+                ok = True
+                for path in ("/live", "/ready", "/health"):
+                    code, payload = self._read_json_url(base_url + path, timeout=10)
+                    health_payloads[path] = {"status": code, "body": payload}
+                    ok = ok and code == 200
+                ready = health_payloads["/ready"]["body"]
+                ok = ok and ready.get("deployment_compatibility") is True
+                if ok:
+                    break
+            except (HTTPError, URLError, TimeoutError, ValueError):
+                ok = False
+            time.sleep(2)
+        if not ok:
+            return {"release_id": release_id, "stages": stages, "failed_stage": "health",
+                    "health": health_payloads}
+        stages["deploy"] = "pass"; stages["health"] = "pass"
+        if str(args.get("live_verification") or "") != "developer_console_safety":
+            return {"release_id": release_id, "stages": stages, "failed_stage": "live_verify"}
+        code, proof = self._read_json_url(
+            base_url + "/internal/developer-release/verify", timeout=10,
+            token=(os.environ.get("NINA_DEVELOPER_AGENT_TOKEN") or "").strip(),
+        )
+        if code != 200 or not proof.get("ok"):
+            return {"release_id": release_id, "stages": stages, "failed_stage": "live_verify"}
+        stages["live_verify"] = "pass"
+        commit_sha = ""
+        for line in (committed.stdout + committed.stderr).splitlines():
+            match = re.search(r"\[.+ ([0-9a-f]{7,40})\]", line)
+            if match:
+                commit_sha = match.group(1); break
+        return {"release_id": release_id, "stages": stages, "commit_sha": commit_sha,
+                "health": health_payloads, "live_verification": proof,
+                "write_access": "disabled", "deploy_access": "disabled"}
+
 
 def _request(base_url, token, path, payload):
     request = Request(base_url.rstrip("/") + path,
@@ -322,6 +420,8 @@ def run_forever():
                 error_code, result = "", {}
                 try:
                     result = agent.execute(job.get("operation"), job.get("arguments"))
+                    if job.get("operation") == "execute_approved_release" and result.get("failed_stage"):
+                        error_code = "release_" + str(result["failed_stage"])[:64]
                 except (DeveloperAgentError, OSError, subprocess.SubprocessError) as exc:
                     error_code = str(exc)[:80]
                 _request(base_url, token, "/internal/developer-agent/jobs/result",

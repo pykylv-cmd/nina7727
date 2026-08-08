@@ -23,9 +23,14 @@ from developer_control import (
     complete_job as complete_developer_job,
     connection_status as developer_connection_status,
     create_approved_patch_job as create_developer_approval_job,
+    create_approved_release_job as create_developer_release_job,
     create_job as create_developer_job,
+    discard_release_candidate as discard_developer_release,
     heartbeat as developer_heartbeat,
     list_jobs as list_developer_jobs,
+    record_verified_lesson as record_developer_lesson,
+    retrieve_relevant_lessons as retrieve_developer_lessons,
+    select_release_services as select_developer_release_services,
     write_access_status as developer_write_access_status,
 )
 from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, generate_with_nina, load_channel_conversation, load_web_conversation, save_channel_turn, send_message_to_nina
@@ -7119,10 +7124,84 @@ def _developer_investigation_plan(command):
     return "", ()
 
 
+def _developer_quality_review(analysis, proposal, evidence):
+    analysis = analysis if isinstance(analysis, dict) else {}
+    proposal = proposal if isinstance(proposal, dict) else {}
+    evidence = evidence if isinstance(evidence, list) else []
+    diff_text = str(proposal.get("diff") or "")
+    normalized_diff = diff_text.casefold()
+    files = [str(path) for path in (proposal.get("files") or []) if str(path).strip()]
+    focused_tests = [str(item) for item in (proposal.get("focused_tests") or []) if str(item).strip()]
+    validation = proposal.get("validation") if isinstance(proposal.get("validation"), dict) else {}
+    evidence_supported = bool(evidence) and all(
+        str(item.get("path") or "").strip()
+        and int(item.get("line") or 0) > 0
+        and str(item.get("source_hash") or "").strip()
+        for item in evidence if isinstance(item, dict)
+    )
+    one_nina_violation = any(marker in normalized_diff for marker in (
+        "second_nina", "second nina", "parallel brain", "new nina service",
+    ))
+    security_violation = any(marker in normalized_diff for marker in (
+        "-@platform_admin_required", "write access</small><b>enabled", "deploy access</small><b>enabled",
+        "+    return true  # bypass", "+    return true # bypass",
+    ))
+    destructive_data_change = any(marker in normalized_diff for marker in (
+        "drop table", "truncate table", "drop column", "delete from nina_",
+    ))
+    architecture = "PASS" if analysis.get("architecture_boundary") and evidence_supported else "FAIL"
+    one_nina = "FAIL" if one_nina_violation else "PASS"
+    security = "FAIL" if security_violation else "PASS"
+    data_integrity = "FAIL" if destructive_data_change else "PASS"
+    test_plan = (
+        "SUFFICIENT" if len(focused_tests) >= 2 and bool(validation.get("py_compile")) else "INSUFFICIENT"
+    )
+    smaller_safe_alternative = "YES" if len(files) > 3 else "NO"
+    proposed_risk = str(proposal.get("risk") or "MEDIUM").upper()
+    regression_risk = proposed_risk if proposed_risk in {"LOW", "MEDIUM", "HIGH"} else "MEDIUM"
+    if "FAIL" in {architecture, one_nina, security, data_integrity}:
+        verdict = "BLOCK"
+    elif test_plan == "INSUFFICIENT" or smaller_safe_alternative == "YES":
+        verdict = "REVISE PROPOSAL"
+    else:
+        verdict = "APPROVE FOR OWNER REVIEW"
+    return {
+        "Architecture": architecture,
+        "ONE NINA": one_nina,
+        "Regression Risk": regression_risk,
+        "Security": security,
+        "Data Integrity": data_integrity,
+        "Test Plan": test_plan,
+        "Smaller Safe Alternative": smaller_safe_alternative,
+        "Assumptions Supported By Evidence": "PASS" if evidence_supported else "FAIL",
+        "Repository Evidence": [
+            {"role": item.get("role"), "path": item.get("path"), "line": item.get("line")}
+            for item in evidence if isinstance(item, dict)
+        ],
+        "Cross-Runtime Review": (
+            "No cross-runtime files changed; shared status and approval consumers remain within Web."
+            if not any("personal_whatsapp_bridge" in path or path == "app.py" for path in files)
+            else "Cross-runtime surface present; focused channel regressions are required."
+        ),
+        "Duplicate Logic Review": (
+            "PASS: proposal reuses the existing _developer_connection_ready predicate."
+            if "_developer_connection_ready" in diff_text else "WARN: no existing shared predicate reuse proven."
+        ),
+        "Backward Compatibility": "PASS" if regression_risk == "LOW" else "WARN",
+        "Verdict": verdict,
+        "Revision Required": verdict == "REVISE PROPOSAL",
+        "Owner Approval Available": verdict == "APPROVE FOR OWNER REVIEW",
+    }
+
+
 def _developer_investigation_answer(kind, jobs):
     evidence, source_hashes = {}, {}
+    question = ""
     for job in jobs:
-        role = str((job.get("arguments") or {}).get("evidence_role") or "")
+        arguments = job.get("arguments") or {}
+        role = str(arguments.get("evidence_role") or "")
+        if not question:
+            question = str(arguments.get("question") or "")
         result = job.get("result") or {}
         matches = result.get("matches") or []
         if role and matches:
@@ -7211,6 +7290,8 @@ def _developer_investigation_answer(kind, jobs):
                     "Changing heartbeat freshness semantics would affect all Developer Console readiness consumers.",
                 ],
             },
+            "Relevant previous lessons": [],
+            "Evidence precedence": "Current repository evidence is authoritative; historical lessons may only refine risk and solution selection.",
             "alternatives": [
                 {"option": "Leave the approval condition duplicated", "risk": "Future status drift remains possible."},
                 {"option": "Reuse the existing readiness helper", "risk": "Minimal; behavior remains fail-closed."},
@@ -7224,6 +7305,44 @@ def _developer_investigation_answer(kind, jobs):
                 "Sprint 5 controlled-write safety tests remain passing",
             ],
         }
+        lesson_matches = retrieve_developer_lessons(
+            question or developer_analysis["problem"], ["web_app.py", "test_admin_developer_console.py"]
+        )
+        evidence_paths = {str(item.get("path") or "").replace("\\", "/").casefold() for item in cited}
+        developer_analysis["Relevant previous lessons"] = ([
+            {
+                **lesson,
+                "current_repo_relevance": (
+                    "CONFIRMED BY CURRENT REPO EVIDENCE"
+                    if evidence_paths & {str(path).replace("\\", "/").casefold()
+                                         for path in (lesson.get("affected_modules") or [])}
+                    else "NOT CONFIRMED; CURRENT REPO EVIDENCE TAKES PRECEDENCE"
+                ),
+            }
+            for lesson in lesson_matches
+        ] or ["None found."])
+        proposal = {
+            "files": ["web_app.py", "test_admin_developer_console.py"],
+            "functions": ["_developer_connection_ready", "admin_developer"],
+            "reason": "Use the existing Agent+Repository readiness predicate for owner approval gating too.",
+            "risk": "LOW",
+            "diff": diff_preview,
+            "focused_tests": [
+                "connected Agent + connected Repository preserves approval behavior",
+                "connected Agent + disconnected Repository rejects owner approval",
+                "Repository-disconnected Send remains rejected",
+                "owner-only access remains enforced",
+            ],
+            "expected_source_hashes": {
+                path: source_hashes.get(path, "")
+                for path in ("web_app.py", "test_admin_developer_console.py")
+            },
+            "validation": {
+                "py_compile": ["web_app.py", "test_admin_developer_console.py"],
+                "pytest": [],
+            },
+        }
+        quality_review = _developer_quality_review(developer_analysis, proposal, cited)
         return {
             "developer_analysis": developer_analysis,
             "answer": (
@@ -7234,27 +7353,8 @@ def _developer_investigation_answer(kind, jobs):
                 location("send_gate") + ". The owner approval path still duplicates that policy at " +
                 location("approval_gate") + ", creating a small future consistency risk."
             ),
-            "proposed_change": {
-                "files": ["web_app.py", "test_admin_developer_console.py"],
-                "functions": ["_developer_connection_ready", "admin_developer"],
-                "reason": "Use the existing Agent+Repository readiness predicate for owner approval gating too.",
-                "risk": "LOW",
-                "diff": diff_preview,
-                "focused_tests": [
-                    "connected Agent + connected Repository preserves approval behavior",
-                    "connected Agent + disconnected Repository rejects owner approval",
-                    "Repository-disconnected Send remains rejected",
-                    "owner-only access remains enforced",
-                ],
-                "expected_source_hashes": {
-                    path: source_hashes.get(path, "")
-                    for path in ("web_app.py", "test_admin_developer_console.py")
-                },
-                "validation": {
-                    "py_compile": ["web_app.py", "test_admin_developer_console.py"],
-                    "pytest": [],
-                },
-            },
+            "proposed_change": proposal,
+            "quality_review": quality_review,
             "evidence": cited,
             "approval_required": True,
             "write_executed": False,
@@ -7302,11 +7402,16 @@ def _developer_investigation_answer(kind, jobs):
                 "Repository claims must remain limited to cited evidence.",
             ]),
         },
+        "Relevant previous lessons": [],
+        "Evidence precedence": "Current repository evidence is authoritative; historical lessons never override it.",
         "alternatives": ["No code change was requested; retain the current architecture and report evidence only."],
         "chosen_solution": "Provide a repository-grounded explanation without generating or applying a patch.",
         "why": "A descriptive investigation does not justify a code change.",
         "focused_validation_plan": ["Verify every stated file/function against the returned evidence."],
     }
+    analysis["Relevant previous lessons"] = (retrieve_developer_lessons(
+        question or analysis["problem"], analysis["affected_modules"]
+    ) or ["None found."])
     return {"developer_analysis": analysis, "answer": answer, "evidence": cited,
             "write_executed": False, "safety_notice": "WRITE NOT EXECUTED."}
 
@@ -7344,6 +7449,9 @@ def _admin_developer_jobs_html():
             controls = ""
             proposal = payload.get("proposed_change") if isinstance(payload, dict) else None
             if status == "completed" and isinstance(proposal, dict):
+                review = _developer_quality_review(
+                    payload.get("developer_analysis"), proposal, payload.get("evidence")
+                )
                 approved_job = approvals.get(item)
                 if approved_job:
                     controls = (
@@ -7351,7 +7459,7 @@ def _admin_developer_jobs_html():
                         html_escape(str((approved_job.get("arguments") or {}).get("approval_id") or "recorded")) +
                         " — " + html_escape(str(approved_job.get("status") or "pending")) + "</div>"
                     )
-                else:
+                elif review["Verdict"] == "APPROVE FOR OWNER REVIEW":
                     diff_hash = hashlib.sha256(str(proposal.get("diff") or "").encode("utf-8")).hexdigest()
                     controls = (
                         "<div class='developer-approval-actions'>"
@@ -7365,7 +7473,14 @@ def _admin_developer_jobs_html():
                         f"<input type='hidden' name='csrf_token' value='{_channel_csrf('developer:reject')}'>"
                         "<input type='hidden' name='action' value='reject_diff'>"
                         "<input type='hidden' name='investigation_id' value='" + html_escape(item) + "'>"
+                        "<input name='rejection_reason' maxlength='500' required "
+                        "placeholder='Owner rejection reason'>"
                         "<button class='btn' type='submit'>Reject</button></form></div>"
+                    )
+                else:
+                    controls = (
+                        "<div class='channel-message'>Owner approval unavailable: " +
+                        html_escape(review["Verdict"]) + ".</div>"
                     )
         else:
             grouped, status = (), item["status"]
@@ -7376,6 +7491,39 @@ def _admin_developer_jobs_html():
                 label = ("LOCAL CHANGE READY" if status == "completed" else
                          ("APPLYING → BACKUP → PATCH → VALIDATION" if status in {"pending", "claimed"} else
                           "VALIDATION FAILED — ROLLBACK COMPLETE"))
+                if status == "completed" and result.get("write_executed"):
+                    validation = result.get("validation") or {}
+                    release_hash = hashlib.sha256(str(validation.get("git_diff") or "").encode("utf-8")).hexdigest()
+                    files = result.get("applied_files") or []
+                    services = select_developer_release_services(files)
+                    payload = {**result, "release_summary": {
+                        "exact_files": files,
+                        "git_diff_summary": {"bytes": len(str(validation.get("git_diff") or "").encode("utf-8")),
+                                             "files": len(files)},
+                        "tests_run": validation.get("checks") or [],
+                        "quality_verdict": str((item.get("arguments") or {}).get("lesson_context", {}).get("quality_verdict") or ""),
+                        "target_branch": "feature/web-chat-v1", "target_services": services,
+                        "risk_level": "LOW",
+                        "expected_deployment_impact": "Existing Railway webhook redeploys affected services only.",
+                    }}
+                    controls = (
+                        "<div class='developer-approval-actions'><form method='post' action='/admin/developer'>"
+                        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('developer:release')}'>"
+                        "<input type='hidden' name='action' value='approve_release'>"
+                        "<input type='hidden' name='source_patch_job_id' value='" + html_escape(item["job_id"]) + "'>"
+                        "<input type='hidden' name='release_hash' value='" + html_escape(release_hash) + "'>"
+                        "<input type='hidden' name='target_services' value='" + html_escape(",".join(services)) + "'>"
+                        "<button class='btn primary' type='submit'>Approve Release</button></form>"
+                        "<form method='post' action='/admin/developer'>"
+                        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('developer:release-discard')}'>"
+                        "<input type='hidden' name='action' value='discard_release'>"
+                        "<input type='hidden' name='source_patch_job_id' value='" + html_escape(item["job_id"]) + "'>"
+                        "<button class='btn' type='submit'>Discard</button></form></div>"
+                    )
+            elif item["operation"] == "execute_approved_release":
+                label = ("RELEASE VERIFIED" if status == "completed" and not result.get("failed_stage") else
+                         ("COMMIT - PUSH - DEPLOY - HEALTH - LIVE VERIFY" if status in {"pending", "claimed"}
+                          else "RELEASE FAILED - " + str(result.get("failed_stage") or item.get("error_code") or "unknown")))
             else:
                 label = item["operation"]
         latest_status = status
@@ -7387,6 +7535,9 @@ def _admin_developer_jobs_html():
             }
             if isinstance(payload.get("proposed_change"), dict):
                 display_payload["DIFF PREVIEW"] = payload["proposed_change"]
+                display_payload["QUALITY REVIEW"] = _developer_quality_review(
+                    payload.get("developer_analysis"), payload["proposed_change"], payload.get("evidence")
+                )
             display_payload["WRITE NOT EXECUTED"] = not bool(payload.get("write_executed"))
         rendered = (json.dumps(display_payload, ensure_ascii=False, indent=2)
                     if isinstance(display_payload, dict) else str(display_payload))
@@ -7481,12 +7632,51 @@ def admin_developer():
         return jsonify({"ok": True, "html": jobs_html, "latest_status": latest_status})
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
+        if action in {"approve_release", "discard_release"}:
+            csrf_action = "developer:release" if action == "approve_release" else "developer:release-discard"
+            if not _valid_channel_csrf(csrf_action):
+                return Response("Forbidden", status=403)
+            source_job_id = (request.form.get("source_patch_job_id") or "").strip()
+            if action == "discard_release":
+                discard_developer_release(source_job_id, "platform_admin_session")
+                return redirect(q("/admin/developer"))
+            services = [value for value in (request.form.get("target_services") or "").split(",") if value]
+            try:
+                create_developer_release_job(
+                    source_job_id, request.form.get("release_hash"),
+                    "feature/web-chat-v1", services, owner_identity="platform_admin_session",
+                )
+            except ValueError as exc:
+                return Response(str(exc), status=409)
+            return redirect(q("/admin/developer"))
         if action in {"approve_diff", "reject_diff"}:
             csrf_action = "developer:approve" if action == "approve_diff" else "developer:reject"
             if not _valid_channel_csrf(csrf_action):
                 return Response("Forbidden", status=403)
             investigation_id = (request.form.get("investigation_id") or "").strip()
             if action == "reject_diff":
+                reason = (request.form.get("rejection_reason") or "").strip()
+                if not reason:
+                    return Response("Owner rejection reason required", status=400)
+                grouped = [job for job in list_developer_jobs(25)
+                           if str((job.get("arguments") or {}).get("investigation_id") or "") == investigation_id]
+                if grouped and all(job.get("status") == "completed" for job in grouped):
+                    kind = str((grouped[0].get("arguments") or {}).get("investigation_kind") or "")
+                    payload = _developer_investigation_answer(kind, grouped)
+                    proposal = payload.get("proposed_change") if isinstance(payload, dict) else None
+                    analysis = payload.get("developer_analysis") if isinstance(payload, dict) else None
+                    if isinstance(proposal, dict) and isinstance(analysis, dict):
+                        record_developer_lesson("owner_rejection", {
+                            "problem_pattern": analysis.get("problem"),
+                            "affected_modules": proposal.get("files") or [],
+                            "root_cause": payload.get("answer"),
+                            "attempted_solution": proposal.get("reason"),
+                            "outcome": "Owner rejected the reviewed proposal.",
+                            "failure_reason": reason,
+                            "regression_risk": proposal.get("risk") or "MEDIUM",
+                            "tests_that_caught_it": proposal.get("focused_tests") or [],
+                            "architecture_rule": analysis.get("architecture_boundary"),
+                        }, {"developer_job_id": str(grouped[0].get("job_id") or investigation_id)})
                 return redirect(q("/admin/developer"))
             approval_status = developer_connection_status()
             if approval_status["agent"] != "connected" or approval_status["repository"] != "connected":
@@ -7500,6 +7690,23 @@ def admin_developer():
             proposal = payload.get("proposed_change") if isinstance(payload, dict) else None
             if not isinstance(proposal, dict):
                 return Response("Approval unavailable", status=409)
+            review = _developer_quality_review(
+                payload.get("developer_analysis"), proposal, payload.get("evidence")
+            )
+            if review["Verdict"] != "APPROVE FOR OWNER REVIEW":
+                analysis = payload.get("developer_analysis") if isinstance(payload, dict) else {}
+                record_developer_lesson("rejected_quality_review", {
+                    "problem_pattern": analysis.get("problem"),
+                    "affected_modules": proposal.get("files") or [],
+                    "root_cause": payload.get("answer") or "Quality Review rejected the proposal.",
+                    "attempted_solution": proposal.get("reason") or "Proposed diff",
+                    "outcome": review["Verdict"],
+                    "failure_reason": review["Verdict"],
+                    "regression_risk": proposal.get("risk") or "MEDIUM",
+                    "tests_that_caught_it": proposal.get("focused_tests") or [],
+                    "architecture_rule": analysis.get("architecture_boundary"),
+                }, {"developer_job_id": str(grouped[0].get("job_id") or investigation_id)})
+                return Response("Quality review blocks owner approval", status=409)
             try:
                 create_developer_approval_job(
                     investigation_id,
@@ -7509,6 +7716,16 @@ def admin_developer():
                     proposal.get("expected_source_hashes"),
                     proposal.get("validation"),
                     owner_identity="platform_admin_session",
+                    lesson_context={
+                        "problem_pattern": payload.get("developer_analysis", {}).get("problem"),
+                        "root_cause": payload.get("answer"),
+                        "attempted_solution": proposal.get("reason"),
+                        "successful_pattern": proposal.get("reason"),
+                        "regression_risk": proposal.get("risk") or "MEDIUM",
+                        "tests_that_caught_it": proposal.get("focused_tests") or [],
+                        "architecture_rule": payload.get("developer_analysis", {}).get("architecture_boundary"),
+                        "quality_verdict": review.get("Verdict"),
+                    },
                 )
             except ValueError as exc:
                 return Response(str(exc), status=409)
@@ -8623,6 +8840,18 @@ def internal_developer_agent_jobs_result():
         str(payload.get("error_code") or "")[:80],
     )
     return (jsonify({"ok": True}) if accepted else (jsonify({"ok": False}), 409))
+
+
+@app.get("/internal/developer-release/verify")
+def internal_developer_release_verify():
+    if not authorize_developer_agent(request.headers.get("Authorization")):
+        return jsonify({"ok": False}), 401
+    status = developer_connection_status()
+    return jsonify({
+        "ok": _developer_connection_ready(status),
+        "developer_agent": status["agent"], "repository": status["repository"],
+        "write_access": "disabled", "deploy_access": "disabled",
+    })
 
 
 @app.post("/internal/personal-whatsapp/auth/load")

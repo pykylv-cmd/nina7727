@@ -94,11 +94,20 @@ class DeveloperControlledWriteTests(unittest.TestCase):
                           "investigation_kind": "developer_status_diff_preview"},
         }
         proposal = {
+            "developer_analysis": {
+                "architecture_boundary": "Owner-authenticated Developer capability",
+            },
             "proposed_change": {
                 "diff": self.patch_text, "files": ["app.py"],
+                "risk": "LOW",
+                "focused_tests": ["exact approved diff", "owner-only approval"],
                 "expected_source_hashes": {"app.py": file_sha(self.root / "app.py")},
                 "validation": {"py_compile": ["app.py"], "pytest": []},
-            }
+            },
+            "evidence": [{
+                "role": "fixture", "path": "app.py", "line": 1,
+                "source_hash": file_sha(self.root / "app.py"),
+            }],
         }
         with patch.object(web_app, "list_developer_jobs", return_value=[investigation]), \
              patch.object(web_app, "_developer_investigation_answer", return_value=proposal), \
