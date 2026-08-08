@@ -352,9 +352,10 @@ def create_approved_release_job(source_patch_job_id, submitted_hash, branch, tar
         selected = select_release_services(files)
         if sorted({str(value) for value in (target_services or [])}) != selected:
             raise ValueError("developer_release_services_changed")
-        cur.execute(_sql("SELECT arguments_json FROM nina_developer_jobs WHERE operation=%s"),
+        cur.execute(_sql("SELECT arguments_json,status FROM nina_developer_jobs WHERE operation=%s"),
                     ("execute_approved_release",))
-        if any(str(json.loads(item[0] or "{}").get("source_patch_job_id") or "") == str(source_patch_job_id)
+        if any(item[1] != "failed" and
+               str(json.loads(item[0] or "{}").get("source_patch_job_id") or "") == str(source_patch_job_id)
                for item in cur.fetchall()):
             raise ValueError("developer_release_replayed")
         approved_at = now or _now()

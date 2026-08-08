@@ -92,6 +92,19 @@ class DeveloperControlledReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "developer_release_branch_not_allowed"):
             self._approve(other, branch="main")
 
+    def test_failed_release_requires_and_allows_new_one_time_approval(self):
+        first = self._approve()
+        conn = developer_control._connect()
+        try:
+            conn.execute(developer_control._sql(
+                "UPDATE nina_developer_jobs SET status=%s,error_code=%s WHERE job_id=%s"),
+                ("failed", "operation_not_allowed", first["job_id"]))
+            conn.commit()
+        finally:
+            conn.close()
+        second = self._approve()
+        self.assertNotEqual(first["release_id"], second["release_id"])
+
     def test_quality_block_prevents_release(self):
         blocked = self._ready_patch(quality="BLOCK")
         with self.assertRaisesRegex(ValueError, "developer_release_quality_not_approved"):
