@@ -37,6 +37,7 @@ from developer_router import (
     developer_command as _developer_command,
     developer_intents as _developer_intents,
     developer_investigation_plan as _developer_investigation_plan,
+    resolve_developer_targets as _resolve_developer_targets,
 )
 from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, generate_with_nina, load_channel_conversation, load_web_conversation, save_channel_turn, send_message_to_nina
 from voice_engine import transcribe_audio_with_openai
@@ -7170,6 +7171,11 @@ def _developer_investigation_answer(kind, jobs):
             question = str(arguments.get("question") or "")
         result = job.get("result") or {}
         matches = result.get("matches") or []
+        if kind == "target_architecture_analysis":
+            grounded = [match for match in matches
+                        if not str(match.get("path") or "").replace("\\", "/").split("/")[-1].startswith("test_")
+                        and str(match.get("path") or "") != "developer_router.py"]
+            matches = grounded or matches
         if role and matches:
             evidence[role] = matches[0]
             path = str(matches[0].get("path") or "")
@@ -7191,6 +7197,9 @@ def _developer_investigation_answer(kind, jobs):
         "send_message_risk_analysis": ("main_definition", "web_call", "media_call"),
         "repository_structure_analysis": ("web_entry", "router", "control_plane", "local_agent"),
     }.get(kind, ())
+    if kind == "target_architecture_analysis":
+        required = tuple(str((job.get("arguments") or {}).get("evidence_role") or "")
+                         for job in jobs if (job.get("arguments") or {}).get("evidence_role"))
     missing = [role for role in required if role not in evidence]
     cited = [
         {"role": role, "path": evidence[role]["path"], "line": evidence[role]["line"],
@@ -7199,6 +7208,13 @@ def _developer_investigation_answer(kind, jobs):
         for role in required if role in evidence
     ]
     if missing:
+        if kind == "target_architecture_analysis":
+            return {
+                "answer": "TARGET NOT PROVEN",
+                "reason": "The requested target could not be supported by current repository evidence.",
+                "missing_evidence": missing, "evidence": cited,
+                "write_executed": False, "safety_notice": "WRITE NOT EXECUTED.",
+            }
         if kind == "developer_status_diff_preview":
             return {
                 "answer": "INSUFFICIENT ARCHITECTURE EVIDENCE",
@@ -7354,6 +7370,17 @@ def _developer_investigation_answer(kind, jobs):
             "), deterministic Router V2 (" + location("router") + "), persistent job control plane (" +
             location("control_plane") + "), and allowlisted local read-only agent (" + location("local_agent") + ")."
         )
+    elif kind == "target_architecture_analysis":
+        resolution = _resolve_developer_targets(question)
+        targets = list(resolution.get("targets") or [])
+        evidence_summary = "; ".join(
+            str(item["path"]) + ":" + str(item["line"]) + " " + str(item["symbol"])
+            for item in cited
+        )
+        answer = (
+            "Resolved target: " + " + ".join(targets) + ". Repository architecture evidence: " +
+            evidence_summary + ". No change or diff was requested."
+        )
     else:
         answer = (
             "Current repository evidence shows /admin/developer is isolated and routes commands through "
@@ -7392,6 +7419,8 @@ def _developer_investigation_answer(kind, jobs):
         "why": "A descriptive investigation does not justify a code change.",
         "focused_validation_plan": ["Verify every stated file/function against the returned evidence."],
     }
+    if kind == "target_architecture_analysis":
+        analysis["resolved_targets"] = list(_resolve_developer_targets(question).get("targets") or [])
     analysis["Relevant previous lessons"] = (retrieve_developer_lessons(
         question or analysis["problem"], analysis["affected_modules"]
     ) or ["None found."])

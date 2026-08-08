@@ -7,6 +7,34 @@ DEVELOPER_INTENTS = (
     "code_search", "diff_request", "release_request",
 )
 
+TARGET_ALIASES = (
+    ("Developer Console", ("developer console",)),
+    ("Client Context", ("client context", "klienta kontekst")),
+    ("Daily Planner", ("daily planner", "dienas plānot")),
+    ("Web Research", ("web research", "tīmekļa izpēt")),
+    ("Work Engine", ("work engine", "darba dzin")),
+    ("WhatsApp", ("whatsapp",)),
+    ("Telegram", ("telegram",)),
+    ("Memory", ("memory", "atmiņ")),
+    ("Inbox", ("inbox", "iesūtn")),
+    ("Tasks", ("tasks", "uzdevum")),
+    ("Files", ("files", "failu sadaļ")),
+    ("Projects", ("projects", "projektu sadaļ")),
+    ("Clients", ("clients", "klientu sadaļ")),
+    ("Web", ("web", "tīmekļa virsm")),
+)
+
+TARGET_EVIDENCE_ANCHORS = {
+    "Inbox": (("route", "def " + "inbox("), ("view", "def " + "channel_hub_body"),
+              ("data", "def " + "load_workspace_data")),
+    "Tasks": (("route", "def " + "tasks("), ("view", "def " + "tasks_body"),
+              ("work_truth", "one_nina_" + "list_work_objects(")),
+    "Client Context": (("definition", "def client_" + "context"),
+                       ("consumer", "context = client_" + "context(")),
+    "Memory": (("snapshot", "def build_memory_" + "snapshot"),
+               ("resolver", "def resolve_memory_" + "command")),
+}
+
 
 def developer_intents(command):
     normalized = " ".join(str(command or "").strip().casefold().split())
@@ -27,7 +55,7 @@ def developer_intents(command):
         " ui", "interfeis", "developer console", "statusu kart", "status card", "lapa",
     )))
     add("architecture_analysis", any(term in normalized for term in (
-        "arhitekt", "architecture", "call chain", "message flow", "plūsma", "moduļi", "modules",
+        "arhitekt", "architecture", "call chain", "message flow", "plūsma", "moduļi", "modules", "saistīb",
     )) or (
         "developer" in normalized and "web research" in normalized
         and any(term in normalized for term in ("kāpēc", "kapec", "why"))
@@ -67,6 +95,39 @@ def developer_command(command):
         ).strip(" .?!")
         return ("search_text", {"query": target}) if target else ("", {})
     return "", {}
+
+
+def resolve_developer_targets(command):
+    """Resolve named NinaOS targets before evidence discovery; repository evidence remains authoritative."""
+    normalized = " ".join(str(command or "").strip().casefold().split())
+    targets = []
+    for target, aliases in TARGET_ALIASES:
+        if target == "Web" and "web research" in normalized:
+            continue
+        if any(alias in normalized for alias in aliases):
+            targets.append(target)
+    targets = list(dict.fromkeys(targets))
+    relational = any(term in normalized for term in (" un ", " and ", "saist", "relationship", ","))
+    if len(targets) > 1 and not relational:
+        return {"status": "ambiguous", "targets": tuple(targets)}
+    if not targets:
+        return {"status": "unresolved", "targets": ()}
+    return {"status": "resolved", "targets": tuple(targets)}
+
+
+def target_evidence_plan(command):
+    resolution = resolve_developer_targets(command)
+    if resolution["status"] != "resolved":
+        return resolution, ()
+    plan = []
+    for index, target in enumerate(resolution["targets"]):
+        anchors = TARGET_EVIDENCE_ANCHORS.get(target)
+        if not anchors:
+            module_term = target.casefold().replace(" ", "_")
+            anchors = (("discovery", module_term),)
+        for label, query in anchors:
+            plan.append((f"target_{index}_{label}", query, ""))
+    return resolution, tuple(plan)
 
 
 def developer_investigation_plan(command):
@@ -129,4 +190,8 @@ def developer_investigation_plan(command):
             ("generic_nina_call", "nina_result = send_message_" + "to_nina(", "web_app.py"),
             ("research_router", "intent = build_search_" + "plan(clean", "nina_message_service.py"),
         )
+    if intents & {"repository_analysis", "architecture_analysis", "risk_analysis", "diff_request"}:
+        resolution, target_plan = target_evidence_plan(command)
+        if resolution["status"] == "resolved" and target_plan:
+            return "target_architecture_analysis", target_plan
     return "", ()
