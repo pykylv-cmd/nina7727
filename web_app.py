@@ -7196,6 +7196,7 @@ def _admin_developer_jobs_html():
 
 def _admin_developer_body(notice=""):
     connection = developer_connection_status()
+    developer_ready = connection["agent"] == "connected" and connection["repository"] == "connected"
     statuses = (
         ("Developer Console", "Online"),
         ("Local Developer Agent", "Connected" if connection["agent"] == "connected" else "Not connected"),
@@ -7223,14 +7224,23 @@ def _admin_developer_body(notice=""):
         "<div id='developer-results' class='list developer-results' aria-live='polite'>" +
         job_rows + "</div></section><br>"
     )
+    message_input = (
+        "<textarea id='developer-message' name='message' maxlength='2000' placeholder=''></textarea>"
+        if developer_ready else
+        "<textarea id='developer-message' name='message' maxlength='2000' "
+        "placeholder='Developer Agent is not connected' disabled></textarea>"
+    )
+    send_button = (
+        "<button class='btn primary' type='submit'>Send</button>"
+        if developer_ready else
+        "<button class='btn primary' type='submit' disabled>Send</button>"
+    )
     console_html = (
         "<section class='card card-pad developer-console'><h2>Developer Console</h2>"
         "<form id='developer-form' method='post' action='/admin/developer' class='channel-form'>"
         f"<input type='hidden' name='csrf_token' value='{_channel_csrf('developer:send')}'>"
         "<label for='developer-message'>Message</label>"
-        "<textarea id='developer-message' name='message' maxlength='2000' "
-        "placeholder='Developer Agent is not connected'></textarea>"
-        "<button class='btn primary' type='submit'>Send</button></form>"
+        + message_input + send_button + "</form>"
         "<div id='developer-notice' aria-live='polite'></div>"
         "<p class='safe-note'>No filesystem, shell, Git, AI provider, write or deploy access is enabled.</p></section><br>"
     )

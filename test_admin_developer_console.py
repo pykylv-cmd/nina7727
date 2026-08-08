@@ -36,13 +36,26 @@ class AdminDeveloperConsoleTests(unittest.TestCase):
         self.assertNotIn("/admin/developer", client_page)
 
     def test_developer_statuses_are_fail_closed(self):
-        page = self.admin_client().get("/admin/developer?lang=en").get_data(as_text=True)
+        with patch.object(web_app, "developer_connection_status",
+                          return_value={"agent": "not_connected", "repository": "not_connected"}):
+            page = self.admin_client().get("/admin/developer?lang=en").get_data(as_text=True)
         for expected in (
             "Developer Console", "Online", "Local Developer Agent", "Not connected",
             "Repository", "AI Coding Model", "Not configured", "Write Access",
             "Deploy Access", "Disabled",
         ):
             self.assertIn(expected, page)
+        self.assertIn("placeholder='Developer Agent is not connected' disabled", page)
+
+    def test_connected_status_and_message_input_use_same_backend_state(self):
+        with patch.object(web_app, "developer_connection_status",
+                          return_value={"agent": "connected", "repository": "connected"}):
+            page = self.admin_client().get("/admin/developer?lang=en").get_data(as_text=True)
+        self.assertIn("Local Developer Agent</small><b>Connected", page)
+        self.assertIn("Repository</small><b>Connected", page)
+        self.assertIn("id='developer-message' name='message' maxlength='2000' placeholder=''></textarea>", page)
+        self.assertNotIn("Developer Agent is not connected", page)
+        self.assertNotIn("type='submit' disabled", page)
 
     def test_send_only_renders_setup_notice_without_external_action(self):
         client = self.admin_client()
