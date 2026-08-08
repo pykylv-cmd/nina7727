@@ -7335,9 +7335,13 @@ def _admin_developer_jobs_html():
     return ("".join(rows) if rows else "<p>No developer jobs yet.</p>", latest_status)
 
 
+def _developer_connection_ready(connection):
+    return (connection["agent"] == "connected"
+            and connection["repository"] == "connected")
+
 def _admin_developer_body(notice=""):
     connection = developer_connection_status()
-    developer_ready = connection["agent"] == "connected" and connection["repository"] == "connected"
+    developer_ready = _developer_connection_ready(connection)
     statuses = (
         ("Developer Console", "Online"),
         ("Local Developer Agent", "Connected" if connection["agent"] == "connected" else "Not connected"),
@@ -7452,7 +7456,7 @@ def admin_developer():
         command = (request.form.get("message") or "").strip()
         investigation_kind, investigation_steps = _developer_investigation_plan(command)
         operation, arguments = _developer_command(command)
-        if status["agent"] != "connected":
+        if not _developer_connection_ready(status):
             notice = "agent_not_connected"
         elif investigation_steps:
             investigation_id = "devinvest_" + secrets.token_hex(12)
