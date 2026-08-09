@@ -1,7 +1,9 @@
 import os
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from test_runtime_support import bind_sqlite_database, install_test_environment
 
@@ -99,6 +101,94 @@ class OneNinaNaturalUnderstandingTests(unittest.TestCase):
         self.assertEqual(result["understanding"]["domain"], "reminders")
         self.assertEqual(result["understanding"]["operation"], "LIST")
         self.assertIn("needs_clarification", result["understanding"])
+
+    def test_explicit_day_with_bare_hour_creates_clean_reminder(self):
+        before = datetime.now(ZoneInfo("Europe/Riga"))
+        result = self.send("Atgādini man rīt 11 piezvanīt Jānim")
+        reminders = self.active_reminders()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["understanding"]["operation"], "CREATE")
+        self.assertFalse(result["understanding"]["needs_clarification"])
+        self.assertEqual(len(reminders), 1)
+        self.assertEqual(reminders[0].title, "piezvanīt Jānim")
+        scheduled = datetime.fromisoformat(reminders[0].metadata["reminder_at"])
+        self.assertEqual(scheduled.astimezone(ZoneInfo("Europe/Riga")).date(), (before + timedelta(days=1)).date())
+        self.assertEqual((scheduled.hour, scheduled.minute), (11, 0))
+
+    def test_explicit_day_without_hour_still_requires_clarification(self):
+        result = self.send("Atgādini man rīt piezvanīt Jānim")
+
+        self.assertTrue(result["decision"]["needs_clarification"])
+        self.assertEqual(result["source"], "brain_clarification")
+        self.assertEqual(self.active_reminders(), [])
+
+    def test_parit_and_weekday_bare_hours_are_valid(self):
+        before = datetime.now(ZoneInfo("Europe/Riga"))
+        parit = self.send("Atgādini man parīt 9 piezvanīt klientam")
+        parit_object = self.work.get_work_object(parit["object_ids"][0])
+        parit_at = datetime.fromisoformat(parit_object.metadata["reminder_at"])
+        self.assertEqual(parit_at.date(), (before + timedelta(days=2)).date())
+        self.assertEqual((parit_at.hour, parit_at.minute), (9, 0))
+        self.assertEqual(parit_object.title, "piezvanīt klientam")
+
+        friday = self.send("Atgādini piektdien 7 aizvest dokumentus", contact="person-b")
+        friday_object = self.work.get_work_object(friday["object_ids"][0])
+        friday_at = datetime.fromisoformat(friday_object.metadata["reminder_at"])
+        self.assertEqual(friday_at.weekday(), 4)
+        self.assertEqual((friday_at.hour, friday_at.minute), (7, 0))
+        self.assertEqual(friday_object.title, "aizvest dokumentus")
+
+    def test_hourly_next_occurrence_followups_are_read_only(self):
+        created = self.send(
+            "Atgādini man ik pēc apaļas stundas — man ļoti patīk kad es esmu miljardieris"
+        )
+        object_id = created["object_ids"][0]
+        before = self.work.get_work_object(object_id)
+        before_count = len(self.work.list_work_objects(workspace_id="tenant-a", limit=100))
+
+        first = self.send("Pēc 19.00 nākamais kad?")
+        second = self.send("Un pēc tam?")
+        midnight = self.send("Pēc 23.00?")
+
+        self.assertEqual(first["understanding"]["operation"], "GET_NEXT_OCCURRENCE")
+        self.assertEqual(first["text"], "20:00.")
+        self.assertEqual(second["text"], "21:00.")
+        self.assertEqual(midnight["text"], "00:00.")
+        self.assertEqual(first["reminder_object_id"], object_id)
+        self.assertEqual(second["reminder_object_id"], object_id)
+        self.assertEqual(midnight["reminder_object_id"], object_id)
+        after = self.work.get_work_object(object_id)
+        self.assertEqual(after.metadata, before.metadata)
+        self.assertEqual(len(self.work.list_work_objects(workspace_id="tenant-a", limit=100)), before_count)
+        self.assertEqual(first["source"], "shared_work")
+
+    def test_all_next_occurrence_phrasings_keep_the_canonical_reference(self):
+        created = self.send(
+            "Atgādini man ik pēc apaļas stundas — pārbaudīt Ninu"
+        )
+        object_id = created["object_ids"][0]
+        before = self.work.get_work_object(object_id)
+        before_count = len(self.work.list_work_objects(workspace_id="tenant-a", limit=100))
+
+        explicit = self.send("Pēc 19.00 nākamais kad?")
+        next_time = self.send("Kad nākamreiz?")
+        next_clock = self.send("Nākamais cikos?")
+        after_this = self.send("Pēc šī kad?")
+        reminder_wording = self.send("Kad tev man nākamreiz jāatgādina?")
+
+        self.assertEqual(
+            [explicit["text"], next_time["text"], next_clock["text"],
+             after_this["text"], reminder_wording["text"]],
+            ["20:00.", "21:00.", "22:00.", "23:00.", "00:00."],
+        )
+        for result in (explicit, next_time, next_clock, after_this, reminder_wording):
+            self.assertEqual(result["understanding"]["operation"], "GET_NEXT_OCCURRENCE")
+            self.assertEqual(result["reminder_object_id"], object_id)
+            self.assertEqual(result["source"], "shared_work")
+        after = self.work.get_work_object(object_id)
+        self.assertEqual(after.metadata, before.metadata)
+        self.assertEqual(len(self.work.list_work_objects(workspace_id="tenant-a", limit=100)), before_count)
 
 
 if __name__ == "__main__":

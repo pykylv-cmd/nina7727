@@ -311,7 +311,7 @@ def _save_action_context(conversation_id: str, payload: Dict[str, Any]) -> None:
     safe = {
         key: payload.get(key) for key in (
             "domain", "operation", "target_type", "target_reference",
-            "object_id", "object_ids", "research_session_id",
+            "object_id", "object_ids", "research_session_id", "occurrence_at",
         ) if payload.get(key)
     }
     _ensure_conversation_store()
@@ -360,6 +360,22 @@ def _understand_natural_action(clean: str, decision, action_context: Dict[str, A
         )
     referenced_reminder = action_context.get("domain") == "reminders" and action_context.get("object_id")
     time_match = re.search(r"\b(?:[01]?\d|2[0-3])(?:[:.]\d{2})?\b", clean)
+    next_occurrence_query = bool(
+        re.search(r"\b(?:nākam(?:ais|reiz)|nakam(?:ais|reiz))\b", folded)
+        or re.search(
+            r"\bp(?:ē|e)c\s+(?:(?:šī|si|tam)\b|(?:[01]?\d|2[0-3])[:.]\d{2}\b)",
+            folded,
+        )
+        or re.search(r"\bun\s+p(?:ē|e)c\s+tam\b", folded)
+    )
+    if referenced_reminder and next_occurrence_query:
+        return NaturalUnderstanding(
+            intent="reminder_next_occurrence", domain="reminders",
+            operation="GET_NEXT_OCCURRENCE", target_type="reminder",
+            target_reference=str(action_context["object_id"]),
+            time_reference=time_match.group(0) if time_match else str(action_context.get("occurrence_at") or ""),
+            conversation_reference="previous_action", confidence=0.99,
+        )
     if referenced_reminder and re.search(r"\b(?:pārcel|parcelt|pārliec|parliec|maini|nē|ne)\b", folded) and time_match:
         return NaturalUnderstanding(
             intent="reminder_update", domain="reminders", operation="UPDATE",
@@ -426,6 +442,35 @@ def _cancel_referenced_reminder(workspace_id: str, owner_id: str, object_id: str
     metadata = dict(target.metadata or {})
     metadata["reminder_state"] = "cancelled"
     return update_work_object(target.object_id, status="cancelled", metadata=metadata)
+
+
+def _next_reminder_occurrence(workspace_id: str, owner_id: str, object_id: str,
+                              text: str, action_context: Dict[str, Any]):
+    """Resolve the next hourly occurrence without mutating canonical reminder state."""
+    target = get_work_object(object_id)
+    active_ids = {obj.object_id for obj in _active_reminder_sources(workspace_id, owner_id)}
+    if target is None or target.object_id not in active_ids:
+        return None
+    metadata = dict(target.metadata or {})
+    if str(metadata.get("recurrence") or "").strip().lower() != "hourly":
+        return None
+    zone = ZoneInfo(str(metadata.get("timezone") or "Europe/Riga"))
+    raw_anchor = str(action_context.get("occurrence_at") or metadata.get("reminder_at") or "").strip()
+    try:
+        anchor = datetime.fromisoformat(raw_anchor.replace("Z", "+00:00"))
+        if anchor.tzinfo is None:
+            anchor = anchor.replace(tzinfo=zone)
+        anchor = anchor.astimezone(zone)
+    except (TypeError, ValueError):
+        return None
+    explicit_clock = re.search(r"\b([01]?\d|2[0-3])[:.]([0-5]\d)\b", text)
+    if explicit_clock:
+        anchor = anchor.replace(
+            hour=int(explicit_clock.group(1)), minute=int(explicit_clock.group(2)),
+            second=0, microsecond=0,
+        )
+    next_occurrence = anchor + timedelta(hours=1)
+    return target, next_occurrence
 
 
 def save_channel_turn(workspace_id: str, user_text: str, nina_text: str,
@@ -1142,6 +1187,32 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
     action_context = _action_context(semantic_context_id)
     understanding = _understand_natural_action(clean, decision, action_context)
     decision_payload = decision.to_dict()
+    if understanding.domain == "reminders" and understanding.operation == "GET_NEXT_OCCURRENCE":
+        resolved = _next_reminder_occurrence(
+            target_workspace, reminder_owner, understanding.target_reference,
+            clean, action_context,
+        )
+        if resolved is None:
+            answer = "Kuru atkārtoto atgādinājumu tu domā?"
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {
+                "ok": False, "error": "reminder_next_occurrence_ambiguous",
+                "text": answer, "source": "shared_work", "channel": channel,
+                "decision": decision_payload, "understanding": understanding.to_dict(),
+            }
+        target, occurrence = resolved
+        _save_action_context(semantic_context_id, {
+            "domain": "reminders", "operation": "GET_NEXT_OCCURRENCE",
+            "object_id": target.object_id, "occurrence_at": occurrence.isoformat(),
+        })
+        answer = occurrence.strftime("%H:%M.")
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+        return {
+            "ok": True, "text": answer, "source": "shared_work", "channel": channel,
+            "decision": decision_payload, "understanding": understanding.to_dict(),
+            "reminder_object_id": target.object_id,
+            "next_occurrence": occurrence.isoformat(),
+        }
     if pending_reminder and decision.reason == "general_reply":
         answer = "Precizē atgādinājuma laiku vai atkārtošanās grafiku."
         _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)

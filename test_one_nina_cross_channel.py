@@ -239,6 +239,28 @@ class OneNinaCrossChannelTests(unittest.TestCase):
                 self.assertEqual(confirmed["remaining_reminders"], 0)
                 self.assertEqual(self.reminders(), [])
 
+    def test_hourly_next_occurrence_uses_same_reference_across_channels(self):
+        created = self.send(
+            "web",
+            "Atgādini man ik pēc apaļas stundas — man ļoti patīk kad es esmu miljardieris",
+        )
+        object_id = created["object_ids"][0]
+        before_count = len(self.reminders())
+
+        no_generic = lambda _: self.fail("NEXT_OCCURRENCE reached generic generation")
+        telegram = self.send("telegram", "Pēc 19.00 nākamais kad?", generator=no_generic)
+        whatsapp = self.send("whatsapp_company", "Un pēc tam?", generator=no_generic)
+        web = self.send("web", "Pēc 23.00?", generator=no_generic)
+
+        self.assertEqual(telegram["text"], "20:00.")
+        self.assertEqual(whatsapp["text"], "21:00.")
+        self.assertEqual(web["text"], "00:00.")
+        self.assertEqual(telegram["reminder_object_id"], object_id)
+        self.assertEqual(whatsapp["reminder_object_id"], object_id)
+        self.assertEqual(web["reminder_object_id"], object_id)
+        self.assertEqual(len(self.reminders()), before_count)
+        self.assertEqual(self.reminders()[0].object_id, object_id)
+
     def test_telegram_reply_routes_ordinary_messages_before_legacy_branches(self):
         with open("app.py", encoding="utf-8") as handle:
             source = handle.read()

@@ -90,6 +90,14 @@ def _has_reminder_time(value: str) -> bool:
     """A day alone is not a delivery time; relative durations are complete."""
     return bool(
         re.search(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", value)
+        or re.search(
+            r"\b(?:\u0161odien|sodien|r\u012bt|rit|par\u012bt|parit|"
+            r"pirmdien|otrdien|tre\u0161dien|tresdien|ceturtdien|piektdien|"
+            r"sestdien|sv\u0113tdien|svetdien|vakar\u0101|vakara|"
+            r"no\s+r\u012bta|no\s+rita)\s+(?:pulksten\s*)?"
+            r"(?:[01]?\d|2[0-3])\b(?![:.]\d)",
+            value,
+        )
         or re.search(r"\b\d{4}-\d{2}-\d{2}[ t](?:[01]?\d|2[0-3])[:.]\d{2}\b", value)
         or re.search(r"\bp(?:ē|e)c\s+(?:(?:\d+|vienas?|div(?:ā|a)m?|tr(?:ī|i)m?)\s+)?(?:stund|min)", value)
         or _HOURLY_REMINDER_RE.search(value)

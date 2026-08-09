@@ -21,6 +21,15 @@ _HOURLY_RECURRENCE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_EXPLICIT_DAY_BARE_HOUR_RE = re.compile(
+    r"\b(?:\u0161odien|sodien|r\u012bt|rit|par\u012bt|parit|"
+    r"pirmdien|otrdien|tre\u0161dien|tresdien|ceturtdien|piektdien|"
+    r"sestdien|sv\u0113tdien|svetdien|vakar\u0101|vakara|"
+    r"no\s+r\u012bta|no\s+rita)\s+(?:pulksten\s*)?"
+    r"([01]?\d|2[0-3])\b(?![:.]\d)",
+    re.IGNORECASE,
+)
+
 
 def create_canonical_task(tenant_id, title, **values):
     """Task Engine adapter: persist only in Universal Work Objects."""
@@ -203,10 +212,10 @@ def _detect_single_reminder_schedule(
                 int(absolute.group(1)), int(absolute.group(2)),
                 int(absolute.group(3)), tzinfo=tz,
             ).date()
-        elif "rīt" in lower or re.search(r"\brit\b", lower):
-            day += timedelta(days=1)
         elif "parīt" in lower or "parit" in lower:
             day += timedelta(days=2)
+        elif "rīt" in lower or re.search(r"\brit\b", lower):
+            day += timedelta(days=1)
         elif not ("šodien" in lower or "sodien" in lower):
             weekdays = {
                 "pirmdien": 0, "otrdien": 1, "trešdien": 2, "tresdien": 2,
@@ -222,7 +231,10 @@ def _detect_single_reminder_schedule(
                     target_weekday = weekday
                     break
         time_match = re.search(r"\b(?:pulksten\s*)?([01]?\d|2[0-3])[:.]([0-5]\d)\b", lower)
-        hour = int(time_match.group(1)) if time_match else 9
+        bare_hour_match = _EXPLICIT_DAY_BARE_HOUR_RE.search(lower)
+        hour = int(time_match.group(1)) if time_match else (
+            int(bare_hour_match.group(1)) if bare_hour_match else 9
+        )
         minute = int(time_match.group(2)) if time_match else 0
         target = datetime(day.year, day.month, day.day, hour, minute, tzinfo=tz)
         if target_weekday is not None and not explicit_next_week and target <= current:
@@ -348,6 +360,10 @@ def _reminder_task_title(text):
         r"ceturtdien|piektdien|sestdien|svētdien|svetdien)\b", "", value, flags=re.IGNORECASE,
     )
     value = re.sub(r"\b(?:pulksten\s*)?\d{1,2}[:.]\d{2}\b", "", value, flags=re.IGNORECASE)
+    value = re.sub(
+        r"^\s*(?:pulksten\s*)?(?:[01]?\d|2[0-3])\b\s*",
+        "", value, flags=re.IGNORECASE,
+    )
     value = re.sub(
         r"\b(?:katru\s+dienu|ik\s+dienu|every\s+day|daily)\b",
         "", value, flags=re.IGNORECASE,
