@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {companyRestorationDiagnostics,companySessions,createCompanyAuthState,createCompanyQr,persistCompanyConnected,processCompanyMessageUpsert,publicCompanyDiagnostics,publicCompanyStatus,reconnectDelay,restoreCompanySessions,restoredQrIsInvalid,stopCompanySession} from '../src/company_session_manager.js'
 import {DisconnectReason} from '@whiskeysockets/baileys'
 import {publicStatus,sessions,stopSession} from '../src/session_manager.js'
+import {clearCompanyAuthRecords} from '../src/nina_api.js'
 
 const quiet={info(){},warn(){}}
 const state=()=>({workspaceId:'ninaos_company',status:'connected',sent:new Set()})
@@ -129,6 +130,21 @@ test('intentional manual pairing generates a QR while empty-auth restoration sti
   await assert.rejects(createCompanyAuthState('company',async()=>{throw missing},async()=>{}),/nina_internal_404/)
   const restorationQr=await createCompanyQr(true,'provider-qr',async()=>{throw new Error('must not render')})
   assert.deepEqual(restorationQr,{accepted:false,qr_svg:''})
+})
+test('invalid Company auth is cleared in bounded batches before fresh pairing QR',async()=>{
+  const records=Object.fromEntries(Array.from({length:1606},(_,index)=>[`key:session:${index}`,{value:index}]))
+  const batches=[]
+  const removed=await clearCompanyAuthRecords('ninaos_company',records,async(workspaceId,removals)=>{
+    assert.equal(workspaceId,'ninaos_company')
+    assert.ok(Object.keys(removals).length<=100)
+    assert.equal(Object.values(removals).every(value=>value===null),true)
+    batches.push(removals)
+  })
+  assert.equal(removed,1606)
+  assert.equal(batches.length,17)
+  assert.equal(new Set(batches.flatMap(batch=>Object.keys(batch))).size,1606)
+  const freshQr=await createCompanyQr(false,'fresh-provider-qr',async()=>'<svg></svg>')
+  assert.deepEqual(freshQr,{accepted:true,qr_svg:'<svg></svg>'})
 })
 test('ordinary restart never creates a pairing QR while invalid credentials require pairing',()=>{
   assert.equal(restoredQrIsInvalid(true,'provider-qr'),true)

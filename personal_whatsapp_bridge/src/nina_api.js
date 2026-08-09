@@ -74,13 +74,20 @@ export async function loadCompanyAuth(workspaceId) {
 export async function storeCompanyAuth(workspaceId, records) {
   return ninaRequest('/internal/company-whatsapp/auth/store', {workspace_id:workspaceId, records})
 }
+export async function clearCompanyAuthRecords(workspaceId, records, store=storeCompanyAuth, batchSize=100) {
+  const keys=Object.keys(records || {})
+  const size=Math.max(1,Math.min(Number(batchSize)||100,100))
+  for(let offset=0;offset<keys.length;offset+=size){
+    const removals=Object.fromEntries(keys.slice(offset,offset+size).map(key=>[key,null]))
+    await store(workspaceId,removals)
+  }
+  return keys.length
+}
 export async function clearCompanyAuth(workspaceId) {
   let records
   try{records=await loadCompanyAuth(workspaceId)}
   catch(error){if(Number(error?.status)===404)return 0;throw error}
-  const removals = Object.fromEntries(Object.keys(records).map(key => [key, null]))
-  if (Object.keys(removals).length) await storeCompanyAuth(workspaceId, removals)
-  return Object.keys(removals).length
+  return clearCompanyAuthRecords(workspaceId,records)
 }
 export async function companyLinked(workspaceId, sessionToken, identity) {
   return ninaRequest('/internal/company-whatsapp/linked', {workspace_id:workspaceId, session_token:sessionToken, identity})
