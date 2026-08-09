@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from brain import Brain, BrainContext
+from brain import Brain, BrainContext, Decision
 from nina_identity import NINA_PROMPT
 import persistence_backend
 DATABASE_URL, DB_FILE, USE_POSTGRES = persistence_backend.module_settings()
@@ -338,12 +338,16 @@ def _reminder_continuation_text(clean: str, conversation_id: str, decision) -> s
     """Combine a time-only answer with the pending action, excluding answer prose."""
     if not decision.create_reminder or decision.needs_clarification:
         return clean
-    if not re.search(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", clean.casefold()):
+    clock_answer = re.search(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", clean.casefold())
+    hourly_answer = _hourly_recurrence_requested(clean)
+    if not clock_answer and not hourly_answer:
         return clean
     pending = _pending_reminder_context(conversation_id)
     if not pending:
         return clean
     action = str(pending.get("action_text") or "").strip()
+    if hourly_answer:
+        return f"Atgādini man {clean}: {action}" if action else clean
     weekday = re.search(
         r"\b(?:pirmdien|otrdien|trešdien|tresdien|ceturtdien|piektdien|sestdien|svētdien|svetdien)\b",
         clean, re.IGNORECASE,
@@ -351,6 +355,14 @@ def _reminder_continuation_text(clean: str, conversation_id: str, decision) -> s
     clock = re.search(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", clean)
     timing = " ".join(part.group(0) for part in (weekday, clock) if part)
     return f"Atgādini {timing} {action}" if action and timing else clean
+
+
+def _hourly_recurrence_requested(text: str) -> bool:
+    return bool(re.search(
+        r"\b(?:ik\s+p(?:ē|e)c\s+(?:apaļ(?:ai|as)\s+)?stundas|"
+        r"ik\s+pa\s+apaļai\s+stundai|katru\s+apaļu\s+stundu|every\s+hour|hourly)\b",
+        str(text or ""), re.IGNORECASE,
+    ))
 
 
 def generate_with_nina(prompt: str) -> str:
@@ -481,7 +493,7 @@ def materialize_due_reminders(workspace_id: str, now=None, owner_id: str = ""):
             origin_user_id=obj.origin_user_id,
             source_key=(
                 f"daily-reminder:{obj.object_id}:{metadata.get('reminder_at')}"
-                if metadata.get("recurrence") == "daily"
+                if metadata.get("recurrence") in {"daily", "hourly"}
                 else f"daily-reminder:{obj.object_id}"
             ),
         )
@@ -580,15 +592,23 @@ def _customer_safe_text(value: str) -> str:
     return re.sub(r"[ \t]+\n", "\n", re.sub(r" {2,}", " ", text)).strip()
 
 
-def _cancel_all_reminders(workspace_id: str, owner_id: str = "") -> int:
-    """Cancel active reminder truth in the existing Work Object store."""
-    cancelled = 0
+def _reminder_object_owner(obj) -> str:
+    metadata = dict(getattr(obj, "metadata", {}) or {})
+    return str(metadata.get("contact_id") or getattr(obj, "origin_user_id", "") or "").strip()
+
+
+def _cancellable_reminders(workspace_id: str, owner_id: str) -> List[Any]:
+    owner_id = str(owner_id or "").strip()
+    result = []
     for obj in list_work_objects(workspace_id=workspace_id, limit=500):
         metadata = dict(getattr(obj, "metadata", {}) or {})
-        object_owner = str(getattr(obj, "origin_user_id", "") or "").strip()
-        if owner_id and object_owner and object_owner != owner_id:
+        if owner_id and _reminder_object_owner(obj) != owner_id:
             continue
-        is_reminder = getattr(obj, "object_type", "") == "reminder"
+        is_reminder = (
+            getattr(obj, "object_type", "") == "reminder"
+            and str(metadata.get("delivery_status") or "scheduled")
+            not in {"delivered", "cancelled"}
+        )
         is_source = metadata.get("reminder_state") == "scheduled"
         if not (is_reminder or is_source):
             continue
@@ -596,14 +616,42 @@ def _cancel_all_reminders(workspace_id: str, owner_id: str = "") -> int:
             "completed", "done", "archived", "cancelled", "rejected",
         }:
             continue
-        if is_reminder:
-            metadata["delivery_status"] = "cancelled"
-            metadata["unread"] = False
-        if is_source:
-            metadata["reminder_state"] = "cancelled"
-        update_work_object(obj.object_id, status="cancelled", metadata=metadata)
-        cancelled += 1
-    return cancelled
+        result.append(obj)
+    return result
+
+
+def _cancel_all_reminders(workspace_id: str, owner_id: str = "") -> Dict[str, Any]:
+    """Cancel owner-scoped reminder truth and prove the persisted result."""
+    before = _cancellable_reminders(workspace_id, owner_id)
+    if not before:
+        return {"ok": True, "cancelled": 0, "remaining": 0, "object_ids": []}
+    updated_ids = []
+    try:
+        for obj in before:
+            metadata = dict(getattr(obj, "metadata", {}) or {})
+            is_reminder = getattr(obj, "object_type", "") == "reminder"
+            is_source = metadata.get("reminder_state") == "scheduled"
+            if is_reminder:
+                metadata["delivery_status"] = "cancelled"
+                metadata["unread"] = False
+            if is_source:
+                metadata["reminder_state"] = "cancelled"
+            persisted = update_work_object(obj.object_id, status="cancelled", metadata=metadata)
+            if persisted is None:
+                raise RuntimeError("reminder_cancel_not_persisted")
+            updated_ids.append(obj.object_id)
+    except Exception as exc:
+        logger.error("Reminder cancel-all persistence failed: exception=%s", type(exc).__name__)
+        remaining = _cancellable_reminders(workspace_id, owner_id)
+        return {
+            "ok": False, "cancelled": len(before) - len(remaining),
+            "remaining": len(remaining), "object_ids": updated_ids,
+        }
+    remaining = _cancellable_reminders(workspace_id, owner_id)
+    return {
+        "ok": not remaining, "cancelled": len(before) - len(remaining),
+        "remaining": len(remaining), "object_ids": updated_ids,
+    }
 
 
 def _active_reminder_sources(workspace_id: str, owner_id: str) -> List[Any]:
@@ -612,7 +660,7 @@ def _active_reminder_sources(workspace_id: str, owner_id: str) -> List[Any]:
     result = []
     for obj in list_work_objects(workspace_id=workspace_id, limit=500):
         metadata = dict(getattr(obj, "metadata", {}) or {})
-        object_owner = str(getattr(obj, "origin_user_id", "") or "").strip()
+        object_owner = _reminder_object_owner(obj)
         if owner_id and object_owner != owner_id:
             continue
         if str(getattr(obj, "status", "") or "").lower() in {
@@ -655,7 +703,11 @@ def _list_reminder_answer(reminders: List[Any]) -> str:
     for obj in reminders:
         metadata = dict(getattr(obj, "metadata", {}) or {})
         title = str(metadata.get("reminder_text") or getattr(obj, "title", "") or "").strip()
-        recurrence = " katru dienu" if metadata.get("recurrence") == "daily" else ""
+        recurrence = (
+            " katru dienu" if metadata.get("recurrence") == "daily"
+            else " katru apaļu stundu" if metadata.get("recurrence") == "hourly"
+            else ""
+        )
         lines.append(f"- {_reminder_local_clock(obj) or 'laiks nav norādīts'}{recurrence}: {title}")
     return "\n".join(lines)
 
@@ -778,12 +830,26 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         return {"ok": False, "error": "message_too_long", "text": ""}
 
     semantic_context_id = str(semantic_conversation_id or conversation_id or "").strip()
+    pending_reminder = _pending_reminder_context(semantic_context_id)
     decision = precomputed_decision or Brain.decide(clean, BrainContext(
         workspace_id=canonical_work_workspace_id or workspace_id,
         channel=channel,
         conversation_id=semantic_context_id,
     ))
+    if pending_reminder and _hourly_recurrence_requested(clean):
+        decision = Decision(
+            reply_required=True, remember=True, create_work_object=True,
+            create_reminder=True, confidence=1.0,
+            reason="scheduled_reminder_continuation", reminder_operation="CREATE",
+        )
     decision_payload = decision.to_dict()
+    if pending_reminder and decision.reason == "general_reply":
+        answer = "Precizē atgādinājuma laiku vai atkārtošanās grafiku."
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+        return {
+            "ok": False, "error": "reminder_schedule_still_pending", "text": answer,
+            "source": "shared_work", "channel": channel, "decision": decision_payload,
+        }
     # ONE NINA routes explicit public research after the shared Brain decision.
     # The capability is deterministic and never treats page content as instructions.
     try:
@@ -901,16 +967,25 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             "decision": decision_payload,
         }
     if decision.reason == "cancel_all_reminders":
-        cancelled = _cancel_all_reminders(target_workspace, str(contact_id or "").strip())
+        outcome = _cancel_all_reminders(target_workspace, reminder_owner)
+        if not outcome["ok"]:
+            answer = "Atgādinājumus neizdevās atcelt. Aktīvais saraksts nav mainīts pilnībā."
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {
+                "ok": False, "error": "reminder_cancel_failed", "text": answer,
+                "source": "shared_work", "channel": channel,
+                "decision": decision_payload, "remaining_reminders": outcome["remaining"],
+            }
         answer = (
-            f"Atcēlu aktīvos atgādinājumus: {cancelled}."
-            if cancelled else "Aktīvu atgādinājumu nebija."
+            f"Atcēlu aktīvos atgādinājumus: {outcome['cancelled']}."
+            if outcome["cancelled"] else "Aktīvu atgādinājumu nebija."
         )
         _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
         return {
             "ok": True, "text": answer, "source": "shared_work",
             "channel": channel, "decision": decision_payload,
-            "cancelled_reminders": cancelled,
+            "cancelled_reminders": outcome["cancelled"],
+            "remaining_reminders": outcome["remaining"],
         }
     if decision.no_action:
         _save_turn(workspace_id, clean, "", conversation_id=conversation_id, channel=channel)

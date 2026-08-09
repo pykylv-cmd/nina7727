@@ -261,6 +261,101 @@ class ReminderConversationTests(unittest.TestCase):
             due + timedelta(minutes=2),
         )
 
+    def test_exact_hourly_create_list_delete_conversation_uses_persisted_truth(self):
+        first = self.send("Atgādini man: es esmu laimīgs dzīvot miljardiera dzīvi")
+        self.assertEqual(first["source"], "brain_clarification")
+        self.assertEqual(first["text"], "Kad tieši man tev to atgādināt?")
+
+        created = self.send("Ik pa apaļai stundai")
+        self.assertTrue(created["ok"])
+        self.assertEqual(created["decision"]["reminder_operation"], "CREATE")
+        sources = self.sources()
+        self.assertEqual(len(sources), 1)
+        source = sources[0]
+        self.assertEqual(source.title, "es esmu laimīgs dzīvot miljardiera dzīvi")
+        self.assertEqual(source.metadata["reminder_text"], source.title)
+        self.assertEqual(source.metadata["recurrence"], "hourly")
+        scheduled = datetime.fromisoformat(source.metadata["reminder_at"])
+        self.assertEqual(scheduled.minute, 0)
+
+        listed = self.send("Kādi man ir atgādinājumi?")
+        self.assertEqual(listed["decision"]["reminder_operation"], "LIST")
+        self.assertIn("katru apaļu stundu", listed["text"])
+        self.assertIn(source.title, listed["text"])
+
+        before_ids = {obj.object_id for obj in self.sources()}
+        deleted = self.send("Izdzēs visus")
+        self.assertTrue(deleted["ok"])
+        self.assertEqual(deleted["decision"]["reminder_operation"], "CANCEL")
+        self.assertEqual(deleted["remaining_reminders"], 0)
+        self.assertEqual(deleted["cancelled_reminders"], 1)
+        self.assertEqual(before_ids, {source.object_id})
+        self.assertEqual(self.sources(), [])
+
+        empty = self.send("Kādi man ir atgādinājumi?")
+        self.assertEqual(empty["text"], "Tev nav aktīvu atgādinājumu.")
+        repeated = self.send("Izdzēs visus")
+        self.assertTrue(repeated["ok"])
+        self.assertEqual(repeated["cancelled_reminders"], 0)
+
+    def test_all_supported_hourly_phrases_schedule_the_next_whole_hour(self):
+        from task_engine import detect_reminder_schedule
+        fixed = datetime(2026, 8, 9, 12, 34, tzinfo=timezone(timedelta(hours=3)))
+        for phrase in (
+            "ik pēc stundas", "ik pa apaļai stundai",
+            "ik pēc apaļas stundas", "katru apaļu stundu",
+        ):
+            with self.subTest(phrase=phrase):
+                parsed = detect_reminder_schedule(
+                    f"Atgādini man {phrase}: pārbaudīt Ninu",
+                    now=fixed, reminder_requested=True,
+                )
+                self.assertEqual(parsed["reminder_at"], "2026-08-09T13:00+03:00")
+
+    def test_delete_persistence_failure_never_claims_success(self):
+        self.send("Atgādini man rīt 11.00 saskaitīt naudu")
+        before_ids = {obj.object_id for obj in self.sources()}
+        with patch.object(self.messaging, "update_work_object", return_value=None):
+            result = self.send("atcel visus manus atgādinājumus")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "reminder_cancel_failed")
+        self.assertNotIn("atcēlu", result["text"].casefold())
+        self.assertNotIn("dzēsti", result["text"].casefold())
+        self.assertEqual({obj.object_id for obj in self.sources()}, before_ids)
+
+    def test_pending_reminder_context_cannot_fall_through_to_generic_chat(self):
+        self.send("Atgādini man: pārbaudīt Ninu")
+        result = self.send("kaut kā regulāri")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "reminder_schedule_still_pending")
+        self.assertIn("atgādinājuma", result["text"].casefold())
+        self.assertEqual(self.sources(), [])
+
+    def test_hourly_delivery_advances_to_next_whole_hour_once(self):
+        due = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
+        source = self.work.create_work_object(
+            object_type="task", title="Stundas apliecinājums",
+            workspace_id="tenant-a", origin_channel="whatsapp_company",
+            origin_user_id="contact-a", source_key="hourly-source:test",
+            metadata={
+                "reminder_state": "scheduled", "reminder_at": due.isoformat(timespec="minutes"),
+                "reminder_text": "Stundas apliecinājums", "recurrence": "hourly",
+                "timezone": "Europe/Riga", "contact_id": "contact-a",
+                "whatsapp_recipient_jid": "37120000000@s.whatsapp.net",
+            },
+        )
+        occurrences = self.messaging.materialize_due_reminders("tenant-a", now=due)
+        self.assertEqual(len(occurrences), 1)
+        claimed = self.delivery.claim_next(now=due + timedelta(minutes=1))
+        with patch("personal_whatsapp.bridge_request", return_value={"ok": True, "message_id": "wa-hourly-1"}):
+            delivered = asyncio.run(self.delivery.deliver_claimed(claimed, now=due + timedelta(minutes=1)))
+        self.assertEqual(delivered.metadata["delivery_status"], "delivered")
+        advanced = self.work.get_work_object(source.object_id)
+        next_at = datetime.fromisoformat(advanced.metadata["reminder_at"])
+        self.assertEqual(next_at.minute, 0)
+        self.assertGreater(next_at, due + timedelta(minutes=1))
+        self.assertIsNone(self.delivery.claim_next(now=due + timedelta(minutes=2)))
+
 
 if __name__ == "__main__":
     unittest.main()

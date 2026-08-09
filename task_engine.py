@@ -15,6 +15,12 @@ from zoneinfo import ZoneInfo
 
 TASK_ENGINE_VERSION = "Task Engine V1.2"
 
+_HOURLY_RECURRENCE_RE = re.compile(
+    r"\b(?:ik\s+p(?:ē|e)c\s+(?:apaļ(?:ai|as)\s+)?stundas|"
+    r"ik\s+pa\s+apaļai\s+stundai|katru\s+apaļu\s+stundu|every\s+hour|hourly)\b",
+    re.IGNORECASE,
+)
+
 
 def create_canonical_task(tenant_id, title, **values):
     """Task Engine adapter: persist only in Universal Work Objects."""
@@ -158,6 +164,7 @@ def _detect_single_reminder_schedule(
         or bool(re.search(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", lower))
         or "katru dienu" in lower or "ik dienu" in lower
         or "parīt" in lower or "parit" in lower
+        or bool(_HOURLY_RECURRENCE_RE.search(lower))
     )
     if not (has_action or reminder_requested) or not has_temporal:
         return {}
@@ -166,12 +173,15 @@ def _detect_single_reminder_schedule(
     current = now or datetime.now(tz)
     if current.tzinfo is None:
         current = current.replace(tzinfo=tz)
+    hourly = bool(_HOURLY_RECURRENCE_RE.search(lower))
     relative = re.search(
         r"\bp(?:ē|e)c\s+(?:(?:(\d+)|vienas?|div(?:ā|a)m?|tr(?:ī|i)m?)\s+)?"
         r"(stund(?:as?|u|ām?)|minūt(?:es?|ēm?)|minut(?:es?|em?)|min)\b",
         lower,
     )
-    if relative:
+    if hourly:
+        target = current.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    elif relative:
         word = relative.group(1) or relative.group(0)
         amount = int(relative.group(1)) if relative.group(1) else (
             2 if "div" in word else 3 if "tr" in word else 1
@@ -226,7 +236,7 @@ def detect_reminder_schedules(
     """Return every explicit reminder time without inventing additional times."""
     raw = _clean(text)
     clocks = list(re.finditer(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", raw))
-    recurrence = "daily" if re.search(
+    recurrence = "hourly" if _HOURLY_RECURRENCE_RE.search(raw) else "daily" if re.search(
         r"\b(?:katru\s+dienu|ik\s+dienu|every\s+day|daily)\b",
         raw, re.IGNORECASE,
     ) else ""
@@ -342,6 +352,7 @@ def _reminder_task_title(text):
         r"\b(?:katru\s+dienu|ik\s+dienu|every\s+day|daily)\b",
         "", value, flags=re.IGNORECASE,
     )
+    value = _HOURLY_RECURRENCE_RE.sub("", value)
     value = re.sub(r"\bno\s+rīta\b", "", value, flags=re.IGNORECASE)
     value = re.sub(r"^\s*ka\s+", "", value, flags=re.IGNORECASE)
     value = " ".join(value.strip(" :,.!?- ").split())

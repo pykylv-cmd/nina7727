@@ -43,6 +43,12 @@ _CANCEL_ALL_REMINDERS = (
     "cancel all reminders",
 )
 
+_HOURLY_REMINDER_RE = re.compile(
+    r"\b(?:ik\s+p(?:ē|e)c\s+(?:apaļ(?:ai|as)\s+)?stundas|"
+    r"ik\s+pa\s+apaļai\s+stundai|katru\s+apaļu\s+stundu|every\s+hour|hourly)\b",
+    re.IGNORECASE,
+)
+
 def _normalized(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "").strip()).casefold()
 
@@ -52,6 +58,18 @@ def _plain_acknowledgement(value: str) -> bool:
         re.sub(r"[^\wāčēģīķļņšūž]+", "", item, flags=re.UNICODE)
         for item in _ACKNOWLEDGEMENTS
     }
+
+
+def _cancel_all_reminder_operation(value: str) -> bool:
+    """Recognize explicit all-reminder cancellation, including contextual shorthand."""
+    cleaned = re.sub(r"[^\wāčēģīķļņšūž]+", " ", value, flags=re.UNICODE).strip()
+    if cleaned in _CANCEL_ALL_REMINDERS:
+        return True
+    return bool(re.fullmatch(
+        r"(?:izdzēs|izdzes|izdēs|izdes|novāc|novac|atcel)\s+visus"
+        r"(?:\s+(?:manus\s+)?(?:atgādinājumus|atgadinajumus|reminderus))?",
+        cleaned,
+    ))
 
 
 def _has_clock_or_date(value: str) -> bool:
@@ -74,6 +92,7 @@ def _has_reminder_time(value: str) -> bool:
         re.search(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", value)
         or re.search(r"\b\d{4}-\d{2}-\d{2}[ t](?:[01]?\d|2[0-3])[:.]\d{2}\b", value)
         or re.search(r"\bp(?:ē|e)c\s+(?:(?:\d+|vienas?|div(?:ā|a)m?|tr(?:ī|i)m?)\s+)?(?:stund|min)", value)
+        or _HOURLY_REMINDER_RE.search(value)
     )
 
 
@@ -131,7 +150,7 @@ def classify_message(message: str) -> Decision:
             confidence=0.99, reason="acknowledgement_no_action",
         )
 
-    if value in _CANCEL_ALL_REMINDERS:
+    if _cancel_all_reminder_operation(value):
         return Decision(
             reply_required=True, confidence=1.0,
             reason="cancel_all_reminders", reminder_operation="CANCEL",

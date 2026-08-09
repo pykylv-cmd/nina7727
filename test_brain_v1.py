@@ -75,6 +75,8 @@ class BrainDecisionTests(unittest.TestCase):
         for command in (
             "novāc visus atgādinājumus",
             "izdzēs visus reminderus",
+            "izdēs visus",
+            "atcel visus manus atgādinājumus",
             "cancel all reminders",
         ):
             with self.subTest(command=command):
@@ -82,6 +84,19 @@ class BrainDecisionTests(unittest.TestCase):
                     classify_message(command).reason,
                     "cancel_all_reminders",
                 )
+
+    def test_hourly_recurrence_is_a_complete_reminder_schedule(self):
+        for schedule in (
+            "ik pēc stundas", "ik pa apaļai stundai",
+            "ik pēc apaļas stundas", "katru apaļu stundu",
+        ):
+            with self.subTest(schedule=schedule):
+                decision = classify_message(
+                    f"Atgādini man {schedule}: es esmu laimīgs dzīvot miljardiera dzīvi"
+                )
+                self.assertEqual(decision.reminder_operation, "CREATE")
+                self.assertTrue(decision.create_reminder)
+                self.assertFalse(decision.needs_clarification)
 
     def test_reminder_list_and_question_are_not_create(self):
         listed = classify_message("Kādi man ir atgādinājumi?")

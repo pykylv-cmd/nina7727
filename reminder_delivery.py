@@ -140,18 +140,19 @@ def persist_web_delivery(reminder):
 
 
 def _advance_daily_source(delivered, now):
-    """Advance the existing canonical source after one delivered daily occurrence."""
+    """Advance the existing canonical source after one recurring occurrence."""
     if delivered is None:
         return delivered
     metadata = dict(delivered.metadata or {})
-    if metadata.get("recurrence") != "daily":
+    recurrence = str(metadata.get("recurrence") or "")
+    if recurrence not in {"daily", "hourly"}:
         return delivered
     source_id = str(metadata.get("source_work_object_id") or "").strip()
     source = get_work_object(source_id) if source_id else None
     if source is None:
         return delivered
     source_metadata = dict(source.metadata or {})
-    if source_metadata.get("recurrence") != "daily":
+    if source_metadata.get("recurrence") != recurrence:
         return delivered
     timezone_name = str(source_metadata.get("timezone") or "Europe/Riga")
     try:
@@ -166,9 +167,10 @@ def _advance_daily_source(delivered, now):
         current = current.astimezone(zone)
     except (TypeError, ValueError, KeyError):
         return delivered
-    next_at = planned + timedelta(days=1)
+    step = timedelta(hours=1) if recurrence == "hourly" else timedelta(days=1)
+    next_at = planned + step
     while next_at <= current:
-        next_at += timedelta(days=1)
+        next_at += step
     source_metadata["reminder_at"] = next_at.isoformat(timespec="minutes")
     source_metadata["reminder_state"] = "scheduled"
     update_work_object(source.object_id, metadata=source_metadata)

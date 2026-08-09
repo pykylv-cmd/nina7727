@@ -183,6 +183,28 @@ class OneNinaCrossChannelTests(unittest.TestCase):
         self.assertNotIn("izveid", result["text"].casefold())
         self.assertEqual(self.reminders(), [])
 
+    def test_hourly_clarification_and_cancel_all_share_one_cross_channel_truth(self):
+        first = self.send(
+            "web", "Atgādini man: es esmu laimīgs dzīvot miljardiera dzīvi",
+        )
+        self.assertEqual(first["source"], "brain_clarification")
+        created = self.send("telegram", "Ik pa apaļai stundai")
+        self.assertTrue(created["ok"])
+        self.assertEqual(len(self.reminders()), 1)
+        source_id = self.reminders()[0].object_id
+        listed = self.send("whatsapp_company", "Kādi man ir atgādinājumi?")
+        self.assertIn("katru apaļu stundu", listed["text"])
+        self.assertIn("es esmu laimīgs dzīvot miljardiera dzīvi", listed["text"])
+        self.assertEqual(self.reminders()[0].object_id, source_id)
+        deleted = self.send("whatsapp_company", "Izdzēs visus")
+        self.assertTrue(deleted["ok"])
+        self.assertEqual(deleted["remaining_reminders"], 0)
+        self.assertEqual(self.reminders(), [])
+
+        other = self.send("web", "Atgādini man rīt 11.00 svešs", contact_id="contact-other")
+        self.assertTrue(other["ok"])
+        self.assertEqual(len(self.reminders("contact-other")), 1)
+
     def test_telegram_reply_routes_ordinary_messages_before_legacy_branches(self):
         with open("app.py", encoding="utf-8") as handle:
             source = handle.read()
