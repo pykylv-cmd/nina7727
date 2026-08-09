@@ -16,7 +16,7 @@ from nina_identity import NINA_PROMPT
 import persistence_backend
 DATABASE_URL, DB_FILE, USE_POSTGRES = persistence_backend.module_settings()
 from work_engine import execute_natural_work_request
-from work_objects import create_work_object, list_work_objects, update_work_object
+from work_objects import create_work_object, get_work_object, list_work_objects, update_work_object
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,24 @@ class NinaMessageEnvelope:
         contact = str(self.contact_id or "").strip()
         workspace = str(self.workspace_id or "").strip()
         return f"contact:{workspace}:{contact}:one_nina" if contact and workspace else str(self.conversation_id or "").strip()
+
+
+@dataclass(frozen=True)
+class NaturalUnderstanding:
+    intent: str = "general_chat"
+    domain: str = "general_chat"
+    operation: str = "CHAT"
+    target_type: str = ""
+    target_reference: str = ""
+    time_reference: str = ""
+    conversation_reference: str = ""
+    confirmation: str = ""
+    destructive_scope: str = ""
+    confidence: float = 1.0
+    needs_clarification: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return dict(self.__dict__)
 
 
 def route_nina_message(envelope: NinaMessageEnvelope, *, generator=None) -> Dict[str, Any]:
@@ -258,6 +276,156 @@ def _save_turn(workspace_id: str, user_text: str, nina_text: str, conversation_i
     conn.commit()
     cur.close()
     conn.close()
+
+
+def _action_context(conversation_id: str) -> Dict[str, Any]:
+    """Read the latest unresolved canonical action reference for one contact."""
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        return {}
+    _ensure_conversation_store()
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        cur.execute(_sql("""
+            SELECT topic FROM conversation_state
+            WHERE user_id = %s AND intent = %s ORDER BY id DESC LIMIT 1
+        """), (conversation_id, "canonical_action_context"))
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+    if not row:
+        return {}
+    try:
+        payload = json.loads(str(row[0] or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _save_action_context(conversation_id: str, payload: Dict[str, Any]) -> None:
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        return
+    safe = {
+        key: payload.get(key) for key in (
+            "domain", "operation", "target_type", "target_reference",
+            "object_id", "object_ids", "research_session_id",
+        ) if payload.get(key)
+    }
+    _ensure_conversation_store()
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        cur.execute(_sql("""
+            INSERT INTO conversation_state
+                (user_id, user_text, nina_text, intent, emotion, topic)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """), (conversation_id, "", "", "canonical_action_context", "", json.dumps(safe, ensure_ascii=False)))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _contact_tasks(workspace_id: str, contact_id: str) -> List[Any]:
+    owner = str(contact_id or "").strip()
+    return [
+        obj for obj in list_work_objects(workspace_id=workspace_id, object_type="task", limit=500)
+        if str(getattr(obj, "origin_user_id", "") or "").strip() == owner
+        and not (getattr(obj, "metadata", {}) or {}).get("reminder_state")
+    ]
+
+
+def _ordinal_index(text: str) -> Optional[int]:
+    folded = str(text or "").casefold()
+    values = (("pirm", 0), ("first", 0), ("otr", 1), ("second", 1),
+              ("treš", 2), ("tres", 2), ("third", 2), ("ceturt", 3), ("fourth", 3))
+    return next((index for token, index in values if token in folded), None)
+
+
+def _understand_natural_action(clean: str, decision, action_context: Dict[str, Any],
+                               previous_research: Optional[Dict[str, Any]] = None) -> NaturalUnderstanding:
+    """Resolve deterministic intent from current text plus canonical references."""
+    folded = clean.casefold()
+    operation = str(getattr(decision, "reminder_operation", "") or "")
+    if operation:
+        return NaturalUnderstanding(
+            intent=f"reminder_{operation.casefold()}", domain="reminders", operation=operation,
+            target_type="reminder", target_reference=str(action_context.get("object_id") or ""),
+            destructive_scope="all" if getattr(decision, "reason", "") == "cancel_all_reminders" else "",
+            confidence=float(getattr(decision, "confidence", 1.0)),
+            needs_clarification=bool(getattr(decision, "needs_clarification", False)),
+        )
+    referenced_reminder = action_context.get("domain") == "reminders" and action_context.get("object_id")
+    time_match = re.search(r"\b(?:[01]?\d|2[0-3])(?:[:.]\d{2})?\b", clean)
+    if referenced_reminder and re.search(r"\b(?:pārcel|parcelt|pārliec|parliec|maini|nē|ne)\b", folded) and time_match:
+        return NaturalUnderstanding(
+            intent="reminder_update", domain="reminders", operation="UPDATE",
+            target_type="reminder", target_reference=str(action_context["object_id"]),
+            time_reference=time_match.group(0), conversation_reference="previous_action", confidence=0.99,
+        )
+    if referenced_reminder and re.search(r"\b(?:izdzēs|izdzes|atcel|novāc|novac)\s+(?:to|šo|so|pēdējo|pedejo)\b", folded):
+        return NaturalUnderstanding(
+            intent="reminder_cancel", domain="reminders", operation="CANCEL",
+            target_type="reminder", target_reference=str(action_context["object_id"]),
+            conversation_reference="previous_action", destructive_scope="single", confidence=0.99,
+        )
+    task_signal = any(token in folded for token in ("uzdevum", "darbu", "darbi", "pabeigt", "izdarīt", "izdariti", "status"))
+    referenced_task = action_context.get("domain") == "tasks" and action_context.get("object_id")
+    if referenced_task and any(token in folded for token in ("pievieno", "pārcel", "parcelt", "maini")) and (
+        "rīt" in folded or "rit" in folded or time_match
+    ):
+        return NaturalUnderstanding(
+            intent="task_update_time", domain="tasks", operation="UPDATE_TIME",
+            target_type="work_object", target_reference=str(action_context["object_id"]),
+            time_reference=time_match.group(0) if time_match else "tomorrow",
+            conversation_reference="previous_action", confidence=0.98,
+        )
+    if task_signal:
+        if any(token in folded for token in ("kādi", "kadi", "parādi", "paradi", "sarakst", "what tasks")):
+            return NaturalUnderstanding(intent="task_list", domain="tasks", operation="LIST", target_type="work_object")
+        if any(token in folded for token in ("pabeigt", "izdarīt", "izdarits", "izdarīts", "done", "complete")):
+            return NaturalUnderstanding(intent="task_status", domain="tasks", operation="UPDATE_STATUS", target_type="work_object", conversation_reference="ordinal_or_previous")
+    if previous_research and any(token in folded for token in ("salīdz", "salidz", "compare", "sūti saites", "suti saites")):
+        return NaturalUnderstanding(intent="research_followup", domain="web_research", operation="FOLLOW_UP", target_type="verified_result_set", conversation_reference="persisted_research")
+    if getattr(decision, "create_work_object", False):
+        return NaturalUnderstanding(intent="work_create", domain="tasks", operation="CREATE", target_type="work_object", confidence=float(getattr(decision, "confidence", 1.0)))
+    if any(token in folded for token in ("klient", "customer", "contact", "kontaktu")):
+        return NaturalUnderstanding(intent="client_context", domain="client_context", operation="GET", target_type="client", confidence=0.75)
+    return NaturalUnderstanding(confidence=float(getattr(decision, "confidence", 1.0)))
+
+
+def _update_referenced_reminder(workspace_id: str, owner_id: str, object_id: str, text: str):
+    target = get_work_object(object_id)
+    active_ids = {obj.object_id for obj in _active_reminder_sources(workspace_id, owner_id)}
+    if target is None or target.object_id not in active_ids:
+        return None
+    match = re.search(r"\b([01]?\d|2[0-3])(?:[:.]([0-5]\d))?\b", text)
+    if not match:
+        return None
+    hour, minute = int(match.group(1)), int(match.group(2) or 0)
+    metadata = dict(target.metadata or {})
+    raw = str(metadata.get("reminder_at") or "")
+    try:
+        value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        local = value.astimezone(ZoneInfo("Europe/Riga")) if value.tzinfo else value.replace(tzinfo=ZoneInfo("Europe/Riga"))
+        local = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        metadata["reminder_at"] = local.astimezone(ZoneInfo("UTC")).isoformat()
+    except ValueError:
+        metadata["reminder_at"] = f"{hour:02d}:{minute:02d}"
+    return update_work_object(target.object_id, metadata=metadata)
+
+
+def _cancel_referenced_reminder(workspace_id: str, owner_id: str, object_id: str):
+    target = get_work_object(object_id)
+    active_ids = {obj.object_id for obj in _active_reminder_sources(workspace_id, owner_id)}
+    if target is None or target.object_id not in active_ids:
+        return None
+    metadata = dict(target.metadata or {})
+    metadata["reminder_state"] = "cancelled"
+    return update_work_object(target.object_id, status="cancelled", metadata=metadata)
 
 
 def save_channel_turn(workspace_id: str, user_text: str, nina_text: str,
@@ -969,6 +1137,10 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             reply_required=True, confidence=1.0,
             reason="cancel_all_reminders", reminder_operation="CANCEL",
         )
+    target_workspace = canonical_work_workspace_id or workspace_id
+    reminder_owner = str(contact_id or conversation_id or _conversation_id(workspace_id)).strip()
+    action_context = _action_context(semantic_context_id)
+    understanding = _understand_natural_action(clean, decision, action_context)
     decision_payload = decision.to_dict()
     if pending_reminder and decision.reason == "general_reply":
         answer = "Precizē atgādinājuma laiku vai atkārtošanās grafiku."
@@ -988,6 +1160,7 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         )
         research_owner = str(contact_id or conversation_id or _conversation_id(workspace_id)).strip()
         previous_research = latest_research_session(workspace_id, research_owner, semantic_context_id) if semantic_context_id else None
+        understanding = _understand_natural_action(clean, decision, action_context, previous_research)
         folded = clean.casefold()
         explicit_save = bool(previous_research) and any(
             phrase in folded for phrase in ("saglabā šo meklējumu", "saglaba so meklejumu", "save this search")
@@ -1061,8 +1234,68 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
             return {"ok": False, "error": "web_research_unavailable", "text": answer,
                     "source": "web_research", "channel": channel, "decision": decision_payload}
-    target_workspace = canonical_work_workspace_id or workspace_id
-    reminder_owner = str(contact_id or conversation_id or _conversation_id(workspace_id)).strip()
+    if understanding.domain == "reminders" and understanding.operation == "UPDATE" and understanding.target_reference:
+        updated = _update_referenced_reminder(target_workspace, reminder_owner, understanding.target_reference, clean)
+        if updated is not None:
+            _save_action_context(semantic_context_id, {"domain": "reminders", "operation": "UPDATE", "object_id": updated.object_id})
+            answer = f"Atgādinājums pārcelts uz {_reminder_local_clock(updated)}."
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {"ok": True, "text": answer, "source": "shared_work", "channel": channel,
+                    "decision": decision_payload, "understanding": understanding.to_dict(),
+                    "reminder_object_id": updated.object_id}
+    if understanding.domain == "reminders" and understanding.operation == "CANCEL" and understanding.destructive_scope == "single":
+        cancelled = _cancel_referenced_reminder(target_workspace, reminder_owner, understanding.target_reference)
+        if cancelled is not None:
+            answer = "Atgādinājums atcelts."
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {"ok": True, "text": answer, "source": "shared_work", "channel": channel,
+                    "decision": decision_payload, "understanding": understanding.to_dict(),
+                    "reminder_object_id": cancelled.object_id}
+    if understanding.domain == "tasks" and understanding.operation == "LIST":
+        tasks = _contact_tasks(target_workspace, reminder_owner)
+        answer = "Tev nav aktīvu uzdevumu." if not tasks else "Tavi uzdevumi:\n" + "\n".join(
+            f"{index}. {obj.title} — {obj.status}" for index, obj in enumerate(tasks, 1)
+        )
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+        return {"ok": True, "text": answer, "source": "shared_work", "channel": channel,
+                "decision": decision_payload, "understanding": understanding.to_dict(),
+                "work_object_ids": [obj.object_id for obj in tasks]}
+    if understanding.domain == "tasks" and understanding.operation == "UPDATE_TIME":
+        target = get_work_object(understanding.target_reference)
+        if target is None or target not in _contact_tasks(target_workspace, reminder_owner):
+            answer = "Kuru uzdevumu vēlies pārcelt?"
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {"ok": False, "error": "task_target_ambiguous", "text": answer,
+                    "source": "shared_work", "channel": channel, "understanding": understanding.to_dict()}
+        clock = re.search(r"\b([01]?\d|2[0-3])(?:[:.]([0-5]\d))?\b", clean)
+        due_date = "tomorrow"
+        if clock:
+            due_date += f" {int(clock.group(1)):02d}:{int(clock.group(2) or 0):02d}"
+        metadata = dict(target.metadata or {})
+        metadata["time_reference"] = due_date
+        updated = update_work_object(target.object_id, due_date=due_date, metadata=metadata)
+        answer = f"Uzdevuma laiks atjaunināts: {updated.title} — {due_date}."
+        _save_action_context(semantic_context_id, {"domain": "tasks", "operation": "UPDATE_TIME", "object_id": updated.object_id})
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+        return {"ok": True, "text": answer, "source": "shared_work", "channel": channel,
+                "decision": decision_payload, "understanding": understanding.to_dict(), "object_id": updated.object_id}
+    if understanding.domain == "tasks" and understanding.operation == "UPDATE_STATUS":
+        tasks = _contact_tasks(target_workspace, reminder_owner)
+        index = _ordinal_index(clean)
+        target = tasks[index] if index is not None and index < len(tasks) else None
+        if target is None and action_context.get("domain") == "tasks":
+            target = next((obj for obj in tasks if obj.object_id == action_context.get("object_id")), None)
+        if target is None:
+            answer = "Kuru uzdevumu vēlies atzīmēt kā pabeigtu?"
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {"ok": False, "error": "task_target_ambiguous", "text": answer,
+                    "source": "shared_work", "channel": channel, "understanding": understanding.to_dict()}
+        updated = update_work_object(target.object_id, status="done")
+        answer = f"Uzdevums pabeigts: {updated.title}"
+        _save_action_context(semantic_context_id, {"domain": "tasks", "operation": "UPDATE_STATUS", "object_id": updated.object_id})
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+        return {"ok": True, "text": answer, "source": "shared_work", "channel": channel,
+                "decision": decision_payload, "understanding": understanding.to_dict(), "object_id": updated.object_id}
     reminder_read = _reminder_read_operation(
         decision.reminder_operation, clean, target_workspace, reminder_owner,
     )
@@ -1073,6 +1306,7 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             "ok": True, "text": answer, "source": "shared_work",
             "channel": channel, "decision": decision_payload,
             "reminder_object_ids": [obj.object_id for obj in reminder_read["reminders"]],
+            "understanding": understanding.to_dict(),
         }
     if decision.reminder_operation == "UPDATE":
         updated = _update_reminder_from_context(target_workspace, reminder_owner, clean)
@@ -1193,10 +1427,15 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             "ok": bool(work_result.get("ok")), "text": answer,
             "source": "shared_work", "channel": channel,
             "decision": decision_payload,
+            "understanding": understanding.to_dict(),
         }
         for key in ("action", "object_id", "object_ids", "reminder_at"):
             if key in work_result:
                 response[key] = work_result[key]
+        ids = list(work_result.get("object_ids") or ([] if not work_result.get("object_id") else [work_result["object_id"]]))
+        if ids:
+            domain = "reminders" if decision.create_reminder else "tasks"
+            _save_action_context(semantic_context_id, {"domain": domain, "operation": "CREATE", "object_id": ids[-1], "object_ids": ids})
         return response
 
     if decision.create_reminder:
@@ -1251,4 +1490,5 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
     if not answer:
         return {"ok": False, "error": "empty_response", "text": ""}
     _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
-    return {"ok": True, "text": answer, "source": "nina", "channel": channel, "decision": decision_payload}
+    return {"ok": True, "text": answer, "source": "nina", "channel": channel,
+            "decision": decision_payload, "understanding": understanding.to_dict()}
