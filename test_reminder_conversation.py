@@ -284,7 +284,13 @@ class ReminderConversationTests(unittest.TestCase):
         self.assertIn(source.title, listed["text"])
 
         before_ids = {obj.object_id for obj in self.sources()}
-        deleted = self.send("Izdzēs visus")
+        requested = self.send("Izdzēs visus")
+        self.assertTrue(requested["confirmation_required"])
+        self.assertEqual({obj.object_id for obj in self.sources()}, before_ids)
+        still_listed = self.send("Kādi man ir atgādinājumi?")
+        self.assertIn(source.title, still_listed["text"])
+        self.assertEqual({obj.object_id for obj in self.sources()}, before_ids)
+        deleted = self.send("jā")
         self.assertTrue(deleted["ok"])
         self.assertEqual(deleted["decision"]["reminder_operation"], "CANCEL")
         self.assertEqual(deleted["remaining_reminders"], 0)
@@ -295,8 +301,10 @@ class ReminderConversationTests(unittest.TestCase):
         empty = self.send("Kādi man ir atgādinājumi?")
         self.assertEqual(empty["text"], "Tev nav aktīvu atgādinājumu.")
         repeated = self.send("Izdzēs visus")
-        self.assertTrue(repeated["ok"])
-        self.assertEqual(repeated["cancelled_reminders"], 0)
+        self.assertTrue(repeated["confirmation_required"])
+        repeated_confirmed = self.send("apstiprinu")
+        self.assertTrue(repeated_confirmed["ok"])
+        self.assertEqual(repeated_confirmed["cancelled_reminders"], 0)
 
     def test_all_supported_hourly_phrases_schedule_the_next_whole_hour(self):
         from task_engine import detect_reminder_schedule
@@ -316,11 +324,40 @@ class ReminderConversationTests(unittest.TestCase):
         self.send("Atgādini man rīt 11.00 saskaitīt naudu")
         before_ids = {obj.object_id for obj in self.sources()}
         with patch.object(self.messaging, "update_work_object", return_value=None):
-            result = self.send("atcel visus manus atgādinājumus")
+            requested = self.send("atcel visus manus atgādinājumus")
+            self.assertTrue(requested["confirmation_required"])
+            result = self.send("dari")
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "reminder_cancel_failed")
         self.assertNotIn("atcēlu", result["text"].casefold())
         self.assertNotIn("dzēsti", result["text"].casefold())
+        self.assertEqual({obj.object_id for obj in self.sources()}, before_ids)
+
+    def test_bulk_cancel_rejection_and_plain_yes_never_mutate(self):
+        self.send("Atgādini man rīt 11.00 saskaitīt naudu")
+        before_ids = {obj.object_id for obj in self.sources()}
+        requested = self.send("novāc visus reminderus")
+        self.assertTrue(requested["confirmation_required"])
+        rejected = self.send("nē")
+        self.assertEqual(rejected["text"], "Atgādinājumi netika mainīti.")
+        self.assertEqual({obj.object_id for obj in self.sources()}, before_ids)
+        plain_yes = self.send("jā")
+        self.assertEqual(plain_yes["decision"]["reason"], "destructive_confirmation_absent")
+        self.assertEqual({obj.object_id for obj in self.sources()}, before_ids)
+
+    def test_expired_bulk_cancel_confirmation_cannot_mutate(self):
+        self.send("Atgādini man rīt 11.00 saskaitīt naudu")
+        before_ids = {obj.object_id for obj in self.sources()}
+        now = datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc)
+        with patch.object(self.messaging, "_destructive_now", return_value=now):
+            requested = self.send("Izdzēs visus")
+        self.assertTrue(requested["confirmation_required"])
+        with patch.object(
+            self.messaging, "_destructive_now",
+            return_value=now + timedelta(seconds=self.messaging.DESTRUCTIVE_CONFIRMATION_TTL_SECONDS + 1),
+        ):
+            expired_yes = self.send("jā")
+        self.assertEqual(expired_yes["decision"]["reason"], "destructive_confirmation_absent")
         self.assertEqual({obj.object_id for obj in self.sources()}, before_ids)
 
     def test_pending_reminder_context_cannot_fall_through_to_generic_chat(self):

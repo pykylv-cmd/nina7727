@@ -21,6 +21,7 @@ from work_objects import create_work_object, list_work_objects, update_work_obje
 logger = logging.getLogger(__name__)
 
 WORKSPACE_ID = (os.environ.get("NINA_WEB_WORKSPACE_ID") or "demo_small_business").strip()
+DESTRUCTIVE_CONFIRMATION_TTL_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -332,6 +333,101 @@ def _clear_pending_reminder_context(conversation_id: str) -> None:
     finally:
         cur.close()
         conn.close()
+
+
+def _destructive_now() -> datetime:
+    return datetime.now(tz=ZoneInfo("UTC"))
+
+
+def _pending_destructive_context(conversation_id: str) -> Dict[str, Any]:
+    """Return an unexpired destructive operation scoped to one canonical conversation."""
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        return {}
+    _ensure_conversation_store()
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        cur.execute(_sql("""
+            SELECT topic FROM conversation_state
+            WHERE user_id = %s AND intent = %s ORDER BY id DESC LIMIT 1
+        """), (conversation_id, "destructive_pending"))
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+    if not row:
+        return {}
+    try:
+        payload = json.loads(str(row[0] or "{}"))
+        expires_at = datetime.fromisoformat(str(payload.get("expires_at") or ""))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict) or payload.get("resolved"):
+        return {}
+    if expires_at.tzinfo is None or expires_at <= _destructive_now():
+        return {}
+    if payload.get("operation") != "CANCEL_ALL_REMINDERS":
+        return {}
+    if payload.get("target_scope") != "active_reminders":
+        return {}
+    return payload
+
+
+def _save_pending_destructive_context(conversation_id: str, contact_id: str) -> None:
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        return
+    now = _destructive_now()
+    payload = {
+        "operation": "CANCEL_ALL_REMINDERS",
+        "target_scope": "active_reminders",
+        "canonical_contact_id": str(contact_id or "").strip(),
+        "created_at": now.isoformat(),
+        "expires_at": (now + timedelta(seconds=DESTRUCTIVE_CONFIRMATION_TTL_SECONDS)).isoformat(),
+    }
+    _ensure_conversation_store()
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        cur.execute(_sql("""
+            INSERT INTO conversation_state
+                (user_id, user_text, nina_text, intent, emotion, topic)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """), (conversation_id, "", "", "destructive_pending", "", json.dumps(payload, ensure_ascii=False)))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _clear_pending_destructive_context(conversation_id: str, reason: str) -> None:
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        return
+    payload = {"resolved": True, "reason": str(reason or "resolved").strip()}
+    _ensure_conversation_store()
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        cur.execute(_sql("""
+            INSERT INTO conversation_state
+                (user_id, user_text, nina_text, intent, emotion, topic)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """), (conversation_id, "", "", "destructive_pending", "", json.dumps(payload, ensure_ascii=False)))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _destructive_confirmation_answer(text: str) -> str:
+    normalized = re.sub(r"[^\wāčēģīķļņšūž]+", " ", str(text or "").casefold()).strip()
+    if normalized in {"jā", "ja", "jā visus", "ja visus", "apstiprinu", "izdzēs", "izdzes", "dari"}:
+        return "confirm"
+    if normalized in {"nē", "ne", "negribu", "atcel", "nedzēs", "nedzes", "neko nedari"}:
+        return "reject"
+    return ""
 
 
 def _reminder_continuation_text(clean: str, conversation_id: str, decision) -> str:
@@ -831,6 +927,32 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
 
     semantic_context_id = str(semantic_conversation_id or conversation_id or "").strip()
     pending_reminder = _pending_reminder_context(semantic_context_id)
+    pending_destructive = _pending_destructive_context(semantic_context_id)
+    confirmation_contact_id = str(contact_id or conversation_id or _conversation_id(workspace_id)).strip()
+    if pending_destructive and pending_destructive.get("canonical_contact_id") != confirmation_contact_id:
+        pending_destructive = {}
+    supplied_destructive_answer = _destructive_confirmation_answer(clean)
+    destructive_answer = supplied_destructive_answer if pending_destructive else ""
+    destructive_confirmed = destructive_answer == "confirm"
+    if destructive_answer == "reject":
+        _clear_pending_destructive_context(semantic_context_id, "rejected")
+        answer = "Atgādinājumi netika mainīti."
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+        return {
+            "ok": True, "text": answer, "source": "shared_work", "channel": channel,
+            "destructive_confirmation": "rejected",
+        }
+    if supplied_destructive_answer == "confirm" and not pending_destructive:
+        decision = Decision(
+            reply_required=False, no_action=True, priority="low", confidence=1.0,
+            reason="destructive_confirmation_absent",
+        )
+        decision_payload = decision.to_dict()
+        _save_turn(workspace_id, clean, "", conversation_id=conversation_id, channel=channel)
+        return {
+            "ok": True, "text": "", "source": "brain_no_action", "channel": channel,
+            "decision": decision_payload, "destructive_confirmation": "absent",
+        }
     decision = precomputed_decision or Brain.decide(clean, BrainContext(
         workspace_id=canonical_work_workspace_id or workspace_id,
         channel=channel,
@@ -841,6 +963,11 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             reply_required=True, remember=True, create_work_object=True,
             create_reminder=True, confidence=1.0,
             reason="scheduled_reminder_continuation", reminder_operation="CREATE",
+        )
+    if destructive_confirmed:
+        decision = Decision(
+            reply_required=True, confidence=1.0,
+            reason="cancel_all_reminders", reminder_operation="CANCEL",
         )
     decision_payload = decision.to_dict()
     if pending_reminder and decision.reason == "general_reply":
@@ -967,6 +1094,16 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             "decision": decision_payload,
         }
     if decision.reason == "cancel_all_reminders":
+        if not destructive_confirmed:
+            _save_pending_destructive_context(semantic_context_id, reminder_owner)
+            answer = "Vai tiešām vēlies atcelt visus aktīvos atgādinājumus?"
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {
+                "ok": True, "text": answer, "source": "shared_work", "channel": channel,
+                "decision": decision_payload, "confirmation_required": True,
+                "remaining_reminders": len(_active_reminder_sources(target_workspace, reminder_owner)),
+            }
+        _clear_pending_destructive_context(semantic_context_id, "confirmed")
         outcome = _cancel_all_reminders(target_workspace, reminder_owner)
         if not outcome["ok"]:
             answer = "Atgādinājumus neizdevās atcelt. Aktīvais saraksts nav mainīts pilnībā."

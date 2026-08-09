@@ -196,7 +196,10 @@ class OneNinaCrossChannelTests(unittest.TestCase):
         self.assertIn("katru apaļu stundu", listed["text"])
         self.assertIn("es esmu laimīgs dzīvot miljardiera dzīvi", listed["text"])
         self.assertEqual(self.reminders()[0].object_id, source_id)
-        deleted = self.send("whatsapp_company", "Izdzēs visus")
+        requested = self.send("whatsapp_company", "Izdzēs visus")
+        self.assertTrue(requested["confirmation_required"])
+        self.assertEqual(self.reminders()[0].object_id, source_id)
+        deleted = self.send("web", "jā")
         self.assertTrue(deleted["ok"])
         self.assertEqual(deleted["remaining_reminders"], 0)
         self.assertEqual(self.reminders(), [])
@@ -204,6 +207,37 @@ class OneNinaCrossChannelTests(unittest.TestCase):
         other = self.send("web", "Atgādini man rīt 11.00 svešs", contact_id="contact-other")
         self.assertTrue(other["ok"])
         self.assertEqual(len(self.reminders("contact-other")), 1)
+
+    def test_destructive_confirmation_is_contact_scoped_across_channels(self):
+        created = self.send("web", "Atgādini man rīt 11.00 slepens reminders")
+        self.assertTrue(created["ok"])
+        source_id = self.reminders()[0].object_id
+        requested = self.send("telegram", "Izdzēs visus")
+        self.assertTrue(requested["confirmation_required"])
+
+        other_yes = self.send("whatsapp_company", "jā", contact_id="contact-other")
+        self.assertEqual(other_yes["decision"]["reason"], "destructive_confirmation_absent")
+        self.assertEqual(self.reminders()[0].object_id, source_id)
+
+        confirmed = self.send("whatsapp_company", "jā")
+        self.assertTrue(confirmed["ok"])
+        self.assertEqual(confirmed["remaining_reminders"], 0)
+        self.assertEqual(self.reminders(), [])
+
+    def test_each_channel_uses_the_same_confirmation_before_bulk_cancel_contract(self):
+        for channel in ("web", "telegram", "whatsapp_company"):
+            with self.subTest(channel=channel):
+                self.setUp()
+                created = self.send(channel, "Atgādini man rīt 11.00 pārbaudīt Ninu")
+                self.assertTrue(created["ok"])
+                source_id = self.reminders()[0].object_id
+                requested = self.send(channel, "Izdzēs visus")
+                self.assertTrue(requested["confirmation_required"])
+                self.assertEqual(self.reminders()[0].object_id, source_id)
+                confirmed = self.send(channel, "jā, visus")
+                self.assertTrue(confirmed["ok"])
+                self.assertEqual(confirmed["remaining_reminders"], 0)
+                self.assertEqual(self.reminders(), [])
 
     def test_telegram_reply_routes_ordinary_messages_before_legacy_branches(self):
         with open("app.py", encoding="utf-8") as handle:

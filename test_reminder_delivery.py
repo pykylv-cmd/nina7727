@@ -146,10 +146,17 @@ class ReminderDeliveryTests(unittest.TestCase):
         other = self.reminder(
             owner="contact-b", channel="web", workspace="tenant-a",
         )
-        result = send_message_to_nina(
+        requested = send_message_to_nina(
             "novāc visus atgādinājumus", workspace_id="tenant-a",
             channel="web", conversation_id="contact:contact-a:web",
             contact_id="contact-a", canonical_work_workspace_id="tenant-a",
+        )
+        self.assertTrue(requested["confirmation_required"])
+        self.assertEqual(self.work.get_work_object(own_source.object_id).status, "open")
+        result = send_message_to_nina(
+            "jā", workspace_id="tenant-a", channel="web",
+            conversation_id="contact:contact-a:web", contact_id="contact-a",
+            canonical_work_workspace_id="tenant-a",
         )
         self.assertEqual(result["cancelled_reminders"], 2)
         self.assertEqual(self.work.get_work_object(own_source.object_id).status, "cancelled")
