@@ -87,11 +87,11 @@ class WebVoiceInputTests(unittest.TestCase):
             self.assertIn("id='voice-start'", body)
 
     def test_existing_typed_post_is_unchanged(self):
-        with patch.object(web_app, "send_message_to_nina") as send:
+        with patch.object(web_app, "route_nina_message") as send:
             response = self.client.post("/nina?lang=en", data={"message": "Hello"})
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(send.call_args.args[0], "Hello")
-        self.assertTrue(send.call_args.kwargs["contact_id"].startswith("contact_"))
+        self.assertEqual(send.call_args.args[0].text, "Hello")
+        self.assertTrue(send.call_args.args[0].contact_id.startswith("contact_"))
 
     def test_voice_rejects_empty_file(self):
         response = self.client.post(
@@ -109,14 +109,14 @@ class WebVoiceInputTests(unittest.TestCase):
 
     def test_successful_transcription_uses_existing_message_service(self):
         with patch.object(web_app, "_transcribe_web_voice", return_value="Recognized text"), \
-             patch.object(web_app, "send_message_to_nina") as send:
+             patch.object(web_app, "route_nina_message") as send:
             response = self.client.post(
                 "/nina/voice?lang=en",
                 data={"audio": (io.BytesIO(b"audio"), "voice.webm", "audio/webm"), "lang": "en"},
             )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(send.call_args.args[0], "Recognized text")
-        self.assertTrue(send.call_args.kwargs["contact_id"].startswith("contact_"))
+        self.assertEqual(send.call_args.args[0].text, "Recognized text")
+        self.assertTrue(send.call_args.args[0].contact_id.startswith("contact_"))
 
     def test_web_uses_accuracy_model_and_actual_mime(self):
         with patch.object(voice_engine, "transcribe_audio_with_openai", return_value="Exact text") as transcribe, \
@@ -223,7 +223,7 @@ class WebVoiceInputTests(unittest.TestCase):
     def test_diagnostic_logs_exclude_secrets_and_transcription(self):
         spoken = "Private spoken words sk-spoken-secret"
         with patch.object(web_app, "_transcribe_web_voice", return_value=spoken), \
-             patch.object(web_app, "send_message_to_nina"), \
+             patch.object(web_app, "route_nina_message"), \
              self.assertLogs(web_app.logger, level="INFO") as captured:
             response = self.client.post(
                 "/nina/voice?lang=ru",

@@ -40,7 +40,7 @@ from developer_router import (
     resolve_developer_targets as _resolve_developer_targets,
     web_research_source_links_proposal as _web_research_source_links_proposal,
 )
-from nina_message_service import WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, generate_with_nina, load_channel_conversation, load_web_conversation, save_channel_turn, send_message_to_nina
+from nina_message_service import NinaMessageEnvelope, WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, generate_with_nina, load_channel_conversation, load_web_conversation, route_nina_message, save_channel_turn, send_message_to_nina
 from voice_engine import transcribe_audio_with_openai
 from channel_connections import claim_channel_message, consume_whatsapp_onboarding_state, create_telegram_token, create_whatsapp_onboarding_state, disconnect as disconnect_channel, get_connection, set_connection_for_test, update_whatsapp_verification
 from channel_layer import (
@@ -6827,11 +6827,11 @@ def nina_voice():
         return jsonify({"ok": False, "error": "transcription_unavailable"}), 502
 
     contact = current_web_contact()
-    send_message_to_nina(
-        transcript, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web",
+    route_nina_message(NinaMessageEnvelope(
+        text=transcript, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web",
         conversation_id=contact["conversation_id"], contact_id=contact["contact_id"],
         contact_context=compact_contact_context(contact),
-    )
+    ))
     return jsonify({"ok": True})
 
 
@@ -9094,8 +9094,8 @@ def internal_company_whatsapp_inbound():
             return jsonify({"ok": True, "accepted": True, "reply": "Multividi saņēmu, bet šobrīd nevarēju to apstrādāt."})
     else:
         quoted = str(payload.get("quoted_text") or "").strip()[:1000]
-        result = send_message_to_nina(
-            (f"Citētā ziņa: {quoted}\n\n{text}" if quoted else text),
+        result = route_nina_message(NinaMessageEnvelope(
+            text=(f"Citētā ziņa: {quoted}\n\n{text}" if quoted else text),
             workspace_id=identity["workspace_id"],
             channel=COMPANY_WHATSAPP_CHANNEL,
             conversation_id=identity["conversation_id"],
@@ -9104,7 +9104,7 @@ def internal_company_whatsapp_inbound():
             canonical_client_id=mapping["canonical_client_id"],
             canonical_work_workspace_id=workspace_id,
             delivery_recipient=sender_jid,
-        )
+        ))
     return jsonify({"ok": True, "accepted": True, "reply": str(result.get("text") or "")})
 
 
@@ -9412,11 +9412,11 @@ def nina_chat():
                 if type(file_exc).__name__ == "FileIntelligenceError" and str(file_exc) == "file_selection_required":
                     nina_result = {"ok": True, "text": "Please select the file you want me to use.", "source": "shared_file_context"}
             if nina_result is None:
-                nina_result = send_message_to_nina(
-                    user_text, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web",
+                nina_result = route_nina_message(NinaMessageEnvelope(
+                    text=user_text, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web",
                     conversation_id=contact["conversation_id"], contact_id=contact["contact_id"],
                     contact_context=compact_contact_context(contact),
-                )
+                ))
             nina_text = (
                 nina_result.get("text", "")
                 if isinstance(nina_result, dict) else nina_result

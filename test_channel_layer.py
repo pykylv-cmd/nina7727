@@ -394,7 +394,7 @@ class ChannelLayerWebTests(unittest.TestCase):
 
     def test_web_chat_persists_canonical_inbound_and_draft(self):
         with patch.object(
-            self.web_app, "send_message_to_nina",
+            self.web_app, "route_nina_message",
             return_value={
                 "ok": True, "text": "One Nina response",
                 "source": "nina", "channel": "web",

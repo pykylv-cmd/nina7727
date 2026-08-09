@@ -88,14 +88,15 @@ class CompanyWhatsAppTests(unittest.TestCase):
     def test_two_external_senders_route_to_isolated_nina_context(self):
         self.connect()
         auth={"Authorization":"Bearer bridge-test"}
-        with patch.object(self.web,"send_message_to_nina",return_value={"text":"Nina reply"}) as nina:
+        with patch.object(self.web,"route_nina_message",return_value={"text":"Nina reply"}) as nina:
             for index,jid in enumerate(("37120000001@s.whatsapp.net","37120000002@s.whatsapp.net"),1):
                 response=self.client.post("/internal/company-whatsapp/inbound",headers=auth,json={"workspace_id":"ninaos_company","message_id":f"m{index}","sender_jid":jid,"text":"hello"})
                 self.assertTrue(response.get_json()["accepted"])
         first,second=nina.call_args_list
-        self.assertNotEqual(first.kwargs["workspace_id"],second.kwargs["workspace_id"])
-        self.assertNotEqual(first.kwargs["conversation_id"],second.kwargs["conversation_id"])
-        self.assertEqual(first.kwargs["channel"],"whatsapp_company")
+        first_envelope, second_envelope = first.args[0], second.args[0]
+        self.assertNotEqual(first_envelope.workspace_id, second_envelope.workspace_id)
+        self.assertNotEqual(first_envelope.conversation_id, second_envelope.conversation_id)
+        self.assertEqual(first_envelope.channel,"whatsapp_company")
 
     def test_sender_context_does_not_leak(self):
         identity_a=self.number.resolve_channel_identity("whatsapp_company","ninaos_company","37120000001")

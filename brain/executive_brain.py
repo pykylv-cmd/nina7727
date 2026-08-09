@@ -150,7 +150,7 @@ def classify_message(message: str) -> Decision:
             reason="reminder_ask", reminder_operation="ASK",
         )
 
-    if _reminder_update_operation(value):
+    if _reminder_update_operation(value) and not _has_reminder_time(value):
         return Decision(
             reply_required=True, confidence=0.98,
             reason="reminder_update", reminder_operation="UPDATE",

@@ -596,7 +596,7 @@ def execute_natural_work_request(
                 reminder_at = _clean(schedule.get("reminder_at"))
                 recurrence = _clean(schedule.get("recurrence"))
                 identity = "\0".join((
-                    _clean(workspace_id), _clean(contact_id), _clean(channel),
+                    _clean(workspace_id), _clean(contact_id),
                     title.casefold(), reminder_at, recurrence,
                 ))
                 source_key = "natural-reminder:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
@@ -612,6 +612,8 @@ def execute_natural_work_request(
                         "source": "natural_work_request",
                         "intent": "create_reminder",
                         "contact_id": _clean(contact_id),
+                        "delivery_channel": _clean(channel) or "unknown",
+                        "delivery_recipient": _clean(delivery_recipient),
                         "canonical_client_id": _clean(canonical_client_id),
                         "reminder_at": reminder_at,
                         "reminder_state": "scheduled",
@@ -633,7 +635,11 @@ def execute_natural_work_request(
                     due_date=_clean(task.get("deadline")),
                     metadata=metadata,
                     origin_channel=_clean(channel) or "unknown",
-                    origin_user_id=_clean(contact_id),
+                    origin_user_id=(
+                        _clean(delivery_recipient)
+                        if _clean(channel) == "telegram" and _clean(delivery_recipient)
+                        else _clean(contact_id)
+                    ),
                     source_key=source_key,
                 ))
             if not created:

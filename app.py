@@ -33,6 +33,7 @@ from runtime_readiness import get_runtime_readiness
 from platform_core import initialize_platform_runtime
 from rolepack_system import initialize_rolepack_system
 from ready_worker_catalog import initialize_ready_worker_catalog
+from nina_message_service import NinaMessageEnvelope, route_nina_message
 
 # ONE NINA Canonical Channel Content + Document Work Intake V1
 # V117.8: channel-content and document-action imports are isolated.
@@ -16562,13 +16563,67 @@ def nina_save_forwarded_text_to_one_nina(update, user_id, user_text, force_busin
     }
 
 
+_TELEGRAM_OWNER_ONLY_EXACT = {
+    "admin", "admin center", "admin command center", "command center",
+    "admin stats", "admin revenue", "platform stats", "v40 stats",
+    "admin notifications", "admin activity", "admin users", "user management",
+    "user actions", "db backup", "database backup", "backup stats",
+    "auto backup", "backup scheduler", "recovery", "recovery center",
+    "restore backup", "restore latest", "stripe webhook", "stripe statuss",
+    "revenue", "revenue analytics", "revenue forecast", "income analytics",
+    "income forecast", "kpi", "admin kpi", "business dashboard", "alerts",
+    "admin alerts", "system alerts", "launch", "launch dashboard", "production launch",
+    "admin logs", "audit logs", "audit stats", "health", "system status",
+    "analytics", "user stats", "user analytics", "notifications", "activity",
+}
+_TELEGRAM_OWNER_ONLY_PREFIXES = (
+    "grant premium", "remove premium", "add xp", "remove xp", "set level",
+    "reset streak", "search user", "find user", "user lookup", "user ",
+    "db backup", "database backup", "auto backup", "backup scheduler",
+    "restore latest", "atjauno pēdējo", "atjauno pedejo", "atjauno no backup",
+    "dzēs backup", "izdzēs backup", "dzes backup", "izdzes backup",
+)
+
+
+def telegram_owner_only_command(text):
+    """Classify only guarded operations that intentionally remain Telegram-local."""
+    clean = re.sub(r"\s+", " ", str(text or "").strip().casefold())
+    return clean in _TELEGRAM_OWNER_ONLY_EXACT or clean.startswith(_TELEGRAM_OWNER_ONLY_PREFIXES)
+
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V117.7 ONE NINA Document Action Terminal Routing V1
     try:
-        resolve_telegram_contact(update, context)
         user_text = update.message.text
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
+        contact = resolve_telegram_contact(update, context)
+
+        # Telegram is a transport adapter. Only explicitly guarded owner commands
+        # stay local; every ordinary human message enters the shared ONE NINA path.
+        if telegram_owner_only_command(user_text):
+            if not is_admin(user_id):
+                await safe_reply_text(update, admin_locked_answer())
+                return
+        else:
+            if not contact:
+                await safe_reply_text(update, "Nevarēju droši sasaistīt šo Telegram kontaktu. Nekāda darbība netika veikta.")
+                return
+            workspace_id = str(contact.get("workspace_id") or "demo_small_business")
+            contact_id = str(contact.get("contact_id") or "").strip()
+            result = route_nina_message(NinaMessageEnvelope(
+                text=user_text,
+                workspace_id=workspace_id,
+                channel="telegram",
+                conversation_id=f"contact:{contact_id}:telegram",
+                contact_id=contact_id,
+                contact_context=compact_contact_context(contact),
+                canonical_client_id=str(contact.get("client_id") or ""),
+                canonical_work_workspace_id=workspace_id,
+                delivery_recipient=user_id,
+            ))
+            await safe_reply_text(update, str(result.get("text") or ""), disable_web_page_preview=True)
+            return
 
         # V118.1.5 — explicit client decisions are terminal and have routing priority.
         # They must never fall through into document actions, generic document Q&A,

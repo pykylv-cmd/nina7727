@@ -8,7 +8,9 @@ from typing import Any, Dict
 
 from document_intake import prepare_document_intake
 from nina_message_service import (
+    NinaMessageEnvelope,
     generate_with_nina,
+    route_nina_message,
     save_channel_turn,
     send_message_to_nina,
 )
@@ -94,13 +96,13 @@ def process_media_message(
         )
         if not str(transcript or "").strip():
             raise RuntimeError("audio_transcription_failed")
-        return send_message_to_nina(
-            _context_text(transcript, quoted_text), workspace_id=workspace_id,
+        return route_nina_message(NinaMessageEnvelope(
+            text=_context_text(transcript, quoted_text), workspace_id=workspace_id,
             channel=channel, conversation_id=conversation_id,
             contact_id=contact_id, contact_context=contact_context,
             canonical_client_id=canonical_client_id,
             canonical_work_workspace_id=canonical_work_workspace_id,
-        )
+        ))
 
     if kind == "image":
         answer = build_vision_answer_from_openai(openai_client, data, caption=_context_text(caption, quoted_text))

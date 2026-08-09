@@ -16,7 +16,7 @@ class CompanyWhatsAppMultimodalTests(unittest.TestCase):
     def test_audio_uses_shared_transcription_then_nina_route(self):
         import nina_media_service as service
         with patch.object(service, "transcribe_audio_with_openai", return_value="Izveido uzdevumu"), \
-             patch.object(service, "send_message_to_nina", return_value={"ok": True, "text": "Izveidots"}) as send:
+             patch.object(service, "route_nina_message", return_value={"ok": True, "text": "Izveidots"}) as send:
             result = service.process_media_message(
                 kind="audio", data=b"audio", mime_type="audio/ogg; codecs=opus",
                 filename="voice.ogg", caption="", quoted_text="", workspace_id="ws",
@@ -24,7 +24,8 @@ class CompanyWhatsAppMultimodalTests(unittest.TestCase):
                 origin_user_id="3712", message_id="m1", openai_client=Mock(),
             )
         self.assertEqual(result["text"], "Izveidots")
-        self.assertEqual(send.call_args.args[0], "Izveido uzdevumu")
+        self.assertEqual(send.call_args.args[0].text, "Izveido uzdevumu")
+        self.assertEqual(send.call_args.args[0].channel, "whatsapp_company")
 
     def test_image_uses_shared_vision_and_shared_conversation_store(self):
         import nina_media_service as service

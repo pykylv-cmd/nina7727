@@ -155,16 +155,16 @@ class ChannelConnectionsV1Tests(unittest.TestCase):
         self.assertEqual(channel_connections.get_connection(web_app.NINA_WEB_WORKSPACE_ID, "whatsapp")["status"], "disconnected")
 
     def test_existing_chat_voice_tasks_and_clients_are_unaffected(self):
-        with patch.object(web_app, "load_web_conversation", return_value=[]), patch.object(web_app, "send_message_to_nina") as send:
+        with patch.object(web_app, "load_web_conversation", return_value=[]), patch.object(web_app, "route_nina_message") as send:
             self.assertEqual(self.client.get("/nina?lang=en").status_code, 200)
             self.assertEqual(self.client.post("/nina?lang=en", data={"message": "Hello"}).status_code, 302)
-            self.assertEqual(send.call_args.args[0], "Hello")
-            self.assertTrue(send.call_args.kwargs["contact_id"].startswith("contact_"))
-        with patch.object(web_app, "_transcribe_web_voice", return_value="Create task tomorrow"), patch.object(web_app, "send_message_to_nina") as send:
+            self.assertEqual(send.call_args.args[0].text, "Hello")
+            self.assertTrue(send.call_args.args[0].contact_id.startswith("contact_"))
+        with patch.object(web_app, "_transcribe_web_voice", return_value="Create task tomorrow"), patch.object(web_app, "route_nina_message") as send:
             response = self.client.post("/nina/voice?lang=en", data={"audio": (io.BytesIO(b"voice"), "voice.webm", "audio/webm"), "lang": "en"})
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(send.call_args.args[0], "Create task tomorrow")
-            self.assertTrue(send.call_args.kwargs["contact_id"].startswith("contact_"))
+            self.assertEqual(send.call_args.args[0].text, "Create task tomorrow")
+            self.assertTrue(send.call_args.args[0].contact_id.startswith("contact_"))
         self.assertEqual(self.client.get("/tasks?lang=en").status_code, 200)
         self.assertEqual(self.client.get("/clients?lang=en").status_code, 200)
 

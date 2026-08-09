@@ -159,13 +159,32 @@ class ReminderConversationTests(unittest.TestCase):
     def test_evening_update_keeps_same_canonical_identity(self):
         sources = self.create_daily_set()
         evening = next(obj for obj in sources if self.messaging._reminder_local_clock(obj) == "19:00")
-        before_ids = [obj.object_id for obj in sources]
+        before_ids = {obj.object_id for obj in sources}
+        before_by_id = {
+            obj.object_id: {
+                "clock": self.messaging._reminder_local_clock(obj),
+                "title": obj.title,
+                "metadata": dict(obj.metadata or {}),
+                "updated_at": obj.updated_at,
+            }
+            for obj in sources
+        }
         result = self.send("Vakarā arī labrīt nesaki")
         after = self.sources()
+        after_by_id = {obj.object_id: obj for obj in after}
         self.assertTrue(result["ok"])
         self.assertEqual(result["reminder_object_id"], evening.object_id)
-        self.assertEqual([obj.object_id for obj in after], before_ids)
+        self.assertEqual(set(after_by_id), before_ids)
         self.assertEqual(len(after), 3)
+        self.assertEqual(
+            self.messaging._reminder_local_clock(after_by_id[evening.object_id]),
+            "19:00",
+        )
+        self.assertNotEqual(after_by_id[evening.object_id].updated_at, before_by_id[evening.object_id]["updated_at"])
+        for object_id in before_ids - {evening.object_id}:
+            self.assertEqual(after_by_id[object_id].title, before_by_id[object_id]["title"])
+            self.assertEqual(after_by_id[object_id].metadata, before_by_id[object_id]["metadata"])
+            self.assertEqual(after_by_id[object_id].updated_at, before_by_id[object_id]["updated_at"])
 
     def test_clean_tomorrow_reminder_is_created_once(self):
         result = self.send("Atgādini man rīt 11.00 saskaitīt naudu")

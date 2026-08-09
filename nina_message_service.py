@@ -6,6 +6,7 @@ import logging
 import json
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -20,6 +21,46 @@ from work_objects import create_work_object, list_work_objects, update_work_obje
 logger = logging.getLogger(__name__)
 
 WORKSPACE_ID = (os.environ.get("NINA_WEB_WORKSPACE_ID") or "demo_small_business").strip()
+
+
+@dataclass(frozen=True)
+class NinaMessageEnvelope:
+    """Normalized transport metadata for one human message to ONE NINA."""
+    text: str
+    workspace_id: str
+    channel: str
+    conversation_id: str
+    contact_id: str
+    contact_context: str = ""
+    canonical_client_id: str = ""
+    canonical_work_workspace_id: str = ""
+    delivery_recipient: str = ""
+
+    @property
+    def semantic_conversation_id(self) -> str:
+        contact = str(self.contact_id or "").strip()
+        workspace = str(self.workspace_id or "").strip()
+        return f"contact:{workspace}:{contact}:one_nina" if contact and workspace else str(self.conversation_id or "").strip()
+
+
+def route_nina_message(envelope: NinaMessageEnvelope, *, generator=None) -> Dict[str, Any]:
+    """The single channel-neutral entrypoint used by transport adapters."""
+    required_fields = ("text", "workspace_id", "channel", "conversation_id", "contact_id")
+    if not isinstance(envelope, NinaMessageEnvelope) and not all(hasattr(envelope, field) for field in required_fields):
+        raise TypeError("invalid_nina_message_envelope")
+    if not str(envelope.workspace_id or "").strip() or not str(envelope.channel or "").strip():
+        raise ValueError("invalid_nina_message_scope")
+    if not str(envelope.contact_id or "").strip():
+        raise ValueError("canonical_contact_required")
+    return send_message_to_nina(
+        envelope.text, workspace_id=envelope.workspace_id, channel=envelope.channel,
+        generator=generator, conversation_id=envelope.conversation_id,
+        semantic_conversation_id=envelope.semantic_conversation_id,
+        contact_id=envelope.contact_id, contact_context=envelope.contact_context,
+        canonical_client_id=envelope.canonical_client_id,
+        canonical_work_workspace_id=envelope.canonical_work_workspace_id,
+        delivery_recipient=envelope.delivery_recipient,
+    )
 def _sql(statement: str) -> str:
     return statement if USE_POSTGRES else statement.replace("%s", "?")
 
@@ -168,6 +209,32 @@ def _load_conversation(conversation_id: str, limit: int = 20) -> List[Dict[str, 
                 "created_at": str(created_at or ""),
                 "message_id": f"conversation:{row_id}:1:nina",
             })
+    return messages
+
+
+def _load_contact_conversation(contact_id: str, fallback_conversation_id: str, limit: int = 20) -> List[Dict[str, str]]:
+    """Read channel turns for one explicitly resolved canonical contact only."""
+    contact = str(contact_id or "").strip()
+    if not contact:
+        return _load_conversation(fallback_conversation_id, limit=limit)
+    _ensure_conversation_store()
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute(_sql("""
+        SELECT user_text, nina_text, created_at FROM conversation_state
+        WHERE user_id LIKE %s AND intent=%s
+        ORDER BY created_at DESC, id DESC LIMIT %s
+    """), (f"contact:{contact}:%", "web_chat", max(1, min(int(limit or 20), 100))))
+    rows = list(reversed(cur.fetchall()))
+    cur.close()
+    conn.close()
+    messages = []
+    for user_text, nina_text, created_at in rows:
+        stamp = str(created_at or "")
+        if user_text:
+            messages.append({"role": "user", "text": str(user_text), "created_at": stamp})
+        if nina_text:
+            messages.append({"role": "assistant", "text": str(nina_text), "created_at": stamp})
     return messages
 
 
@@ -375,10 +442,12 @@ def materialize_due_reminders(workspace_id: str, now=None, owner_id: str = ""):
     current = now or datetime.now(ZoneInfo("Europe/Riga"))
     created = []
     for obj in list_work_objects(workspace_id=workspace_id, limit=200):
-        object_owner = str(getattr(obj, "origin_user_id", "") or "").strip()
+        metadata = getattr(obj, "metadata", {}) or {}
+        object_owner = str(
+            metadata.get("contact_id") or getattr(obj, "origin_user_id", "") or ""
+        ).strip()
         if owner_id and object_owner and object_owner != owner_id:
             continue
-        metadata = getattr(obj, "metadata", {}) or {}
         if metadata.get("reminder_state") != "scheduled":
             continue
         due = _daily_item_time(obj, current)
@@ -696,6 +765,7 @@ def _reminder_read_operation(operation: str, clean: str, workspace_id: str, owne
 def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, channel: str = "web",
                          generator: Optional[Callable[[str], str]] = None,
                          conversation_id: str = "", contact_id: str = "",
+                         semantic_conversation_id: str = "",
                          contact_context: str = "", canonical_client_id: str = "",
                          canonical_work_workspace_id: str = "",
                          precomputed_decision=None,
@@ -707,10 +777,11 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
     if len(clean) > 4000:
         return {"ok": False, "error": "message_too_long", "text": ""}
 
+    semantic_context_id = str(semantic_conversation_id or conversation_id or "").strip()
     decision = precomputed_decision or Brain.decide(clean, BrainContext(
         workspace_id=canonical_work_workspace_id or workspace_id,
         channel=channel,
-        conversation_id=conversation_id,
+        conversation_id=semantic_context_id,
     ))
     decision_payload = decision.to_dict()
     # ONE NINA routes explicit public research after the shared Brain decision.
@@ -723,7 +794,7 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             read_public_websites, search_public_web, summarize_sources, summarize_verified_links,
         )
         research_owner = str(contact_id or conversation_id or _conversation_id(workspace_id)).strip()
-        previous_research = latest_research_session(workspace_id, research_owner, conversation_id) if conversation_id else None
+        previous_research = latest_research_session(workspace_id, research_owner, semantic_context_id) if semantic_context_id else None
         folded = clean.casefold()
         explicit_save = bool(previous_research) and any(
             phrase in folded for phrase in ("saglabā šo meklējumu", "saglaba so meklejumu", "save this search")
@@ -740,7 +811,7 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
                 "atrodi šajā vietnē", "atrodi saja vietne", "find on this site", "meklē šajā vietnē",
             ))
             payload = read_public_websites(explicit_urls, clean, crawl=crawl)
-            session_id = save_research_session(workspace_id, research_owner, conversation_id, payload)
+            session_id = save_research_session(workspace_id, research_owner, semantic_context_id, payload)
             answer = answer_page_content(payload, clean)
             _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
             return {"ok": bool(payload.get("ok")), "text": answer, "source": "web_research",
@@ -779,7 +850,7 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
                 return {"ok": True, "text": clarification, "source": "web_research_clarification",
                         "channel": channel, "decision": decision_payload, "search_intent": dict(intent.__dict__)}
             payload = apply_followup(previous_research, clean) if followup_signal else search_public_web(intent)
-            session_id = save_research_session(workspace_id, research_owner, conversation_id, payload)
+            session_id = save_research_session(workspace_id, research_owner, semantic_context_id, payload)
             answer = summarize_sources(payload)
             _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
             return {"ok": bool(payload.get("ok")), "text": answer, "source": "web_research",
@@ -810,9 +881,7 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             "channel": channel, "decision": decision_payload,
             "reminder_object_ids": [obj.object_id for obj in reminder_read["reminders"]],
         }
-    if decision.reminder_operation == "UPDATE" or (_period_bounds(clean) and re.search(
-        r"\b(?:saki|nesaki|atgādini|atgadini)\b", clean, re.IGNORECASE,
-    )):
+    if decision.reminder_operation == "UPDATE":
         updated = _update_reminder_from_context(target_workspace, reminder_owner, clean)
         if updated is not None:
             metadata = dict(getattr(updated, "metadata", {}) or {})
@@ -853,7 +922,7 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         if decision.reminder_operation == "CREATE":
             from task_engine import build_task_title
             _save_pending_reminder_context(
-                conversation_id, clean, build_task_title(clean),
+                semantic_context_id, clean, build_task_title(clean),
             )
         answer = (
             "Kad tieši man tev to atgādināt?"
@@ -891,7 +960,7 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         return {"ok": True, "text": answer, "source": "daily_assistant", "channel": channel, "decision": decision_payload}
 
     work_result = None
-    work_text = _reminder_continuation_text(clean, conversation_id, decision)
+    work_text = _reminder_continuation_text(clean, semantic_context_id, decision)
     if decision.create_work_object:
         try:
             work_result = execute_natural_work_request(
@@ -905,7 +974,7 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             work_result = None
     if work_result and work_result.get("handled") and str(work_result.get("text") or "").strip():
         if work_result.get("ok") and work_text != clean:
-            _clear_pending_reminder_context(conversation_id)
+            _clear_pending_reminder_context(semantic_context_id)
         answer = _customer_safe_text(work_result.get("text") or "")
         _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
         response = {
@@ -927,7 +996,10 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             "decision": decision_payload,
         }
 
-    history = _load_conversation(conversation_id, limit=12) if conversation_id else load_web_conversation(workspace_id=workspace_id, limit=12)
+    history = (
+        _load_contact_conversation(contact_id, conversation_id, limit=12)
+        if conversation_id else load_web_conversation(workspace_id=workspace_id, limit=12)
+    )
     history_text = "\n".join(
         f"{'Lietotājs' if item['role'] == 'user' else 'Nina'}: {item['text']}" for item in history[-24:]
     )
