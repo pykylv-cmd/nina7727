@@ -92,6 +92,24 @@ class NaturalWorkRoutingTests(unittest.TestCase):
             "sagatavot piedāvājumu Jānim",
         )
 
+    def test_tasks_get_does_not_seed_or_duplicate_canonical_work(self):
+        task = self._assert_task(
+            "Create a task: preserve canonical work during rendering.",
+            "preserve canonical work during rendering",
+        )
+        before = self.work_objects.list_work_objects(workspace_id="demo_small_business")
+        before_ids = sorted(obj.object_id for obj in before)
+
+        response = self.web_app.app.test_client().get("/tasks?lang=en")
+
+        after = self.work_objects.list_work_objects(workspace_id="demo_small_business")
+        after_ids = sorted(obj.object_id for obj in after)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(after), len(before))
+        self.assertEqual(after_ids, before_ids)
+        self.assertIn(task.title, response.get_data(as_text=True))
+        self.assertFalse(any((obj.source_key or "").startswith("demo:") for obj in after))
+
     def test_latvian_reminder_precedes_offer_noun(self):
         self._assert_task(
             "Atgādini rīt piezvanīt Jānim par piedāvājumu.",

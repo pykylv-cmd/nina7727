@@ -4339,11 +4339,7 @@ def load_workspace_data():
     ]
     objects = []
     try:
-        from work_objects import list_work_objects, seed_demo_work_objects
-        try:
-            seed_demo_work_objects()
-        except Exception:
-            pass
+        from work_objects import list_work_objects
         try:
             objects = list_work_objects(workspace_id="demo_small_business") or []
         except TypeError:
