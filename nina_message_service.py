@@ -647,7 +647,9 @@ def _reminder_continuation_text(clean: str, conversation_id: str, decision) -> s
     """Combine a time-only answer with the pending action, excluding answer prose."""
     if not decision.create_reminder or decision.needs_clarification:
         return clean
-    clock_answer = re.search(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", clean.casefold())
+    if _is_explicit_complete_reminder_create(clean, decision):
+        return clean
+    clock_answer = re.search(r"\b(?:[01]?\d|2[0-3])(?::[0-5]\d|\.[0-5]\d)?\b", clean.casefold())
     hourly_answer = _hourly_recurrence_requested(clean)
     if not clock_answer and not hourly_answer:
         return clean
@@ -657,13 +659,46 @@ def _reminder_continuation_text(clean: str, conversation_id: str, decision) -> s
     action = str(pending.get("action_text") or "").strip()
     if hourly_answer:
         return f"Atgādini man {clean}: {action}" if action else clean
-    weekday = re.search(
-        r"\b(?:pirmdien|otrdien|trešdien|tresdien|ceturtdien|piektdien|sestdien|svētdien|svetdien)\b",
+    pending_raw = str(pending.get("raw_text") or "")
+    day = re.search(
+        r"\b(?:šodien|sodien|rīt|rit|parīt|parit|pirmdien|otrdien|trešdien|tresdien|"
+        r"ceturtdien|piektdien|sestdien|svētdien|svetdien)\b",
         clean, re.IGNORECASE,
+    ) or re.search(
+        r"\b(?:šodien|sodien|rīt|rit|parīt|parit|pirmdien|otrdien|trešdien|tresdien|"
+        r"ceturtdien|piektdien|sestdien|svētdien|svetdien)\b",
+        pending_raw, re.IGNORECASE,
     )
-    clock = re.search(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", clean)
-    timing = " ".join(part.group(0) for part in (weekday, clock) if part)
+    clock = re.search(r"\b(?:[01]?\d|2[0-3])(?::[0-5]\d|\.[0-5]\d)?\b", clean)
+    clock_text = clock.group(0) if clock else ""
+    if clock_text and ":" not in clock_text and "." not in clock_text:
+        clock_text = f"{clock_text}:00"
+    timing = " ".join(part for part in (day.group(0) if day else "", clock_text) if part)
     return f"Atgādini {timing} {action}" if action and timing else clean
+
+
+def _is_explicit_complete_reminder_create(text: str, decision) -> bool:
+    """Return true when this turn is a complete new reminder command, not a clarification answer."""
+    if (
+        not decision.create_reminder
+        or decision.needs_clarification
+        or str(getattr(decision, "reminder_operation", "") or "").upper() != "CREATE"
+    ):
+        return False
+    return bool(re.search(
+        r"\b(?:atgādini|atgadini|atceries|remind)\b",
+        str(text or ""), re.IGNORECASE,
+    ))
+
+
+def _is_pending_reminder_schedule_answer(text: str) -> bool:
+    """Recognize a schedule-only clarification answer without treating it as a new action."""
+    value = str(text or "").strip()
+    if re.fullmatch(r"(?:[01]?\d|2[0-3])(?::[0-5]\d|\.[0-5]\d)?", value):
+        return True
+    return _hourly_recurrence_requested(value) and not bool(re.search(
+        r"\b(?:atgādini|atgadini|atceries|remind)\b", value, re.IGNORECASE,
+    ))
 
 
 def _hourly_recurrence_requested(text: str) -> bool:
@@ -1171,7 +1206,10 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         channel=channel,
         conversation_id=semantic_context_id,
     ))
-    if pending_reminder and _hourly_recurrence_requested(clean):
+    supersedes_pending_reminder = bool(
+        pending_reminder and _is_explicit_complete_reminder_create(clean, decision)
+    )
+    if pending_reminder and _is_pending_reminder_schedule_answer(clean) and not supersedes_pending_reminder:
         decision = Decision(
             reply_required=True, remember=True, create_work_object=True,
             create_reminder=True, confidence=1.0,
@@ -1490,7 +1528,7 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         except Exception:
             work_result = None
     if work_result and work_result.get("handled") and str(work_result.get("text") or "").strip():
-        if work_result.get("ok") and work_text != clean:
+        if work_result.get("ok") and (work_text != clean or supersedes_pending_reminder):
             _clear_pending_reminder_context(semantic_context_id)
         answer = _customer_safe_text(work_result.get("text") or "")
         _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)

@@ -116,6 +116,29 @@ class OneNinaCrossChannelTests(unittest.TestCase):
         self.assertNotEqual(self.reminders()[0].metadata["reminder_text"], "izvest suni")
         self.assertEqual(len(self.reminders("contact-other")), 0)
 
+    def test_full_explicit_cross_channel_create_supersedes_only_same_contact_pending(self):
+        pending = self.send("web", "Atgādini man rīt piezvanīt Jānim")
+        self.assertEqual(pending["source"], "brain_clarification")
+
+        created = self.send(
+            "telegram",
+            "Atgādini man ik pēc apaļas stundas — man ļoti patīk kad es esmu miljardieris",
+        )
+        linked = self.reminders()
+        self.assertTrue(created["ok"])
+        self.assertEqual(len(linked), 1)
+        self.assertEqual(linked[0].metadata["reminder_text"], "man ļoti patīk kad es esmu miljardieris")
+        self.assertNotIn("Jānim", linked[0].metadata["reminder_text"])
+
+        other_pending = self.send("web", "Atgādini man rīt izvest suni", contact_id="contact-other")
+        self.assertEqual(other_pending["source"], "brain_clarification")
+        self.send("whatsapp_company", "Atgādini man rīt 15 piezvanīt Pēterim")
+        continued = self.send("telegram", "11:30", contact_id="contact-other")
+        self.assertTrue(continued["ok"])
+        other = self.reminders("contact-other")
+        self.assertEqual(len(other), 1)
+        self.assertEqual(other[0].metadata["reminder_text"], "izvest suni")
+
     def test_duplicate_inbound_across_channels_is_idempotent(self):
         text = "Atgādini man rīt 11.00 saskaitīt naudu"
         first = self.send("web", text)

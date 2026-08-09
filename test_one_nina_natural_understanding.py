@@ -123,6 +123,48 @@ class OneNinaNaturalUnderstandingTests(unittest.TestCase):
         self.assertEqual(result["source"], "brain_clarification")
         self.assertEqual(self.active_reminders(), [])
 
+    def test_complete_explicit_reminder_supersedes_pending_clarification(self):
+        pending = self.send("Atgādini man rīt piezvanīt Jānim")
+        self.assertEqual(pending["source"], "brain_clarification")
+
+        created = self.send(
+            "Atgādini man ik pēc apaļas stundas — man ļoti patīk kad es esmu miljardieris"
+        )
+        reminders = self.active_reminders()
+
+        self.assertTrue(created["ok"])
+        self.assertEqual(len(reminders), 1)
+        self.assertEqual(reminders[0].metadata["recurrence"], "hourly")
+        self.assertEqual(reminders[0].metadata["reminder_text"], "man ļoti patīk kad es esmu miljardieris")
+        self.assertNotIn("Jānim", reminders[0].metadata["reminder_text"])
+        self.assertEqual(self.messaging._pending_reminder_context("person-a"), {})
+
+    def test_clock_only_answer_still_continues_pending_reminder(self):
+        pending = self.send("Atgādini man rīt piezvanīt Jānim")
+        self.assertEqual(pending["source"], "brain_clarification")
+
+        created = self.send("11")
+        reminders = self.active_reminders()
+
+        self.assertTrue(created["ok"])
+        self.assertEqual(len(reminders), 1)
+        self.assertEqual(reminders[0].metadata["reminder_text"], "piezvanīt Jānim")
+        scheduled = datetime.fromisoformat(reminders[0].metadata["reminder_at"])
+        self.assertEqual((scheduled.hour, scheduled.minute), (11, 0))
+
+    def test_complete_timed_reminder_supersedes_pending_clarification(self):
+        self.send("Atgādini man rīt piezvanīt Jānim")
+
+        created = self.send("Atgādini man rīt 15 piezvanīt Pēterim")
+        reminders = self.active_reminders()
+
+        self.assertTrue(created["ok"])
+        self.assertEqual(len(reminders), 1)
+        self.assertEqual(reminders[0].metadata["reminder_text"], "piezvanīt Pēterim")
+        self.assertNotIn("Jānim", reminders[0].metadata["reminder_text"])
+        scheduled = datetime.fromisoformat(reminders[0].metadata["reminder_at"])
+        self.assertEqual((scheduled.hour, scheduled.minute), (15, 0))
+
     def test_parit_and_weekday_bare_hours_are_valid(self):
         before = datetime.now(ZoneInfo("Europe/Riga"))
         parit = self.send("Atgādini man parīt 9 piezvanīt klientam")
