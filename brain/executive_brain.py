@@ -108,6 +108,16 @@ def _reminder_query_operation(value: str) -> str:
     return ""
 
 
+def _reminder_update_operation(value: str) -> bool:
+    """Recognize a contextual reminder edit without turning it into CREATE."""
+    daypart = bool(re.search(
+        r"\b(?:no\s+rīta|rītā|pa\s+dienu|pusdienlaikā|vakarā|morning|midday|evening)\b",
+        value,
+    ))
+    edit = bool(re.search(r"\b(?:saki|nesaki|atgādini|atgadini)\b", value))
+    return daypart and edit and "?" not in value
+
+
 def classify_message(message: str) -> Decision:
     value = _normalized(message)
     if not value:
@@ -138,6 +148,12 @@ def classify_message(message: str) -> Decision:
         return Decision(
             reply_required=True, confidence=0.98,
             reason="reminder_ask", reminder_operation="ASK",
+        )
+
+    if _reminder_update_operation(value):
+        return Decision(
+            reply_required=True, confidence=0.98,
+            reason="reminder_update", reminder_operation="UPDATE",
         )
 
     has_time = _has_clock_or_date(value)

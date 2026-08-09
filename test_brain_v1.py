@@ -93,6 +93,12 @@ class BrainDecisionTests(unittest.TestCase):
         self.assertFalse(asked.create_reminder)
         self.assertFalse(asked.needs_clarification)
 
+    def test_contextual_evening_edit_is_update_not_create(self):
+        decision = classify_message("Vakarā arī labrīt nesaki")
+        self.assertEqual(decision.reminder_operation, "UPDATE")
+        self.assertFalse(decision.create_reminder)
+        self.assertFalse(decision.create_work_object)
+
     def test_no_action_decision(self):
         decision = classify_message("Ok.")
         self.assertTrue(decision.no_action)

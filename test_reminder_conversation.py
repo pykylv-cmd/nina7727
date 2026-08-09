@@ -87,6 +87,57 @@ class ReminderConversationTests(unittest.TestCase):
         self.assertEqual(len(result["object_ids"]), 3)
         return self.sources()
 
+    def create_production_daily_set(self):
+        result = self.send(
+            "Katru dienu 7.00 atgādini: Labrīt, miljardieri 😊\n"
+            "Vēl 12.00 saki: Tu esi miljardieris\n"
+            "Un 19.00 arī: Tu esi miljardieris 😊"
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(result["object_ids"]), 3)
+        return self.sources()
+
+    def test_exact_latvian_production_conversation_uses_persisted_truth(self):
+        sources = self.create_production_daily_set()
+        expected = {
+            "07:00": "Labrīt, miljardieri 😊",
+            "12:00": "Tu esi miljardieris",
+            "19:00": "Tu esi miljardieris 😊",
+        }
+        self.assertEqual(
+            {self.messaging._reminder_local_clock(obj): obj.metadata["reminder_text"] for obj in sources},
+            expected,
+        )
+        original_ids = {obj.object_id for obj in sources}
+
+        listed = self.send("Kādi man ir atgādinājumi?")
+        self.assertEqual(listed["decision"]["reminder_operation"], "LIST")
+        for clock, text in expected.items():
+            self.assertIn(clock, listed["text"])
+            self.assertIn(text, listed["text"])
+        self.assertEqual({obj.object_id for obj in self.sources()}, original_ids)
+
+        midday = self.send("Pa dienu kas tev jāatgādina?")
+        self.assertEqual(midday["decision"]["reminder_operation"], "ASK")
+        self.assertIn("12:00", midday["text"])
+        self.assertIn("Tu esi miljardieris", midday["text"])
+        self.assertNotIn("Kad tieši", midday["text"])
+
+        evening_before = next(obj for obj in sources if self.messaging._reminder_local_clock(obj) == "19:00")
+        updated = self.send("Vakarā arī labrīt nesaki")
+        self.assertTrue(updated["ok"])
+        self.assertEqual(updated["decision"]["reminder_operation"], "UPDATE")
+        self.assertEqual(updated["reminder_object_id"], evening_before.object_id)
+        after = self.sources()
+        self.assertEqual({obj.object_id for obj in after}, original_ids)
+        self.assertEqual(len(after), 3)
+
+        listed_after = self.send("Kādi man ir atgādinājumi?")
+        evening_after = next(obj for obj in after if self.messaging._reminder_local_clock(obj) == "19:00")
+        self.assertEqual(evening_after.object_id, evening_before.object_id)
+        self.assertNotIn("Labrīt", evening_after.metadata["reminder_text"])
+        self.assertIn(evening_after.metadata["reminder_text"], listed_after["text"])
+
     def test_latvian_list_is_read_only_not_create(self):
         self.create_daily_set()
         before = [obj.object_id for obj in self.sources()]

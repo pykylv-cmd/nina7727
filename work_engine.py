@@ -583,13 +583,16 @@ def execute_natural_work_request(
         if task and len(schedules) == 1 and _clean(task.get("reminder_at")):
             schedules[0]["reminder_at"] = _clean(task.get("reminder_at"))
         if task and schedules:
-            title = _clean(build_task_title(user_text))
-            if not title:
+            default_title = _clean(build_task_title(user_text))
+            if not default_title and not any(_clean(item.get("reminder_text")) for item in schedules):
                 return {"ok": False, "handled": True, "error": "reminder_text_missing", "text": "Atgādinājuma teksts nav saprotams."}
             parsed_client_name = _clean(task.get("client"))
             work_client_id = _clean(canonical_client_id) or parsed_client_name
             created = []
             for schedule in schedules:
+                title = _clean(schedule.get("reminder_text")) or default_title
+                if not title:
+                    return {"ok": False, "handled": True, "error": "reminder_text_missing", "text": "Atgādinājuma teksts nav saprotams."}
                 reminder_at = _clean(schedule.get("reminder_at"))
                 recurrence = _clean(schedule.get("recurrence"))
                 identity = "\0".join((
@@ -636,7 +639,8 @@ def execute_natural_work_request(
             if not created:
                 return {"ok": False, "handled": True, "error": "reminder_persistence_failed", "text": "Atgādinājumu neizdevās saglabāt."}
             summary = ", ".join(
-                str((obj.metadata or {}).get("reminder_at") or "") for obj in created
+                f"{(obj.metadata or {}).get('reminder_at') or ''}: {(obj.metadata or {}).get('reminder_text') or obj.title}"
+                for obj in created
             )
             return {
                 "ok": True,
@@ -646,7 +650,7 @@ def execute_natural_work_request(
                 "object_ids": [obj.object_id for obj in created],
                 "objects": created,
                 "channel": _clean(channel) or "unknown",
-                "text": f"Atgādinājums saglabāts: {title} — {summary}",
+                "text": f"Atgādinājumi saglabāti — {summary}",
                 "reminder_at": _clean((created[0].metadata or {}).get("reminder_at")),
             }
 

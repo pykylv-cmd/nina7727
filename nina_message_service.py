@@ -595,7 +595,7 @@ def _period_bounds(text: str):
     lower = str(text or "").casefold()
     if any(marker in lower for marker in ("no rīta", "rītā", "rīta", "morning")):
         return 5, 10
-    if any(marker in lower for marker in ("pa dienu", "pusdien", "dienā", "midday", "afternoon")):
+    if any(marker in lower for marker in ("pa dienu", "pusdienlaikā", "pusdien", "dienā", "midday", "afternoon")):
         return 10, 17
     if any(marker in lower for marker in ("vakarā", "vakara", "evening")):
         return 17, 24
@@ -614,7 +614,34 @@ def _select_period_reminder(reminders: List[Any], text: str):
         hour = int(clock.split(":", 1)[0])
         if bounds[0] <= hour < bounds[1]:
             matching.append(obj)
+    lower = str(text or "").casefold()
+    anchor = 7 if any(value in lower for value in ("no rīta", "rītā", "rīta", "morning")) else 12
+    if any(value in lower for value in ("vakarā", "vakara", "evening")):
+        anchor = 19
+    exact = [obj for obj in matching if _reminder_local_clock(obj) == f"{anchor:02d}:00"]
+    if len(exact) == 1:
+        return exact[0]
     return matching[0] if len(matching) == 1 else None
+
+
+def _period_reminders(reminders: List[Any], text: str) -> List[Any]:
+    bounds = _period_bounds(text)
+    if not bounds:
+        return []
+    result = []
+    for obj in reminders:
+        clock = _reminder_local_clock(obj)
+        if clock and bounds[0] <= int(clock.split(":", 1)[0]) < bounds[1]:
+            result.append(obj)
+    return result
+
+
+def _period_clarification(reminders: List[Any], text: str) -> str:
+    relevant = _period_reminders(reminders, text)
+    if not relevant:
+        return "Neatradu atgādinājumu šim dienas laikam."
+    times = ", ".join(sorted({_reminder_local_clock(obj) for obj in relevant}))
+    return f"Atradu vairākus atgādinājumus šajā dienas laikā: {times}. Kuru vēlies?"
 
 
 def _updated_reminder_text(current: str, instruction: str) -> str:
@@ -659,7 +686,7 @@ def _reminder_read_operation(operation: str, clean: str, workspace_id: str, owne
     if operation == "ASK":
         target = _select_period_reminder(reminders, clean)
         if target is None:
-            return {"ok": True, "text": "Neatradu vienu nepārprotamu atgādinājumu šim dienas laikam.", "reminders": reminders}
+            return {"ok": True, "text": _period_clarification(reminders, clean), "reminders": reminders}
         metadata = dict(getattr(target, "metadata", {}) or {})
         title = str(metadata.get("reminder_text") or getattr(target, "title", "") or "").strip()
         return {"ok": True, "text": f"{_reminder_local_clock(target)} man tev jāatgādina: {title}", "reminders": [target]}
@@ -783,9 +810,9 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             "channel": channel, "decision": decision_payload,
             "reminder_object_ids": [obj.object_id for obj in reminder_read["reminders"]],
         }
-    if _period_bounds(clean) and re.search(
+    if decision.reminder_operation == "UPDATE" or (_period_bounds(clean) and re.search(
         r"\b(?:saki|nesaki|atgādini|atgadini)\b", clean, re.IGNORECASE,
-    ):
+    )):
         updated = _update_reminder_from_context(target_workspace, reminder_owner, clean)
         if updated is not None:
             metadata = dict(getattr(updated, "metadata", {}) or {})
@@ -796,6 +823,14 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
                 "channel": channel, "decision": decision_payload,
                 "reminder_object_id": updated.object_id,
             }
+        reminders = _active_reminder_sources(target_workspace, reminder_owner)
+        answer = _period_clarification(reminders, clean)
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+        return {
+            "ok": False, "error": "reminder_update_target_ambiguous",
+            "text": answer, "source": "shared_work", "channel": channel,
+            "decision": decision_payload,
+        }
     if decision.reason == "cancel_all_reminders":
         cancelled = _cancel_all_reminders(target_workspace, str(contact_id or "").strip())
         answer = (

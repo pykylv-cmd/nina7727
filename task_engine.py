@@ -230,6 +230,20 @@ def detect_reminder_schedules(
         r"\b(?:katru\s+dienu|ik\s+dienu|every\s+day|daily)\b",
         raw, re.IGNORECASE,
     ) else ""
+    per_clock_text = {}
+    for line in raw.splitlines():
+        line_clocks = list(re.finditer(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", line))
+        if len(line_clocks) != 1:
+            continue
+        line_clock = line_clocks[0]
+        message = line[line_clock.end():].strip()
+        message = re.sub(
+            r"^(?:(?:atgādini|atgadini)(?:\s+man)?|saki|arī|ari)\s*:?\s*",
+            "", message, flags=re.IGNORECASE,
+        ).strip(" :,.!?- ")
+        if message:
+            hour, minute = re.split(r"[:.]", line_clock.group(0))
+            per_clock_text[f"{int(hour):02d}:{int(minute):02d}"] = message
     if len(clocks) <= 1:
         parsed = _detect_single_reminder_schedule(
             raw, now=now, timezone_name=timezone_name,
@@ -237,6 +251,11 @@ def detect_reminder_schedules(
         )
         if parsed and recurrence:
             parsed["recurrence"] = recurrence
+        if parsed and clocks:
+            hour, minute = re.split(r"[:.]", clocks[0].group(0))
+            message = per_clock_text.get(f"{int(hour):02d}:{int(minute):02d}")
+            if message:
+                parsed["reminder_text"] = message
         return [parsed] if parsed else []
 
     results = []
@@ -261,6 +280,10 @@ def detect_reminder_schedules(
         seen.add(reminder_at)
         if recurrence:
             parsed["recurrence"] = recurrence
+        hour, minute = re.split(r"[:.]", selected.group(0))
+        message = per_clock_text.get(f"{int(hour):02d}:{int(minute):02d}")
+        if message:
+            parsed["reminder_text"] = message
         results.append(parsed)
     return results
 
