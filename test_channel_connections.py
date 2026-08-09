@@ -71,13 +71,17 @@ class ChannelConnectionsV1Tests(unittest.TestCase):
         self.assertNotIn("connection-status disconnected", client_page)
         admin_page = self.client.get("/admin/channels?lang=en").get_data(as_text=True)
         self.assertIn("connection-status disconnected", admin_page)
-        channel_connections.set_connection_for_test(web_app.NINA_WEB_WORKSPACE_ID, "telegram", "connected", {"bot_username": "Nina7727_bot"})
+        channel_connections.set_connection_for_test(
+            web_app.NINA_WEB_WORKSPACE_ID, "telegram", "connected",
+            {"bot_username": "Nina7727_bot", "polling_ready": True,
+             "last_heartbeat_at": datetime.now(timezone.utc).isoformat()},
+        )
         client_page = self.client.get("/channels?lang=en").get_data(as_text=True)
         self.assertIn("Available", client_page)
         self.assertIn("Open Telegram", client_page)
         self.assertNotIn("connection-status connected", client_page)
         admin_page = self.client.get("/admin/channels?lang=en").get_data(as_text=True)
-        self.assertIn("connection-status connected", admin_page)
+        self.assertIn("connection-status ready", admin_page)
         self.assertIn("@Nina7727_bot", admin_page)
 
     def test_telegram_token_is_workspace_scoped_single_use_and_expiring(self):
@@ -118,9 +122,10 @@ class ChannelConnectionsV1Tests(unittest.TestCase):
         self.assertIn("Open Telegram", pending)
         self.assertNotIn("connection-status pending", pending)
         pending_admin = self.client.get("/admin/channels?lang=en").get_data(as_text=True)
-        self.assertIn("connection-status pending", pending_admin)
+        self.assertIn("connection-status not_connected", pending_admin)
         linked = channel_connections.consume_telegram_token(setup["token"], "101", "owner", "202", "Owner Name")
         self.assertIsNotNone(linked)
+        channel_connections.mark_telegram_runtime_state(True)
         self.assertEqual(
             channel_connections.get_connection(web_app.NINA_WEB_WORKSPACE_ID, "telegram")["status"],
             "connected",
@@ -132,7 +137,7 @@ class ChannelConnectionsV1Tests(unittest.TestCase):
         self.assertNotIn("Owner Name", connected)
         self.assertNotIn(setup["token"], connected)
         connected_admin = self.client.get("/admin/channels?lang=en").get_data(as_text=True)
-        self.assertIn("connection-status connected", connected_admin)
+        self.assertIn("connection-status ready", connected_admin)
         self.assertIn("Owner Name", connected_admin)
         self.assertNotIn(setup["token"], connected_admin)
 

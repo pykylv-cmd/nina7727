@@ -160,24 +160,72 @@ class CompanyWhatsAppTests(unittest.TestCase):
             "ninaos_company", "whatsapp_company", "pending",
             {"mode": "company_external", "runtime_state": "reconnecting"},
         )
-        with patch.object(self.web, "personal_whatsapp_bridge_request", return_value={"status": "connecting"}):
+        with patch.object(self.web, "personal_whatsapp_bridge_request", return_value={"status": "connecting"}), \
+             patch.object(self.web, "resolve_channel_connection_truth", wraps=self.connections.resolve_channel_connection_truth) as resolver:
             response = self.client.get("/channels/whatsapp-company/status")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["status"], "connecting")
+        self.assertEqual(response.get_json()["status"], "qr_pending")
+        resolver.assert_called_once()
         self.assertEqual(
             self.connections.get_connection("ninaos_company", "whatsapp_company")["status"], "pending"
         )
         self.assertEqual(self.company.list_connected_workspaces(), ["ninaos_company"])
+
+        with patch.object(self.web, "personal_whatsapp_bridge_request",
+                          return_value={"status": "connecting", "qr_svg": "<svg></svg>"}), \
+             patch.object(self.web, "company_whatsapp_pairing_is_active", return_value=True), \
+             patch.object(self.web, "resolve_channel_connection_truth", wraps=self.connections.resolve_channel_connection_truth) as resolver:
+            qr_pending = self.client.get("/channels/whatsapp-company/status")
+        self.assertEqual(qr_pending.get_json()["status"], "qr_pending")
+        self.assertEqual(qr_pending.get_json()["qr_svg"], "<svg></svg>")
+        resolver.assert_called_once()
+
+        self.connections.set_connection_for_test(
+            "ninaos_company", "whatsapp_company", "pending",
+            {"mode": "company_external"},
+        )
+        with patch.object(self.web, "personal_whatsapp_bridge_request", return_value={"status": "connecting"}), \
+             patch.object(self.web, "company_whatsapp_pairing_is_active", return_value=False), \
+             patch.object(self.web, "resolve_channel_connection_truth", wraps=self.connections.resolve_channel_connection_truth) as resolver:
+            expired = self.client.get("/channels/whatsapp-company/status")
+        self.assertEqual(expired.get_json()["status"], "attention")
+        resolver.assert_called_once()
+
+        self.connections.set_connection_for_test("ninaos_company", "whatsapp_company", "connected", {})
+        with patch.object(self.web, "personal_whatsapp_bridge_request", side_effect=RuntimeError("offline")), \
+             patch.object(self.web, "resolve_channel_connection_truth", wraps=self.connections.resolve_channel_connection_truth) as resolver:
+            unavailable = self.client.get("/channels/whatsapp-company/status")
+        self.assertEqual(unavailable.get_json()["status"], "attention")
+        resolver.assert_called_once()
+
+        self.connections.set_connection_for_test(
+            "ninaos_company", "whatsapp_company", "error",
+            {"runtime_state": "invalid_auth"},
+        )
+        with patch.object(self.web, "personal_whatsapp_bridge_request", return_value={"status": "invalid_auth"}), \
+             patch.object(self.web, "resolve_channel_connection_truth", wraps=self.connections.resolve_channel_connection_truth) as resolver:
+            invalid = self.client.get("/channels/whatsapp-company/status")
+        self.assertEqual(invalid.get_json()["status"], "reconnect_required")
+        resolver.assert_called_once()
+
+        self.company.disconnect_company()
+        with patch.object(self.web, "personal_whatsapp_bridge_request", return_value={"status": "connected"}), \
+             patch.object(self.web, "resolve_channel_connection_truth", wraps=self.connections.resolve_channel_connection_truth) as resolver:
+            unlinked = self.client.get("/channels/whatsapp-company/status")
+        self.assertEqual(unlinked.get_json()["status"], "not_connected")
+        resolver.assert_called_once()
 
     def test_bridge_connected_reconciles_error_row_and_clears_only_safe_errors(self):
         self.connections.set_connection_for_test(
             "ninaos_company", "whatsapp_company", "error",
             {"error_code": "pairing_expired", "last_error": "safe", "last_error_class": "temporary", "masked_identity": "*******4711"},
         )
-        with patch.object(self.web, "personal_whatsapp_bridge_request", return_value={"status": "connected"}):
+        with patch.object(self.web, "personal_whatsapp_bridge_request", return_value={"status": "connected"}), \
+             patch.object(self.web, "resolve_channel_connection_truth", wraps=self.connections.resolve_channel_connection_truth) as resolver:
             response = self.client.get("/channels/whatsapp-company/status")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["status"], "connected")
+        self.assertEqual(response.get_json()["status"], "ready")
+        resolver.assert_called_once()
         stored = self.connections.get_connection("ninaos_company", "whatsapp_company")
         self.assertEqual(stored["status"], "connected")
         self.assertTrue(stored["metadata"]["last_connected_at"])

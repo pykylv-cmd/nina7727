@@ -141,6 +141,90 @@ def get_connection(workspace_id, channel):
     }
 
 
+def resolve_channel_connection_truth(workspace_id, channel, persistence_state, runtime_state=None,
+                                     user_readiness=None, now=None, heartbeat_ttl_seconds=45):
+    """Derive one secret-free truth from canonical linkage and runtime readiness."""
+    _validate_workspace(workspace_id)
+    channel = _validate_channel(channel)
+    persisted = dict(persistence_state or {})
+    runtime = dict(runtime_state or {})
+    linked = persisted.get("status") == "connected"
+    runtime_name = str(runtime.get("state") or runtime.get("status") or "").strip().lower()
+    fresh = bool(runtime.get("fresh"))
+    heartbeat = str(runtime.get("last_heartbeat_at") or "")
+    if heartbeat and "fresh" not in runtime:
+        try:
+            seen = datetime.fromisoformat(heartbeat.replace("Z", "+00:00"))
+            fresh = (((now or _now()) - seen).total_seconds() <= int(heartbeat_ttl_seconds))
+        except (TypeError, ValueError):
+            fresh = False
+    if channel == "telegram":
+        if not linked:
+            state, reason, action = "not_connected", "telegram_not_linked", "link"
+        elif runtime_name in {"ready", "connected"} and fresh:
+            state, reason, action = "ready", "telegram_polling_ready", ""
+        else:
+            state, reason, action = "attention", "telegram_runtime_unavailable", "retry"
+    elif channel == "whatsapp_company":
+        persisted_status = str(persisted.get("status") or "disconnected")
+        persisted_runtime = str((persisted.get("metadata") or {}).get("runtime_state") or "")
+        if runtime_name in {"", "disconnected", "unavailable"} and persisted_runtime in {"invalid_auth", "logged_out"}:
+            runtime_name = persisted_runtime
+        if runtime_name == "connected" and linked:
+            state, reason, action = "ready", "company_runtime_connected", ""
+        elif runtime_name in {"invalid_auth", "logged_out"}:
+            state, reason, action = "reconnect_required", "company_auth_invalid", "reconnect"
+        elif runtime_name in {"connecting", "qr_pending"} and runtime.get("qr_available"):
+            state, reason, action = "qr_pending", "company_pairing_qr_ready", "scan_qr"
+        elif persisted_status == "pending" and runtime_name in {"connecting", "qr_pending"}:
+            state, reason, action = "qr_pending", "company_pairing_preparing", "wait"
+        elif not linked and persisted_status not in {"pending", "error"}:
+            state, reason, action = "not_connected", "company_not_linked", "connect"
+        else:
+            state, reason, action = "attention", "company_runtime_unavailable", "retry"
+    elif channel == "web":
+        if not runtime.get("service_ready"):
+            state, reason, action = "attention", "web_service_unhealthy", "retry"
+        elif not (user_readiness or {}).get("workspace_usable"):
+            state, reason, action = "not_ready", "web_workspace_not_ready", "login"
+        else:
+            state, reason, action, linked = "ready", "web_workspace_ready", "", True
+    else:
+        state = "ready" if linked else "not_connected"
+        reason, action = ("persisted_connected", "") if linked else ("not_linked", "connect")
+    return {"state": state, "linked": linked, "runtime_ready": state == "ready",
+            "recoverable": state != "ready", "recovery_action": action, "reason_code": reason}
+
+
+def mark_telegram_runtime_state(ready, now=None):
+    """Refresh linked Telegram rows only; runtime health never creates linkage."""
+    ensure_schema()
+    stamp = _iso(now or _now())
+    conn = _connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(_sql(f"SELECT workspace_id,metadata_json FROM {_TABLE} WHERE channel=%s AND status=%s"),
+                    ("telegram", "connected"))
+        rows = cur.fetchall()
+        for workspace_id, metadata_json in rows:
+            try:
+                metadata = json.loads(metadata_json or "{}")
+            except Exception:
+                metadata = {}
+            metadata["polling_owner"] = bool(ready)
+            metadata["polling_ready"] = bool(ready)
+            metadata["last_heartbeat_at"] = stamp
+            cur.execute(_sql(f"UPDATE {_TABLE} SET metadata_json=%s,updated_at=%s "
+                             "WHERE workspace_id=%s AND channel=%s AND status=%s"),
+                        (json.dumps(metadata, ensure_ascii=False, separators=(",", ":")),
+                         stamp, workspace_id, "telegram", "connected"))
+        conn.commit()
+        cur.close()
+        return len(rows)
+    finally:
+        conn.close()
+
+
 def _upsert(workspace_id, channel, status, metadata=None, secret_ref="", webhook_secret_ref="", app_secret_ref="", token_hash="", token_expires_at="", token_used_at=""):
     workspace_id = _validate_workspace(workspace_id)
     channel = _validate_channel(channel)

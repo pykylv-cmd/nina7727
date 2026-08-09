@@ -42,7 +42,7 @@ from developer_router import (
 )
 from nina_message_service import NinaMessageEnvelope, WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, generate_with_nina, load_channel_conversation, load_web_conversation, route_nina_message, save_channel_turn, send_message_to_nina
 from voice_engine import transcribe_audio_with_openai
-from channel_connections import claim_channel_message, consume_whatsapp_onboarding_state, create_telegram_token, create_whatsapp_onboarding_state, disconnect as disconnect_channel, get_connection, set_connection_for_test, update_whatsapp_verification
+from channel_connections import claim_channel_message, consume_whatsapp_onboarding_state, create_telegram_token, create_whatsapp_onboarding_state, disconnect as disconnect_channel, get_connection, resolve_channel_connection_truth, set_connection_for_test, update_whatsapp_verification
 from channel_layer import (
     CHANNEL_TYPES,
     ChannelLayerError,
@@ -4401,7 +4401,7 @@ def css():
 .nina-logo{position:relative;border-radius:50%;overflow:hidden;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.9),transparent 5%),radial-gradient(circle at 65% 25%,rgba(84,232,255,.9),transparent 10%),radial-gradient(circle at 50% 50%,#1de0ff 0%,#2358ff 38%,#7f45ff 72%,#11152a 100%);box-shadow:0 0 24px rgba(49,140,255,.52),inset 0 0 30px rgba(255,255,255,.12)}.nina-logo.small{width:34px;height:34px}.nina-logo.hero{width:156px;height:156px;flex:0 0 156px}.dot-grid{position:absolute;inset:0;background:radial-gradient(circle,rgba(255,255,255,.86) 0 2px,transparent 2.8px);background-size:16px 16px;transform:rotate(-18deg) scale(1.1);opacity:.58;mask-image:radial-gradient(circle,#000 62%,transparent 70%)}.orbit{position:absolute;left:-22%;right:-22%;top:44%;height:2px;background:rgba(255,255,255,.45);border-radius:999px;transform:rotate(-16deg);box-shadow:0 0 14px rgba(90,190,255,.8)}.orbit-b{transform:rotate(28deg);opacity:.28;top:54%}.nav{display:flex;flex-direction:column;gap:7px}.nav-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:13px;color:#dce7ff;font-size:14px;border:1px solid transparent}.nav-item:hover{background:rgba(255,255,255,.06)}.nav-item.active{background:linear-gradient(90deg,rgba(28,128,255,.95),rgba(90,63,255,.86));color:#fff;box-shadow:0 14px 32px rgba(23,109,255,.23)}.new{margin-left:auto;font-size:10px;padding:2px 7px;border-radius:999px;background:#5638ff}.user{position:absolute;bottom:18px;left:14px;right:14px;border:1px solid var(--line);background:rgba(255,255,255,.045);border-radius:16px;padding:12px;color:var(--muted);font-size:13px}.user b{color:#fff}
  .main{padding:22px 26px 40px;max-width:1460px;width:100%;margin:0 auto}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.search{width:min(520px,55vw);border:1px solid var(--line);border-radius:18px;padding:14px 18px;color:var(--muted);background:rgba(16,24,45,.72);box-shadow:inset 0 0 0 1px rgba(255,255,255,.03),0 12px 34px rgba(0,0,0,.18)}.icons{display:flex;gap:10px;align-items:center}.icon{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.10)}.avatar{background:linear-gradient(135deg,#7c43ff,#dc42ff);font-weight:950}.lang-switch{display:flex;gap:6px}.lang-switch a{font-size:12px;font-weight:950;padding:8px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.06);color:#dbe8ff}.lang-switch a.active{background:linear-gradient(90deg,#168dff,#6443ff);color:#fff}.grid{display:grid;gap:18px}.hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:18px}.card{background:linear-gradient(180deg,rgba(26,36,68,.72),rgba(9,12,24,.70)),radial-gradient(circle at 25% 15%,rgba(40,140,255,.12),transparent 38%);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}.card-pad{padding:24px}.hero-card{min-height:390px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}.hero-lockup{display:flex;align-items:center;justify-content:center;gap:26px}.hero-title{font-size:78px;line-height:.9;font-weight:1000;letter-spacing:-5px;text-shadow:0 10px 40px rgba(0,0,0,.5)}.hero-title span{color:#2493ff}.subtitle{color:#dbe8ff;font-weight:900;letter-spacing:2px;font-size:13px;margin-top:10px}.bigline{margin-top:34px;font-size:25px;line-height:1.35;font-weight:950}.trust{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:24px}.trust span{font-size:12px;font-weight:900;padding:7px 12px;border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:999px}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.kpi{display:block;padding:18px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.025));border-radius:18px;min-height:118px}.kpi small{color:#dbe7ff;font-weight:900}.kpi strong{display:block;font-size:38px;margin:9px 0 2px}.kpi em{color:#71e9ff;font-style:normal;font-size:13px;font-weight:900}.page-title h1{margin:0;font-size:42px;letter-spacing:-1.8px;line-height:1}.page-title p{margin:8px 0 0;color:#c3d4f5;font-weight:800}.section-title{font-size:21px;font-weight:1000;margin:6px 0 13px}.worker-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:16px}.worker-card{overflow:hidden;border-radius:20px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(28,35,60,.78),rgba(9,12,24,.78));min-height:248px;box-shadow:0 20px 55px rgba(0,0,0,.22)}.worker-top{height:112px;display:grid;place-items:center;position:relative;overflow:hidden}.worker-top:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(110deg,rgba(255,255,255,.10) 0 2px,transparent 2px 10px);opacity:.35}.tone-purple{background:linear-gradient(135deg,#4830d8,#6322b7)}.tone-blue{background:linear-gradient(135deg,#058aff,#053c8c)}.tone-green{background:linear-gradient(135deg,#02b973,#095a3b)}.tone-orange{background:linear-gradient(135deg,#d47418,#56321c)}.worker-avatar{position:relative;z-index:1;width:82px;height:82px;border-radius:50%;background:radial-gradient(circle at 36% 30%,#ffe8c8 0 16%,transparent 17%),radial-gradient(circle at 53% 65%,#ffdba8 0 23%,transparent 24%),radial-gradient(circle at 46% 45%,#ef973a 0 45%,#5d3928 46% 62%,#f6c58b 63% 100%);box-shadow:0 16px 34px rgba(0,0,0,.32)}.worker-body{padding:16px}.worker-body h3{margin:0 0 4px;font-size:20px;line-height:1.02}.muted{color:var(--muted)}.status{font-weight:950;font-size:12px;margin:10px 0}.active-dot{color:var(--green)}.idle-dot{color:#ffd057}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px}.list{display:flex;flex-direction:column;gap:10px}.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 15px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(90deg,rgba(28,111,255,.12),rgba(255,255,255,.035))}.row b{display:block;margin-bottom:4px}.pill{display:inline-flex;align-items:center;padding:7px 11px;border-radius:999px;background:rgba(31,124,255,.16);border:1px solid rgba(76,147,255,.32);color:#d7e8ff;font-size:12px;font-weight:950;white-space:nowrap}.btns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}.btn{display:inline-flex;align-items:center;justify-content:center;padding:13px 18px;border-radius:14px;border:1px solid var(--line);font-weight:950;background:rgba(255,255,255,.055);box-shadow:0 12px 26px rgba(0,0,0,.18)}.btn.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.footer-note{margin-top:22px;color:var(--muted);font-size:13px;text-align:center;font-weight:700}.console-nav{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}.console-nav a{padding:10px 13px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.055);font-weight:950}.console-nav a.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.metric-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.metric-mini{padding:13px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.045)}.metric-mini small{color:var(--muted);font-weight:900}.metric-mini b{display:block;font-size:24px;margin-top:4px}.panel-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:18px}.stack-grid{display:grid;gap:12px}.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field{display:flex;flex-direction:column;gap:6px}.field label{font-size:12px;font-weight:950;color:#dbe7ff}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(5,9,20,.58);color:var(--text);padding:12px 13px;font:inherit;outline:none}.field textarea{min-height:92px;resize:vertical}.form-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.preview-box{border:1px solid var(--line);border-radius:18px;background:rgba(31,124,255,.10);padding:16px;margin-bottom:16px}.preview-box b{display:block;margin-bottom:6px}.safe-note{color:#8fe7ff;font-weight:800;font-size:13px;margin-top:10px}@media(max-width:1100px){.layout{grid-template-columns:1fr}.sidebar,.main{min-width:0}.sidebar{position:relative;height:auto}.user{position:static;margin-top:18px}.hero-grid,.two-col{grid-template-columns:1fr}.worker-grid{grid-template-columns:repeat(2,1fr)}.kpis{grid-template-columns:repeat(2,1fr)}}@media(max-width:640px){.main{padding:16px}.topbar{gap:12px;flex-wrap:wrap}.search{order:2;width:100%}.icons{max-width:100%;flex-wrap:wrap}.worker-grid,.kpis{grid-template-columns:1fr}.hero-lockup{flex-direction:column}.hero-title{font-size:56px;letter-spacing:-3px}.nina-logo.hero{width:128px;height:128px;flex-basis:128px}}
 
-.channels-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.connection-card{display:flex;flex-direction:column;gap:14px;min-height:260px}.connection-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.connection-head h2{margin:0}.connection-status{padding:7px 11px;border-radius:999px;font-size:12px;font-weight:950;background:rgba(255,255,255,.07);border:1px solid var(--line)}.connection-status.connected,.connection-status.active{color:var(--green)}.connection-status.pending{color:#ffd057}.connection-status.error{color:#ff9aad}.connection-actions{margin-top:auto}.connection-actions form{display:inline-block;margin:0 8px 8px 0}.connection-actions button{cursor:pointer;color:var(--text)}.channel-form{display:grid;gap:12px}.channel-form input{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(5,9,20,.58);color:var(--text);padding:12px 13px;font:inherit}.channel-message{padding:12px 14px;border-radius:14px;background:rgba(31,124,255,.12);color:#d9eaff;font-weight:800}.whatsapp-stack{grid-column:1/-1}.whatsapp-products{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}.whatsapp-product{padding:18px;border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.035)}.whatsapp-product h3{margin:0 0 8px}.qr-shell{max-width:320px;padding:12px;background:#fff;border-radius:16px;margin:8px auto}.qr-shell svg{display:block;width:100%;height:auto}.pairing-steps{line-height:1.65}.connection-lost{color:#ff9aad}@media(max-width:640px){.channels-grid,.whatsapp-products{grid-template-columns:1fr}.connection-card{min-height:0}.whatsapp-stack{grid-column:auto}.qr-shell{max-width:280px}body.channels .sidebar{padding-bottom:14px}body.channels .brand{margin-bottom:14px}body.channels .nav{flex-direction:row;overflow-x:auto;padding-bottom:6px}body.channels .nav-item{flex:0 0 auto}body.channels .user{display:none}}
+.channels-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.connection-card{display:flex;flex-direction:column;gap:14px;min-height:260px}.connection-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.connection-head h2{margin:0}.connection-status{padding:7px 11px;border-radius:999px;font-size:12px;font-weight:950;background:rgba(255,255,255,.07);border:1px solid var(--line)}.connection-status.connected,.connection-status.active,.connection-status.ready{color:var(--green)}.connection-status.pending,.connection-status.qr_pending{color:#ffd057}.connection-status.error,.connection-status.attention,.connection-status.reconnect_required{color:#ff9aad}.connection-actions{margin-top:auto}.connection-actions form{display:inline-block;margin:0 8px 8px 0}.connection-actions button{cursor:pointer;color:var(--text)}.channel-form{display:grid;gap:12px}.channel-form input{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(5,9,20,.58);color:var(--text);padding:12px 13px;font:inherit}.channel-message{padding:12px 14px;border-radius:14px;background:rgba(31,124,255,.12);color:#d9eaff;font-weight:800}.whatsapp-stack{grid-column:1/-1}.whatsapp-products{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}.whatsapp-product{padding:18px;border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.035)}.whatsapp-product h3{margin:0 0 8px}.qr-shell{max-width:320px;padding:12px;background:#fff;border-radius:16px;margin:8px auto}.qr-shell svg{display:block;width:100%;height:auto}.pairing-steps{line-height:1.65}.connection-lost{color:#ff9aad}@media(max-width:640px){.channels-grid,.whatsapp-products{grid-template-columns:1fr}.connection-card{min-height:0}.whatsapp-stack{grid-column:auto}.qr-shell{max-width:280px}body.channels .sidebar{padding-bottom:14px}body.channels .brand{margin-bottom:14px}body.channels .nav{flex-direction:row;overflow-x:auto;padding-bottom:6px}body.channels .nav-item{flex:0 0 auto}body.channels .user{display:none}}
 """
 
 
@@ -6640,8 +6640,46 @@ def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
         company_workspace, company_number = "ninaos_company", ""
         company = {"status": "error", "metadata": {}}
     tmeta, wmeta = telegram["metadata"], whatsapp["metadata"]
+    telegram_truth = resolve_channel_connection_truth(
+        NINA_WEB_WORKSPACE_ID,
+        "telegram",
+        telegram,
+        {
+            "state": "ready" if tmeta.get("polling_ready") else "unavailable",
+            "last_heartbeat_at": tmeta.get("last_heartbeat_at"),
+        },
+    )
+    try:
+        company_runtime_payload = personal_whatsapp_bridge_request(
+            "/v1/company/status", {"workspace_id": company_workspace}
+        )
+        company_runtime_status = str(company_runtime_payload.get("status") or "")
+        company_runtime_qr = str(company_runtime_payload.get("qr_svg") or "")
+    except Exception:
+        company_runtime_status, company_runtime_qr = "unavailable", ""
+    company_truth = resolve_channel_connection_truth(
+        company_workspace,
+        COMPANY_WHATSAPP_CHANNEL,
+        company,
+        {"state": company_runtime_status, "qr_available": bool(company_runtime_qr)},
+    )
+    web_truth = resolve_channel_connection_truth(
+        NINA_WEB_WORKSPACE_ID,
+        "web",
+        {"status": "connected"},
+        {"service_ready": WEB_RUNTIME_READINESS.ready},
+        {"workspace_usable": current_web_role() == ADMIN_ROLE and bool(
+            _verified_workspace_cookie(request.cookies.get(_WORKSPACE_COOKIE))
+        )},
+    )
     refresh_label = {"en": "Refresh status", "lv": "Atjaunot statusu", "ru": "Обновить статус"}[lang]
-    status_label = {"connected": c["connected"], "pending": c["pending"], "error": c["error"], "disconnected": c["disconnected"]}
+    status_label = {
+        "connected": c["connected"], "pending": c["pending"],
+        "error": c["error"], "disconnected": c["disconnected"],
+        "ready": c["connected"], "qr_pending": c["pending"],
+        "attention": c["error"], "reconnect_required": c["error"],
+        "not_connected": c["disconnected"], "not_ready": c["disconnected"],
+    }
     saved_username = str(tmeta.get("bot_username") or "").strip().lstrip("@")
     bot_username = saved_username if re.fullmatch(r"[A-Za-z0-9_]{5,64}", saved_username) else _telegram_bot_username()
     telegram_action = ""
@@ -6690,11 +6728,11 @@ def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
         label = pc["reconnect"] if pstatus == "error" else pc["connect"]
         personal_body = f"<form method='post' action='/channels/whatsapp-personal/connect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_personal_connect')}'><button class='btn primary' type='submit'>{html_escape(label)}</button></form><div class='safe-note'>{html_escape(pc['privacy'])}</div>"
     cc = {
-        "en": {"title":"NinaOS Company WhatsApp","text":"Nina's official private contact for direct conversations.","connect":"Connect company phone","waiting":"Waiting for the company phone to scan the QR…","privacy":"External private conversations are isolated from one another.","not_configured":"Configure the company number before connecting."},
+        "en": {"title":"NinaOS Company WhatsApp","text":"Nina's official private contact for direct conversations.","connect":"Connect company phone","reconnect":"Reconnect WhatsApp","waiting":"Waiting for the company phone to scan the QR…","privacy":"External private conversations are isolated from one another.","not_configured":"Configure the company number before connecting."},
         "lv": {"title":"NinaOS uzņēmuma WhatsApp","text":"Ninas oficiālais privātais kontakts tiešām sarunām.","connect":"Savienot uzņēmuma tālruni","waiting":"Gaida, kad uzņēmuma tālrunis noskenēs QR kodu…","privacy":"Ārējo cilvēku privātās sarunas ir savstarpēji nodalītas.","not_configured":"Pirms savienošanas konfigurē uzņēmuma numuru."},
         "ru": {"title":"WhatsApp компании NinaOS","text":"Официальный личный контакт Нины для прямого общения.","connect":"Подключить телефон компании","waiting":"Ожидание сканирования QR-кода телефоном компании…","privacy":"Личные разговоры разных людей изолированы друг от друга.","not_configured":"Перед подключением настройте номер компании."},
     }[lang]
-    company_status = company["status"]
+    company_status = company_truth["state"]
     company_meta = company.get("metadata") or {}
     company_masked = str(company_meta.get("masked_identity") or "")
     if not company_masked and company_number:
@@ -6702,12 +6740,18 @@ def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
         company_masked = ("*" * max(0, len(digits) - 4)) + digits[-4:]
     if not company_number:
         company_body = f"<div class='channel-message'>{html_escape(cc['not_configured'])}</div>"
-    elif company_status == "connected":
+    elif company_status == "ready":
         company_body = f"<div class='safe-note'>{html_escape(company_masked)}</div><div class='channel-message'>{html_escape(cc['privacy'])}</div><form method='post' action='/channels/whatsapp-company/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_company_disconnect')}'><button class='btn' type='submit'>{c['disconnect']}</button></form>"
-    elif company_status == "pending":
-        company_body = f"<div id='company-whatsapp-qr' class='qr-shell' hidden></div><div id='company-whatsapp-state' class='channel-message'>{html_escape(cc['waiting'])}</div><form method='post' action='/channels/whatsapp-company/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_company_disconnect')}'><button class='btn' type='submit'>{c['cancel']}</button></form>"
+    elif company_status == "qr_pending":
+        safe_qr = company_runtime_qr
+        if len(safe_qr) > 250000 or not safe_qr.lstrip().startswith("<svg") or "<script" in safe_qr.lower() or "onload=" in safe_qr.lower():
+            safe_qr = ""
+        qr_attributes = ">" + safe_qr if safe_qr else " hidden>"
+        preparing = cc["waiting"] if safe_qr else "Preparing QR"
+        company_body = f"<div id='company-whatsapp-qr' class='qr-shell'{qr_attributes}</div><div id='company-whatsapp-state' class='channel-message'>{html_escape(preparing)}</div><form method='post' action='/channels/whatsapp-company/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_company_disconnect')}'><button class='btn' type='submit'>{c['cancel']}</button></form>"
     else:
-        company_body = f"<form method='post' action='/channels/whatsapp-company/connect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_company_connect')}'><button class='btn primary' type='submit'>{html_escape(cc['connect'])}</button></form><div class='safe-note'>{html_escape(cc['privacy'])}</div>"
+        company_action = cc.get("reconnect", cc["connect"]) if company_status == "reconnect_required" else cc["connect"]
+        company_body = f"<form method='post' action='/channels/whatsapp-company/connect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_company_connect')}'><button class='btn primary' type='submit'>{html_escape(company_action)}</button></form><div class='safe-note'>{html_escape(cc['privacy'])}</div>"
     notice_text = c.get(notice, notice)
     notice_html = f"<div class='channel-message'>{html_escape(notice_text)}</div>" if notice else ""
     return (
@@ -6715,8 +6759,8 @@ def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
         f"<div class='page-title'><h1>{c['title']}</h1><p>{c['sub']}</p></div><br>{notice_html}"
         f"{nina_contact_html(lang)}<div class='channels-grid'>"
         f"<section class='card card-pad connection-card'><div class='connection-head'><h2>{html_escape(cc['title'])}</h2><span class='connection-status {company_status}'>{status_label[company_status]}</span></div><p class='muted'>{html_escape(cc['text'])}</p>{company_body}</section>"
-        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Web</h2><span class='connection-status active'>{c['active']}</span></div><p class='muted'>{c['web_text']}</p></section>"
-        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Telegram</h2><span class='connection-status {telegram['status']}'>{status_label[telegram['status']]}</span></div><p class='muted'>{c['telegram_text']}</p><div><b>@{html_escape(bot_username)}</b></div>{linked_account}<div class='connection-actions'>{telegram_action}</div></section>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Web</h2><span class='connection-status {web_truth['state']}'>{status_label[web_truth['state']]}</span></div><p class='muted'>{c['web_text']}</p></section>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Telegram</h2><span class='connection-status {telegram_truth['state']}'>{status_label[telegram_truth['state']]}</span></div><p class='muted'>{c['telegram_text']}</p><div><b>@{html_escape(bot_username)}</b></div>{linked_account}<div class='connection-actions'>{telegram_action}</div></section>"
         f"<section class='card card-pad connection-card whatsapp-stack'><div class='connection-head'><h2>WhatsApp</h2></div><div class='whatsapp-products'><div class='whatsapp-product'><div class='connection-head'><h3>{html_escape(pc['title'])}</h3><span class='connection-status {pstatus}'>{status_label[pstatus]}</span></div><p class='muted'>{html_escape(pc['text'])}</p>{personal_body}</div><div class='whatsapp-product'><div class='connection-head'><h3>{html_escape(pc['business'])}</h3><span class='connection-status {whatsapp['status']}'>{status_label[whatsapp['status']]}</span></div><p class='muted'>{html_escape(pc['business_text'])}</p>{whatsapp_help}{whatsapp_error_html}{whatsapp_identity_html}<div class='connection-actions'>{whatsapp_action}</div></div></div></section>"
         f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Email</h2><span class='connection-status'>{c['coming']}</span></div><p class='muted'>{c['email_text']}</p></section>"
         "</div>"
@@ -6724,7 +6768,7 @@ def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
         f"<script>window.NinaWhatsApp={{startCsrf:{json.dumps(_channel_csrf('whatsapp_start'))},callbackCsrf:{json.dumps(_channel_csrf('whatsapp_callback'))},lang:{json.dumps(lang)}}};</script>"
         "<script>" + _whatsapp_connect_script() + "</script>"
         "<script>(()=>{const q=document.getElementById('personal-whatsapp-qr'),s=document.getElementById('personal-whatsapp-state');if(!q||!s)return;const poll=async()=>{try{const r=await fetch('/channels/whatsapp-personal/status',{cache:'no-store'}),d=await r.json();if(d.status==='connected'){location.reload();return}if(d.qr_svg){q.innerHTML=d.qr_svg;q.hidden=false}if(d.status==='connection_lost'||d.status==='logged_out'){s.textContent=" + json.dumps(pc["lost"]) + ";s.classList.add('connection-lost');return}}catch(_){}setTimeout(poll,2000)};poll()})()</script>"
-        "<script>(()=>{const q=document.getElementById('company-whatsapp-qr'),s=document.getElementById('company-whatsapp-state');if(!q||!s)return;const poll=async()=>{try{const r=await fetch('/channels/whatsapp-company/status',{cache:'no-store'}),d=await r.json();if(d.status==='connected'){location.reload();return}if(d.qr_svg){q.innerHTML=d.qr_svg;q.hidden=false}if(d.status==='connection_lost'||d.status==='logged_out'){s.textContent='Connection lost';s.classList.add('connection-lost');return}}catch(_){}setTimeout(poll,2000)};poll()})()</script>"
+        "<script>(()=>{const q=document.getElementById('company-whatsapp-qr'),s=document.getElementById('company-whatsapp-state');if(!q||!s)return;const poll=async()=>{try{const r=await fetch('/channels/whatsapp-company/status',{cache:'no-store'}),d=await r.json();if(d.status==='ready'){location.reload();return}if(d.qr_svg){q.innerHTML=d.qr_svg;q.hidden=false}if(d.status==='reconnect_required'||d.status==='attention'){s.textContent='Connection needs attention';s.classList.add('connection-lost');return}}catch(_){}setTimeout(poll,2000)};poll()})()</script>"
     )
 
 
@@ -7931,28 +7975,37 @@ def channels_company_whatsapp_connect():
 def channels_company_whatsapp_status():
     workspace_id = configured_company_whatsapp_workspace()
     connection = get_connection(workspace_id, COMPANY_WHATSAPP_CHANNEL)
-    if connection["status"] == "connected":
-        return jsonify({"status": "connected"})
+    state = {}
     try:
         state = personal_whatsapp_bridge_request("/v1/company/status", {"workspace_id": workspace_id})
     except Exception:
-        return jsonify({"status": connection["status"], "qr_svg": ""})
-    bridge_status = str(state.get("status") or "")
-    if bridge_status == "connected":
+        state = {"status": "unavailable", "qr_svg": ""}
+    bridge_status = str(state.get("status") or "unavailable")
+    if bridge_status == "connected" and connection["status"] != "disconnected":
         reconciled = mark_company_whatsapp_runtime_state(workspace_id, "connected")
-        if not reconciled:
-            return jsonify({"status": "error", "qr_svg": ""}), 503
-        logger.info("Company WhatsApp status reconciled bridge=connected persistence=connected")
-        return jsonify({"status": "connected", "qr_svg": ""})
+        if reconciled:
+            connection = get_connection(workspace_id, COMPANY_WHATSAPP_CHANNEL)
+            logger.info("Company WhatsApp status reconciled bridge=connected persistence=connected")
     runtime_state = str((connection.get("metadata") or {}).get("runtime_state") or "")
     if connection["status"] == "pending" and runtime_state not in {"reconnecting", "temporary_failure", "backend_unavailable"} and not company_whatsapp_pairing_is_active(workspace_id):
         set_connection_for_test(workspace_id, COMPANY_WHATSAPP_CHANNEL, "error", {"error_code": "pairing_expired"})
         logger.info("Company WhatsApp status write status=error runtime_state=pairing_expired")
-        return jsonify({"status": "connection_lost", "qr_svg": ""})
+        connection = get_connection(workspace_id, COMPANY_WHATSAPP_CHANNEL)
+        bridge_status = "unavailable"
     svg = str(state.get("qr_svg") or "")
     if len(svg) > 250000 or not svg.lstrip().startswith("<svg") or "<script" in svg.lower() or "onload=" in svg.lower():
         svg = ""
-    return jsonify({"status": bridge_status or connection["status"], "qr_svg": svg})
+    truth = resolve_channel_connection_truth(
+        workspace_id,
+        COMPANY_WHATSAPP_CHANNEL,
+        connection,
+        {"state": bridge_status, "qr_available": bool(svg)},
+    )
+    return jsonify({
+        "status": truth["state"],
+        "qr_svg": svg if truth["state"] == "qr_pending" else "",
+        "reason_code": truth["reason_code"],
+    })
 
 
 @app.post("/channels/whatsapp-company/disconnect")

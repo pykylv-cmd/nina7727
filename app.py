@@ -28,7 +28,7 @@ from telegram.ext import Application, MessageHandler, CommandHandler, filters, C
 from contact_identity import compact_contact_context, resolve_contact_identity
 from openai import OpenAI
 from nina_identity import NINA_PROMPT as SHARED_NINA_PROMPT
-from channel_connections import consume_telegram_token, is_telegram_connection_token, workspace_for_telegram_identity
+from channel_connections import consume_telegram_token, is_telegram_connection_token, mark_telegram_runtime_state, workspace_for_telegram_identity
 from runtime_readiness import get_runtime_readiness
 from platform_core import initialize_platform_runtime
 from rolepack_system import initialize_rolepack_system
@@ -18926,9 +18926,25 @@ def run_telegram_core():
         )
         time.sleep(retry_seconds)
 
+    heartbeat_stop = threading.Event()
+
+    def telegram_runtime_heartbeat():
+        while not heartbeat_stop.wait(15):
+            try:
+                mark_telegram_runtime_state(True)
+            except Exception as exc:
+                print("Telegram runtime heartbeat error:", repr(exc))
+
     try:
+        mark_telegram_runtime_state(True)
+        threading.Thread(target=telegram_runtime_heartbeat, daemon=True).start()
         telegram_app.run_polling()
     finally:
+        heartbeat_stop.set()
+        try:
+            mark_telegram_runtime_state(False)
+        except Exception as exc:
+            print("Telegram runtime shutdown state error:", repr(exc))
         release_one_nina_telegram_runtime_lock()
 
 def stripe_production_checklist_answer(user_id=None):
