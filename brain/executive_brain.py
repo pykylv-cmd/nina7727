@@ -43,7 +43,6 @@ _CANCEL_ALL_REMINDERS = (
     "cancel all reminders",
 )
 
-
 def _normalized(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "").strip()).casefold()
 
@@ -89,6 +88,26 @@ def _starts_with_time(value: str) -> bool:
     )
 
 
+def _reminder_query_operation(value: str) -> str:
+    """Classify reminder questions by grammar before create detection."""
+    reminder_reference = bool(re.search(r"\b(?:atgādinājum|atgadinajum|reminder)", value))
+    reminder_verb = bool(re.search(r"\b(?:jāatgādina|jaatgadina|atgādināsi|atgadinasi)\b", value))
+    list_request = bool(re.search(
+        r"\b(?:kādi|kadi|parādi|paradi|nosauc|uzskaiti|list|show)\b",
+        value,
+    ))
+    if reminder_reference and list_request:
+        return "LIST"
+    period_reference = bool(re.search(
+        r"\b(?:pa\s+dienu|pusdien|dienā|vakara|vakarā|rītā|no\s+rīta|midday|afternoon|evening|morning)\b",
+        value,
+    ))
+    question_request = "?" in value or bool(re.search(r"\b(?:kas|ko|what)\b", value))
+    if (reminder_reference or reminder_verb) and period_reference and question_request:
+        return "ASK"
+    return ""
+
+
 def classify_message(message: str) -> Decision:
     value = _normalized(message)
     if not value:
@@ -105,7 +124,20 @@ def classify_message(message: str) -> Decision:
     if value in _CANCEL_ALL_REMINDERS:
         return Decision(
             reply_required=True, confidence=1.0,
-            reason="cancel_all_reminders",
+            reason="cancel_all_reminders", reminder_operation="CANCEL",
+        )
+
+    reminder_query = _reminder_query_operation(value)
+    if reminder_query == "LIST":
+        return Decision(
+            reply_required=True, confidence=0.99,
+            reason="reminder_list", reminder_operation="LIST",
+        )
+
+    if reminder_query == "ASK":
+        return Decision(
+            reply_required=True, confidence=0.98,
+            reason="reminder_ask", reminder_operation="ASK",
         )
 
     has_time = _has_clock_or_date(value)
@@ -129,6 +161,7 @@ def classify_message(message: str) -> Decision:
             create_work_object=True, create_reminder=True,
             needs_clarification=True, priority="high" if high else "normal",
             confidence=0.98, reason="reminder_time_missing",
+            reminder_operation="CREATE",
         )
     if reminder:
         return Decision(
@@ -136,6 +169,7 @@ def classify_message(message: str) -> Decision:
             create_work_object=True, create_reminder=True,
             priority="high" if high else "normal",
             confidence=0.98, reason="scheduled_reminder",
+            reminder_operation="CREATE",
         )
     if birthday_or_event:
         return Decision(

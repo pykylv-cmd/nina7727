@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
 import re
 from datetime import datetime, timedelta
@@ -197,21 +198,73 @@ def save_channel_turn(workspace_id: str, user_text: str, nina_text: str,
     _save_turn(workspace_id, user_text, nina_text, conversation_id=conversation_id, channel=channel)
 
 
-def _pending_reminder_request(conversation_id: str) -> str:
-    """Recover the last reminder action from existing conversation truth."""
-    if not str(conversation_id or "").strip():
-        return ""
-    messages = _load_conversation(conversation_id, limit=8)
-    for index in range(len(messages) - 1, 0, -1):
-        current = messages[index]
-        previous = messages[index - 1]
-        if (
-            current.get("role") == "nina"
-            and "kad tieši" in str(current.get("text") or "").casefold()
-            and previous.get("role") == "user"
-        ):
-            return str(previous.get("text") or "").strip()
-    return ""
+def _pending_reminder_context(conversation_id: str) -> Dict[str, Any]:
+    """Read the latest structured reminder clarification from conversation_state."""
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        return {}
+    _ensure_conversation_store()
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        cur.execute(_sql("""
+            SELECT topic FROM conversation_state
+            WHERE user_id = %s AND intent = %s ORDER BY id DESC LIMIT 1
+        """), (conversation_id, "reminder_pending"))
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+    if not row:
+        return {}
+    try:
+        payload = json.loads(str(row[0] or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) and not payload.get("resolved") else {}
+
+
+def _save_pending_reminder_context(conversation_id: str, raw_text: str, action_text: str) -> None:
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        return
+    _ensure_conversation_store()
+    payload = {
+        "operation": "CREATE",
+        "raw_text": str(raw_text or "").strip(),
+        "action_text": str(action_text or "").strip(),
+    }
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        cur.execute(_sql("""
+            INSERT INTO conversation_state
+                (user_id, user_text, nina_text, intent, emotion, topic)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """), (conversation_id, "", "", "reminder_pending", "", json.dumps(payload, ensure_ascii=False)))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _clear_pending_reminder_context(conversation_id: str) -> None:
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        return
+    _ensure_conversation_store()
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        cur.execute(_sql("""
+            INSERT INTO conversation_state
+                (user_id, user_text, nina_text, intent, emotion, topic)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """), (conversation_id, "", "", "reminder_pending", "", '{"resolved":true}'))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
 
 
 def _reminder_continuation_text(clean: str, conversation_id: str, decision) -> str:
@@ -220,11 +273,10 @@ def _reminder_continuation_text(clean: str, conversation_id: str, decision) -> s
         return clean
     if not re.search(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", clean.casefold()):
         return clean
-    pending = _pending_reminder_request(conversation_id)
+    pending = _pending_reminder_context(conversation_id)
     if not pending:
         return clean
-    from task_engine import build_task_title
-    action = build_task_title(pending)
+    action = str(pending.get("action_text") or "").strip()
     weekday = re.search(
         r"\b(?:pirmdien|otrdien|trešdien|tresdien|ceturtdien|piektdien|sestdien|svētdien|svetdien)\b",
         clean, re.IGNORECASE,
@@ -334,7 +386,7 @@ def materialize_due_reminders(workspace_id: str, now=None, owner_id: str = ""):
             continue
         reminder = create_work_object(
             object_type="reminder",
-            title=f"Atgādinājums: {obj.title}",
+            title=f"Atgādinājums: {metadata.get('reminder_text') or obj.title}",
             workspace_id=workspace_id,
             assigned_agent_id=obj.assigned_agent_id,
             client_id=obj.client_id,
@@ -349,13 +401,20 @@ def materialize_due_reminders(workspace_id: str, now=None, owner_id: str = ""):
                 "delivery_status": "scheduled",
                 "attempt_count": 0,
                 "unread": False,
+                "reminder_text": metadata.get("reminder_text") or obj.title,
+                "recurrence": metadata.get("recurrence", ""),
+                "timezone": metadata.get("timezone", "Europe/Riga"),
                 "whatsapp_recipient_jid": str(
                     metadata.get("whatsapp_recipient_jid") or ""
                 ).strip(),
             },
             origin_channel=obj.origin_channel,
             origin_user_id=obj.origin_user_id,
-            source_key=f"daily-reminder:{obj.object_id}",
+            source_key=(
+                f"daily-reminder:{obj.object_id}:{metadata.get('reminder_at')}"
+                if metadata.get("recurrence") == "daily"
+                else f"daily-reminder:{obj.object_id}"
+            ),
         )
         created.append(reminder)
     return created
@@ -478,6 +537,135 @@ def _cancel_all_reminders(workspace_id: str, owner_id: str = "") -> int:
     return cancelled
 
 
+def _active_reminder_sources(workspace_id: str, owner_id: str) -> List[Any]:
+    """Return owner-scoped canonical schedules without materialized duplicates."""
+    owner_id = str(owner_id or "").strip()
+    result = []
+    for obj in list_work_objects(workspace_id=workspace_id, limit=500):
+        metadata = dict(getattr(obj, "metadata", {}) or {})
+        object_owner = str(getattr(obj, "origin_user_id", "") or "").strip()
+        if owner_id and object_owner != owner_id:
+            continue
+        if str(getattr(obj, "status", "") or "").lower() in {
+            "completed", "done", "archived", "cancelled", "rejected", "sent",
+        }:
+            continue
+        is_source = metadata.get("reminder_state") == "scheduled"
+        is_direct = (
+            getattr(obj, "object_type", "") == "reminder"
+            and not str(metadata.get("source_work_object_id") or "").strip()
+            and str(metadata.get("delivery_status") or "scheduled")
+            not in {"delivered", "cancelled"}
+        )
+        if is_source or is_direct:
+            result.append(obj)
+    result.sort(key=lambda item: str(
+        (getattr(item, "metadata", {}) or {}).get("reminder_at")
+        or (getattr(item, "metadata", {}) or {}).get("planned_at") or ""
+    ))
+    return result
+
+
+def _reminder_local_clock(obj) -> str:
+    metadata = dict(getattr(obj, "metadata", {}) or {})
+    raw = str(metadata.get("reminder_at") or metadata.get("planned_at") or "").strip()
+    try:
+        value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        zone = ZoneInfo(str(metadata.get("timezone") or "Europe/Riga"))
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=zone)
+        return value.astimezone(zone).strftime("%H:%M")
+    except (TypeError, ValueError, KeyError):
+        return ""
+
+
+def _list_reminder_answer(reminders: List[Any]) -> str:
+    if not reminders:
+        return "Tev nav aktīvu atgādinājumu."
+    lines = ["Tavi aktīvie atgādinājumi:"]
+    for obj in reminders:
+        metadata = dict(getattr(obj, "metadata", {}) or {})
+        title = str(metadata.get("reminder_text") or getattr(obj, "title", "") or "").strip()
+        recurrence = " katru dienu" if metadata.get("recurrence") == "daily" else ""
+        lines.append(f"- {_reminder_local_clock(obj) or 'laiks nav norādīts'}{recurrence}: {title}")
+    return "\n".join(lines)
+
+
+def _period_bounds(text: str):
+    lower = str(text or "").casefold()
+    if any(marker in lower for marker in ("no rīta", "rītā", "rīta", "morning")):
+        return 5, 10
+    if any(marker in lower for marker in ("pa dienu", "pusdien", "dienā", "midday", "afternoon")):
+        return 10, 17
+    if any(marker in lower for marker in ("vakarā", "vakara", "evening")):
+        return 17, 24
+    return None
+
+
+def _select_period_reminder(reminders: List[Any], text: str):
+    bounds = _period_bounds(text)
+    if not bounds:
+        return None
+    matching = []
+    for obj in reminders:
+        clock = _reminder_local_clock(obj)
+        if not clock:
+            continue
+        hour = int(clock.split(":", 1)[0])
+        if bounds[0] <= hour < bounds[1]:
+            matching.append(obj)
+    return matching[0] if len(matching) == 1 else None
+
+
+def _updated_reminder_text(current: str, instruction: str) -> str:
+    current = str(current or "").strip()
+    instruction = str(instruction or "").strip()
+    replacement = re.search(r"(?:saki|atgādini|atgadini)\s*:\s*(.+)$", instruction, re.IGNORECASE)
+    if replacement:
+        return replacement.group(1).strip(" .,!?")
+    if re.search(r"labrīt\s+nesaki|labrit\s+nesaki", instruction, re.IGNORECASE):
+        cleaned = re.sub(r"\blabrīt\b[\s,!:;-]*", "", current, flags=re.IGNORECASE).strip()
+        return cleaned or current
+    return ""
+
+
+def _update_reminder_from_context(workspace_id: str, owner_id: str, clean: str):
+    reminders = _active_reminder_sources(workspace_id, owner_id)
+    target = _select_period_reminder(reminders, clean)
+    if target is None:
+        return None
+    metadata = dict(getattr(target, "metadata", {}) or {})
+    current = str(metadata.get("reminder_text") or getattr(target, "title", "") or "").strip()
+    updated_text = _updated_reminder_text(current, clean)
+    if not updated_text:
+        return None
+    metadata["reminder_text"] = updated_text
+    updated = update_work_object(target.object_id, title=updated_text, metadata=metadata)
+    for reminder in list_work_objects(workspace_id=workspace_id, object_type="reminder", limit=500):
+        reminder_metadata = dict(getattr(reminder, "metadata", {}) or {})
+        if str(reminder_metadata.get("source_work_object_id") or "") != target.object_id:
+            continue
+        reminder_metadata["reminder_text"] = updated_text
+        update_work_object(
+            reminder.object_id, title=f"Atgādinājums: {updated_text}", metadata=reminder_metadata,
+        )
+    return updated
+
+
+def _reminder_read_operation(operation: str, clean: str, workspace_id: str, owner_id: str):
+    reminders = _active_reminder_sources(workspace_id, owner_id)
+    if operation == "LIST":
+        return {"ok": True, "text": _list_reminder_answer(reminders), "reminders": reminders}
+    if operation == "ASK":
+        target = _select_period_reminder(reminders, clean)
+        if target is None:
+            return {"ok": True, "text": "Neatradu vienu nepārprotamu atgādinājumu šim dienas laikam.", "reminders": reminders}
+        metadata = dict(getattr(target, "metadata", {}) or {})
+        title = str(metadata.get("reminder_text") or getattr(target, "title", "") or "").strip()
+        return {"ok": True, "text": f"{_reminder_local_clock(target)} man tev jāatgādina: {title}", "reminders": [target]}
+    return None
+
+
 def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, channel: str = "web",
                          generator: Optional[Callable[[str], str]] = None,
                          conversation_id: str = "", contact_id: str = "",
@@ -582,8 +770,33 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
             return {"ok": False, "error": "web_research_unavailable", "text": answer,
                     "source": "web_research", "channel": channel, "decision": decision_payload}
+    target_workspace = canonical_work_workspace_id or workspace_id
+    reminder_owner = str(contact_id or conversation_id or _conversation_id(workspace_id)).strip()
+    reminder_read = _reminder_read_operation(
+        decision.reminder_operation, clean, target_workspace, reminder_owner,
+    )
+    if reminder_read is not None:
+        answer = _customer_safe_text(reminder_read["text"])
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+        return {
+            "ok": True, "text": answer, "source": "shared_work",
+            "channel": channel, "decision": decision_payload,
+            "reminder_object_ids": [obj.object_id for obj in reminder_read["reminders"]],
+        }
+    if _period_bounds(clean) and re.search(
+        r"\b(?:saki|nesaki|atgādini|atgadini)\b", clean, re.IGNORECASE,
+    ):
+        updated = _update_reminder_from_context(target_workspace, reminder_owner, clean)
+        if updated is not None:
+            metadata = dict(getattr(updated, "metadata", {}) or {})
+            answer = f"Atgādinājums atjaunināts: {metadata.get('reminder_text') or updated.title}"
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {
+                "ok": True, "text": answer, "source": "shared_work",
+                "channel": channel, "decision": decision_payload,
+                "reminder_object_id": updated.object_id,
+            }
     if decision.reason == "cancel_all_reminders":
-        target_workspace = canonical_work_workspace_id or workspace_id
         cancelled = _cancel_all_reminders(target_workspace, str(contact_id or "").strip())
         answer = (
             f"Atcēlu aktīvos atgādinājumus: {cancelled}."
@@ -602,6 +815,11 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             "channel": channel, "decision": decision_payload,
         }
     if decision.needs_clarification:
+        if decision.reminder_operation == "CREATE":
+            from task_engine import build_task_title
+            _save_pending_reminder_context(
+                conversation_id, clean, build_task_title(clean),
+            )
         answer = (
             "Kad tieši man tev to atgādināt?"
             if decision.reason == "reminder_time_missing"
@@ -651,9 +869,19 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         except Exception:
             work_result = None
     if work_result and work_result.get("handled") and str(work_result.get("text") or "").strip():
+        if work_result.get("ok") and work_text != clean:
+            _clear_pending_reminder_context(conversation_id)
         answer = _customer_safe_text(work_result.get("text") or "")
         _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
-        return {"ok": True, "text": answer, "source": "shared_work", "channel": channel, "decision": decision_payload}
+        response = {
+            "ok": bool(work_result.get("ok")), "text": answer,
+            "source": "shared_work", "channel": channel,
+            "decision": decision_payload,
+        }
+        for key in ("action", "object_id", "object_ids", "reminder_at"):
+            if key in work_result:
+                response[key] = work_result[key]
+        return response
 
     if decision.create_reminder:
         answer = "Atgādinājumu neizdevās droši ieplānot. Mēģini vēlreiz."

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from work_objects import (
     claim_due_reminder,
@@ -138,6 +139,42 @@ def persist_web_delivery(reminder):
     return outbound
 
 
+def _advance_daily_source(delivered, now):
+    """Advance the existing canonical source after one delivered daily occurrence."""
+    if delivered is None:
+        return delivered
+    metadata = dict(delivered.metadata or {})
+    if metadata.get("recurrence") != "daily":
+        return delivered
+    source_id = str(metadata.get("source_work_object_id") or "").strip()
+    source = get_work_object(source_id) if source_id else None
+    if source is None:
+        return delivered
+    source_metadata = dict(source.metadata or {})
+    if source_metadata.get("recurrence") != "daily":
+        return delivered
+    timezone_name = str(source_metadata.get("timezone") or "Europe/Riga")
+    try:
+        zone = ZoneInfo(timezone_name)
+        planned = datetime.fromisoformat(
+            str(source_metadata.get("reminder_at") or "").replace("Z", "+00:00")
+        )
+        if planned.tzinfo is None:
+            planned = planned.replace(tzinfo=zone)
+        planned = planned.astimezone(zone)
+        current = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+        current = current.astimezone(zone)
+    except (TypeError, ValueError, KeyError):
+        return delivered
+    next_at = planned + timedelta(days=1)
+    while next_at <= current:
+        next_at += timedelta(days=1)
+    source_metadata["reminder_at"] = next_at.isoformat(timespec="minutes")
+    source_metadata["reminder_state"] = "scheduled"
+    update_work_object(source.object_id, metadata=source_metadata)
+    return delivered
+
+
 async def deliver_claimed(reminder, telegram_sender=None, now=None):
     current = now or utc_now()
     metadata = dict(reminder.metadata or {})
@@ -169,10 +206,11 @@ async def deliver_claimed(reminder, telegram_sender=None, now=None):
             pass
         metadata.update({"unread": True, "channel_message_id": outbound.message_id})
         update_work_object(reminder.object_id, metadata=metadata)
-        return finish_reminder_delivery(
+        delivered = finish_reminder_delivery(
             reminder.object_id, token, "delivered", channel="web",
             delivered_at=current.isoformat(timespec="seconds"),
         )
+        return _advance_daily_source(delivered, current)
     if channel in {"whatsapp_personal", "whatsapp_company"}:
         try:
             message_id = deliver_whatsapp(reminder, channel)
@@ -183,10 +221,11 @@ async def deliver_claimed(reminder, telegram_sender=None, now=None):
             )
         metadata["whatsapp_message_id"] = message_id
         update_work_object(reminder.object_id, metadata=metadata)
-        return finish_reminder_delivery(
+        delivered = finish_reminder_delivery(
             reminder.object_id, token, "delivered", channel=channel,
             delivered_at=current.isoformat(timespec="seconds"),
         )
+        return _advance_daily_source(delivered, current)
     if telegram_sender is None:
         return finish_reminder_delivery(
             reminder.object_id, token, "failed", channel="telegram",
@@ -203,10 +242,11 @@ async def deliver_claimed(reminder, telegram_sender=None, now=None):
             reminder.object_id, token, "failed", channel="telegram",
             error_code=f"telegram_{type(exc).__name__.lower()}",
         )
-    return finish_reminder_delivery(
+    delivered = finish_reminder_delivery(
         reminder.object_id, token, "delivered", channel="telegram",
         delivered_at=current.isoformat(timespec="seconds"),
     )
+    return _advance_daily_source(delivered, current)
 
 
 async def process_due_reminders(telegram_sender=None, worker_id="telegram-core", now=None, limit=25):

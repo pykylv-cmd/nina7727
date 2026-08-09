@@ -15,7 +15,7 @@ class BrainDecisionTests(unittest.TestCase):
         self.assertEqual(set(decision.to_dict()), {
             "reply_required", "remember", "create_work_object", "create_reminder",
             "follow_up", "initiative", "needs_clarification", "no_action",
-            "priority", "confidence", "reason",
+            "priority", "confidence", "reason", "reminder_operation",
         })
         with self.assertRaises(ValueError):
             Decision(create_reminder=True)
@@ -82,6 +82,16 @@ class BrainDecisionTests(unittest.TestCase):
                     classify_message(command).reason,
                     "cancel_all_reminders",
                 )
+
+    def test_reminder_list_and_question_are_not_create(self):
+        listed = classify_message("Kādi man ir atgādinājumi?")
+        asked = classify_message("Pa dienu kas tev jāatgādina?")
+        self.assertEqual(listed.reminder_operation, "LIST")
+        self.assertFalse(listed.create_reminder)
+        self.assertFalse(listed.needs_clarification)
+        self.assertEqual(asked.reminder_operation, "ASK")
+        self.assertFalse(asked.create_reminder)
+        self.assertFalse(asked.needs_clarification)
 
     def test_no_action_decision(self):
         decision = classify_message("Ok.")

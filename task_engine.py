@@ -134,7 +134,7 @@ def detect_task(text, reminder_requested=False):
     }
 
 
-def detect_reminder_schedule(
+def _detect_single_reminder_schedule(
     text, now=None, timezone_name="Europe/Riga", reminder_requested=False,
 ):
     """Interpret reminder timing for the existing Work Object contract."""
@@ -155,6 +155,8 @@ def detect_reminder_schedule(
     has_temporal = (
         any(value in lower for value in temporal)
         or bool(re.search(r"\b\d{4}-\d{2}-\d{2}\b", lower))
+        or bool(re.search(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", lower))
+        or "katru dienu" in lower or "ik dienu" in lower
         or "parīt" in lower or "parit" in lower
     )
     if not (has_action or reminder_requested) or not has_temporal:
@@ -218,6 +220,61 @@ def detect_reminder_schedule(
     return {"reminder_at": target.isoformat(timespec="minutes"), "timezone": timezone_name}
 
 
+def detect_reminder_schedules(
+    text, now=None, timezone_name="Europe/Riga", reminder_requested=False,
+):
+    """Return every explicit reminder time without inventing additional times."""
+    raw = _clean(text)
+    clocks = list(re.finditer(r"\b(?:[01]?\d|2[0-3])[:.]\d{2}\b", raw))
+    recurrence = "daily" if re.search(
+        r"\b(?:katru\s+dienu|ik\s+dienu|every\s+day|daily)\b",
+        raw, re.IGNORECASE,
+    ) else ""
+    if len(clocks) <= 1:
+        parsed = _detect_single_reminder_schedule(
+            raw, now=now, timezone_name=timezone_name,
+            reminder_requested=reminder_requested,
+        )
+        if parsed and recurrence:
+            parsed["recurrence"] = recurrence
+        return [parsed] if parsed else []
+
+    results = []
+    seen = set()
+    for selected in clocks:
+        pieces = []
+        cursor = 0
+        for clock in clocks:
+            pieces.append(raw[cursor:clock.start()])
+            if clock.start() == selected.start():
+                pieces.append(clock.group(0))
+            cursor = clock.end()
+        pieces.append(raw[cursor:])
+        candidate = re.sub(r"\s+", " ", "".join(pieces)).strip(" ,")
+        parsed = _detect_single_reminder_schedule(
+            candidate, now=now, timezone_name=timezone_name,
+            reminder_requested=reminder_requested,
+        )
+        reminder_at = str(parsed.get("reminder_at") or "") if parsed else ""
+        if not reminder_at or reminder_at in seen:
+            continue
+        seen.add(reminder_at)
+        if recurrence:
+            parsed["recurrence"] = recurrence
+        results.append(parsed)
+    return results
+
+
+def detect_reminder_schedule(
+    text, now=None, timezone_name="Europe/Riga", reminder_requested=False,
+):
+    schedules = detect_reminder_schedules(
+        text, now=now, timezone_name=timezone_name,
+        reminder_requested=reminder_requested,
+    )
+    return schedules[0] if schedules else {}
+
+
 def build_task_title(text):
     raw = _clean(text)
     lower = raw.lower()
@@ -258,9 +315,13 @@ def _reminder_task_title(text):
         r"ceturtdien|piektdien|sestdien|svētdien|svetdien)\b", "", value, flags=re.IGNORECASE,
     )
     value = re.sub(r"\b(?:pulksten\s*)?\d{1,2}[:.]\d{2}\b", "", value, flags=re.IGNORECASE)
+    value = re.sub(
+        r"\b(?:katru\s+dienu|ik\s+dienu|every\s+day|daily)\b",
+        "", value, flags=re.IGNORECASE,
+    )
     value = re.sub(r"\bno\s+rīta\b", "", value, flags=re.IGNORECASE)
     value = re.sub(r"^\s*ka\s+", "", value, flags=re.IGNORECASE)
-    value = " ".join(value.strip(" ,.!?- ").split())
+    value = " ".join(value.strip(" :,.!?- ").split())
     value = re.sub(r"^jāsarēķina\b", "Sarēķināt", value, flags=re.IGNORECASE)
     value = re.sub(r"\balga\b", "algu", value, flags=re.IGNORECASE)
     value = re.sub(r"\bpa\s+jumtu\b", "par jumtu", value, flags=re.IGNORECASE)

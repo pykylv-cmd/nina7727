@@ -19,6 +19,7 @@ class Decision:
     priority: str = "normal"
     confidence: float = 1.0
     reason: str = "general_reply"
+    reminder_operation: str = ""
 
     def __post_init__(self) -> None:
         if self.priority not in {"low", "normal", "high"}:
@@ -32,6 +33,10 @@ class Decision:
             raise ValueError("invalid_no_action_decision")
         if self.create_reminder and not self.create_work_object:
             raise ValueError("reminder_requires_work_object")
+        if self.reminder_operation not in {
+            "", "CREATE", "LIST", "ASK", "UPDATE", "CANCEL", "CONFIRM_MODIFY",
+        }:
+            raise ValueError("invalid_reminder_operation")
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

@@ -65,11 +65,20 @@ class ChannelConnectionsV1Tests(unittest.TestCase):
             self.assertIn(b"connection-status active", response.data)
 
     def test_telegram_disconnected_and_connected_rendering(self):
-        self.assertIn(b"connection-status disconnected", self.client.get("/channels?lang=en").data)
+        client_page = self.client.get("/channels?lang=en").get_data(as_text=True)
+        self.assertIn("Available", client_page)
+        self.assertIn("Open Telegram", client_page)
+        self.assertNotIn("connection-status disconnected", client_page)
+        admin_page = self.client.get("/admin/channels?lang=en").get_data(as_text=True)
+        self.assertIn("connection-status disconnected", admin_page)
         channel_connections.set_connection_for_test(web_app.NINA_WEB_WORKSPACE_ID, "telegram", "connected", {"bot_username": "Nina7727_bot"})
-        page = self.client.get("/channels?lang=en").data
-        self.assertIn(b"connection-status connected", page)
-        self.assertIn(b"@Nina7727_bot", page)
+        client_page = self.client.get("/channels?lang=en").get_data(as_text=True)
+        self.assertIn("Available", client_page)
+        self.assertIn("Open Telegram", client_page)
+        self.assertNotIn("connection-status connected", client_page)
+        admin_page = self.client.get("/admin/channels?lang=en").get_data(as_text=True)
+        self.assertIn("connection-status connected", admin_page)
+        self.assertIn("@Nina7727_bot", admin_page)
 
     def test_telegram_token_is_workspace_scoped_single_use_and_expiring(self):
         setup = channel_connections.create_telegram_token("workspace_a", "Nina7727_bot", ttl_seconds=60)
@@ -100,18 +109,39 @@ class ChannelConnectionsV1Tests(unittest.TestCase):
 
     def test_web_changes_from_pending_to_connected_after_telegram_consumes_token(self):
         setup = channel_connections.create_telegram_token(web_app.NINA_WEB_WORKSPACE_ID, "Nina7727_bot")
+        self.assertEqual(
+            channel_connections.get_connection(web_app.NINA_WEB_WORKSPACE_ID, "telegram")["status"],
+            "pending",
+        )
         pending = self.client.get("/channels?lang=en").get_data(as_text=True)
-        self.assertIn("connection-status pending", pending)
+        self.assertIn("Available", pending)
+        self.assertIn("Open Telegram", pending)
+        self.assertNotIn("connection-status pending", pending)
+        pending_admin = self.client.get("/admin/channels?lang=en").get_data(as_text=True)
+        self.assertIn("connection-status pending", pending_admin)
         linked = channel_connections.consume_telegram_token(setup["token"], "101", "owner", "202", "Owner Name")
         self.assertIsNotNone(linked)
+        self.assertEqual(
+            channel_connections.get_connection(web_app.NINA_WEB_WORKSPACE_ID, "telegram")["status"],
+            "connected",
+        )
         connected = self.client.get("/channels?lang=en").get_data(as_text=True)
-        self.assertIn("connection-status connected", connected)
-        self.assertIn("Owner Name", connected)
+        self.assertIn("Available", connected)
+        self.assertIn("Open Telegram", connected)
+        self.assertNotIn("connection-status connected", connected)
+        self.assertNotIn("Owner Name", connected)
         self.assertNotIn(setup["token"], connected)
+        connected_admin = self.client.get("/admin/channels?lang=en").get_data(as_text=True)
+        self.assertIn("connection-status connected", connected_admin)
+        self.assertIn("Owner Name", connected_admin)
+        self.assertNotIn(setup["token"], connected_admin)
 
     def test_whatsapp_customer_connect_is_simple_and_secure(self):
-        page = self.client.get("/channels?lang=en").get_data(as_text=True)
-        self.assertIn("Connect WhatsApp", page)
+        with patch.dict(os.environ, {"NINA_COMPANY_WHATSAPP_NUMBER": "+37120714711"}):
+            page = self.client.get("/channels?lang=en").get_data(as_text=True)
+        self.assertIn("Open WhatsApp", page)
+        self.assertRegex(page, r"href='https://wa\.me/\d+'")
+        self.assertNotIn("Connect WhatsApp", page)
         for label in ("Phone Number ID", "Business Account ID", "Access token secret reference", "Meta App Secret reference"):
             self.assertNotIn(label, page)
         self.assertEqual(self.client.post("/channels/whatsapp/start", json={}).status_code, 400)
