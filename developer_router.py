@@ -4,7 +4,7 @@ import re
 
 DEVELOPER_INTENTS = (
     "repository_analysis", "ui_analysis", "architecture_analysis", "risk_analysis",
-    "code_search", "diff_request", "release_request",
+    "code_search", "diff_request", "implementation_request", "release_request",
 )
 
 TARGET_ALIASES = (
@@ -79,6 +79,14 @@ def developer_intents(command):
         "prepare change", "sagatavo minim", "minimālo drošo risinājumu", "piedāvā minim",
     )))
     add("diff_request", any(term in normalized for term in ("salabo", "fix ")))
+    add("implementation_request", any(term in normalized for term in (
+        "self-coding", "self coding", "paškod", "pats sevi kod", "pati sevi kod",
+        "implementē", "implemente", "uztaisi", "pabeidz", "build ", "implement ",
+        "taisi", "labo",
+    )) and any(term in normalized for term in (
+        "developer", "self-coding", "self coding", "kod", "funkc", "modul",
+        "router", "telegram", "whatsapp", "web", "memory", "files", "tasks",
+    )))
     add("release_request", bool(tokens & {
         "release", "deploy", "deployment", "commit", "push", "izlaid", "deployo", "commitot", "pushot",
     }))
@@ -207,6 +215,17 @@ def developer_investigation_plan(command):
             ("generic_nina_call", "nina_result = send_message_" + "to_nina(", "web_app.py"),
             ("research_router", "intent = build_search_" + "plan(clean", "nina_message_service.py"),
         )
+    if "implementation_request" in intents:
+        resolution, target_plan = target_evidence_plan(command)
+        core_plan = (
+            ("router_contract", "def developer_intents", "developer_router.py"),
+            ("planner_contract", "def developer_investigation_plan", "developer_router.py"),
+            ("answer_contract", "def _developer_investigation_answer", "web_app.py"),
+            ("approval_contract", "def create_approved_patch_job", "developer_control.py"),
+            ("agent_contract", "def _apply_approved_patch", "nina_developer_agent.py"),
+            ("model_contract", "def generate_with_nina", "nina_message_service.py"),
+        )
+        return "developer_self_coding_v1", core_plan + tuple(target_plan or ())
     if intents & {"repository_analysis", "architecture_analysis", "risk_analysis", "diff_request"}:
         resolution, target_plan = target_evidence_plan(command)
         if resolution["status"] == "resolved" and target_plan:

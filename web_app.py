@@ -7267,6 +7267,10 @@ def _developer_investigation_answer(kind, jobs):
         "web_research_source_links_diff_preview": (
             "search_entry", "verified_gate", "source_summary", "chat_render", "regression_anchor",
         ),
+        "developer_self_coding_v1": (
+            "router_contract", "planner_contract", "answer_contract",
+            "approval_contract", "agent_contract", "model_contract",
+        ),
     }.get(kind, ())
     if kind == "target_architecture_analysis":
         required = tuple(str((job.get("arguments") or {}).get("evidence_role") or "")
@@ -7286,7 +7290,7 @@ def _developer_investigation_answer(kind, jobs):
                 "missing_evidence": missing, "evidence": cited,
                 "write_executed": False, "safety_notice": "WRITE NOT EXECUTED.",
             }
-        if kind in {"developer_status_diff_preview", "web_research_source_links_diff_preview"}:
+        if kind in {"developer_status_diff_preview", "web_research_source_links_diff_preview", "developer_self_coding_v1"}:
             return {
                 "answer": "INSUFFICIENT ARCHITECTURE EVIDENCE",
                 "reason": "A safe diff preview was not generated because required repository evidence is missing.",
@@ -7416,6 +7420,30 @@ def _developer_investigation_answer(kind, jobs):
             "answer": "The verified-search pipeline provides persisted real URLs; the canonical Web chat escapes them as plain text. The minimal safe change linkifies only the verified set.",
             "proposed_change": proposal, "quality_review": quality_review, "evidence": cited,
             "approval_required": True, "write_executed": False, "safety_notice": "WRITE NOT EXECUTED.",
+        }
+    if kind == "developer_self_coding_v1":
+        from developer_self_coding import build_self_coding_proposal
+        developer_analysis, proposal = build_self_coding_proposal(
+            question=question,
+            cited=cited,
+            source_hashes=source_hashes,
+            generator=generate_with_nina,
+        )
+        quality_review = _developer_quality_review(
+            developer_analysis, proposal, cited
+        )
+        return {
+            "developer_analysis": developer_analysis,
+            "answer": (
+                "ONE NINA generated an evidence-bound implementation "
+                "proposal for owner review."
+            ),
+            "proposed_change": proposal,
+            "quality_review": quality_review,
+            "evidence": cited,
+            "approval_required": True,
+            "write_executed": False,
+            "safety_notice": "WRITE NOT EXECUTED.",
         }
     if kind == "send_message_definition":
         answer = (
