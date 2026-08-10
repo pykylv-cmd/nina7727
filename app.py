@@ -16607,8 +16607,9 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
         else:
             if not contact:
-                await safe_reply_text(update, "Nevarēju droši sasaistīt šo Telegram kontaktu. Nekāda darbība netika veikta.")
-                return
+                if not is_admin(user_id):
+                    await safe_reply_text(update, "Nevarēju droši sasaistīt šo Telegram kontaktu. Nekāda darbība netika veikta.")
+                    return
             workspace_id = str(contact.get("workspace_id") or "demo_small_business")
             contact_id = str(contact.get("contact_id") or "").strip()
             result = route_nina_message(NinaMessageEnvelope(
