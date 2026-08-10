@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {companyRestorationDiagnostics,companySessions,createCompanyAuthState,createCompanyQr,persistCompanyConnected,processCompanyMessageUpsert,publicCompanyDiagnostics,publicCompanyStatus,reconnectDelay,restoreCompanySessions,restoredQrIsInvalid,stopCompanySession} from '../src/company_session_manager.js'
+import {companyPublicDisconnectStatus,companyRestorationDiagnostics,companySessions,createCompanyAuthState,createCompanyQr,persistCompanyConnected,processCompanyMessageUpsert,publicCompanyDiagnostics,publicCompanyStatus,reconnectDelay,restoreCompanySessions,restoredQrIsInvalid,stopCompanySession} from '../src/company_session_manager.js'
 import {DisconnectReason} from '@whiskeysockets/baileys'
 import {publicStatus,sessions,stopSession} from '../src/session_manager.js'
 import {clearCompanyAuthRecords} from '../src/nina_api.js'
@@ -152,6 +152,15 @@ test('ordinary restart never creates a pairing QR while invalid credentials requ
   assert.equal(reconnectDelay(DisconnectReason.loggedOut),null)
   assert.equal(reconnectDelay(DisconnectReason.badSession),null)
   assert.notEqual(reconnectDelay(DisconnectReason.restartRequired),null)
+})
+test('terminal Company auth failure remains publicly observable while retryable closes keep connecting',()=>{
+  assert.equal(companyPublicDisconnectStatus(DisconnectReason.forbidden),'invalid_auth')
+  assert.equal(companyPublicDisconnectStatus(DisconnectReason.badSession),'invalid_auth')
+  assert.equal(companyPublicDisconnectStatus(DisconnectReason.loggedOut),'logged_out')
+  assert.equal(companyPublicDisconnectStatus(DisconnectReason.restartRequired),'connecting')
+  companySessions.set('invalid-auth-public',{workspaceId:'invalid-auth-public',status:companyPublicDisconnectStatus(DisconnectReason.forbidden)})
+  assert.equal(publicCompanyStatus('invalid-auth-public').status,'invalid_auth')
+  companySessions.delete('invalid-auth-public')
 })
 test('Company restoration diagnostics expose lifecycle state without auth values',()=>{
   companyRestorationDiagnostics.set('company',{restoration_state:'connected',last_error_class:'',restore_attempt:2,last_connected_at:'2026-01-01T00:00:00Z',credential:'never'})
