@@ -1021,6 +1021,7 @@ def _query_term_groups(intent):
         "atrodi", "mekle", "meklē", "find", "search", "letas", "lētas", "cena",
         "price", "buy", "pirkt", "com", "www", "no", "lidz", "līdz", "gada",
         "latvijā", "latvija", "latvia", "aktuālus", "aktualus", "aktuālu", "aktualu",
+        "internetā", "interneta", "internet",
         "avotus", "avoti", "avotu", "sources", "source", "par", "about",
         "atsūti", "atsuti", "sūti", "suti", "saites", "saiti", "links", "link", "un", "and",
     }

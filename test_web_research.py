@@ -568,6 +568,19 @@ class WebResearchTests(unittest.TestCase):
         self.assertEqual(payload["results"],[])
         self.assertEqual(payload["rejected_results"][0]["reason"],"query_terms_absent")
 
+    def test_internet_transport_word_is_not_a_required_page_term(self):
+        intent=self.research.build_search_plan("Atrodi internetā AI uzņēmumus Latvijā un atsūti saites")
+        candidate={"url":"https://company.example/about","provider":"test"}
+        payload=self.research.search_verified_web(
+            intent, search_provider=lambda _intent:[candidate],
+            fetcher=lambda url,**_kwargs:{
+                "url":url,"title":"AI uzņēmums Latvijā",
+                "html":"<main>Latvijas AI uzņēmums un tā pakalpojumi.</main>",
+            },
+        )
+        self.assertEqual(len(payload["results"]),1)
+        self.assertEqual(payload["rejected_results"],[])
+
     def test_irrelevant_provider_url_and_not_found_fail_closed(self):
         intent=self.research.build_search_plan("Atrodi reklama.lv BMW X5")
         candidates=[

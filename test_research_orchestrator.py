@@ -78,6 +78,60 @@ class ResearchOrchestratorTests(unittest.TestCase):
         self.assertEqual(result.provider_calls, 2)
         self.assertEqual(len(result.evidence), 1)
 
+    def test_provider_hints_do_not_become_required_verification_terms(self):
+        base = self.plan(queries=("AI companies official company information",))
+        plan = type(base)(
+            domain=base.domain, original_query="AI companies", decomposed_queries=base.decomposed_queries,
+            freshness=base.freshness, minimum_source_count=base.minimum_source_count,
+            minimum_distinct_domains=base.minimum_distinct_domains,
+            preferred_source_types=base.preferred_source_types, preferred_domains=base.preferred_domains,
+            output_requirement=base.output_requirement, clarification_state=base.clarification_state,
+            budget=base.budget,
+        )
+        seen = {}
+
+        def provider(intent, providers=None):
+            seen["provider_query"] = intent.query
+            return [self.candidate()], "fixture_provider", []
+
+        def verifier(intent, search_provider, fetcher):
+            seen["verification_query"] = intent.query
+            return self.verifier(intent, search_provider, fetcher)
+
+        result = research_orchestrator.run_research(
+            query=plan.original_query, workspace_id="workspace-a", contact_id="contact-a",
+            plan=plan, provider_searcher=provider, fetcher=self.fetcher,
+            verification_runner=verifier,
+        )
+        self.assertEqual(result.outcome, ResearchOutcome.COMPLETED)
+        self.assertEqual(seen["provider_query"], "AI companies official company information")
+        self.assertEqual(seen["verification_query"], "AI companies")
+
+    def test_exact_latvian_company_query_produces_multiple_evidence_records(self):
+        query = "Atrodi internetā 3 AI uzņēmumus Latvijā un atsūti avotu saites."
+        plan = plan_business_research(query)
+        candidates = [
+            self.candidate("https://company-one.example/about"),
+            self.candidate("https://company-two.example/about"),
+            self.candidate("https://company-three.example/about"),
+        ]
+
+        def fetcher(url, **_kwargs):
+            return {
+                "url": url,
+                "title": "AI uzņēmums Latvijā",
+                "html": "<main>Latvijas AI uzņēmums un tā pakalpojumi.</main>",
+            }
+
+        result = research_orchestrator.run_research(
+            query=query, workspace_id="workspace-a", contact_id="contact-a",
+            plan=plan, provider_searcher=self.provider(candidates), fetcher=fetcher,
+            verification_runner=web_research.search_verified_web,
+        )
+        self.assertEqual(result.outcome, ResearchOutcome.COMPLETED)
+        self.assertEqual(len(result.evidence), 3)
+        self.assertEqual(len({record.canonical_url for record in result.evidence}), 3)
+
     def test_duplicate_urls_deduplicate(self):
         result = self.execute([self.candidate(), self.candidate()])
         self.assertEqual(len(result.evidence), 1)

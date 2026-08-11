@@ -34,6 +34,11 @@ def _intent(query: str, plan: ResearchPlan) -> web_research.SearchIntent:
     )
 
 
+def _verification_intent(plan: ResearchPlan) -> web_research.SearchIntent:
+    """Validate candidates against the owner's request, not planner search hints."""
+    return _intent(plan.original_query, plan)
+
+
 def _result(
     *, plan: ResearchPlan, outcome: ResearchOutcome, evidence=(), failures=(), gaps=(),
     guard: ResearchBudgetGuard, clock: Callable[[], float],
@@ -103,13 +108,14 @@ def run_research(
             budgeted_providers.append((provider_name, budgeted_provider))
         for decomposed_query in selected_plan.decomposed_queries[:5]:
             guard.check_elapsed(now=clock())
-            intent = _intent(decomposed_query, selected_plan)
+            provider_intent = _intent(decomposed_query, selected_plan)
+            verification_intent = _verification_intent(selected_plan)
             try:
                 if provider_searcher is web_research.provider_search:
-                    candidates, provider_name, provider_failures = provider_searcher(intent, providers=budgeted_providers)
+                    candidates, provider_name, provider_failures = provider_searcher(provider_intent, providers=budgeted_providers)
                 else:
                     guard.consume_provider_call()
-                    candidates, provider_name, provider_failures = provider_searcher(intent, providers=providers)
+                    candidates, provider_name, provider_failures = provider_searcher(provider_intent, providers=providers)
             except ResearchBudgetExceeded:
                 raise
             except (web_research.WebResearchError, OSError, ValueError) as exc:
@@ -122,7 +128,7 @@ def run_research(
             provider_had_candidates = provider_had_candidates or bool(candidates)
             try:
                 payload = verification_runner(
-                    intent,
+                    verification_intent,
                     search_provider=lambda _intent, rows=tuple(candidates): list(rows),
                     fetcher=budget_fetch,
                 )
