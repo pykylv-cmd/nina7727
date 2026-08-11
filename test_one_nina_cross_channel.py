@@ -116,6 +116,27 @@ class OneNinaCrossChannelTests(unittest.TestCase):
         self.assertNotEqual(self.reminders()[0].metadata["reminder_text"], "izvest suni")
         self.assertEqual(len(self.reminders("contact-other")), 0)
 
+    def test_unrelated_chat_clears_only_same_contact_pending_across_channels(self):
+        pending = self.send("web", "Atgādini nopirkt pienu")
+        self.assertEqual(pending["source"], "brain_clarification")
+        other = self.send("web", "Atgādini izvest suni", contact_id="contact-other")
+        self.assertEqual(other["source"], "brain_clarification")
+
+        telegram = self.send("telegram", "kas jauns?")
+        self.assertEqual(telegram["text"], "shared ordinary reply")
+        self.assertEqual(
+            self.messaging._pending_reminder_context("contact:tenant-a:contact-linked:one_nina"),
+            {},
+        )
+        self.assertEqual(
+            self.messaging._pending_reminder_context("contact:tenant-a:contact-other:one_nina")["action_text"],
+            "izvest suni",
+        )
+
+        whatsapp = self.send("whatsapp_company", "tev visi mājās?")
+        self.assertEqual(whatsapp["text"], "shared ordinary reply")
+        self.assertEqual(self.reminders(), [])
+
     def test_full_explicit_cross_channel_create_supersedes_only_same_contact_pending(self):
         pending = self.send("web", "Atgādini man rīt piezvanīt Jānim")
         self.assertEqual(pending["source"], "brain_clarification")

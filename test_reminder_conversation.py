@@ -360,13 +360,55 @@ class ReminderConversationTests(unittest.TestCase):
         self.assertEqual(expired_yes["decision"]["reason"], "destructive_confirmation_absent")
         self.assertEqual({obj.object_id for obj in self.sources()}, before_ids)
 
-    def test_pending_reminder_context_cannot_fall_through_to_generic_chat(self):
+    def test_unrelated_chat_resolves_pending_reminder_and_uses_normal_reply(self):
         self.send("Atgādini man: pārbaudīt Ninu")
-        result = self.send("kaut kā regulāri")
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["error"], "reminder_schedule_still_pending")
-        self.assertIn("atgādinājuma", result["text"].casefold())
+        result = self.messaging.send_message_to_nina(
+            "tev visi mājās?", workspace_id="tenant-a", channel="whatsapp_company",
+            conversation_id="company:contact-a", contact_id="contact-a",
+            canonical_work_workspace_id="tenant-a",
+            generator=lambda _prompt: "Jā, viss kārtībā.",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["text"], "Jā, viss kārtībā.")
+        self.assertNotEqual(result.get("error"), "reminder_schedule_still_pending")
+        self.assertEqual(self.messaging._pending_reminder_context("company:contact-a"), {})
         self.assertEqual(self.sources(), [])
+
+    def test_expired_pending_reminder_cannot_block_general_chat(self):
+        self.send("Atgādini man: pārbaudīt Ninu")
+        conn = self.work._connect()
+        conn.execute(
+            "UPDATE conversation_state SET created_at=? WHERE user_id=? AND intent=?",
+            ("2000-01-01T00:00:00+00:00", "company:contact-a", "reminder_pending"),
+        )
+        conn.commit()
+        conn.close()
+        result = self.messaging.send_message_to_nina(
+            "kā tev iet?", workspace_id="tenant-a", channel="whatsapp_company",
+            conversation_id="company:contact-a", contact_id="contact-a",
+            canonical_work_workspace_id="tenant-a",
+            generator=lambda _prompt: "Man iet labi.",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["text"], "Man iet labi.")
+        self.assertEqual(self.sources(), [])
+
+    def test_pending_reminder_accepts_shared_brain_schedule_continuations(self):
+        for schedule in ("rīt 9:00", "pēc 2 stundām", "katru pirmdienu"):
+            with self.subTest(schedule=schedule):
+                conn = self.work._connect()
+                conn.execute("DELETE FROM nina_work_objects")
+                conn.execute("DELETE FROM conversation_state")
+                conn.commit()
+                conn.close()
+                pending = self.send("Atgādini man nopirkt pienu")
+                self.assertEqual(pending["source"], "brain_clarification")
+                completed = self.send(schedule)
+                self.assertTrue(completed["ok"])
+                reminders = self.sources()
+                self.assertEqual(len(reminders), 1)
+                self.assertEqual(reminders[0].metadata["reminder_text"], "nopirkt pienu")
+                self.assertEqual(self.messaging._pending_reminder_context("company:contact-a"), {})
 
     def test_hourly_delivery_advances_to_next_whole_hour_once(self):
         due = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)

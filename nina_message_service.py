@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 WORKSPACE_ID = (os.environ.get("NINA_WEB_WORKSPACE_ID") or "demo_small_business").strip()
 DESTRUCTIVE_CONFIRMATION_TTL_SECONDS = 300
+REMINDER_PENDING_TTL_SECONDS = 1800
 
 
 @dataclass(frozen=True)
@@ -489,7 +490,7 @@ def _pending_reminder_context(conversation_id: str) -> Dict[str, Any]:
     cur = conn.cursor()
     try:
         cur.execute(_sql("""
-            SELECT topic FROM conversation_state
+            SELECT topic, created_at FROM conversation_state
             WHERE user_id = %s AND intent = %s ORDER BY id DESC LIMIT 1
         """), (conversation_id, "reminder_pending"))
         row = cur.fetchone()
@@ -500,7 +501,14 @@ def _pending_reminder_context(conversation_id: str) -> Dict[str, Any]:
         return {}
     try:
         payload = json.loads(str(row[0] or "{}"))
+        created_at = row[1]
+        if not isinstance(created_at, datetime):
+            created_at = datetime.fromisoformat(str(created_at or "").replace("Z", "+00:00"))
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=ZoneInfo("UTC"))
     except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    if created_at + timedelta(seconds=REMINDER_PENDING_TTL_SECONDS) <= datetime.now(ZoneInfo("UTC")):
         return {}
     return payload if isinstance(payload, dict) and not payload.get("resolved") else {}
 
@@ -651,13 +659,18 @@ def _reminder_continuation_text(clean: str, conversation_id: str, decision) -> s
         return clean
     clock_answer = re.search(r"\b(?:[01]?\d|2[0-3])(?::[0-5]\d|\.[0-5]\d)?\b", clean.casefold())
     hourly_answer = _hourly_recurrence_requested(clean)
-    if not clock_answer and not hourly_answer:
+    schedule_answer = _is_pending_reminder_schedule_answer(clean)
+    if not clock_answer and not hourly_answer and not schedule_answer:
         return clean
     pending = _pending_reminder_context(conversation_id)
     if not pending:
         return clean
     action = str(pending.get("action_text") or "").strip()
     if hourly_answer:
+        return f"Atgādini man {clean}: {action}" if action else clean
+    if not clock_answer and schedule_answer:
+        if clean.casefold().startswith("katru "):
+            return f"{clean} atgādini: {action}" if action else clean
         return f"Atgādini man {clean}: {action}" if action else clean
     pending_raw = str(pending.get("raw_text") or "")
     day = re.search(
@@ -695,6 +708,16 @@ def _is_pending_reminder_schedule_answer(text: str) -> bool:
     """Recognize a schedule-only clarification answer without treating it as a new action."""
     value = str(text or "").strip()
     if re.fullmatch(r"(?:[01]?\d|2[0-3])(?::[0-5]\d|\.[0-5]\d)?", value):
+        return True
+    if re.fullmatch(
+        r"(?:pēc|pec)\s+\d+\s+(?:minūt(?:es|ēm)|minut(?:es|em)|stund(?:as|ām)|stund(?:as|am))",
+        value, re.IGNORECASE,
+    ):
+        return True
+    if re.fullmatch(
+        r"katru\s+(?:pirmdienu|otrdienu|trešdienu|tresdienu|ceturtdienu|piektdienu|sestdienu|svētdienu|svetdienu)",
+        value, re.IGNORECASE,
+    ):
         return True
     return _hourly_recurrence_requested(value) and not bool(re.search(
         r"\b(?:atgādini|atgadini|atceries|remind)\b", value, re.IGNORECASE,
@@ -1252,12 +1275,11 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             "next_occurrence": occurrence.isoformat(),
         }
     if pending_reminder and decision.reason == "general_reply":
-        answer = "Precizē atgādinājuma laiku vai atkārtošanās grafiku."
-        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
-        return {
-            "ok": False, "error": "reminder_schedule_still_pending", "text": answer,
-            "source": "shared_work", "channel": channel, "decision": decision_payload,
-        }
+        # The shared Brain has classified this turn as ordinary conversation,
+        # not a plausible reminder continuation. Resolve the stale clarification
+        # and continue through ONE NINA's normal channel-neutral routing.
+        _clear_pending_reminder_context(semantic_context_id)
+        pending_reminder = {}
     # ONE NINA routes explicit public research after the shared Brain decision.
     # The capability is deterministic and never treats page content as instructions.
     try:
