@@ -49,6 +49,23 @@ class BusinessResearchBridgeTests(unittest.TestCase):
         self.assertEqual(seen["domain"], ResearchDomain.COMPETITOR)
         self.assertEqual(seen["freshness"], FreshnessRequirement.CURRENT)
 
+    def test_public_research_keeps_original_business_question_context(self):
+        seen = {}
+        fixed = self.result()
+        def planner(query, **kwargs):
+            seen["planner_query"] = query
+            return plan_business_research(query, **kwargs)
+        def runner(**kwargs):
+            seen["runner_query"] = kwargs["query"]
+            return fixed
+        execute_business_research_need(
+            self.need(), workspace_id="workspace-a", contact_id="contact-a",
+            query_context="Kā NinaOS var pārspēt Sintra AI?", planner=planner, runner=runner,
+        )
+        self.assertIn("NinaOS", seen["planner_query"])
+        self.assertIn("Sintra AI", seen["planner_query"])
+        self.assertEqual(seen["planner_query"], seen["runner_query"])
+
     def test_completed_research_creates_business_fact(self):
         bridged = self.execute()
         self.assertEqual(len(bridged.facts), 1)

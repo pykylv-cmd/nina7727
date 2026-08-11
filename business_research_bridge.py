@@ -30,15 +30,19 @@ def _fact_type(need: ResearchNeed) -> BusinessFactType:
 
 def execute_business_research_need(
     need: ResearchNeed, *, workspace_id: str, contact_id: str,
+    query_context: str = "",
     planner: Callable = plan_business_research,
     runner: Callable = run_research,
     synthesizer: Callable = synthesize_research,
 ) -> BusinessResearchResult:
     """Run existing Research V1 and expose only completed, verified, URL-bound facts."""
-    plan = planner(need.question, domain=need.domain, freshness=need.freshness,
+    research_query = need.question
+    if str(query_context or "").strip():
+        research_query = f"{need.question}\nBiznesa lēmuma konteksts: {str(query_context).strip()}"
+    plan = planner(research_query, domain=need.domain, freshness=need.freshness,
                    output_requirement=need.why_needed)
     result = runner(
-        query=need.question, workspace_id=workspace_id, contact_id=contact_id,
+        query=research_query, workspace_id=workspace_id, contact_id=contact_id,
         domain=need.domain, freshness=need.freshness, output_requirement=need.why_needed,
         plan=plan,
     )

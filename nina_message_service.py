@@ -1208,7 +1208,8 @@ def _is_business_decision_request(text: str, decision) -> bool:
         "biznes", "uzņēmum", "uznemum", "konkur", "cenu", "cena", "peļņ", "peln",
         "tirg", "izmaks", "partnerīb", "partnerib", "pārdo", "pardo", "mārketing", "marketing",
         "invest", "ieguld", "ieņēm", "ienem", "klient", "produktu", "izaugs",
-        "stratēģ", "strateg", "biznesa virzien",
+        "stratēģ", "strateg", "biznesa virzien", "pārspēt", "parspet",
+        "labāki par", "labaki par", "priekšrocību pār", "prieksrocibu par",
     ))
     decision_language = any(token in folded for token in (
         "vai man ir vērts", "vai man ir verts", "vai ir vērts", "vai ir verts", "vai vajag", "kā ", "ka ", "izanalizē", "izanalize",
@@ -1220,6 +1221,36 @@ def _is_business_decision_request(text: str, decision) -> bool:
     return business_subject and decision_language
 
 
+def _is_public_business_research_need(need) -> bool:
+    """Keep owner-private operating data out of public Research V1."""
+    folded = f"{getattr(need, 'question', '')} {getattr(need, 'why_needed', '')}".casefold()
+    if any(token in folded for token in (
+        "vienības ekonom", "vienibas ekonom", "iekšēj", "ieksej", "marž", "margin",
+        "privāt", "privat", "konvers", "churn", "confidential", "sales numbers",
+        "pārdošanas skait", "pardosanas skait", "naudas nepieciešam", "naudas nepieciesam",
+    )):
+        return False
+    return any(token in folded for token in (
+        "konkur", "compet", "piedāvājum", "piedavajum", "cena", "price", "tirg", "market",
+        "klientu piepras", "customer demand", "regul", "publisk", "public", "uzņēmum", "uznemum",
+    ))
+
+
+def _latvian_business_text(value: str) -> str:
+    text = str(value or "").strip()
+    translations = {
+        "Run the reversible validation first.": "Vispirms veic ierobežotu, atgriezenisku pārbaudi.",
+        "Proceed with the evidence-backed option under stated constraints.": "Turpini ar pierādījumos balstīto variantu, ievērojot norādītos ierobežojumus.",
+        "Resolve the highest-priority evidence gap with a bounded validation.": "Ar ierobežotu pārbaudi noskaidro svarīgāko trūkstošo pierādījumu.",
+        "Execute the recommended option and monitor its stated conditions.": "Īsteno ieteikto variantu un uzraugi norādītos nosacījumus.",
+        "Validate the highest-value customer problem before scaling commitment.": "Pirms lielāku resursu ieguldīšanas pārbaudi klientam vērtīgāko problēmu.",
+        "Material evidence is missing.": "Trūkst būtisku pierādījumu.",
+    }
+    if text.startswith("Verify: "):
+        return "Jāpārbauda: " + text[len("Verify: "):]
+    return translations.get(text, text)
+
+
 def _render_business_decision(decision) -> str:
     """Render an executive answer without exposing internal model names."""
     lines = ["Ko es redzu"]
@@ -1229,9 +1260,9 @@ def _render_business_decision(decision) -> str:
     else:
         lines.append("- Kritiskie fakti vēl nav pietiekami verificēti; pieņēmumus neuzdošu par faktiem.")
     lines.append("Kur ir iespēja")
-    lines.extend(f"- {item.description}" for item in tuple(decision.opportunities)[:3])
+    lines.extend(f"- {_latvian_business_text(item.description)}" for item in tuple(decision.opportunities)[:3])
     lines.append("Kas var nogāzt")
-    lines.extend(f"- {item.description}" for item in tuple(decision.risks)[:3])
+    lines.extend(f"- {_latvian_business_text(item.description)}" for item in tuple(decision.risks)[:3])
     assumptions = tuple(getattr(decision.context, "assumptions", ()) or ())
     if assumptions:
         lines.append("Pieņēmumi")
@@ -1240,9 +1271,9 @@ def _render_business_decision(decision) -> str:
     if unresolved:
         lines.append("Vēl jāpārbauda")
         lines.extend(f"- {item.question}" for item in unresolved[:4])
-    lines.extend(("Mans lēmums", decision.recommendation.decision, "Ko darīt tagad"))
+    lines.extend(("Mans lēmums", _latvian_business_text(decision.recommendation.decision), "Ko darīt tagad"))
     actions = tuple(getattr(decision, "next_best_actions", ()) or ())
-    lines.extend(f"- {item.action}" for item in actions[:3])
+    lines.extend(f"- {_latvian_business_text(item.action)}" for item in actions[:3])
     verified_links = []
     seen = set()
     for fact in facts:
@@ -1266,8 +1297,10 @@ def _run_business_thinking(text: str, workspace_id: str, contact_id: str):
         text, workspace_id=workspace_id, contact_id=contact_id,
     )
     research_results = tuple(
-        execute_business_research_need(need, workspace_id=workspace_id, contact_id=contact_id)
-        for need in initial.research_needs
+        execute_business_research_need(
+            need, workspace_id=workspace_id, contact_id=contact_id, query_context=text,
+        )
+        for need in initial.research_needs if _is_public_business_research_need(need)
     )
     return analyze_business_decision_with_evidence(
         text, workspace_id=workspace_id, contact_id=contact_id,

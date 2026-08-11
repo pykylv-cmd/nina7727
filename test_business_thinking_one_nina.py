@@ -51,6 +51,26 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
     def test_competitor_question_triggers(self):
         self.assertTrue(self.trigger("Kā mēs varam pārspēt konkurentus?"))
 
+    def test_live_competitor_phrasings_trigger_without_channel_specific_logic(self):
+        for text in (
+            "Vai NinaOS var pārspēt Sintra AI un ko mums darīt, lai viņus pārspētu?",
+            "Kā pārspēt Sintra AI?",
+            "Kā mēs varam pārspēt konkurentus?",
+            "Ko darīt, lai būtu labāki par konkurentiem?",
+            "Kā iegūt priekšrocību pār konkurentiem?",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(self.trigger(text))
+
+    def test_sintra_information_requests_do_not_trigger(self):
+        for text in (
+            "kas ir Sintra AI?",
+            "atrodi internetā Sintra AI",
+            "atsūti Sintra AI mājaslapu",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(self.trigger(text))
+
     def test_pricing_question_triggers(self):
         self.assertTrue(self.trigger("Vai vajag celt cenu?"))
 
@@ -100,7 +120,47 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
             return self.result_for_need(need)
         with patch("business_research_bridge.execute_business_research_need", side_effect=execute):
             messaging._run_business_thinking("Vai vajag celt cenu?", "workspace-a", "contact-a")
-        self.assertEqual(len(calls), len(initial.research_needs))
+        public_needs = tuple(need for need in initial.research_needs if messaging._is_public_business_research_need(need))
+        self.assertEqual(tuple(need for need, _scope in calls), public_needs)
+        self.assertTrue(all(scope["query_context"] == "Vai vajag celt cenu?" for _need, scope in calls))
+
+    def test_public_demand_competitor_and_pricing_needs_use_research_v1(self):
+        initial = analyze_business_decision(
+            "Kā pārspēt konkurentus ar labāku cenu?", workspace_id="workspace-a", contact_id="contact-a",
+        )
+        public_questions = tuple(
+            need.question for need in initial.research_needs if messaging._is_public_business_research_need(need)
+        )
+        self.assertTrue(any("pieprasījums" in question for question in public_questions))
+        self.assertTrue(any("konkurentu" in question and "cenas" in question for question in public_questions))
+
+    def test_private_unit_economics_need_does_not_use_public_research(self):
+        initial = analyze_business_decision(
+            "Vai vajag celt cenu?", workspace_id="workspace-a", contact_id="contact-a",
+        )
+        private_needs = tuple(need for need in initial.research_needs if not messaging._is_public_business_research_need(need))
+        self.assertTrue(any("ekonomika" in need.question for need in private_needs))
+        with patch(
+            "business_research_bridge.execute_business_research_need",
+            side_effect=lambda need, **_scope: self.result_for_need(need),
+        ) as execute:
+            messaging._run_business_thinking(
+                "Vai vajag celt cenu?", "workspace-a", "contact-a",
+            )
+        self.assertNotIn(private_needs[0], tuple(call.args[0] for call in execute.call_args_list))
+
+    def test_private_margin_need_is_not_publicly_researched(self):
+        need = type("PrivateNeed", (), {
+            "question": "Kāda ir mūsu privātā bruto marža un iekšējā konversija?",
+            "why_needed": "Confidential internal sales numbers are required.",
+        })()
+        self.assertFalse(messaging._is_public_business_research_need(need))
+
+    def test_latvian_renderer_hides_deterministic_english_engine_prose(self):
+        rendered = messaging._render_business_decision(self.enriched(completed=False))
+        self.assertNotIn("Run the reversible validation first", rendered)
+        self.assertNotIn("Validate the highest-value customer problem", rendered)
+        self.assertNotIn("Verify:", rendered)
 
     def test_failed_research_creates_no_rendered_fact(self):
         rendered = messaging._render_business_decision(self.enriched(completed=False))
@@ -162,6 +222,32 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
         self.assertEqual({item["source"] for item in outputs}, {"business_thinking"})
         self.assertEqual(len({item["text"] for item in outputs}), 1)
         self.assertTrue(all(item["external_action_executed"] is False for item in outputs))
+
+    def test_both_exact_live_messages_share_business_runtime_across_channels(self):
+        messages = (
+            "Vai NinaOS var pārspēt Sintra AI un ko mums darīt, lai viņus pārspētu?",
+            "Kādu biznesa stratēģiju mums izvēlēties, lai NinaOS augtu ātrāk par konkurentiem?",
+        )
+        for question in messages:
+            decision = self.enriched(question)
+            with self.subTest(question=question), \
+                 patch.object(messaging, "_run_business_thinking", return_value=decision), \
+                 patch.object(messaging, "_save_turn"), \
+                 patch.object(messaging, "_pending_reminder_context", return_value={}), \
+                 patch.object(messaging, "_pending_destructive_context", return_value={}), \
+                 patch.object(messaging, "_action_context", return_value={}):
+                outputs = tuple(
+                    messaging.route_nina_message(
+                        messaging.NinaMessageEnvelope(
+                            question, "workspace-a", channel, f"conversation-{channel}", "contact-a",
+                        ),
+                        generator=lambda _prompt: "unused",
+                    )
+                    for channel in ("web", "telegram", "company_whatsapp")
+                )
+                self.assertEqual({item["source"] for item in outputs}, {"business_thinking"})
+                self.assertEqual(len({item["text"] for item in outputs}), 1)
+                self.assertTrue(all(item["external_action_executed"] is False for item in outputs))
 
     def test_no_channel_specific_business_code(self):
         source = inspect.getsource(messaging._run_business_thinking).casefold()
