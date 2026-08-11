@@ -42,6 +42,24 @@ def _connect():
     return persistence_backend.connect(DATABASE_URL, DB_FILE, USE_POSTGRES)
 
 
+def _connection_columns(cur):
+    if USE_POSTGRES:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema=current_schema() AND table_name=%s",
+            (_TABLE,),
+        )
+        return {str(row[0]) for row in cur.fetchall()}
+    cur.execute(f"PRAGMA table_info({_TABLE})")
+    return {str(row[1]) for row in cur.fetchall()}
+
+
+def _legacy_connection_id(workspace_id, channel):
+    channel_type = "WHATSAPP" if "whatsapp" in channel else channel.upper()
+    material = f"{workspace_id}\0{channel_type}\0legacy:{channel}".encode()
+    return "chc_" + hashlib.sha256(material).hexdigest()[:32]
+
+
 def _validate_workspace(workspace_id):
     value = str(workspace_id or "").strip()
     if not _WORKSPACE_RE.fullmatch(value):
@@ -249,7 +267,11 @@ def _upsert(workspace_id, channel, status, metadata=None, secret_ref="", webhook
         if existing:
             cur.execute(_sql(f"UPDATE {_TABLE} SET status=%s, metadata_json=%s, secret_ref=%s, webhook_secret_ref=%s, app_secret_ref=%s, connect_token_hash=%s, connect_token_expires_at=%s, connect_token_used_at=%s, updated_at=%s WHERE workspace_id=%s AND channel=%s"), (status, payload, secret_ref, webhook_secret_ref, app_secret_ref, token_hash, token_expires_at, token_used_at, now, workspace_id, channel))
         else:
-            cur.execute(_sql(f"INSERT INTO {_TABLE} (workspace_id, channel, status, metadata_json, secret_ref, webhook_secret_ref, app_secret_ref, connect_token_hash, connect_token_expires_at, connect_token_used_at, created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"), (workspace_id, channel, status, payload, secret_ref, webhook_secret_ref, app_secret_ref, token_hash, token_expires_at, token_used_at, now, now))
+            columns = _connection_columns(cur)
+            if "channel_connection_id" in columns:
+                cur.execute(_sql(f"INSERT INTO {_TABLE} (workspace_id, channel, status, metadata_json, secret_ref, webhook_secret_ref, app_secret_ref, connect_token_hash, connect_token_expires_at, connect_token_used_at, created_at, updated_at, channel_connection_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"), (workspace_id, channel, status, payload, secret_ref, webhook_secret_ref, app_secret_ref, token_hash, token_expires_at, token_used_at, now, now, _legacy_connection_id(workspace_id, channel)))
+            else:
+                cur.execute(_sql(f"INSERT INTO {_TABLE} (workspace_id, channel, status, metadata_json, secret_ref, webhook_secret_ref, app_secret_ref, connect_token_hash, connect_token_expires_at, connect_token_used_at, created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"), (workspace_id, channel, status, payload, secret_ref, webhook_secret_ref, app_secret_ref, token_hash, token_expires_at, token_used_at, now, now))
         conn.commit()
         cur.close()
     finally:

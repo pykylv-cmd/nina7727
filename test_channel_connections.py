@@ -179,6 +179,91 @@ class ChannelConnectionsV1Tests(unittest.TestCase):
             except OSError:
                 pass
 
+    def test_channel_layer_schema_accepts_new_telegram_pending_connection(self):
+        handle = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        legacy_db = handle.name
+        handle.close()
+        connection = sqlite3.connect(legacy_db)
+        try:
+            connection.execute("""CREATE TABLE nina_channel_connections (
+                workspace_id TEXT NOT NULL, channel TEXT NOT NULL, status TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}', secret_ref TEXT NOT NULL DEFAULT '',
+                webhook_secret_ref TEXT NOT NULL DEFAULT '', app_secret_ref TEXT NOT NULL DEFAULT '',
+                connect_token_hash TEXT NOT NULL DEFAULT '',
+                connect_token_expires_at TEXT NOT NULL DEFAULT '',
+                connect_token_used_at TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                channel_connection_id TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (workspace_id, channel)
+            )""")
+            connection.execute(
+                "CREATE UNIQUE INDEX idx_nina_channel_connection_id "
+                "ON nina_channel_connections (channel_connection_id)"
+            )
+            connection.execute(
+                "INSERT INTO nina_channel_connections "
+                "(workspace_id,channel,status,created_at,updated_at) VALUES (?,?,?,?,?)",
+                ("existing_workspace", "web", "connected", "before", "before"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        original = (
+            channel_connections.DATABASE_URL, channel_connections.DB_FILE,
+            channel_connections.USE_POSTGRES, channel_connections._SCHEMA_READY,
+            channel_connections._SCHEMA_TARGET,
+        )
+        try:
+            channel_connections.DATABASE_URL = ""
+            channel_connections.DB_FILE = legacy_db
+            channel_connections.USE_POSTGRES = False
+            channel_connections._SCHEMA_READY = False
+            channel_connections._SCHEMA_TARGET = ""
+            setup = channel_connections.create_telegram_token(
+                "admin_workspace", "Nina7727_bot", ttl_seconds=60,
+            )
+            connection = sqlite3.connect(legacy_db)
+            try:
+                row = connection.execute(
+                    "SELECT status,connect_token_hash,connect_token_expires_at,"
+                    "connect_token_used_at,channel_connection_id "
+                    "FROM nina_channel_connections WHERE workspace_id=? AND channel=?",
+                    ("admin_workspace", "telegram"),
+                ).fetchone()
+                existing = connection.execute(
+                    "SELECT status,created_at,updated_at FROM nina_channel_connections "
+                    "WHERE workspace_id=? AND channel=?",
+                    ("existing_workspace", "web"),
+                ).fetchone()
+            finally:
+                connection.close()
+            self.assertEqual(row[0], "pending")
+            self.assertTrue(row[1])
+            self.assertNotIn(setup["token"], row[1])
+            self.assertEqual(row[2], setup["expires_at"])
+            self.assertEqual(row[3], "")
+            self.assertTrue(row[4].startswith("chc_"))
+            self.assertEqual(existing, ("connected", "before", "before"))
+            self.assertEqual(
+                setup["deep_link"],
+                f"https://t.me/Nina7727_bot?start={setup['token']}",
+            )
+            self.assertNotEqual(
+                channel_connections.get_connection("admin_workspace", "telegram")["status"],
+                "connected",
+            )
+        finally:
+            (
+                channel_connections.DATABASE_URL, channel_connections.DB_FILE,
+                channel_connections.USE_POSTGRES, channel_connections._SCHEMA_READY,
+                channel_connections._SCHEMA_TARGET,
+            ) = original
+            try:
+                os.unlink(legacy_db)
+            except OSError:
+                pass
+
     def test_telegram_provider_secret_never_appears_in_html(self):
         secret = "telegram-provider-secret-never-render"
         with patch.dict(os.environ, {"TELEGRAM_TOKEN": secret, "TELEGRAM_BOT_USERNAME": "Nina7727_bot"}):
@@ -191,7 +276,12 @@ class ChannelConnectionsV1Tests(unittest.TestCase):
         response = self.client.post("/channels/telegram/connect?lang=en", data={"csrf_token": self.csrf("telegram_connect")})
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"https://t.me/Nina7727_bot?start=", response.data)
-        self.assertEqual(channel_connections.get_connection(web_app.NINA_WEB_WORKSPACE_ID, "telegram")["status"], "pending")
+        pending = channel_connections.get_connection(
+            web_app.NINA_WEB_WORKSPACE_ID, "telegram"
+        )
+        self.assertEqual(pending["status"], "pending")
+        self.assertTrue(pending["token_expires_at"])
+        self.assertFalse(pending["token_used_at"])
         response = self.client.post("/channels/telegram/disconnect?lang=en", data={"csrf_token": self.csrf("telegram_disconnect")})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(channel_connections.get_connection(web_app.NINA_WEB_WORKSPACE_ID, "telegram")["status"], "disconnected")
