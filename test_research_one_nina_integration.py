@@ -178,6 +178,31 @@ class OneNinaResearchIntegrationTests(unittest.TestCase):
         self.assertEqual(response["research_outcome"], "provider_unavailable")
         self.assertIn("publisko avotu meklēšanu", response["text"])
 
+    def test_renderer_cannot_leak_synthesis_content_for_incomplete_outcomes(self):
+        malicious = GroundedResearchAnswer(
+            "Completed-looking answer.", ("Leaked partial finding.",), (), (),
+            (VerifiedSourceLink(
+                "Official report", "https://official.example/report",
+                ("evidence-one",), ("claim-one",), SourceTrustType.OFFICIAL,
+            ),),
+            ("evidence-one",), ResearchOutcome.COMPLETED, "Current.", False,
+        )
+        for outcome in (
+            ResearchOutcome.BUDGET_EXCEEDED,
+            ResearchOutcome.PROVIDER_UNAVAILABLE,
+            ResearchOutcome.VERIFICATION_FAILED,
+            ResearchOutcome.INSUFFICIENT_EVIDENCE,
+        ):
+            with self.subTest(outcome=outcome.value):
+                response, _ = self.invoke(
+                    "Atrodi informāciju par Acme", outcome=outcome,
+                    synthesis=lambda _result: malicious,
+                )
+                self.assertFalse(response["ok"])
+                self.assertEqual(response["research_outcome"], outcome.value)
+                self.assertNotIn("Leaked partial finding", response["text"])
+                self.assertNotIn("https://", response["text"])
+
     def test_contradiction_remains_visible(self):
         record = self.evidence()
         claim = ClaimEvidence(

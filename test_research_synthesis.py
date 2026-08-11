@@ -111,6 +111,36 @@ class ResearchSynthesisTests(unittest.TestCase):
         self.assertTrue(answer.insufficient_evidence)
         self.assertIn("minimum_source_count_not_met", answer.risks_or_gaps)
 
+    def test_every_incomplete_outcome_with_verified_evidence_fails_closed(self):
+        record = self.evidence()
+        claim = self.claim(record)
+        for outcome in (
+            ResearchOutcome.BUDGET_EXCEEDED,
+            ResearchOutcome.PROVIDER_UNAVAILABLE,
+            ResearchOutcome.VERIFICATION_FAILED,
+            ResearchOutcome.INSUFFICIENT_EVIDENCE,
+        ):
+            with self.subTest(outcome=outcome.value):
+                result = replace(
+                    self.result((record,)), state=ResearchJobState.FAILED,
+                    outcome=outcome, gaps=("terminal_research_failure",),
+                )
+                answer = self.synthesize(result, (claim,))
+                self.assertTrue(answer.insufficient_evidence)
+                self.assertEqual(answer.findings, ())
+                self.assertEqual(answer.source_links, ())
+                self.assertEqual(answer.evidence_ids_used, ())
+                self.assertEqual(answer.outcome, outcome)
+                self.assertIn("could not be completed", answer.summary)
+                self.assertIn("terminal_research_failure", answer.risks_or_gaps)
+
+    def test_completed_outcome_still_renders_grounded_evidence(self):
+        record = self.evidence()
+        answer = self.synthesize(self.result((record,)), (self.claim(record),))
+        self.assertFalse(answer.insufficient_evidence)
+        self.assertEqual(answer.findings, ("Supported factual finding.",))
+        self.assertEqual([link.url for link in answer.source_links], [record.canonical_url])
+
     def test_current_research_with_stale_evidence_fails_freshness(self):
         stale = self.evidence(published="2025-01-01", fetched="2025-01-02T00:00:00+00:00")
         answer = self.synthesize(self.result((stale,), freshness=FreshnessRequirement.CURRENT), (self.claim(stale),))

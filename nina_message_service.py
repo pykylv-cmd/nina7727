@@ -1283,14 +1283,16 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
 
     def render_grounded_research_answer(answer, research_result):
         """Render only grounded prose and URLs present in verified Research V1 evidence."""
+        result_completed = getattr(getattr(research_result, "outcome", None), "value", "") == "completed"
+        answer_completed = getattr(getattr(answer, "outcome", None), "value", "") == "completed"
         approved = {
             record.canonical_url: record
             for record in research_result.evidence
             if getattr(record.verification_state, "value", "") == "verified"
         }
         strip_urls = lambda value: re.sub(r"https?://[^\s<>\"']+", "", str(value or ""), flags=re.I).strip()
-        if answer.insufficient_evidence:
-            if answer.outcome.value == "provider_unavailable":
+        if not result_completed or not answer_completed or answer.insufficient_evidence:
+            if getattr(getattr(research_result, "outcome", None), "value", "") == "provider_unavailable":
                 return "Neizdevās sasniegt publisko avotu meklēšanu. Neizdomāšu faktus vai saites."
             return "Neizdevās iegūt pietiekami uzticamus verificētus avotus. Neizdomāšu faktus vai saites."
         lines = [strip_urls(answer.summary)]

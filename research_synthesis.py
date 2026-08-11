@@ -206,19 +206,29 @@ def synthesize_research(
         )
     else:
         freshness_note = "No freshness constraint was requested."
-    insufficient = not grounded or (
+    terminal_failure = result.outcome is not ResearchOutcome.COMPLETED
+    if terminal_failure:
+        findings = ()
+        links = ()
+        evidence_ids_used = ()
+    insufficient = terminal_failure or not grounded or (
         result.plan.freshness is FreshnessRequirement.CURRENT and bool(stale_count)
     )
-    if contradicted:
+    if terminal_failure:
+        summary = {
+            ResearchOutcome.BUDGET_EXCEEDED: "Reliable research could not be completed within the research budget.",
+            ResearchOutcome.PROVIDER_UNAVAILABLE: "Reliable research could not be completed because the provider was unavailable.",
+            ResearchOutcome.VERIFICATION_FAILED: "Reliable research could not be completed because source verification failed.",
+            ResearchOutcome.INSUFFICIENT_EVIDENCE: "Reliable research could not be completed because evidence was insufficient.",
+        }.get(result.outcome, "Reliable research could not be completed.")
+    elif contradicted:
         summary = f"Verified sources disagree. {len(grounded)} grounded findings are available."
     elif grounded:
         summary = f"{len(grounded)} grounded findings from {len(links)} verified sources."
     else:
         summary = "Insufficient verified evidence for a grounded factual answer."
-    outcome = (
-        result.outcome
-        if insufficient and result.outcome is not ResearchOutcome.COMPLETED
-        else (ResearchOutcome.INSUFFICIENT_EVIDENCE if insufficient else result.outcome)
+    outcome = result.outcome if terminal_failure else (
+        ResearchOutcome.INSUFFICIENT_EVIDENCE if insufficient else result.outcome
     )
     return GroundedResearchAnswer(
         summary=summary,
