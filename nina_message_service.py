@@ -1208,11 +1208,14 @@ def _is_business_decision_request(text: str, decision) -> bool:
         "biznes", "uzņēmum", "uznemum", "konkur", "cenu", "cena", "peļņ", "peln",
         "tirg", "izmaks", "partnerīb", "partnerib", "pārdo", "pardo", "mārketing", "marketing",
         "invest", "ieguld", "ieņēm", "ienem", "klient", "produktu", "izaugs",
+        "stratēģ", "strateg", "biznesa virzien",
     ))
     decision_language = any(token in folded for token in (
         "vai man ir vērts", "vai man ir verts", "vai ir vērts", "vai ir verts", "vai vajag", "kā ", "ka ", "izanalizē", "izanalize",
         "ko darīt", "ko darit", "kur mums", "visizdevīg", "visizdevig", "samazināt", "samazinat",
-        "pārspēt", "parspet", "attīstīt", "attistit", "ieiet",
+        "pārspēt", "parspet", "attīstīt", "attistit", "ieiet", "kādu ", "kadu ",
+        "kāda būtu", "kada butu", "ko mums", "darīt tālāk", "darit talak",
+        "izvēlēties", "izveleties", "gudrākais", "gudrakais", "lēmum", "lemum",
     ))
     return business_subject and decision_language
 

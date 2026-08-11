@@ -57,6 +57,31 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
     def test_market_entry_question_triggers(self):
         self.assertTrue(self.trigger("Vai ir vērts ieiet šajā tirgū?"))
 
+    def test_strategic_business_decision_phrasings_trigger(self):
+        for text in (
+            "Kādu biznesa stratēģiju izvēlēties?",
+            "Kāda būtu labākā stratēģija manam biznesam?",
+            "Ko mums stratēģiski darīt tālāk?",
+            "Kādu virzienu biznesam izvēlēties?",
+            "Kāds būtu gudrākais biznesa lēmums šajā situācijā?",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(self.trigger(text))
+
+    def test_strategy_information_and_existing_capabilities_do_not_trigger(self):
+        for text, changes in (
+            ("kas ir stratēģija?", {}),
+            ("izskaidro biznesa stratēģiju", {}),
+            ("kā tev iet?", {}),
+            ("atrodi internetā biznesa stratēģijas", {}),
+            ("izlasi https://example.com/strategy", {}),
+            ("Atgādini man rīt izvēlēties stratēģiju", {"create_reminder": True, "create_work_object": True}),
+            ("Uztaisi uzdevumu izvēlēties biznesa stratēģiju", {"create_work_object": True}),
+            ("Atceries, ka mana biznesa stratēģija ir izaugsme", {}),
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(self.trigger(text, **changes))
+
     def test_enough_evidence_renders_recommendation_and_action(self):
         rendered = messaging._render_business_decision(self.enriched())
         self.assertIn("Mans lēmums", rendered)
