@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import re
 from typing import Any, Iterable
 
 from business_thinking_models import (
-    BusinessDecision, BusinessDecisionContext, BusinessIntent, BusinessMetric, BusinessRisk,
+    BusinessDecision, BusinessDecisionContext, BusinessFact, BusinessIntent, BusinessMetric, BusinessResearchResult, BusinessRisk,
     DecisionEvidence, DecisionFrame, DecisionState, EvidenceConfidence, EvidenceKind,
-    NextBestAction, Opportunity, Recommendation, ResearchNeed, StrategicOption, StrategicPriority,
+    DecisionEvidenceSet, NextBestAction, Opportunity, Recommendation, ResearchNeed, StrategicOption, StrategicPriority,
 )
+from competitive_strategy import analyze_competitive_strategy
 from research_models import FreshnessRequirement, ResearchDomain
 
 
@@ -67,7 +69,7 @@ def _research_needs(intent: BusinessIntent, facts: tuple[DecisionEvidence, ...])
         needs.append(ResearchNeed("Kādi ir aktuālie konkurentu piedāvājumi un cenas?", ResearchDomain.COMPETITOR,
                                   FreshnessRequirement.CURRENT, StrategicPriority.HIGH,
                                   "Competitive position and pricing cannot be inferred safely."))
-    if intent in {BusinessIntent.START_BUSINESS, BusinessIntent.GROW_BUSINESS, BusinessIntent.INVESTMENT, BusinessIntent.PRICING} and not _has(facts, "margin", "revenue", "cost", "izmaks", "ieņēm"):
+    if intent in {BusinessIntent.START_BUSINESS, BusinessIntent.GROW_BUSINESS, BusinessIntent.INVESTMENT, BusinessIntent.PRICING} and not _has(facts, "economics", "economic", "ekonom", "margin", "revenue", "cost", "izmaks", "ieņēm"):
         needs.append(ResearchNeed("Kāda ir pierādāmā vienības ekonomika un naudas nepieciešamība?", ResearchDomain.MARKET,
                                   FreshnessRequirement.RECENT, StrategicPriority.HIGH,
                                   "Capital allocation requires evidence-backed economics."))
@@ -167,4 +169,88 @@ def analyze_business_decision(
         tuple(f"Hypothesis: {item.value}" for item in assumed), (opportunity,), tuple(risks),
         (option_experiment, option_commit), recommendation, actions, needs,
         tuple(dict.fromkeys(unknown + tuple(need.question for need in needs))), metrics,
+    )
+
+
+def analyze_business_decision_with_evidence(
+    question: str, *, workspace_id: str, contact_id: str,
+    research_results: Iterable[BusinessResearchResult] = (),
+    competitive_comparison: dict[str, dict[str, Any]] | None = None,
+    **kwargs,
+) -> BusinessDecision:
+    """Recompute a decision using completed, scope-matched BusinessResearchResult facts."""
+    initial = analyze_business_decision(
+        question, workspace_id=workspace_id, contact_id=contact_id, **kwargs,
+    )
+    accepted_facts: list[BusinessFact] = []
+    unresolved: list[ResearchNeed] = []
+    contradictions: list[str] = []
+    freshness_gaps: list[str] = []
+    result_by_need = {item.research_need: item for item in research_results}
+    for need in initial.research_needs:
+        result = result_by_need.get(need)
+        if result is None or result.workspace_id != workspace_id or result.contact_id != contact_id:
+            unresolved.append(need)
+            continue
+        if result.outcome != "completed" or not result.facts:
+            unresolved.append(need)
+            freshness_gaps.extend(gap for gap in result.gaps if "freshness" in gap)
+            continue
+        accepted_facts.extend(result.facts)
+        contradictions.extend(gap for gap in result.gaps if "contradict" in gap)
+    supplied = tuple(kwargs.get("known_facts") or ())
+    research_evidence = tuple(
+        DecisionEvidence(
+            label=fact.fact_type.value, value=fact.statement, kind=EvidenceKind.FACT,
+            source_reference=",".join(fact.evidence_ids), confidence=fact.confidence,
+        )
+        for fact in accepted_facts
+    )
+    recompute_kwargs = dict(kwargs)
+    recompute_kwargs["known_facts"] = supplied + research_evidence
+    recomputed = analyze_business_decision(
+        question, workspace_id=workspace_id, contact_id=contact_id, **recompute_kwargs,
+    )
+    still_unresolved = tuple(dict.fromkeys(tuple(unresolved) + tuple(recomputed.research_needs)))
+    evidence_set = DecisionEvidenceSet(
+        facts=tuple(accepted_facts), unresolved_needs=still_unresolved,
+        contradictions=tuple(dict.fromkeys(contradictions)),
+        freshness_gaps=tuple(dict.fromkeys(freshness_gaps)),
+    )
+    confidence = recomputed.recommendation.confidence
+    state = recomputed.state
+    if still_unresolved:
+        state = DecisionState.NEEDS_RESEARCH
+        confidence = EvidenceConfidence.LOW if accepted_facts else EvidenceConfidence.UNKNOWN
+    if contradictions and confidence is EvidenceConfidence.HIGH:
+        confidence = EvidenceConfidence.MEDIUM
+    highest_need = still_unresolved[0] if still_unresolved else None
+    next_actions = recomputed.next_best_actions
+    if highest_need:
+        next_actions = (NextBestAction(
+            action=f"Verify: {highest_need.question}",
+            why_now=highest_need.why_needed,
+            expected_value="Resolve the highest-value uncertainty without inventing business facts.",
+            required_input=(highest_need.question,), reversible=True, approval_required=True,
+        ),)
+    recommendation = replace(
+        recomputed.recommendation,
+        confidence=confidence,
+        evidence_basis=tuple(sorted({evidence_id for fact in accepted_facts for evidence_id in fact.evidence_ids})),
+        conditions_that_change_decision=tuple(dict.fromkeys(
+            recomputed.recommendation.conditions_that_change_decision
+            + tuple(need.question for need in still_unresolved)
+        )),
+    )
+    competitive = analyze_competitive_strategy(competitive_comparison or {}) if (
+        recomputed.context.intent in {BusinessIntent.COMPETE, BusinessIntent.MARKET_ENTRY}
+        or competitive_comparison
+    ) else None
+    return replace(
+        recomputed, state=state, recommendation=recommendation,
+        next_best_actions=next_actions, research_needs=still_unresolved,
+        missing_information=tuple(dict.fromkeys(
+            recomputed.missing_information + tuple(need.question for need in still_unresolved)
+        )),
+        evidence_set=evidence_set, competitive_analysis=competitive,
     )

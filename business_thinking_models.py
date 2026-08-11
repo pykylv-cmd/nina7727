@@ -60,6 +60,17 @@ class EvidenceKind(StableEnum):
     UNKNOWN = "unknown"
 
 
+class BusinessFactType(StableEnum):
+    CUSTOMER = "customer"
+    MARKET = "market"
+    COMPETITOR = "competitor"
+    PRICING = "pricing"
+    ECONOMICS = "economics"
+    OPERATIONS = "operations"
+    RISK = "risk"
+    GENERAL = "general"
+
+
 def _stable(value: Any) -> Any:
     if isinstance(value, Enum):
         return value.value
@@ -176,6 +187,38 @@ class ResearchNeed(StableModel):
 
 
 @dataclass(frozen=True)
+class BusinessFact(StableModel):
+    statement: str
+    evidence_ids: tuple[str, ...]
+    source_links: tuple[str, ...]
+    confidence: EvidenceConfidence
+    freshness: FreshnessRequirement
+    fact_type: BusinessFactType
+
+
+@dataclass(frozen=True)
+class BusinessResearchResult(StableModel):
+    research_need: ResearchNeed
+    outcome: str
+    verified_evidence_ids: tuple[str, ...]
+    facts: tuple[BusinessFact, ...]
+    source_links: tuple[str, ...]
+    confidence: EvidenceConfidence
+    gaps: tuple[str, ...]
+    failure_reason: str
+    workspace_id: str
+    contact_id: str
+
+
+@dataclass(frozen=True)
+class DecisionEvidenceSet(StableModel):
+    facts: tuple[BusinessFact, ...]
+    unresolved_needs: tuple[ResearchNeed, ...]
+    contradictions: tuple[str, ...]
+    freshness_gaps: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class DecisionFrame(StableModel):
     objective: str
     customer_value: tuple[str, ...]
@@ -203,3 +246,5 @@ class BusinessDecision(StableModel):
     research_needs: tuple[ResearchNeed, ...]
     missing_information: tuple[str, ...]
     metrics: tuple[BusinessMetric, ...] = ()
+    evidence_set: DecisionEvidenceSet | None = None
+    competitive_analysis: Any = None
