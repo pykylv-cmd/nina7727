@@ -1181,6 +1181,97 @@ def _reminder_read_operation(operation: str, clean: str, workspace_id: str, owne
     return None
 
 
+def _is_business_decision_request(text: str, decision) -> bool:
+    """Recognize explicit owner/operator decisions without intercepting existing capabilities."""
+    clean = str(text or "").strip()
+    folded = clean.casefold()
+    if not clean or re.search(r"https?://", clean, re.I):
+        return False
+    if any(phrase in folded for phrase in (
+        "atrodi internetā", "atrodi interneta", "meklē internetā", "mekle interneta",
+        "atsūti avotu", "atsuti avotu", "izlasi šo lapu", "izlasi so lapu",
+    )):
+        return False
+    if any((
+        bool(getattr(decision, "create_reminder", False)),
+        bool(getattr(decision, "create_work_object", False)),
+        bool(getattr(decision, "needs_clarification", False)),
+        str(getattr(decision, "reminder_operation", "") or "").upper() in {"LIST", "ASK", "UPDATE", "CANCEL", "CREATE"},
+    )):
+        return False
+    if any(token in folded for token in (
+        "atgādini", "atgadini", "uzdevum", "pieraksti atmiņ", "pieraksti atmin",
+        "atceries, ka", "mans profils",
+    )):
+        return False
+    business_subject = any(token in folded for token in (
+        "biznes", "uzņēmum", "uznemum", "konkur", "cenu", "cena", "peļņ", "peln",
+        "tirg", "izmaks", "partnerīb", "partnerib", "pārdo", "pardo", "mārketing", "marketing",
+        "invest", "ieguld", "ieņēm", "ienem", "klient", "produktu", "izaugs",
+    ))
+    decision_language = any(token in folded for token in (
+        "vai man ir vērts", "vai man ir verts", "vai ir vērts", "vai ir verts", "vai vajag", "kā ", "ka ", "izanalizē", "izanalize",
+        "ko darīt", "ko darit", "kur mums", "visizdevīg", "visizdevig", "samazināt", "samazinat",
+        "pārspēt", "parspet", "attīstīt", "attistit", "ieiet",
+    ))
+    return business_subject and decision_language
+
+
+def _render_business_decision(decision) -> str:
+    """Render an executive answer without exposing internal model names."""
+    lines = ["Ko es redzu"]
+    facts = tuple(getattr(getattr(decision, "evidence_set", None), "facts", ()) or ())
+    if facts:
+        lines.extend(f"- {fact.statement}" for fact in facts[:4])
+    else:
+        lines.append("- Kritiskie fakti vēl nav pietiekami verificēti; pieņēmumus neuzdošu par faktiem.")
+    lines.append("Kur ir iespēja")
+    lines.extend(f"- {item.description}" for item in tuple(decision.opportunities)[:3])
+    lines.append("Kas var nogāzt")
+    lines.extend(f"- {item.description}" for item in tuple(decision.risks)[:3])
+    assumptions = tuple(getattr(decision.context, "assumptions", ()) or ())
+    if assumptions:
+        lines.append("Pieņēmumi")
+        lines.extend(f"- {item.value}" for item in assumptions[:3])
+    unresolved = tuple(getattr(decision, "research_needs", ()) or ())
+    if unresolved:
+        lines.append("Vēl jāpārbauda")
+        lines.extend(f"- {item.question}" for item in unresolved[:4])
+    lines.extend(("Mans lēmums", decision.recommendation.decision, "Ko darīt tagad"))
+    actions = tuple(getattr(decision, "next_best_actions", ()) or ())
+    lines.extend(f"- {item.action}" for item in actions[:3])
+    verified_links = []
+    seen = set()
+    for fact in facts:
+        for url in fact.source_links:
+            if not str(url).startswith("https://") or url in seen:
+                continue
+            seen.add(url)
+            verified_links.append(url)
+    if verified_links:
+        lines.append("Verificēti avoti")
+        lines.extend(f"{index}. {url}" for index, url in enumerate(verified_links, 1))
+    return "\n".join(str(line) for line in lines if str(line).strip())[:4000]
+
+
+def _run_business_thinking(text: str, workspace_id: str, contact_id: str):
+    """Use Business Thinking and its existing Research V1 bridge; perform no external action."""
+    from business_research_bridge import execute_business_research_need
+    from business_thinking_engine import analyze_business_decision, analyze_business_decision_with_evidence
+
+    initial = analyze_business_decision(
+        text, workspace_id=workspace_id, contact_id=contact_id,
+    )
+    research_results = tuple(
+        execute_business_research_need(need, workspace_id=workspace_id, contact_id=contact_id)
+        for need in initial.research_needs
+    )
+    return analyze_business_decision_with_evidence(
+        text, workspace_id=workspace_id, contact_id=contact_id,
+        research_results=research_results,
+    )
+
+
 def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, channel: str = "web",
                          generator: Optional[Callable[[str], str]] = None,
                          conversation_id: str = "", contact_id: str = "",
@@ -1280,6 +1371,33 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         # and continue through ONE NINA's normal channel-neutral routing.
         _clear_pending_reminder_context(semantic_context_id)
         pending_reminder = {}
+
+    if _is_business_decision_request(clean, decision):
+        business_owner = str(contact_id or conversation_id or _conversation_id(workspace_id)).strip()
+        try:
+            business_decision = _run_business_thinking(clean, target_workspace, business_owner)
+            answer = _customer_safe_text(_render_business_decision(business_decision))
+            ok = True
+            error = ""
+        except Exception as exc:
+            logger.error("Business Thinking routing failed: exception=%s", type(exc).__name__)
+            business_decision = None
+            answer = (
+                "Šobrīd nevaru droši pabeigt biznesa izvērtējumu. "
+                "Neizdomāšu trūkstošos faktus; vispirms jāpārbauda tirgus, klientu un ekonomikas pierādījumi."
+            )
+            ok = False
+            error = "business_thinking_unavailable"
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+        response = {
+            "ok": ok, "text": answer, "source": "business_thinking", "channel": channel,
+            "decision": decision_payload, "external_action_executed": False,
+        }
+        if error:
+            response["error"] = error
+        if business_decision is not None:
+            response["business_state"] = business_decision.state.value
+        return response
 
     def render_grounded_research_answer(answer, research_result):
         """Render only grounded prose and URLs present in verified Research V1 evidence."""
