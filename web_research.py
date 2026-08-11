@@ -22,6 +22,7 @@ import time
 from urllib import error, parse, request, robotparser
 
 import persistence_backend
+from research_evidence import evidence_record_from_verified_result
 
 
 SEARCH_TYPES = {
@@ -655,6 +656,24 @@ def verified_results(payload):
         item["source_url"] = canonical_url
         unique.setdefault(canonical_url, item)
     return list(unique.values())
+
+
+def verified_result_to_evidence(result, *, workspace_id="", contact_id=""):
+    """Adapt one intact existing verified result into the canonical evidence contract."""
+    verified = verified_results({"results": [result]})
+    if not verified:
+        raise WebResearchError("verified_result_provenance_required")
+    return evidence_record_from_verified_result(
+        verified[0], workspace_id=workspace_id, contact_id=contact_id,
+    )
+
+
+def verified_payload_to_evidence(payload, *, workspace_id="", contact_id=""):
+    """Adapt only the existing verifier's accepted results; never infer source URLs."""
+    return tuple(
+        evidence_record_from_verified_result(item, workspace_id=workspace_id, contact_id=contact_id)
+        for item in verified_results(payload)
+    )
 
 
 def parse_search_results(page, intent):
