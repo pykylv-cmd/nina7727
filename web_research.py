@@ -676,6 +676,49 @@ def verified_payload_to_evidence(payload, *, workspace_id="", contact_id=""):
     )
 
 
+def research_result_to_session_payload(result):
+    """Translate verified Research V1 evidence into the existing session shape."""
+    rows = []
+    for record in result.evidence:
+        provenance = str(record.provider_provenance.get("provenance") or "")
+        if provenance not in {"parsed_html", "search_provider", "parsed_search_html", "direct_user_url"}:
+            continue
+        item = {
+            "result_id": record.evidence_id,
+            "source_url": record.canonical_url,
+            "final_url": record.final_url,
+            "source_url_provenance": provenance,
+            "source_url_verified": True,
+            "source_domain": record.domain,
+            "page_title": record.title,
+            "published_at": record.publication_date,
+            "fetched_at": record.fetched_at,
+            "content_hash": record.content_hash,
+            "extracted_snippet": " ".join(fragment.text for fragment in record.fragments)[:4000],
+            "provider": str(record.provider_provenance.get("provider") or ""),
+            "provider_result_index": record.provider_provenance.get("provider_result_index"),
+            "source_trust_type": record.source_trust_type.value,
+            "freshness": record.freshness.value,
+        }
+        item["verified_result_id"] = _verified_result_id(item)
+        rows.append(item)
+    return {
+        "ok": result.outcome.value == "completed",
+        "intent": {
+            "search_type": "GENERAL_WEB_RESEARCH",
+            "query": result.plan.original_query,
+            "target_domains": list(result.plan.preferred_domains),
+            "freshness": result.plan.freshness.value,
+        },
+        "results": rows,
+        "comparison": compare_results([]),
+        "source_url": "",
+        "source_access": "read" if rows else "limited",
+        "error": "" if result.outcome.value == "completed" else result.outcome.value,
+        "fetched_at": _now(),
+    }
+
+
 def parse_search_results(page, intent):
     if not page or parse.urlsplit(page.get("url") or "").hostname not in DOMAIN_POLICY:
         raise WebResearchError("unsupported_domain")

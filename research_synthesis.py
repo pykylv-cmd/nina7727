@@ -215,7 +215,11 @@ def synthesize_research(
         summary = f"{len(grounded)} grounded findings from {len(links)} verified sources."
     else:
         summary = "Insufficient verified evidence for a grounded factual answer."
-    outcome = ResearchOutcome.INSUFFICIENT_EVIDENCE if insufficient else result.outcome
+    outcome = (
+        result.outcome
+        if insufficient and result.outcome is not ResearchOutcome.COMPLETED
+        else (ResearchOutcome.INSUFFICIENT_EVIDENCE if insufficient else result.outcome)
+    )
     return GroundedResearchAnswer(
         summary=summary,
         findings=findings,

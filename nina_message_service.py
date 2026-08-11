@@ -1280,6 +1280,39 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         # and continue through ONE NINA's normal channel-neutral routing.
         _clear_pending_reminder_context(semantic_context_id)
         pending_reminder = {}
+
+    def render_grounded_research_answer(answer, research_result):
+        """Render only grounded prose and URLs present in verified Research V1 evidence."""
+        approved = {
+            record.canonical_url: record
+            for record in research_result.evidence
+            if getattr(record.verification_state, "value", "") == "verified"
+        }
+        strip_urls = lambda value: re.sub(r"https?://[^\s<>\"']+", "", str(value or ""), flags=re.I).strip()
+        if answer.insufficient_evidence:
+            if answer.outcome.value == "provider_unavailable":
+                return "Neizdevās sasniegt publisko avotu meklēšanu. Neizdomāšu faktus vai saites."
+            return "Neizdevās iegūt pietiekami uzticamus verificētus avotus. Neizdomāšu faktus vai saites."
+        lines = [strip_urls(answer.summary)]
+        lines.extend(f"- {text}" for text in (strip_urls(item) for item in answer.findings) if text)
+        if "verified_sources_contradict" in answer.risks_or_gaps:
+            lines.append("Piezīme: verificētie avoti savā starpā atšķiras.")
+        freshness_note = strip_urls(answer.freshness_note)
+        if freshness_note:
+            lines.append(freshness_note)
+        rendered_links = []
+        seen = set()
+        for link in answer.source_links:
+            record = approved.get(link.url)
+            if record is None or link.url in seen:
+                continue
+            seen.add(link.url)
+            rendered_links.append(f"{len(rendered_links) + 1}. {strip_urls(link.title) or record.domain} — {link.url}")
+        if rendered_links:
+            lines.append("Verificēti avoti:")
+            lines.extend(rendered_links)
+        return "\n".join(line for line in lines if line)[:4000]
+
     # ONE NINA routes explicit public research after the shared Brain decision.
     # The capability is deterministic and never treats page content as instructions.
     try:
@@ -1287,7 +1320,8 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             answer_page_content, apply_followup, build_search_plan, clarification_for,
             extract_public_urls,
             latest_research_session, save_research_session, save_search,
-            read_public_websites, search_public_web, summarize_sources, summarize_verified_links,
+            read_public_websites, research_result_to_session_payload,
+            summarize_sources, summarize_verified_links,
         )
         research_owner = str(contact_id or conversation_id or _conversation_id(workspace_id)).strip()
         previous_research = latest_research_session(workspace_id, research_owner, semantic_context_id) if semantic_context_id else None
@@ -1346,13 +1380,31 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
                 _save_turn(workspace_id, clean, clarification, conversation_id=conversation_id, channel=channel)
                 return {"ok": True, "text": clarification, "source": "web_research_clarification",
                         "channel": channel, "decision": decision_payload, "search_intent": dict(intent.__dict__)}
-            payload = apply_followup(previous_research, clean) if followup_signal else search_public_web(intent)
+            if followup_signal:
+                payload = apply_followup(previous_research, clean)
+                answer = summarize_sources(payload)
+            else:
+                from business_research_planner import plan_business_research
+                from research_orchestrator import run_research
+                from research_synthesis import synthesize_research
+
+                research_plan = plan_business_research(
+                    clean, freshness=intent.freshness or None,
+                    output_requirement="concise grounded answer with verified source links",
+                )
+                research_result = run_research(
+                    query=clean, workspace_id=workspace_id, contact_id=research_owner,
+                    plan=research_plan,
+                )
+                grounded_answer = synthesize_research(research_result)
+                payload = research_result_to_session_payload(research_result)
+                answer = render_grounded_research_answer(grounded_answer, research_result)
             session_id = save_research_session(workspace_id, research_owner, semantic_context_id, payload)
-            answer = summarize_sources(payload)
             _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
             return {"ok": bool(payload.get("ok")), "text": answer, "source": "web_research",
                     "channel": channel, "decision": decision_payload, "search_session_id": session_id,
-                    "search_intent": payload.get("intent"), "source_access": payload.get("source_access")}
+                    "search_intent": payload.get("intent"), "source_access": payload.get("source_access"),
+                    "research_outcome": (research_result.outcome.value if not followup_signal else "follow_up")}
     except Exception as exc:
         logger.error("Nina Web Research routing failed: exception=%s", type(exc).__name__)
         if "explicit_urls" in locals() and explicit_urls:
