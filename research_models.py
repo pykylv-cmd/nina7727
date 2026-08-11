@@ -63,6 +63,14 @@ class ClaimSupportState(_StableEnum):
     INSUFFICIENT = "insufficient"
 
 
+class ResearchOutcome(_StableEnum):
+    COMPLETED = "completed"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    BUDGET_EXCEEDED = "budget_exceeded"
+    VERIFICATION_FAILED = "verification_failed"
+
+
 def _stable_value(value: Any) -> Any:
     if isinstance(value, Enum):
         return value.value
@@ -190,4 +198,29 @@ class ClaimEvidence(StableModel):
         data["evidence_ids"] = tuple(data.get("evidence_ids") or ())
         data["fragment_ids"] = tuple(data.get("fragment_ids") or ())
         data["support_state"] = ClaimSupportState(data["support_state"])
+        return cls(**data)
+
+
+@dataclass(frozen=True)
+class ResearchResult(StableModel):
+    state: ResearchJobState
+    outcome: ResearchOutcome
+    plan: ResearchPlan
+    evidence: tuple[EvidenceRecord, ...]
+    failures: tuple[dict[str, Any], ...]
+    gaps: tuple[str, ...]
+    provider_calls: int
+    http_requests: int
+    total_bytes: int
+    elapsed_seconds: float
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ResearchResult":
+        data = dict(payload)
+        data["state"] = ResearchJobState(data["state"])
+        data["outcome"] = ResearchOutcome(data["outcome"])
+        data["plan"] = ResearchPlan.from_dict(data["plan"])
+        data["evidence"] = tuple(EvidenceRecord.from_dict(item) for item in data.get("evidence") or ())
+        data["failures"] = tuple(data.get("failures") or ())
+        data["gaps"] = tuple(data.get("gaps") or ())
         return cls(**data)

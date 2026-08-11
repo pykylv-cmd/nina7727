@@ -22,6 +22,16 @@ from research_models import (
 
 
 VERIFIED_PROVENANCE = frozenset({"parsed_html", "search_provider", "parsed_search_html", "direct_user_url"})
+SOURCE_TRUST_RANK = {
+    SourceTrustType.PRIMARY: 0,
+    SourceTrustType.OFFICIAL: 0,
+    SourceTrustType.REGULATORY: 0,
+    SourceTrustType.NEWS: 1,
+    SourceTrustType.INDUSTRY: 1,
+    SourceTrustType.COMMERCIAL: 2,
+    SourceTrustType.COMMUNITY: 3,
+    SourceTrustType.UNKNOWN: 4,
+}
 
 
 class EvidenceContractError(ValueError):
@@ -126,6 +136,13 @@ def deduplicate_evidence(records: Iterable[EvidenceRecord]) -> tuple[EvidenceRec
     return tuple(unique[url] for url in sorted(unique))
 
 
+def order_evidence_by_trust(records: Iterable[EvidenceRecord]) -> tuple[EvidenceRecord, ...]:
+    return tuple(sorted(
+        deduplicate_evidence(records),
+        key=lambda record: (SOURCE_TRUST_RANK[record.source_trust_type], record.canonical_url, record.evidence_id),
+    ))
+
+
 @dataclass
 class ResearchBudgetGuard:
     budget: ResearchBudget
@@ -162,6 +179,13 @@ class ResearchBudgetGuard:
     def check_elapsed(self, now: float | None = None) -> None:
         elapsed = (time.monotonic() if now is None else now) - float(self.started_at)
         self._check("elapsed_seconds", elapsed, self.budget.max_elapsed_seconds)
+
+    def enforce_all(self, now: float | None = None) -> None:
+        self._check("provider_calls", self.provider_calls, self.budget.max_provider_calls)
+        self._check("http_requests", self.http_requests, self.budget.max_http_requests)
+        self._check("total_bytes", self.total_bytes, self.budget.max_total_bytes)
+        self._check("evidence_records", self.evidence_records, self.budget.max_evidence_records)
+        self.check_elapsed(now=now)
 
 
 def validate_claim_evidence(
