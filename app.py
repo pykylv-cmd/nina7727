@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import hashlib
 import asyncio
 import threading
 import time
@@ -28,7 +29,7 @@ from telegram.ext import Application, MessageHandler, CommandHandler, filters, C
 from contact_identity import compact_contact_context, resolve_contact_identity
 from openai import OpenAI
 from nina_identity import NINA_PROMPT as SHARED_NINA_PROMPT
-from channel_connections import consume_telegram_token, is_telegram_connection_token, mark_telegram_runtime_state, workspace_for_telegram_identity
+from channel_connections import consume_telegram_token, is_telegram_connection_token, mark_telegram_runtime_state, telegram_workspace_resolution, workspace_for_telegram_identity
 from runtime_readiness import get_runtime_readiness
 from platform_core import initialize_platform_runtime
 from rolepack_system import initialize_rolepack_system
@@ -13642,17 +13643,49 @@ def v1151_vision_smart_reply(user_id, raw_answer, caption=""):
     return v1151_clean_version(answer)
 
 
+def _telegram_contact_diagnostic(reason_code, stage, workspace_id="", exception=None):
+    payload = {
+        "event": "telegram_contact_resolution",
+        "reason_code": str(reason_code),
+        "stage": str(stage),
+        "workspace_ref": hashlib.sha256(str(workspace_id).encode()).hexdigest()[:12] if workspace_id else "",
+    }
+    if exception is not None:
+        payload["exception_class"] = type(exception).__name__
+    print(json.dumps(payload, ensure_ascii=True, separators=(",", ":")))
+
+
+def _telegram_contact_exception_reason(exc):
+    message = str(exc or "").casefold()
+    if isinstance(exc, RuntimeError) and "contact_identity_key_missing" in message:
+        return "telegram_identity_config_missing"
+    if isinstance(exc, ValueError) and "contact_not_found" in message:
+        return "telegram_contact_not_found"
+    if any(marker in message for marker in ("no such table", "undefined table", "undefined column", "does not exist")):
+        return "telegram_schema_error"
+    if type(exc).__module__.startswith(("sqlite3", "psycopg")):
+        return "telegram_contact_persistence_error"
+    return "telegram_identity_resolution_exception"
+
+
 def resolve_telegram_contact(update, context=None):
     user = getattr(update, "effective_user", None)
     external = str(getattr(user, "id", "") or "")
     if not external:
+        _telegram_contact_diagnostic("telegram_workspace_not_found", "workspace_lookup")
         return None
+    _telegram_contact_diagnostic("telegram_contact_lookup_start", "workspace_lookup")
+    workspace_id = ""
     try:
         chat = getattr(update, "effective_chat", None)
-        workspace_id = workspace_for_telegram_identity(
+        workspace_result = telegram_workspace_resolution(
             telegram_user_id=external,
             telegram_chat_id=str(getattr(chat, "id", "") or ""),
-        ) or "demo_small_business"
+        )
+        workspace_id = str(workspace_result.get("workspace_id") or "")
+        if not workspace_id:
+            _telegram_contact_diagnostic(workspace_result["reason_code"], "workspace_lookup")
+            return None
         contact = resolve_contact_identity(
             workspace_id, "telegram", external,
             {
@@ -13664,7 +13697,9 @@ def resolve_telegram_contact(update, context=None):
             },
         )
     except Exception as exc:
-        print("Contact identity resolution unavailable:", type(exc).__name__)
+        _telegram_contact_diagnostic(
+            _telegram_contact_exception_reason(exc), "contact_resolution", workspace_id, exc,
+        )
         return None
     try:
         if context is not None:
@@ -13672,6 +13707,7 @@ def resolve_telegram_contact(update, context=None):
             context.chat_data["contact_context"] = compact_contact_context(contact)
     except Exception:
         pass
+    _telegram_contact_diagnostic("telegram_contact_resolved", "contact_resolution", workspace_id)
     return contact
 
 
@@ -16609,8 +16645,14 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not contact:
                 await safe_reply_text(update, "Nevarēju droši sasaistīt šo Telegram kontaktu. Nekāda darbība netika veikta.")
                 return
-            workspace_id = str(contact.get("workspace_id") or "demo_small_business")
+            workspace_id = str(contact.get("workspace_id") or "").strip()
             contact_id = str(contact.get("contact_id") or "").strip()
+            if not workspace_id or not contact_id:
+                _telegram_contact_diagnostic(
+                    "telegram_contact_persistence_error", "shared_route_identity"
+                )
+                await safe_reply_text(update, "Nevarēju droši sasaistīt šo Telegram kontaktu. Nekāda darbība netika veikta.")
+                return
             result = route_nina_message(NinaMessageEnvelope(
                 text=user_text,
                 workspace_id=workspace_id,

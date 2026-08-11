@@ -339,12 +339,12 @@ def consume_telegram_token(
         conn.close()
 
 
-def workspace_for_telegram_identity(telegram_user_id="", telegram_chat_id=""):
-    """Resolve a linked Telegram identity to one workspace without exposing metadata."""
+def telegram_workspace_resolution(telegram_user_id="", telegram_chat_id=""):
+    """Return secret-free diagnostics for the existing Telegram linkage lookup."""
     user_id = str(telegram_user_id or "").strip()
     chat_id = str(telegram_chat_id or "").strip()
     if not user_id and not chat_id:
-        return ""
+        return {"workspace_id": "", "reason_code": "telegram_workspace_not_found", "match_count": 0}
     ensure_schema()
     conn = _connect()
     try:
@@ -364,9 +364,21 @@ def workspace_for_telegram_identity(telegram_user_id="", telegram_chat_id=""):
             ):
                 matches.append(str(workspace_id))
         cur.close()
-        return matches[0] if len(set(matches)) == 1 else ""
+        unique = sorted(set(matches))
+        if len(unique) == 1:
+            return {"workspace_id": unique[0], "reason_code": "telegram_workspace_resolved", "match_count": 1}
+        return {
+            "workspace_id": "",
+            "reason_code": "telegram_workspace_ambiguous" if len(unique) > 1 else "telegram_workspace_not_found",
+            "match_count": len(unique),
+        }
     finally:
         conn.close()
+
+
+def workspace_for_telegram_identity(telegram_user_id="", telegram_chat_id=""):
+    """Resolve a linked Telegram identity to one workspace without exposing metadata."""
+    return telegram_workspace_resolution(telegram_user_id, telegram_chat_id)["workspace_id"]
 
 
 def configure_whatsapp(workspace_id, phone_number_id, business_account_id, secret_ref, webhook_secret_ref, meta_app_id="", app_secret_ref=""):
