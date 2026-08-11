@@ -84,16 +84,24 @@ def ensure_schema():
             )
             """
         )
+        required_connection_columns = (
+            ("webhook_secret_ref", "TEXT NOT NULL DEFAULT ''"),
+            ("app_secret_ref", "TEXT NOT NULL DEFAULT ''"),
+            ("connect_token_hash", "TEXT NOT NULL DEFAULT ''"),
+            ("connect_token_expires_at", "TEXT NOT NULL DEFAULT ''"),
+            ("connect_token_used_at", "TEXT NOT NULL DEFAULT ''"),
+        )
         if USE_POSTGRES:
-            cur.execute("ALTER TABLE nina_channel_connections ADD COLUMN IF NOT EXISTS webhook_secret_ref TEXT NOT NULL DEFAULT ''")
-            cur.execute("ALTER TABLE nina_channel_connections ADD COLUMN IF NOT EXISTS app_secret_ref TEXT NOT NULL DEFAULT ''")
+            for column, definition in required_connection_columns:
+                cur.execute(
+                    f"ALTER TABLE {_TABLE} ADD COLUMN IF NOT EXISTS {column} {definition}"
+                )
         else:
             cur.execute(f"PRAGMA table_info({_TABLE})")
             columns = {str(row[1]) for row in cur.fetchall()}
-            if "webhook_secret_ref" not in columns:
-                cur.execute(f"ALTER TABLE {_TABLE} ADD COLUMN webhook_secret_ref TEXT NOT NULL DEFAULT ''")
-            if "app_secret_ref" not in columns:
-                cur.execute(f"ALTER TABLE {_TABLE} ADD COLUMN app_secret_ref TEXT NOT NULL DEFAULT ''")
+            for column, definition in required_connection_columns:
+                if column not in columns:
+                    cur.execute(f"ALTER TABLE {_TABLE} ADD COLUMN {column} {definition}")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS nina_channel_message_receipts (

@@ -1,5 +1,6 @@
 import io
 import os
+import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -93,6 +94,90 @@ class ChannelConnectionsV1Tests(unittest.TestCase):
         expired = channel_connections.create_telegram_token("workspace_c", "Nina7727_bot", ttl_seconds=60)
         future = datetime.now(timezone.utc) + timedelta(minutes=2)
         self.assertIsNone(channel_connections.consume_telegram_token(expired["token"], now=future))
+
+    def test_legacy_connection_schema_adds_token_columns_without_losing_data(self):
+        handle = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        legacy_db = handle.name
+        handle.close()
+        connection = sqlite3.connect(legacy_db)
+        try:
+            connection.execute("DROP TABLE IF EXISTS nina_channel_connections")
+            connection.execute("""CREATE TABLE nina_channel_connections (
+                workspace_id TEXT NOT NULL, channel TEXT NOT NULL, status TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}', secret_ref TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                PRIMARY KEY (workspace_id, channel)
+            )""")
+            connection.execute(
+                "INSERT INTO nina_channel_connections VALUES (?,?,?,?,?,?,?)",
+                ("legacy_workspace", "telegram", "disconnected", '{"preserved":true}',
+                 "legacy-secret-ref", "before", "before"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        original = (
+            channel_connections.DATABASE_URL, channel_connections.DB_FILE,
+            channel_connections.USE_POSTGRES, channel_connections._SCHEMA_READY,
+            channel_connections._SCHEMA_TARGET,
+        )
+        try:
+            channel_connections.DATABASE_URL = ""
+            channel_connections.DB_FILE = legacy_db
+            channel_connections.USE_POSTGRES = False
+            channel_connections._SCHEMA_READY = False
+            channel_connections._SCHEMA_TARGET = ""
+            self.assertTrue(channel_connections.ensure_schema())
+
+            connection = sqlite3.connect(legacy_db)
+            try:
+                columns = {row[1] for row in connection.execute(
+                    "PRAGMA table_info(nina_channel_connections)"
+                )}
+                row = connection.execute(
+                    "SELECT status,metadata_json,secret_ref FROM nina_channel_connections "
+                    "WHERE workspace_id=? AND channel=?",
+                    ("legacy_workspace", "telegram"),
+                ).fetchone()
+            finally:
+                connection.close()
+            self.assertTrue({
+                "webhook_secret_ref", "app_secret_ref", "connect_token_hash",
+                "connect_token_expires_at", "connect_token_used_at",
+            }.issubset(columns))
+            self.assertEqual(
+                row, ("disconnected", '{"preserved":true}', "legacy-secret-ref")
+            )
+            self.assertEqual(
+                channel_connections.get_connection("legacy_workspace", "telegram")["status"],
+                "disconnected",
+            )
+            setup = channel_connections.create_telegram_token(
+                "legacy_workspace", "Nina7727_bot", ttl_seconds=60,
+            )
+            connection = sqlite3.connect(legacy_db)
+            try:
+                token_row = connection.execute(
+                    "SELECT connect_token_hash,connect_token_expires_at,connect_token_used_at "
+                    "FROM nina_channel_connections WHERE workspace_id=? AND channel=?",
+                    ("legacy_workspace", "telegram"),
+                ).fetchone()
+            finally:
+                connection.close()
+            self.assertTrue(token_row[0])
+            self.assertEqual(token_row[1], setup["expires_at"])
+            self.assertEqual(token_row[2], "")
+        finally:
+            (
+                channel_connections.DATABASE_URL, channel_connections.DB_FILE,
+                channel_connections.USE_POSTGRES, channel_connections._SCHEMA_READY,
+                channel_connections._SCHEMA_TARGET,
+            ) = original
+            try:
+                os.unlink(legacy_db)
+            except OSError:
+                pass
 
     def test_telegram_provider_secret_never_appears_in_html(self):
         secret = "telegram-provider-secret-never-render"
