@@ -224,3 +224,44 @@ class ResearchResult(StableModel):
         data["failures"] = tuple(data.get("failures") or ())
         data["gaps"] = tuple(data.get("gaps") or ())
         return cls(**data)
+
+
+@dataclass(frozen=True)
+class VerifiedSourceLink(StableModel):
+    title: str
+    url: str
+    evidence_ids: tuple[str, ...]
+    claim_ids: tuple[str, ...]
+    source_trust_type: SourceTrustType
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "VerifiedSourceLink":
+        data = dict(payload)
+        data["evidence_ids"] = tuple(data.get("evidence_ids") or ())
+        data["claim_ids"] = tuple(data.get("claim_ids") or ())
+        data["source_trust_type"] = SourceTrustType(data["source_trust_type"])
+        return cls(**data)
+
+
+@dataclass(frozen=True)
+class GroundedResearchAnswer(StableModel):
+    summary: str
+    findings: tuple[str, ...]
+    claims: tuple[ClaimEvidence, ...]
+    risks_or_gaps: tuple[str, ...]
+    source_links: tuple[VerifiedSourceLink, ...]
+    evidence_ids_used: tuple[str, ...]
+    outcome: ResearchOutcome
+    freshness_note: str
+    insufficient_evidence: bool
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "GroundedResearchAnswer":
+        data = dict(payload)
+        data["findings"] = tuple(data.get("findings") or ())
+        data["claims"] = tuple(ClaimEvidence.from_dict(item) for item in data.get("claims") or ())
+        data["risks_or_gaps"] = tuple(data.get("risks_or_gaps") or ())
+        data["source_links"] = tuple(VerifiedSourceLink.from_dict(item) for item in data.get("source_links") or ())
+        data["evidence_ids_used"] = tuple(data.get("evidence_ids_used") or ())
+        data["outcome"] = ResearchOutcome(data["outcome"])
+        return cls(**data)
