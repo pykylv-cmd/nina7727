@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 WORKSPACE_ID = (os.environ.get("NINA_WEB_WORKSPACE_ID") or "demo_small_business").strip()
 DESTRUCTIVE_CONFIRMATION_TTL_SECONDS = 300
 REMINDER_PENDING_TTL_SECONDS = 1800
+WORK_INITIATIVE_CONTEXT_TTL_SECONDS = 1800
 
 
 @dataclass(frozen=True)
@@ -1456,7 +1457,7 @@ def _work_initiative_context(conversation_id: str) -> Dict[str, str]:
     cur = conn.cursor()
     try:
         cur.execute(_sql("""
-            SELECT topic FROM conversation_state
+            SELECT topic, created_at FROM conversation_state
             WHERE user_id = %s AND intent = %s ORDER BY id DESC LIMIT 1
         """), (scope, "work_initiative_context"))
         row = cur.fetchone()
@@ -1466,6 +1467,13 @@ def _work_initiative_context(conversation_id: str) -> Dict[str, str]:
     if not row:
         return {}
     try:
+        created_at = row[1]
+        if not isinstance(created_at, datetime):
+            created_at = datetime.fromisoformat(str(created_at or "").replace("Z", "+00:00"))
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=ZoneInfo("UTC"))
+        if created_at + timedelta(seconds=WORK_INITIATIVE_CONTEXT_TTL_SECONDS) <= datetime.now(ZoneInfo("UTC")):
+            return {}
         payload = json.loads(str(row[0] or "{}"))
     except (TypeError, ValueError, json.JSONDecodeError):
         return {}
@@ -1502,14 +1510,36 @@ def _save_work_initiative_context(conversation_id: str, payload: Dict[str, str])
 
 
 def _render_capability_answer(answer) -> str:
-    lines = ["Šobrīd varu:"]
-    lines.extend(f"- {item};" for item in answer.available_now[:12])
-    if answer.available_after_connection:
-        lines.append("Pēc savienojuma varu:")
-        lines.extend(f"- {item};" for item in answer.available_after_connection[:6])
-    if answer.not_yet_available:
-        lines.append("Vēl nevaru:")
-        lines.extend(f"- {item};" for item in answer.not_yet_available[:4])
+    from capability_registry import CapabilityId, CapabilityState, get_capability_registry
+
+    registry = get_capability_registry()
+    preparation_ids = {
+        CapabilityId.EMAIL_DRAFT, CapabilityId.AUTOMATION_DESIGN,
+        CapabilityId.DOCUMENT_GENERATION,
+    }
+    now, prepare, after, unavailable = [], [], [], []
+    for capability_id, descriptor in registry.items():
+        description = descriptor.safe_user_description
+        if not description:
+            continue
+        if capability_id in preparation_ids and descriptor.state == CapabilityState.AVAILABLE:
+            prepare.append(description)
+        elif descriptor.state == CapabilityState.AVAILABLE:
+            now.append(description)
+        elif descriptor.state in {CapabilityState.AVAILABLE_WITH_APPROVAL, CapabilityState.REQUIRES_CONNECTION}:
+            after.append(description + (" (vajag apstiprinājumu)" if descriptor.approval_required else ""))
+        else:
+            unavailable.append(description)
+    lines = ["VARU TAGAD"]
+    lines.extend(f"- {item};" for item in now[:12])
+    lines.append("VARU SAGATAVOT")
+    lines.extend(f"- {item};" for item in prepare[:8])
+    lines.append("VARU PĒC PIESLĒGŠANAS / APSTIPRINĀJUMA")
+    lines.extend(f"- {item};" for item in after[:6])
+    if not after:
+        lines.append("- pašlaik nav ieviestas ārējas e-pasta vai kalendāra izpildes;")
+    lines.append("VĒL NEVARU")
+    lines.extend(f"- {item};" for item in unavailable[:8])
     lines.extend(("Ko sākt vispirms", answer.suggested_first_use))
     return "\n".join(lines)
 
@@ -1519,9 +1549,16 @@ def _render_work_initiative(result, business_text: str = "") -> str:
         return _render_capability_answer(result.capability_answer)
     if result.response_kind == "email":
         return (
-            "Varu sagatavot atbildes melnrakstu tagad. Nosūtīt to varu tikai pēc "
-            "e-pasta savienojuma un tava apstiprinājuma.\n\n"
+            "Varu sagatavot atbildes melnrakstu tagad. Ārēju e-pasta iesūtni lasīt vai "
+            "e-pastu nosūtīt pašlaik nevaru, jo e-pasta connector nav ieviests. "
+            "Nekāda ārēja darbība nav veikta.\n\n"
             "Nākamais solis: ielīmē e-pastu, uz kuru jāatbild."
+        )
+    if result.response_kind == "calendar":
+        return (
+            "Varu sakārtot datumus, adreses, prioritātes un sagatavot strukturētu "
+            "kalendāra plānu. Ārējā kalendārā lasīt vai ierakstīt pašlaik nevaru, "
+            "jo calendar connector nav ieviests. Nekāda ārēja darbība nav veikta."
         )
     lines = []
     if business_text:
@@ -1666,10 +1703,15 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
     # explicit research, tasks, URLs and memory/profile statements.
     from work_initiative_engine import analyze_work_initiative
     initiative_context = _work_initiative_context(semantic_context_id)
+    ninaos_priority_transition = bool(
+        re.search(r"\bninaos\b", clean, re.I)
+        and re.search(r"\b(?:vispirms|svarīgāk|svarigak)\b", clean, re.I)
+        and re.search(r"\bpabeigt\b", clean, re.I)
+    )
     explicit_shared_action = bool(
         getattr(decision, "reminder_operation", "")
         or getattr(decision, "create_reminder", False)
-        or getattr(decision, "create_work_object", False)
+        or (getattr(decision, "create_work_object", False) and not ninaos_priority_transition)
         or re.search(r"https?://", clean, re.I)
         or re.search(r"\b(?:atgādini|atgadini|reminder|uzdevum|task)\b", clean, re.I)
         or re.search(r"\b(?:atrodi|meklē|mekle|izpēti|izpeti)\s+(?:internetā|interneta|tīmeklī|timekli|informāciju|informaciju)\b", clean, re.I)

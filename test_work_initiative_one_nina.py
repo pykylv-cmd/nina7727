@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from test_runtime_support import bind_sqlite_database, install_test_environment
@@ -91,18 +92,61 @@ class WorkInitiativeOneNinaTests(unittest.TestCase):
 
     def test_capability_and_integration_answers_are_concrete(self):
         capabilities = self.send("Ko vari man palīdzēt biznesā? Vai manā firmā?")
-        self.assertIn("Šobrīd varu", capabilities["text"])
-        self.assertIn("Pēc savienojuma varu", capabilities["text"])
+        self.assertIn("VARU TAGAD", capabilities["text"])
+        self.assertIn("VARU PĒC PIESLĒGŠANAS / APSTIPRINĀJUMA", capabilities["text"])
         integrations = self.send("kur tevi var integrēt?")
         self.assertEqual(integrations["source"], "work_initiative")
         self.assertNotIn("varu visu", integrations["text"].casefold())
 
+    def test_capability_answer_has_four_honest_categories(self):
+        response = self.send("Ko tu vari manā firmā?")
+        self.assertIn("VARU TAGAD", response["text"])
+        self.assertIn("VARU SAGATAVOT", response["text"])
+        self.assertIn("VARU PĒC PIESLĒGŠANAS / APSTIPRINĀJUMA", response["text"])
+        self.assertIn("VĒL NEVARU", response["text"])
+        self.assertIn("e-pasta atbildes melnrakstu", response["text"])
+        self.assertIn("lasīt ārēju e-pasta iesūtni", response["text"])
+
+    def test_calendar_answer_is_honest_and_not_generic(self):
+        response = self.send("Vari sakārtot manu kalendāru?")
+        self.assertEqual(response["source"], "work_initiative")
+        self.assertIn("sagatavot strukturētu kalendāra plānu", response["text"])
+        self.assertIn("calendar connector nav ieviests", response["text"])
+        self.assertFalse(response["external_action_executed"])
+
     def test_email_answer_does_not_claim_send(self):
         response = self.send("vari atbildēt manā vietā e-pastā?")
         self.assertIn("melnrakstu", response["text"])
-        self.assertIn("savienojuma", response["text"])
-        self.assertIn("apstiprinājuma", response["text"])
+        self.assertIn("connector nav ieviests", response["text"])
+        self.assertIn("Nekāda ārēja darbība nav veikta", response["text"])
         self.assertFalse(response["external_action_executed"])
+
+    @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
+    def test_expired_initiative_context_does_not_capture_followup(self, _business):
+        self.send("Gribu YouTube biznesu.")
+        conn = self.work._connect()
+        cur = conn.cursor()
+        expired = (datetime.now(timezone.utc) - timedelta(hours=1)).replace(tzinfo=None).isoformat(" ")
+        cur.execute(
+            "UPDATE conversation_state SET created_at=? WHERE intent='work_initiative_context'",
+            (expired,),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        response = self.send("Lokācija Rīga.")
+        self.assertNotEqual(response.get("source"), "work_initiative")
+        self.assertEqual(len(self.projects()), 1)
+
+    @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
+    def test_new_durable_goal_supersedes_previous_context(self, _business):
+        first = self.send("Gribu YouTube biznesu.")
+        second = self.send("Tagad svarīgāk pabeigt NinaOS.")
+        self.assertNotEqual(first["work_object_id"], second["work_object_id"])
+        self.assertIn("Pabeigt NinaOS", second["text"])
+        followup = self.send("Lokācija Rīga.")
+        self.assertIn("Pabeigt NinaOS", followup["text"])
+        self.assertNotIn("YouTube", followup["text"])
 
     def test_proof_and_customer_search_offer_concrete_work(self):
         proof = self.send("gribu tevi pārdot, bet vajag lai tu pierādi ko māki")

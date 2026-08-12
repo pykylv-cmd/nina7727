@@ -9,7 +9,7 @@ class WorkInitiativeEngineTests(unittest.TestCase):
         self.assertTrue(result.decision.should_act)
         self.assertEqual(result.response_kind, "capability")
         self.assertIn("sagatavot e-pasta atbildes melnrakstu", result.capability_answer.available_now)
-        self.assertIn("nosūtīt apstiprinātu e-pastu pēc konta pieslēgšanas", result.capability_answer.available_after_connection)
+        self.assertIn("nosūtīt e-pastu ārējā e-pasta sistēmā", result.capability_answer.not_yet_available)
 
     def test_youtube_goal_becomes_project_plan_without_niche_blocker(self):
         result = analyze_work_initiative("Gribu uzsākt YouTube biznesu kur tu taisi monetizāciju, kontentu un soli pa solim līdz bizness ir automatizēts.")
@@ -43,8 +43,15 @@ class WorkInitiativeEngineTests(unittest.TestCase):
     def test_email_answer_is_honest(self):
         result = analyze_work_initiative("vari atbildēt manā vietā e-pastā?", environment={})
         self.assertEqual(result.response_kind, "email")
-        self.assertTrue(result.decision.requires_connection)
+        self.assertFalse(result.decision.requires_connection)
         self.assertTrue(result.decision.requires_approval)
+        self.assertTrue(result.next_best_work.can_start_now)
+
+    def test_calendar_question_is_deterministic_planning_capability(self):
+        result = analyze_work_initiative("Vari sakārtot manu kalendāru?", environment={})
+        self.assertTrue(result.decision.should_act)
+        self.assertEqual(result.response_kind, "calendar")
+        self.assertEqual(result.next_best_work.work.work_type, "calendar_plan")
         self.assertTrue(result.next_best_work.can_start_now)
 
     def test_ordinary_chat_is_not_actionable(self):

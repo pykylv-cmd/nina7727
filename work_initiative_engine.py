@@ -36,6 +36,8 @@ def _capability_answer(registry) -> CapabilityAnswer:
             connection.append(description)
         elif descriptor.state == CapabilityState.NOT_IMPLEMENTED:
             unavailable.append(description)
+        elif descriptor.state == CapabilityState.DEGRADED:
+            unavailable.append(description + " (runtime pašlaik nav gatavs)")
     return CapabilityAnswer(tuple(now), tuple(connection), tuple(unavailable), "Sāktu ar vienu reālu biznesa vai darba mērķi un sagatavotu pirmo izmērāmo rezultātu.")
 
 
@@ -59,7 +61,10 @@ def _proof_mode(text: str) -> bool:
 def _context_followup(text: str, previous_context: Mapping[str, str]) -> bool:
     return bool(previous_context and (
         re.match(r"^(?:lokacija|vieta)\b", text)
-        or len(text.split()) <= 9 and any(token in text for token in ("riga", "bernu", "multenes", "saturs", "aktivs"))
+        or len(text.split()) <= 9 and any(
+            re.search(rf"\b{token}\b", text)
+            for token in ("riga", "bernu", "multenes", "saturs", "aktivs")
+        )
     ))
 
 
@@ -87,13 +92,28 @@ def analyze_work_initiative(
     proof = _proof_mode(text)
     durable = bool(project_kind and any(token in text for token in ("gribu", "uzsakt", "uztaisit", "atvert", "palaist", "pabeigt")))
     email_question = "e-past" in text and any(token in text for token in ("atbild", "mana vieta", "vari"))
+    calendar_question = "kalendar" in text and any(token in text for token in ("sakartot", "plan", "vari"))
     if (_capability_query(text) and not email_question) or "kur tevi var integret" in text:
         answer = _capability_answer(registry)
         goal = UserGoal(clean, "Saprast Nina reālās iespējas", scope="capability_discovery")
         work = ProposedWork("Pirmais pierādāmais darbs", "Izvēlēties un paveikt vienu reālu darbu", "capability_demo", "Rezultāts parāda vērtību labāk par funkciju sarakstu", (CapabilityId.WORK_OBJECTS.value,), expected_output="Viens izmērāms darba rezultāts")
         return WorkInitiativeResult(goal, InitiativeDecision(True, "capability_question", .99, True), (work,), NextBestWork(work, "Ātrākais ceļš uz praktisku vērtību", True), answer, response_kind="capability")
-    if not durable and not proof and not email_question:
+    if not durable and not proof and not email_question and not calendar_question:
         return WorkInitiativeResult(UserGoal(clean, ""), InitiativeDecision(False, "no_durable_actionable_goal", .9, False))
+
+    if calendar_question:
+        work = ProposedWork(
+            "Sagatavot kalendāra plānu", "Sakārtot datumus, adreses un prioritātes",
+            "calendar_plan", "Plānu var sagatavot bez ārējas kalendāra mutācijas",
+            (CapabilityId.DOCUMENT_GENERATION.value,), required_inputs=("datumi un prioritātes",),
+            expected_output="Strukturēts kalendāra plāns",
+        )
+        return WorkInitiativeResult(
+            UserGoal(clean, "Sakārtot kalendāra plānu", scope="calendar"),
+            InitiativeDecision(True, "calendar_capability", .99, True),
+            (work,), NextBestWork(work, "Plānošana ir pieejama bez ārējas darbības", True),
+            response_kind="calendar",
+        )
 
     if email_question:
         email = registry[CapabilityId.EMAIL_SEND]

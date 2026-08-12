@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import os
+import shutil
 from typing import Mapping
 
 
@@ -56,15 +57,25 @@ class CapabilityDescriptor:
     safe_user_description: str = ""
 
 
-def _connected(env: Mapping[str, str], *keys: str) -> bool:
-    return any(str(env.get(key, "")).strip().lower() in {"1", "true", "connected", "ready"} for key in keys)
+def _provider_ready(env: Mapping[str, str]) -> bool:
+    return bool(str(env.get("OPENAI_API_KEY", "")).strip())
+
+
+def _video_runtime_ready() -> bool:
+    if shutil.which("ffmpeg"):
+        return True
+    try:
+        import imageio_ffmpeg
+        return bool(imageio_ffmpeg.get_ffmpeg_exe())
+    except Exception:
+        return False
 
 
 def get_capability_registry(environment: Mapping[str, str] | None = None) -> dict[CapabilityId, CapabilityDescriptor]:
     env = environment if environment is not None else os.environ
-    email_connected = _connected(env, "NINA_EMAIL_CONNECTED", "EMAIL_CONNECTED")
-    calendar_connected = _connected(env, "NINA_CALENDAR_CONNECTED", "CALENDAR_CONNECTED")
     available = CapabilityState.AVAILABLE
+    media_state = available if _provider_ready(env) else CapabilityState.DEGRADED
+    video_state = available if _provider_ready(env) and _video_runtime_ready() else CapabilityState.DEGRADED
     registry = {
         CapabilityId.BUSINESS_THINKING: CapabilityDescriptor(CapabilityId.BUSINESS_THINKING, available, "Analyze business decisions", safe_user_description="analizēt biznesa lēmumus un nākamo labāko soli"),
         CapabilityId.WEB_RESEARCH: CapabilityDescriptor(CapabilityId.WEB_RESEARCH, available, "Research verified public sources", limitations="Only verified public evidence", safe_user_description="izpētīt tirgu, konkurentus un publiskus avotus"),
@@ -74,20 +85,20 @@ def get_capability_registry(environment: Mapping[str, str] | None = None) -> dic
         CapabilityId.WORK_OBJECTS: CapabilityDescriptor(CapabilityId.WORK_OBJECTS, available, "Structure durable work and projects", safe_user_description="strukturēt darbu un projektus vienā darba patiesībā"),
         CapabilityId.MEMORY: CapabilityDescriptor(CapabilityId.MEMORY, available, "Use scoped conversation and approved memory", limitations="Workspace/contact scoped", safe_user_description="turpināt darbu ar kopīgu, izolētu kontekstu"),
         CapabilityId.FILE_ANALYSIS: CapabilityDescriptor(CapabilityId.FILE_ANALYSIS, available, "Analyze supported files and documents", safe_user_description="analizēt failus un dokumentus"),
-        CapabilityId.IMAGE_UNDERSTANDING: CapabilityDescriptor(CapabilityId.IMAGE_UNDERSTANDING, available, "Understand images and screenshots", safe_user_description="saprast attēlus un ekrānuzņēmumus"),
-        CapabilityId.AUDIO_UNDERSTANDING: CapabilityDescriptor(CapabilityId.AUDIO_UNDERSTANDING, available, "Transcribe and understand audio", safe_user_description="saprast audio"),
-        CapabilityId.VIDEO_UNDERSTANDING: CapabilityDescriptor(CapabilityId.VIDEO_UNDERSTANDING, available, "Analyze supported video", limitations="Subject to media limits", safe_user_description="analizēt atbalstītu video"),
-        CapabilityId.EMAIL_DRAFT: CapabilityDescriptor(CapabilityId.EMAIL_DRAFT, available, "Prepare email drafts", limitations="Does not send without a connected sender", safe_user_description="sagatavot e-pasta atbildes melnrakstu"),
-        CapabilityId.EMAIL_READ: CapabilityDescriptor(CapabilityId.EMAIL_READ, available if email_connected else CapabilityState.REQUIRES_CONNECTION, "Read connected email", required_connection="email", limitations="No inbox access until connected", safe_user_description="lasīt pieslēgtu e-pastu"),
-        CapabilityId.EMAIL_SEND: CapabilityDescriptor(CapabilityId.EMAIL_SEND, CapabilityState.AVAILABLE_WITH_APPROVAL if email_connected else CapabilityState.REQUIRES_CONNECTION, "Send through a connected email account after approval", required_connection="email", approval_required=True, limitations="Cannot send before connection and approval", safe_user_description="nosūtīt apstiprinātu e-pastu pēc konta pieslēgšanas"),
-        CapabilityId.CALENDAR_READ: CapabilityDescriptor(CapabilityId.CALENDAR_READ, available if calendar_connected else CapabilityState.REQUIRES_CONNECTION, "Read a connected calendar", required_connection="calendar", safe_user_description="lasīt pieslēgtu kalendāru"),
-        CapabilityId.CALENDAR_WRITE: CapabilityDescriptor(CapabilityId.CALENDAR_WRITE, CapabilityState.AVAILABLE_WITH_APPROVAL if calendar_connected else CapabilityState.REQUIRES_CONNECTION, "Write to a connected calendar after approval", required_connection="calendar", approval_required=True, safe_user_description="ierakstīt apstiprinātu notikumu pieslēgtā kalendārā"),
-        CapabilityId.CONTACTS: CapabilityDescriptor(CapabilityId.CONTACTS, available, "Use canonical workspace contacts", safe_user_description="strādāt ar canonical klientu un kontaktu kontekstu"),
+        CapabilityId.IMAGE_UNDERSTANDING: CapabilityDescriptor(CapabilityId.IMAGE_UNDERSTANDING, media_state, "Understand images and screenshots", limitations="Requires a configured media provider", safe_user_description="saprast attēlus un ekrānuzņēmumus"),
+        CapabilityId.AUDIO_UNDERSTANDING: CapabilityDescriptor(CapabilityId.AUDIO_UNDERSTANDING, media_state, "Transcribe and understand audio", limitations="Requires a configured media provider", safe_user_description="saprast audio"),
+        CapabilityId.VIDEO_UNDERSTANDING: CapabilityDescriptor(CapabilityId.VIDEO_UNDERSTANDING, video_state, "Analyze supported video", limitations="Requires a configured media provider and video runtime", safe_user_description="analizēt atbalstītu video"),
+        CapabilityId.EMAIL_DRAFT: CapabilityDescriptor(CapabilityId.EMAIL_DRAFT, available, "Prepare email drafts", limitations="Text drafting only; no email sender connector is implemented", safe_user_description="sagatavot e-pasta atbildes melnrakstu"),
+        CapabilityId.EMAIL_READ: CapabilityDescriptor(CapabilityId.EMAIL_READ, CapabilityState.NOT_IMPLEMENTED, "Read connected email", required_connection="email", limitations="No email reader connector is implemented", safe_user_description="lasīt ārēju e-pasta iesūtni"),
+        CapabilityId.EMAIL_SEND: CapabilityDescriptor(CapabilityId.EMAIL_SEND, CapabilityState.NOT_IMPLEMENTED, "Send through a connected email account after approval", required_connection="email", approval_required=True, limitations="No email sender connector is implemented", safe_user_description="nosūtīt e-pastu ārējā e-pasta sistēmā"),
+        CapabilityId.CALENDAR_READ: CapabilityDescriptor(CapabilityId.CALENDAR_READ, CapabilityState.NOT_IMPLEMENTED, "Read a connected calendar", required_connection="calendar", limitations="No calendar reader connector is implemented", safe_user_description="lasīt ārēju kalendāru"),
+        CapabilityId.CALENDAR_WRITE: CapabilityDescriptor(CapabilityId.CALENDAR_WRITE, CapabilityState.NOT_IMPLEMENTED, "Write to a connected calendar after approval", required_connection="calendar", approval_required=True, limitations="No calendar writer connector is implemented", safe_user_description="ierakstīt notikumu ārējā kalendārā"),
+        CapabilityId.CONTACTS: CapabilityDescriptor(CapabilityId.CONTACTS, available, "Use NinaOS canonical contact identity and context", limitations="Not an external address book", safe_user_description="strādāt ar NinaOS canonical kontakta identitāti un kontekstu"),
         CapabilityId.WEB_GUIDE: CapabilityDescriptor(CapabilityId.WEB_GUIDE, available, "Guide the user through NinaOS", safe_user_description="izskaidrot un vadīt darbu NinaOS"),
         CapabilityId.AUTOMATION_DESIGN: CapabilityDescriptor(CapabilityId.AUTOMATION_DESIGN, available, "Design a safe automation proposal", safe_user_description="izstrādāt automatizācijas plānu"),
         CapabilityId.AUTOMATION_EXECUTION: CapabilityDescriptor(CapabilityId.AUTOMATION_EXECUTION, CapabilityState.NOT_IMPLEMENTED, "External automation execution is not generally available", approval_required=True, limitations="V1 can design and structure, not activate arbitrary external automation", safe_user_description="patvaļīga ārēja automatizācijas izpilde vēl nav pieejama"),
         CapabilityId.DATA_ANALYSIS: CapabilityDescriptor(CapabilityId.DATA_ANALYSIS, available, "Analyze supplied structured data", safe_user_description="analizēt iesniegtus datus"),
-        CapabilityId.DOCUMENT_GENERATION: CapabilityDescriptor(CapabilityId.DOCUMENT_GENERATION, available, "Prepare document content and supported documents", safe_user_description="sagatavot dokumentus un to saturu"),
+        CapabilityId.DOCUMENT_GENERATION: CapabilityDescriptor(CapabilityId.DOCUMENT_GENERATION, available, "Prepare document text and structured content", limitations="Does not promise rich external document artifacts", safe_user_description="sagatavot dokumenta tekstu, kalendāra plānu un strukturētu saturu"),
     }
     return registry
 
