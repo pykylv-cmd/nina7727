@@ -275,6 +275,9 @@ def analyze_business_decision_with_evidence(
         if result.outcome != "completed" or not result.facts:
             unresolved.append(need)
             freshness_gaps.extend(gap for gap in result.gaps if "freshness" in gap)
+            freshness_gaps.append(
+                f"research_attempt_failed:{need.question}:{result.failure_reason or result.outcome}"
+            )
             continue
         accepted_facts.extend(result.facts)
         contradictions.extend(gap for gap in result.gaps if "contradict" in gap)

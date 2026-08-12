@@ -124,6 +124,61 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
         self.assertEqual(tuple(need for need, _scope in calls), public_needs)
         self.assertTrue(all(scope["query_context"] == "Vai vajag celt cenu?" for _need, scope in calls))
 
+    def test_exact_live_questions_attempt_every_public_need(self):
+        for question in (
+            "Vai NinaOS var pārspēt Sintra AI un ko mums darīt, lai viņus pārspētu?",
+            "Kādu biznesa stratēģiju mums izvēlēties, lai NinaOS augtu ātrāk par konkurentiem?",
+        ):
+            initial = analyze_business_decision(question, workspace_id="workspace-a", contact_id="contact-a")
+            public_needs = tuple(need for need in initial.research_needs if messaging._is_public_business_research_need(need))
+            calls = []
+            with self.subTest(question=question), patch(
+                "business_research_bridge.execute_business_research_need",
+                side_effect=lambda need, **_scope: calls.append(need) or self.result_for_need(need),
+            ):
+                decision = messaging._run_business_thinking(question, "workspace-a", "contact-a")
+            self.assertEqual(tuple(calls), public_needs)
+            self.assertEqual(len(calls), len(initial.research_needs))
+            self.assertTrue(decision.evidence_set.facts)
+
+    def test_private_economics_is_not_auto_researched_while_public_facts_survive(self):
+        question = "Vai vajag celt cenu?"
+        initial = analyze_business_decision(question, workspace_id="workspace-a", contact_id="contact-a")
+        calls = []
+        with patch(
+            "business_research_bridge.execute_business_research_need",
+            side_effect=lambda need, **_scope: calls.append(need) or self.result_for_need(need),
+        ):
+            decision = messaging._run_business_thinking(question, "workspace-a", "contact-a")
+        self.assertTrue(all(messaging._is_public_business_research_need(need) for need in calls))
+        self.assertTrue(any(not messaging._is_public_business_research_need(need) for need in initial.research_needs))
+        self.assertTrue(decision.evidence_set.facts)
+
+    def test_failed_public_research_is_rendered_as_attempted(self):
+        question = "Vai NinaOS var pārspēt Sintra AI un ko mums darīt, lai viņus pārspētu?"
+        initial = analyze_business_decision(question, workspace_id="workspace-a", contact_id="contact-a")
+        failures = tuple(self.result_for_need(need, completed=False) for need in initial.research_needs)
+        decision = analyze_business_decision_with_evidence(
+            question, workspace_id="workspace-a", contact_id="contact-a", research_results=failures,
+        )
+        rendered = messaging._render_business_decision(decision)
+        self.assertIn("Research tika mēģināts, bet neizdevās verificēt", rendered)
+        self.assertIn("provider_unavailable", rendered)
+
+    def test_failed_need_does_not_erase_successful_business_fact(self):
+        question = "Vai NinaOS var pārspēt Sintra AI un ko mums darīt, lai viņus pārspētu?"
+        initial = analyze_business_decision(question, workspace_id="workspace-a", contact_id="contact-a")
+        results = (self.result_for_need(initial.research_needs[0]),) + tuple(
+            self.result_for_need(need, completed=False) for need in initial.research_needs[1:]
+        )
+        decision = analyze_business_decision_with_evidence(
+            question, workspace_id="workspace-a", contact_id="contact-a", research_results=results,
+        )
+        rendered = messaging._render_business_decision(decision)
+        self.assertIn("Verified", rendered)
+        self.assertIn("Research tika mēģināts", rendered)
+        self.assertIn("https://verified.example/", rendered)
+
     def test_public_demand_competitor_and_pricing_needs_use_research_v1(self):
         initial = analyze_business_decision(
             "Kā pārspēt konkurentus ar labāku cenu?", workspace_id="workspace-a", contact_id="contact-a",

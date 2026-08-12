@@ -1232,7 +1232,8 @@ def _is_public_business_research_need(need) -> bool:
         return False
     return any(token in folded for token in (
         "konkur", "compet", "piedāvājum", "piedavajum", "cena", "price", "tirg", "market",
-        "klientu piepras", "customer demand", "regul", "publisk", "public", "uzņēmum", "uznemum",
+        "pieprasījum", "pieprasijum", "customer demand", "workforce demand", "regul", "publisk", "public",
+        "uzņēmum", "uznemum", "funkcij", "integrāc", "integrac", "izplatīšan", "izplatisan",
     ))
 
 
@@ -1270,7 +1271,17 @@ def _render_business_decision(decision) -> str:
     unresolved = tuple(getattr(decision, "research_needs", ()) or ())
     if unresolved:
         lines.append("Vēl jāpārbauda")
-        lines.extend(f"- {item.question}" for item in unresolved[:4])
+        failed_attempts = {
+            gap.split(":", 2)[1]: gap.split(":", 2)[2]
+            for gap in tuple(getattr(getattr(decision, "evidence_set", None), "freshness_gaps", ()) or ())
+            if str(gap).startswith("research_attempt_failed:") and str(gap).count(":") >= 2
+        }
+        for item in unresolved[:4]:
+            reason = failed_attempts.get(item.question)
+            lines.append(
+                f"- Research tika mēģināts, bet neizdevās verificēt: {item.question} ({reason})"
+                if reason else f"- {item.question}"
+            )
     lines.extend(("Mans lēmums", _latvian_business_text(decision.recommendation.decision), "Ko darīt tagad"))
     actions = tuple(getattr(decision, "next_best_actions", ()) or ())
     lines.extend(f"- {_latvian_business_text(item.action)}" for item in actions[:3])
