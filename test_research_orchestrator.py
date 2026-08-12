@@ -3,6 +3,7 @@ import io
 import json
 import unittest
 from contextlib import redirect_stdout
+from dataclasses import replace
 from unittest import mock
 
 import business_research_planner
@@ -85,8 +86,67 @@ class ResearchOrchestratorTests(unittest.TestCase):
 
     def test_multiple_queries_merge_and_deduplicate_evidence(self):
         result = self.execute([self.candidate()], plan=self.plan(queries=("one", "two")))
-        self.assertEqual(result.provider_calls, 2)
+        self.assertEqual(result.provider_calls, 1)
         self.assertEqual(len(result.evidence), 1)
+
+    def test_competitor_stops_after_existing_source_and_domain_contract(self):
+        rows = [
+            self.candidate("https://official.example/offer"),
+            self.candidate("https://industry.example/review", trust="industry"),
+            self.candidate("https://official.example/integrations"),
+        ]
+        result = self.execute(rows, plan=self.plan(
+            queries=("base", "official", "pricing", "comparison"), sources=3, domains=2,
+        ))
+        self.assertEqual(result.outcome, ResearchOutcome.COMPLETED)
+        self.assertEqual(result.provider_calls, 1)
+        self.assertEqual(result.http_requests, 3)
+        self.assertEqual(len(result.evidence), 3)
+
+    def test_budget_hit_after_sufficient_evidence_completes(self):
+        rows = [
+            self.candidate("https://official.example/offer"),
+            self.candidate("https://industry.example/review"),
+            self.candidate("https://official.example/integrations"),
+        ]
+        ticks = iter((0.0, 0.0, 2.0, 2.0))
+        result = self.execute(
+            rows,
+            plan=self.plan(
+                queries=("base", "later"), sources=3, domains=2,
+                budget=ResearchBudget(5, 10, 100_000, 1, 20),
+            ),
+            clock=lambda: next(ticks),
+        )
+        self.assertEqual(result.outcome, ResearchOutcome.COMPLETED)
+        self.assertEqual(len(result.evidence), 3)
+        self.assertIn("acquisition_stopped_at_bound:elapsed_seconds", result.gaps)
+
+    def test_budget_hit_before_sufficiency_remains_failed(self):
+        ticks = iter((0.0, 0.0, 2.0, 2.0))
+        result = self.execute(
+            [self.candidate()],
+            plan=self.plan(
+                queries=("base", "later"), sources=3, domains=2,
+                budget=ResearchBudget(5, 10, 100_000, 1, 20),
+            ),
+            clock=lambda: next(ticks),
+        )
+        self.assertEqual(result.outcome, ResearchOutcome.BUDGET_EXCEEDED)
+
+    def test_stale_current_evidence_cannot_complete_early(self):
+        def stale_verifier(intent, search_provider, fetcher):
+            payload = self.verifier(intent, search_provider, fetcher)
+            for item in payload["results"]:
+                item["fetched_at"] = "2020-01-01T00:00:00+00:00"
+            return payload
+        result = research_orchestrator.run_research(
+            query="query", workspace_id="workspace-a", contact_id="contact-a",
+            plan=self.plan(queries=("one",), freshness=FreshnessRequirement.CURRENT),
+            provider_searcher=self.provider([self.candidate()]), fetcher=self.fetcher,
+            verification_runner=stale_verifier,
+        )
+        self.assertNotEqual(result.outcome, ResearchOutcome.COMPLETED)
 
     def test_provider_hints_do_not_become_required_verification_terms(self):
         base = self.plan(queries=("AI companies official company information",))
@@ -307,6 +367,19 @@ class ResearchOrchestratorTests(unittest.TestCase):
         record = self.execute([self.candidate()]).evidence[0]
         self.assertEqual((record.workspace_id, record.contact_id), ("workspace-a", "contact-a"))
         self.assertEqual(record.provider_provenance["provider"], "fixture_provider")
+
+    def test_completion_rejects_scope_or_provenance_mismatch(self):
+        record = self.execute([self.candidate()]).evidence[0]
+        wrong_scope = replace(record, contact_id="contact-b")
+        wrong_provenance = replace(record, provider_provenance={"provenance": "untrusted"})
+        for invalid in (wrong_scope, wrong_provenance):
+            with self.subTest(record=invalid):
+                self.assertEqual(
+                    research_orchestrator._evidence_meets_completion_contract(
+                        self.plan(), (invalid,), workspace_id="workspace-a", contact_id="contact-a",
+                    ),
+                    (),
+                )
 
     def test_freshness_metadata_is_preserved(self):
         result = self.execute([self.candidate()], plan=self.plan(freshness=FreshnessRequirement.CURRENT))

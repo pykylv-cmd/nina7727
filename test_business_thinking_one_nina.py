@@ -110,7 +110,7 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
     def test_missing_evidence_is_cautious(self):
         rendered = messaging._render_business_decision(self.enriched(completed=False))
         self.assertIn("vēl nav pietiekami verificēti", rendered)
-        self.assertIn("Vēl jāpārbauda", rendered)
+        self.assertIn("Ko mēs vēl nezinām", rendered)
 
     def test_research_need_invokes_existing_bridge(self):
         initial = analyze_business_decision("Vai vajag celt cenu?", workspace_id="workspace-a", contact_id="contact-a")
@@ -162,8 +162,8 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
             question, workspace_id="workspace-a", contact_id="contact-a", research_results=failures,
         )
         rendered = messaging._render_business_decision(decision)
-        self.assertIn("Research tika mēģināts, bet neizdevās verificēt", rendered)
-        self.assertIn("provider_unavailable", rendered)
+        self.assertIn("Ko mēs vēl nezinām", rendered)
+        self.assertNotIn("provider_unavailable", rendered)
 
     def test_failed_need_does_not_erase_successful_business_fact(self):
         question = "Vai NinaOS var pārspēt Sintra AI un ko mums darīt, lai viņus pārspētu?"
@@ -175,8 +175,8 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
             question, workspace_id="workspace-a", contact_id="contact-a", research_results=results,
         )
         rendered = messaging._render_business_decision(decision)
-        self.assertIn("Verified", rendered)
-        self.assertIn("Research tika mēģināts", rendered)
+        self.assertIn("Ir verificēta publiska informācija", rendered)
+        self.assertIn("Ko mēs vēl nezinām", rendered)
         self.assertIn("https://verified.example/", rendered)
 
     def test_public_demand_competitor_and_pricing_needs_use_research_v1(self):
@@ -237,6 +237,19 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
     def test_failed_research_creates_no_rendered_fact(self):
         rendered = messaging._render_business_decision(self.enriched(completed=False))
         self.assertNotIn("Verified customer fact", rendered)
+
+    def test_executive_renderer_hides_internal_outcomes_and_raw_english_snippets(self):
+        rendered = messaging._render_business_decision(self.enriched())
+        for forbidden in (
+            "budget_exceeded", "verification_failed", "provider_unavailable",
+            "Verified customer fact",
+        ):
+            self.assertNotIn(forbidden, rendered)
+        for section in (
+            "Ko mēs zinām", "Kur konkurents ir stiprs", "Kur NinaOS var uzvarēt",
+            "Mans lēmums", "Ko darīt tagad", "Verificēti avoti",
+        ):
+            self.assertIn(section, rendered)
 
     def test_verified_links_only_are_rendered(self):
         rendered = messaging._render_business_decision(self.enriched())

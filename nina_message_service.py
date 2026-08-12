@@ -1253,45 +1253,85 @@ def _latvian_business_text(value: str) -> str:
 
 
 def _render_business_decision(decision) -> str:
-    """Render an executive answer without exposing internal model names."""
-    lines = ["Ko es redzu"]
+    """Render a grounded Latvian executive answer without research internals."""
     facts = tuple(getattr(getattr(decision, "evidence_set", None), "facts", ()) or ())
-    if facts:
-        lines.extend(f"- {fact.statement}" for fact in facts[:4])
-    else:
+    lines = ["Ko mēs zinām"]
+    fact_labels = {
+        "pricing": "Ir verificēta publiska informācija par konkurenta cenām.",
+        "competitor": "Ir verificēta publiska informācija par konkurenta piedāvājumu, funkcijām vai integrācijām.",
+        "customer": "Ir verificēti publiski avoti par klientu vajadzībām vai pieprasījumu.",
+        "market": "Ir verificēta publiska informācija par tirgu un konkurences vidi.",
+        "economics": "Ir verificēta publiska informācija par ekonomiskajiem nosacījumiem.",
+        "risk": "Ir verificēta publiska informācija par būtisku risku.",
+    }
+    seen_labels = set()
+    for fact in facts:
+        label = fact_labels.get(
+            getattr(fact.fact_type, "value", ""),
+            "Ir iegūts verificēts publisks biznesa fakts.",
+        )
+        if label not in seen_labels:
+            seen_labels.add(label)
+            lines.append(f"- {label}")
+    if not facts:
         lines.append("- Kritiskie fakti vēl nav pietiekami verificēti; pieņēmumus neuzdošu par faktiem.")
-    lines.append("Kur ir iespēja")
-    lines.extend(f"- {_latvian_business_text(item.description)}" for item in tuple(decision.opportunities)[:3])
+
+    lines.append("Kur konkurents ir stiprs")
+    if any(getattr(fact.fact_type, "value", "") in {"competitor", "pricing"} for fact in facts):
+        lines.append(
+            "- Konkurentam ir publiski verificējams piedāvājums; tā stiprās puses jāvērtē "
+            "pēc avotos pierādītajām funkcijām, integrācijām un cenas."
+        )
+    else:
+        lines.append("- Konkurenta stiprās puses vēl nav pietiekami verificētas.")
+
+    lines.append("Kur NinaOS var uzvarēt")
+    opportunities = tuple(getattr(decision, "opportunities", ()) or ())
+    if opportunities:
+        lines.extend(
+            f"- Stratēģisks secinājums: {_latvian_business_text(item.description)}"
+            for item in opportunities[:3]
+        )
+    else:
+        lines.append("- Salīdzinoša priekšrocība vēl jāpierāda ar vienādiem, izmērāmiem klientu uzdevumiem.")
+
     lines.append("Kas var nogāzt")
-    lines.extend(f"- {_latvian_business_text(item.description)}" for item in tuple(decision.risks)[:3])
+    lines.extend(
+        f"- {_latvian_business_text(item.description)}"
+        for item in tuple(getattr(decision, "risks", ()) or ())[:3]
+    )
+
     assumptions = tuple(getattr(decision.context, "assumptions", ()) or ())
     if assumptions:
         lines.append("Pieņēmumi")
         lines.extend(f"- {item.value}" for item in assumptions[:3])
+
     unresolved = tuple(getattr(decision, "research_needs", ()) or ())
     if unresolved:
-        lines.append("Vēl jāpārbauda")
-        failed_attempts = {
-            gap.split(":", 2)[1]: gap.split(":", 2)[2]
-            for gap in tuple(getattr(getattr(decision, "evidence_set", None), "freshness_gaps", ()) or ())
-            if str(gap).startswith("research_attempt_failed:") and str(gap).count(":") >= 2
-        }
-        for item in unresolved[:4]:
-            reason = failed_attempts.get(item.question)
-            lines.append(
-                f"- Research tika mēģināts, bet neizdevās verificēt: {item.question} ({reason})"
-                if reason else f"- {item.question}"
-            )
-    lines.extend(("Mans lēmums", _latvian_business_text(decision.recommendation.decision), "Ko darīt tagad"))
+        lines.append("Ko mēs vēl nezinām")
+        lines.extend(f"- {item.question}" for item in unresolved[:4])
+
+    lines.extend((
+        "Mans lēmums",
+        _latvian_business_text(decision.recommendation.decision),
+        "Ko darīt tagad",
+    ))
     actions = tuple(getattr(decision, "next_best_actions", ()) or ())
     lines.extend(f"- {_latvian_business_text(item.action)}" for item in actions[:3])
+    if getattr(getattr(decision, "context", None), "intent", None) and decision.context.intent.value == "compete":
+        lines.extend((
+            "- Izvēlies vienu klientu segmentu un vienu izmērāmu problēmu, kur NinaOS var radīt skaidrāku vērtību.",
+            "- Veic mazu, atgriezenisku salīdzinājuma testu ar vienādiem uzdevumiem un izmērāmiem rezultātiem.",
+            "- Pirms mērogošanas pārbaudi pieprasījumu, noturēšanu un vienības ekonomiku.",
+        ))
+
     verified_links = []
-    seen = set()
+    seen_urls = set()
     for fact in facts:
         for url in fact.source_links:
-            if not str(url).startswith("https://") or url in seen:
+            if not str(url).startswith("https://") or url in seen_urls:
                 continue
-            seen.add(url)
+            seen_urls.add(url)
             verified_links.append(url)
     if verified_links:
         lines.append("Verificēti avoti")

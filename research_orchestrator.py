@@ -7,13 +7,19 @@ verification and EvidenceRecord contracts behind a callable interface.
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timezone
 import json
 import time
 from typing import Callable, Iterable
 
 import web_research
 from business_research_planner import plan_business_research
-from research_evidence import ResearchBudgetExceeded, ResearchBudgetGuard, order_evidence_by_trust
+from research_evidence import (
+    VERIFIED_PROVENANCE,
+    ResearchBudgetExceeded,
+    ResearchBudgetGuard,
+    order_evidence_by_trust,
+)
 from research_models import (
     FreshnessRequirement,
     ResearchDomain,
@@ -21,17 +27,68 @@ from research_models import (
     ResearchOutcome,
     ResearchPlan,
     ResearchResult,
+    VerificationState,
 )
+
+
+_CURRENT_MAX_AGE_SECONDS = 2 * 24 * 60 * 60
+_RECENT_MAX_AGE_SECONDS = 90 * 24 * 60 * 60
+
+
+def _evidence_meets_completion_contract(
+    plan: ResearchPlan, evidence, *, workspace_id: str, contact_id: str,
+    as_of: datetime | None = None,
+):
+    """Return eligible evidence only when the existing plan contract is met."""
+    current_time = (as_of or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    eligible = []
+    for record in order_evidence_by_trust(evidence):
+        if record.verification_state is not VerificationState.VERIFIED:
+            continue
+        if record.provider_provenance.get("provenance") not in VERIFIED_PROVENANCE:
+            continue
+        if record.workspace_id != str(workspace_id) or record.contact_id != str(contact_id):
+            continue
+        if plan.freshness.value != "any":
+            raw_date = str(record.publication_date or record.fetched_at or "").strip()
+            if not raw_date:
+                continue
+            try:
+                dated = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+            except ValueError:
+                try:
+                    dated = datetime.fromisoformat(raw_date[:10])
+                except ValueError:
+                    continue
+            dated = (
+                dated.replace(tzinfo=timezone.utc)
+                if dated.tzinfo is None else dated.astimezone(timezone.utc)
+            )
+            max_age = (
+                _CURRENT_MAX_AGE_SECONDS
+                if plan.freshness.value == "current"
+                else _RECENT_MAX_AGE_SECONDS
+            )
+            if max(0.0, (current_time - dated).total_seconds()) > max_age:
+                continue
+        eligible.append(record)
+    ordered = order_evidence_by_trust(eligible)
+    if len(ordered) < plan.minimum_source_count:
+        return ()
+    if len({record.domain for record in ordered}) < plan.minimum_distinct_domains:
+        return ()
+    return ordered
 
 
 def _emit_execution_diagnostics(
     *, plan: ResearchPlan, outcome: ResearchOutcome, failures, gaps, evidence,
     guard: ResearchBudgetGuard, elapsed: float,
 ) -> None:
-    prefix = "research_budget_exceeded:"
-    limit_dimension = next(
-        (str(item)[len(prefix):] for item in gaps if str(item).startswith(prefix)), "",
-    )
+    prefixes = ("research_budget_exceeded:", "acquisition_stopped_at_bound:")
+    limit_dimension = next((
+        str(item)[len(prefix):]
+        for item in gaps for prefix in prefixes if str(item).startswith(prefix)
+    ), "")
     rejection_count = sum(
         1 for item in failures
         if item.get("stage") == "verification" and bool(item.get("reason"))
@@ -197,10 +254,32 @@ def run_research(
                 record = web_research.verified_result_to_evidence(
                     enriched, workspace_id=workspace_id, contact_id=contact_id,
                 )
+                if any(existing.canonical_url == record.canonical_url for existing in evidence):
+                    continue
                 guard.consume_evidence()
                 evidence.append(record)
+            evidence = list(order_evidence_by_trust(evidence))
             guard.enforce_all(now=clock())
+            completed_evidence = _evidence_meets_completion_contract(
+                selected_plan, evidence, workspace_id=workspace_id, contact_id=contact_id,
+            )
+            if completed_evidence:
+                return _result(
+                    plan=selected_plan, outcome=ResearchOutcome.COMPLETED,
+                    evidence=completed_evidence, failures=failures, guard=guard, clock=clock,
+                )
     except ResearchBudgetExceeded as exc:
+        completed_evidence = _evidence_meets_completion_contract(
+            selected_plan, evidence, workspace_id=workspace_id, contact_id=contact_id,
+        )
+        if completed_evidence:
+            return _result(
+                plan=selected_plan, outcome=ResearchOutcome.COMPLETED,
+                evidence=completed_evidence,
+                failures=failures + [{"stage": "budget", "error": str(exc)}],
+                gaps=(f"acquisition_stopped_at_bound:{str(exc).rsplit(':', 1)[-1]}",),
+                guard=guard, clock=clock,
+            )
         return _result(
             plan=selected_plan, outcome=ResearchOutcome.BUDGET_EXCEEDED,
             evidence=order_evidence_by_trust(evidence), failures=failures + [{"stage": "budget", "error": str(exc)}],
