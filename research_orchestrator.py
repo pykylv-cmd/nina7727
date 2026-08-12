@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 import json
-import logging
 import time
 from typing import Callable, Iterable
 
@@ -23,9 +22,6 @@ from research_models import (
     ResearchPlan,
     ResearchResult,
 )
-
-
-LOGGER = logging.getLogger(__name__)
 
 
 def _emit_execution_diagnostics(
@@ -62,7 +58,7 @@ def _emit_execution_diagnostics(
         "rejection_count": rejection_count,
         "fetch_failure_count": fetch_failure_count,
     }
-    LOGGER.info(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    print(json.dumps(payload, sort_keys=True, separators=(",", ":")), flush=True)
 
 
 def _intent(query: str, plan: ResearchPlan) -> web_research.SearchIntent:

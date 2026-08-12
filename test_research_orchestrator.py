@@ -1,6 +1,8 @@
 import inspect
+import io
 import json
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 import business_research_planner
@@ -18,9 +20,10 @@ from research_models import (
 
 class ResearchOrchestratorTests(unittest.TestCase):
     def logged_payload(self, callback):
-        with self.assertLogs("research_orchestrator", level="INFO") as captured:
+        captured = io.StringIO()
+        with redirect_stdout(captured):
             result = callback()
-        return result, json.loads(captured.output[-1].split(":", 2)[-1])
+        return result, json.loads(captured.getvalue().strip().splitlines()[-1])
 
     def candidate(self, url="https://official.example/report", **changes):
         item = {"url": url, "provider": "fixture_provider", "verified": True, "trust": "official"}
@@ -284,9 +287,10 @@ class ResearchOrchestratorTests(unittest.TestCase):
             self.assertNotIn(forbidden, serialized)
 
     def test_observability_does_not_change_research_result(self):
-        with self.assertLogs("research_orchestrator", level="INFO"):
+        captured = io.StringIO()
+        with redirect_stdout(captured):
             observed = self.execute([self.candidate()])
-        with mock.patch.object(research_orchestrator.LOGGER, "info"):
+        with mock.patch("builtins.print"):
             silent = self.execute([self.candidate()])
         self.assertEqual(observed, silent)
 
