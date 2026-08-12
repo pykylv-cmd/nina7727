@@ -139,6 +139,15 @@ def run_research(
                 failures.append({"query": decomposed_query, "stage": "verification", "error": str(exc)})
                 continue
             verification_rejections = verification_rejections or bool(payload.get("rejected_results"))
+            failures.extend(
+                {
+                    "query": decomposed_query,
+                    "stage": "verification",
+                    "reason": str(item.get("reason") or "verification_rejected")[:120],
+                    "source_domain": str(item.get("source_domain") or "")[:253],
+                }
+                for item in payload.get("rejected_results") or ()
+            )
             for item in web_research.verified_results(payload):
                 enriched = dict(item)
                 enriched.setdefault("freshness", selected_plan.freshness.value)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Callable
 
 from business_research_planner import plan_business_research
@@ -11,6 +12,30 @@ from business_thinking_models import (
 from research_models import ClaimSupportState, ResearchOutcome
 from research_orchestrator import run_research
 from research_synthesis import synthesize_research
+
+
+def _focused_research_query(need: ResearchNeed) -> str:
+    """Keep named-company verification concise and independent of decision prose."""
+    question = re.sub(r"\s+", " ", str(need.question or "")).strip()
+    match = re.search(
+        r"\b([A-ZĀČĒĢĪĶĻŅŠŪŽ][\wĀČĒĢĪĶĻŅŠŪŽāčēģīķļņšūž.-]*(?:\s+[A-ZĀČĒĢĪĶĻŅŠŪŽ][\wĀČĒĢĪĶĻŅŠŪŽāčēģīķļņšūž.-]*){0,2})"
+        r"\s+(?:pašlaik|pašreizēj|funkcij|integrāc)",
+        question,
+    )
+    company = ""
+    if match:
+        parts = match.group(1).split()
+        while parts and parts[0].casefold() in {"ko", "kādas", "kādi", "kāds"}:
+            parts.pop(0)
+        company = " ".join(parts)
+    folded = question.casefold()
+    if company and any(token in folded for token in ("cen", "pricing", "price")):
+        return f"{company} pricing"
+    if company and any(token in folded for token in ("funkc", "integrāc", "integrac")):
+        return f"{company} features integrations"
+    if company and any(token in folded for token in ("piedāv", "piedav", "offer")):
+        return f"{company} offer"
+    return question
 
 
 def _fact_type(need: ResearchNeed) -> BusinessFactType:
@@ -36,9 +61,9 @@ def execute_business_research_need(
     synthesizer: Callable = synthesize_research,
 ) -> BusinessResearchResult:
     """Run existing Research V1 and expose only completed, verified, URL-bound facts."""
-    research_query = need.question
-    if str(query_context or "").strip():
-        research_query = f"{need.question}\nBiznesa lēmuma konteksts: {str(query_context).strip()}"
+    # The owner question remains in BusinessDecisionContext. Research V1 must
+    # verify only the focused public fact, never the surrounding decision prose.
+    research_query = _focused_research_query(need)
     plan = planner(research_query, domain=need.domain, freshness=need.freshness,
                    output_requirement=need.why_needed)
     result = runner(

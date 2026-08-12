@@ -49,7 +49,7 @@ class BusinessResearchBridgeTests(unittest.TestCase):
         self.assertEqual(seen["domain"], ResearchDomain.COMPETITOR)
         self.assertEqual(seen["freshness"], FreshnessRequirement.CURRENT)
 
-    def test_public_research_keeps_original_business_question_context(self):
+    def test_public_research_keeps_owner_context_out_of_verification_query(self):
         seen = {}
         fixed = self.result()
         def planner(query, **kwargs):
@@ -62,9 +62,28 @@ class BusinessResearchBridgeTests(unittest.TestCase):
             self.need(), workspace_id="workspace-a", contact_id="contact-a",
             query_context="Kā NinaOS var pārspēt Sintra AI?", planner=planner, runner=runner,
         )
-        self.assertIn("NinaOS", seen["planner_query"])
-        self.assertIn("Sintra AI", seen["planner_query"])
+        self.assertEqual(seen["planner_query"], "Kādas ir konkurenta cenas?")
+        self.assertNotIn("NinaOS", seen["planner_query"])
         self.assertEqual(seen["planner_query"], seen["runner_query"])
+
+    def test_named_competitor_offer_and_pricing_queries_are_focused(self):
+        from business_research_bridge import _focused_research_query
+        offer = ResearchNeed("Ko Sintra AI pašlaik piedāvā klientiem?", ResearchDomain.COMPETITOR,
+                             FreshnessRequirement.CURRENT, StrategicPriority.HIGH, "verify offer")
+        pricing = ResearchNeed("Kādas ir Sintra AI pašreizējās publiskās cenas?", ResearchDomain.COMPETITOR,
+                               FreshnessRequirement.CURRENT, StrategicPriority.HIGH, "verify pricing")
+        features = ResearchNeed("Kādas publiski verificējamas Sintra AI funkcijas, integrācijas un ierobežojumi ir būtiski?",
+                                ResearchDomain.COMPETITOR, FreshnessRequirement.CURRENT,
+                                StrategicPriority.HIGH, "verify capabilities")
+        self.assertEqual(_focused_research_query(offer), "Sintra AI offer")
+        self.assertEqual(_focused_research_query(pricing), "Sintra AI pricing")
+        self.assertEqual(_focused_research_query(features), "Sintra AI features integrations")
+
+    def test_focused_query_is_not_sintra_hard_coded(self):
+        from business_research_bridge import _focused_research_query
+        need = ResearchNeed("Kādas ir Acme Cloud pašreizējās publiskās cenas?", ResearchDomain.COMPETITOR,
+                            FreshnessRequirement.CURRENT, StrategicPriority.HIGH, "verify pricing")
+        self.assertEqual(_focused_research_query(need), "Acme Cloud pricing")
 
     def test_completed_research_creates_business_fact(self):
         bridged = self.execute()

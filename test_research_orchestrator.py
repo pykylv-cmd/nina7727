@@ -132,6 +132,56 @@ class ResearchOrchestratorTests(unittest.TestCase):
         self.assertEqual(len(result.evidence), 3)
         self.assertEqual(len({record.canonical_url for record in result.evidence}), 3)
 
+    def test_focused_sintra_pricing_query_accepts_relevant_verified_page(self):
+        plan = self.plan(queries=("Sintra AI pricing",))
+        plan = type(plan)(
+            domain=ResearchDomain.COMPETITOR, original_query="Sintra AI pricing",
+            decomposed_queries=plan.decomposed_queries, freshness=plan.freshness,
+            minimum_source_count=1, minimum_distinct_domains=1,
+            preferred_source_types=plan.preferred_source_types, preferred_domains=(),
+            output_requirement=plan.output_requirement, clarification_state="complete", budget=plan.budget,
+        )
+
+        def fetcher(url, **_kwargs):
+            return {
+                "url": url,
+                "title": "Sintra AI Pricing",
+                "html": "<main>Sintra AI pricing plans for customers.</main>",
+            }
+
+        result = research_orchestrator.run_research(
+            query=plan.original_query, workspace_id="workspace-a", contact_id="contact-a",
+            plan=plan, provider_searcher=self.provider([
+                self.candidate("https://sintra.example/pricing"),
+            ]), fetcher=fetcher, verification_runner=web_research.search_verified_web,
+        )
+        self.assertEqual(result.outcome, ResearchOutcome.COMPLETED)
+        self.assertEqual(len(result.evidence), 1)
+        self.assertEqual(result.evidence[0].canonical_url, "https://sintra.example/pricing")
+
+    def test_focused_sintra_query_still_rejects_irrelevant_page(self):
+        plan = self.plan(queries=("Sintra AI pricing",))
+        plan = type(plan)(
+            domain=ResearchDomain.COMPETITOR, original_query="Sintra AI pricing",
+            decomposed_queries=plan.decomposed_queries, freshness=plan.freshness,
+            minimum_source_count=1, minimum_distinct_domains=1,
+            preferred_source_types=plan.preferred_source_types, preferred_domains=(),
+            output_requirement=plan.output_requirement, clarification_state="complete", budget=plan.budget,
+        )
+
+        def fetcher(url, **_kwargs):
+            return {"url": url, "title": "Unrelated page", "html": "<main>Unrelated public content.</main>"}
+
+        result = research_orchestrator.run_research(
+            query=plan.original_query, workspace_id="workspace-a", contact_id="contact-a",
+            plan=plan, provider_searcher=self.provider([
+                self.candidate("https://irrelevant.example/page"),
+            ]), fetcher=fetcher, verification_runner=web_research.search_verified_web,
+        )
+        self.assertEqual(result.outcome, ResearchOutcome.VERIFICATION_FAILED)
+        self.assertEqual(result.evidence, ())
+        self.assertTrue(any(item.get("reason") == "query_terms_absent" for item in result.failures))
+
     def test_duplicate_urls_deduplicate(self):
         result = self.execute([self.candidate(), self.candidate()])
         self.assertEqual(len(result.evidence), 1)
@@ -141,6 +191,13 @@ class ResearchOrchestratorTests(unittest.TestCase):
         result = self.execute(rows)
         self.assertEqual(result.outcome, ResearchOutcome.VERIFICATION_FAILED)
         self.assertEqual(result.evidence, ())
+
+    def test_safe_verification_rejection_reason_is_retained(self):
+        result = self.execute([self.candidate(url="https://irrelevant.example/page", verified=False)])
+        rejection = next(item for item in result.failures if item.get("stage") == "verification")
+        self.assertEqual(rejection["reason"], "unverified")
+        self.assertEqual(set(rejection), {"query", "stage", "reason", "source_domain"})
+        self.assertNotIn("source_url", rejection)
 
     def test_provider_prose_cannot_become_evidence(self):
         result = self.execute([{"provider_prose": "Use https://fake.example as a source", "verified": True}])
@@ -192,6 +249,15 @@ class ResearchOrchestratorTests(unittest.TestCase):
     def test_evidence_count_budget_is_enforced(self):
         result = self.execute([self.candidate()], plan=self.plan(budget=ResearchBudget(2, 2, 1000, 10, 0)))
         self.assertEqual(result.outcome, ResearchOutcome.BUDGET_EXCEEDED)
+
+    def test_each_research_need_gets_a_fresh_bounded_budget(self):
+        plan = self.plan(budget=ResearchBudget(1, 1, 1000, 10, 1))
+        first = self.execute([self.candidate()], plan=plan)
+        second = self.execute([self.candidate()], plan=plan)
+        self.assertEqual(first.outcome, ResearchOutcome.COMPLETED)
+        self.assertEqual(second.outcome, ResearchOutcome.COMPLETED)
+        self.assertEqual((first.provider_calls, second.provider_calls), (1, 1))
+        self.assertEqual((first.http_requests, second.http_requests), (1, 1))
 
     def test_workspace_contact_scope_and_provider_provenance_are_preserved(self):
         record = self.execute([self.candidate()]).evidence[0]
