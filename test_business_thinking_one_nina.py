@@ -295,6 +295,63 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, rendered)
 
+    def test_live_shaped_sintra_facts_skip_headings_without_losing_supported_content(self):
+        question = "Vai NinaOS var pārspēt Sintra AI un ko mums darīt, lai viņus pārspētu?"
+        initial = analyze_business_decision(question, workspace_id="workspace-a", contact_id="contact-a")
+        statements = (
+            "What is Sintra? Sintra is your AI team made up of specialized AI helpers for business work.",
+            "Sintra pricing. Choose from publicly listed paid monthly plans for access to Sintra AI helpers.",
+            "Integrations. Sintra provides documented integrations that connect its AI helpers with customer work tools.",
+        )
+        fact_types = (BusinessFactType.COMPETITOR, BusinessFactType.PRICING, BusinessFactType.COMPETITOR)
+        completed = tuple(
+            BusinessResearchResult(
+                need, "completed", (f"live-evidence-{index}",),
+                (BusinessFact(
+                    statements[index], (f"live-evidence-{index}",),
+                    (f"https://verified.example/live-{index}",), EvidenceConfidence.HIGH,
+                    need.freshness, fact_types[index],
+                ),),
+                (f"https://verified.example/live-{index}",), EvidenceConfidence.HIGH,
+                (), "", "workspace-a", "contact-a",
+            )
+            for index, need in enumerate(initial.research_needs[:3])
+        )
+        unresolved_need = initial.research_needs[3]
+        unresolved = BusinessResearchResult(
+            unresolved_need, "insufficient_evidence", (), (), (), EvidenceConfidence.UNKNOWN,
+            ("minimum_source_count_not_met",), "insufficient_evidence", "workspace-a", "contact-a",
+        )
+        decision = analyze_business_decision_with_evidence(
+            question, workspace_id="workspace-a", contact_id="contact-a",
+            research_results=completed + (unresolved,),
+        )
+        self.assertEqual(
+            tuple(fact.statement for fact in decision.evidence_set.facts),
+            statements,
+        )
+        rendered = messaging._render_business_decision(decision)
+        expected_facts = (
+            "Sintra pozicionē produktu kā AI komandu ar specializētiem AI palīgiem biznesa darbam.",
+            "Sintra publiski piedāvā maksas abonēšanas plānus piekļuvei AI palīgiem.",
+            "Sintra dokumentē integrācijas, kas savieno AI palīgus ar klienta darba rīkiem.",
+        )
+        for fact in expected_facts:
+            self.assertIn(fact, rendered)
+        self.assertIn(
+            "Sintra AI stiprā puse ir skaidri noformēts AI palīgu piedāvājums, publiska cenu struktūra un dokumentētas integrācijas.",
+            rendered,
+        )
+        self.assertIn("pieprasījumu pēc AI darbinieku", rendered)
+        self.assertEqual(rendered.count("Verificēts fakts:"), 3)
+        self.assertEqual(sum(line.startswith(("1. ", "2. ", "3. ")) for line in rendered.splitlines()), 6)
+        self.assertNotIn("revolutionary all-in-one", rendered.casefold())
+        self.assertNotIn("insufficient_evidence", rendered)
+        self.assertNotIn("minimum_source_count_not_met", rendered)
+        self.assertNotIn("https://fabricated.example", rendered)
+        for index in range(3):
+            self.assertIn(f"https://verified.example/live-{index}", rendered)
+
     def test_supported_english_fact_is_paraphrased_without_marketing_dump(self):
         self.assertEqual(
             messaging._concise_business_fact(

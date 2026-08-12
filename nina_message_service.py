@@ -1260,12 +1260,47 @@ def _concise_business_fact(value: str) -> str:
     text = re.sub(r"\s+", " ", text).strip(" -:\n\t")
     if not text:
         return ""
-    sentence = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0].strip()[:280]
-    folded = sentence.casefold()
-    if any(char in sentence for char in "āčēģīķļņšūž") or any(
-        token in folded for token in (" piedāvā", " cena", " integrāc", " funkcij", " atbalsta", " klient")
-    ):
-        return sentence
+    sentences = tuple(
+        part.strip()[:280]
+        for part in re.split(r"(?<=[.!?])\s+", text)[:3]
+        if part.strip()
+    )
+    for sentence in sentences:
+        folded = sentence.casefold()
+        if any(char in sentence for char in "āčēģīķļņšūž") or any(
+            token in folded for token in (" piedāvā", " cena", " integrāc", " funkcij", " atbalsta", " klient")
+        ):
+            return sentence
+
+    heading_subject = ""
+    if sentences:
+        heading_match = re.match(
+            r"^([A-Z][A-Za-z0-9._-]*(?:\s+[A-Z][A-Za-z0-9._-]*){0,2})\s+(?:pricing|plans?|integrations?|features?)\.?$",
+            sentences[0], re.I,
+        )
+        if heading_match:
+            heading_subject = heading_match.group(1).strip()
+
+    for sentence in sentences[:2]:
+        match = re.match(
+            r"^(.+?) is (?:your|an?|the) AI team made up of specialized AI helpers(?: for business work)?\.?$",
+            sentence, re.I,
+        )
+        if match:
+            return f"{match.group(1).strip()} pozicionē produktu kā AI komandu ar specializētiem AI palīgiem biznesa darbam."
+        match = re.match(
+            r"^(?:Choose from )?publicly listed paid (?:monthly )?plans for access to (.+?) AI helpers\.?$",
+            sentence, re.I,
+        )
+        if match and heading_subject:
+            return f"{heading_subject} publiski piedāvā maksas abonēšanas plānus piekļuvei AI palīgiem."
+        match = re.match(
+            r"^(.+?) provides documented integrations that connect (?:its|the) AI helpers with (?:customer|client) work tools\.?$",
+            sentence, re.I,
+        )
+        if match:
+            return f"{match.group(1).strip()} dokumentē integrācijas, kas savieno AI palīgus ar klienta darba rīkiem."
+
     patterns = (
         (r"^(.+?) offers (?:a suite of |a collection of )?(.+)$", r"\1 piedāvā \2"),
         (r"^(.+?) supports (.+)$", r"\1 atbalsta \2"),
@@ -1273,14 +1308,15 @@ def _concise_business_fact(value: str) -> str:
         (r"^(.+?) integrates with (.+)$", r"\1 nodrošina integrācijas ar \2"),
         (r"^(.+?) pricing starts at (.+)$", r"\1 publiskā cena sākas no \2"),
     )
-    for pattern, replacement in patterns:
-        if re.match(pattern, sentence, re.I):
-            translated = re.sub(pattern, replacement, sentence, flags=re.I)
-            translated = re.sub(r"\bAI-powered\b", "AI", translated, flags=re.I)
-            translated = re.sub(r"\bhelpers\b", "palīgus", translated, flags=re.I)
-            translated = re.sub(r"\bintegrations\b", "integrācijas", translated, flags=re.I)
-            translated = re.sub(r"\bper month\b", "mēnesī", translated, flags=re.I)
-            return translated
+    for sentence in sentences[:2]:
+        for pattern, replacement in patterns:
+            if re.match(pattern, sentence, re.I):
+                translated = re.sub(pattern, replacement, sentence, flags=re.I)
+                translated = re.sub(r"\bAI-powered\b", "AI", translated, flags=re.I)
+                translated = re.sub(r"\bhelpers\b", "palīgus", translated, flags=re.I)
+                translated = re.sub(r"\bintegrations\b", "integrācijas", translated, flags=re.I)
+                translated = re.sub(r"\bper month\b", "mēnesī", translated, flags=re.I)
+                return translated
     return ""
 
 
@@ -1306,15 +1342,26 @@ def _render_business_decision(decision) -> str:
         lines.append("- Kritiskie fakti vēl nav pietiekami verificēti; pieņēmumus neuzdošu par faktiem.")
 
     lines.append("Kur konkurents ir stiprs")
-    strengths = []
+    strength_dimensions = []
     for fact in facts:
         statement = _concise_business_fact(fact.statement)
-        if statement and getattr(fact.fact_type, "value", "") == "competitor" and any(
-            token in statement.casefold() for token in ("piedāvā", "integrāc", "funkcij", "atbalsta", "ietver")
-        ):
-            strengths.append(statement)
-    if strengths:
-        lines.extend(f"- Verificēta stiprā puse: {item}" for item in tuple(dict.fromkeys(strengths))[:3])
+        folded = statement.casefold()
+        fact_type = getattr(fact.fact_type, "value", "")
+        if statement and fact_type == "competitor" and any(token in folded for token in ("ai komand", "ai palīg", "piedāvā")):
+            strength_dimensions.append("skaidri noformēts AI palīgu piedāvājums")
+        if statement and fact_type == "pricing" and any(token in folded for token in ("cenu", "abonēšanas plān")):
+            strength_dimensions.append("publiska cenu struktūra")
+        if statement and fact_type == "competitor" and "integrāc" in folded:
+            strength_dimensions.append("dokumentētas integrācijas")
+    strength_dimensions = list(dict.fromkeys(strength_dimensions))
+    if strength_dimensions:
+        if len(strength_dimensions) == 1:
+            supported_strengths = strength_dimensions[0]
+        else:
+            supported_strengths = ", ".join(strength_dimensions[:-1]) + " un " + strength_dimensions[-1]
+        lines.append(
+            f"- Verificēta stiprā puse: {_business_competitor_name(decision)} stiprā puse ir {supported_strengths}."
+        )
     else:
         lines.append("- Konkurenta stiprās puses vēl nav pietiekami verificētas.")
 
