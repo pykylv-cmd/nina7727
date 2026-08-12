@@ -7,6 +7,8 @@ verification and EvidenceRecord contracts behind a callable interface.
 from __future__ import annotations
 
 from dataclasses import replace
+import json
+import logging
 import time
 from typing import Callable, Iterable
 
@@ -21,6 +23,46 @@ from research_models import (
     ResearchPlan,
     ResearchResult,
 )
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+def _emit_execution_diagnostics(
+    *, plan: ResearchPlan, outcome: ResearchOutcome, failures, gaps, evidence,
+    guard: ResearchBudgetGuard, elapsed: float,
+) -> None:
+    prefix = "research_budget_exceeded:"
+    limit_dimension = next(
+        (str(item)[len(prefix):] for item in gaps if str(item).startswith(prefix)), "",
+    )
+    rejection_count = sum(
+        1 for item in failures
+        if item.get("stage") == "verification" and bool(item.get("reason"))
+    )
+    fetch_failure_count = sum(
+        1 for item in failures
+        if item.get("stage") == "verification"
+        and any(token in str(item.get("reason") or item.get("error") or "").casefold()
+                for token in ("fetch", "http", "robots", "mime", "size", "ssrf"))
+    )
+    payload = {
+        "event": ("research_budget_exceeded" if outcome is ResearchOutcome.BUDGET_EXCEEDED
+                  else "research_execution_summary"),
+        "domain": plan.domain.value,
+        "decomposed_query_count": len(plan.decomposed_queries),
+        "provider_calls": guard.provider_calls,
+        "http_requests": guard.http_requests,
+        "total_bytes": guard.total_bytes,
+        "elapsed_seconds": round(float(elapsed), 3),
+        "evidence_records": len(evidence),
+        "outcome": outcome.value,
+        "limit_dimension": limit_dimension,
+        "verified_evidence_count": len(evidence),
+        "rejection_count": rejection_count,
+        "fetch_failure_count": fetch_failure_count,
+    }
+    LOGGER.info(json.dumps(payload, sort_keys=True, separators=(",", ":")))
 
 
 def _intent(query: str, plan: ResearchPlan) -> web_research.SearchIntent:
@@ -44,7 +86,7 @@ def _result(
     guard: ResearchBudgetGuard, clock: Callable[[], float],
 ) -> ResearchResult:
     elapsed = max(0.0, clock() - float(guard.started_at))
-    return ResearchResult(
+    result = ResearchResult(
         state=ResearchJobState.COMPLETED if outcome is ResearchOutcome.COMPLETED else ResearchJobState.FAILED,
         outcome=outcome,
         plan=plan,
@@ -56,6 +98,11 @@ def _result(
         total_bytes=guard.total_bytes,
         elapsed_seconds=elapsed,
     )
+    _emit_execution_diagnostics(
+        plan=plan, outcome=outcome, failures=result.failures, gaps=result.gaps,
+        evidence=result.evidence, guard=guard, elapsed=elapsed,
+    )
+    return result
 
 
 def run_research(

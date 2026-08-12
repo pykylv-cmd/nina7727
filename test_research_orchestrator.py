@@ -1,5 +1,7 @@
 import inspect
+import json
 import unittest
+from unittest import mock
 
 import business_research_planner
 import research_orchestrator
@@ -15,6 +17,11 @@ from research_models import (
 
 
 class ResearchOrchestratorTests(unittest.TestCase):
+    def logged_payload(self, callback):
+        with self.assertLogs("research_orchestrator", level="INFO") as captured:
+            result = callback()
+        return result, json.loads(captured.output[-1].split(":", 2)[-1])
+
     def candidate(self, url="https://official.example/report", **changes):
         item = {"url": url, "provider": "fixture_provider", "verified": True, "trust": "official"}
         item.update(changes)
@@ -249,6 +256,39 @@ class ResearchOrchestratorTests(unittest.TestCase):
     def test_evidence_count_budget_is_enforced(self):
         result = self.execute([self.candidate()], plan=self.plan(budget=ResearchBudget(2, 2, 1000, 10, 0)))
         self.assertEqual(result.outcome, ResearchOutcome.BUDGET_EXCEEDED)
+
+    def test_each_budget_dimension_is_logged_exactly(self):
+        cases = (
+            (ResearchBudget(0, 10, 1000, 10, 10), "provider_calls", None),
+            (ResearchBudget(2, 0, 1000, 10, 10), "http_requests", None),
+            (ResearchBudget(2, 2, 1, 10, 10), "total_bytes", None),
+            (ResearchBudget(2, 2, 1000, 1, 10), "elapsed_seconds", iter((0.0, 2.0, 2.0, 2.0, 2.0))),
+            (ResearchBudget(2, 2, 1000, 10, 0), "evidence_records", None),
+        )
+        for budget, expected, ticks in cases:
+            with self.subTest(dimension=expected):
+                kwargs = {"clock": lambda: next(ticks)} if ticks is not None else {}
+                _, payload = self.logged_payload(lambda b=budget, k=kwargs: self.execute(
+                    [self.candidate()], plan=self.plan(budget=b), **k))
+                self.assertEqual(payload["event"], "research_budget_exceeded")
+                self.assertEqual(payload["limit_dimension"], expected)
+
+    def test_success_logs_safe_counters_without_identity_or_secrets(self):
+        result, payload = self.logged_payload(lambda: self.execute([self.candidate()]))
+        self.assertEqual(payload["event"], "research_execution_summary")
+        self.assertEqual(payload["outcome"], "completed")
+        self.assertEqual(payload["verified_evidence_count"], len(result.evidence))
+        self.assertEqual(payload["decomposed_query_count"], 1)
+        serialized = json.dumps(payload)
+        for forbidden in ("workspace-a", "contact-a", "token", "credential", "source_url"):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_observability_does_not_change_research_result(self):
+        with self.assertLogs("research_orchestrator", level="INFO"):
+            observed = self.execute([self.candidate()])
+        with mock.patch.object(research_orchestrator.LOGGER, "info"):
+            silent = self.execute([self.candidate()])
+        self.assertEqual(observed, silent)
 
     def test_each_research_need_gets_a_fresh_bounded_budget(self):
         plan = self.plan(budget=ResearchBudget(1, 1, 1000, 10, 1))
