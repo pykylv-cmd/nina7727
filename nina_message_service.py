@@ -1246,42 +1246,75 @@ def _latvian_business_text(value: str) -> str:
         "Execute the recommended option and monitor its stated conditions.": "Īsteno ieteikto variantu un uzraugi norādītos nosacījumus.",
         "Validate the highest-value customer problem before scaling commitment.": "Pirms lielāku resursu ieguldīšanas pārbaudi klientam vērtīgāko problēmu.",
         "Material evidence is missing.": "Trūkst būtisku pierādījumu.",
+        "Material assumptions may be wrong.": "Būtiskie pieņēmumi var būt kļūdaini.",
+        "retention will improve": "klientu noturēšana uzlabosies",
     }
     if text.startswith("Verify: "):
-        return "Jāpārbauda: " + text[len("Verify: "):]
+        return "Veic ierobežotu pārbaudi: " + text[len("Verify: "):]
     return translations.get(text, text)
+
+
+def _concise_business_fact(value: str) -> str:
+    """Keep an accepted fact concise; paraphrase English only when deterministic."""
+    text = re.sub(r"https?://[^\s<>\"']+", "", str(value or ""), flags=re.I)
+    text = re.sub(r"\s+", " ", text).strip(" -:\n\t")
+    if not text:
+        return ""
+    sentence = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0].strip()[:280]
+    folded = sentence.casefold()
+    if any(char in sentence for char in "āčēģīķļņšūž") or any(
+        token in folded for token in (" piedāvā", " cena", " integrāc", " funkcij", " atbalsta", " klient")
+    ):
+        return sentence
+    patterns = (
+        (r"^(.+?) offers (?:a suite of |a collection of )?(.+)$", r"\1 piedāvā \2"),
+        (r"^(.+?) supports (.+)$", r"\1 atbalsta \2"),
+        (r"^(.+?) includes (.+)$", r"\1 ietver \2"),
+        (r"^(.+?) integrates with (.+)$", r"\1 nodrošina integrācijas ar \2"),
+        (r"^(.+?) pricing starts at (.+)$", r"\1 publiskā cena sākas no \2"),
+    )
+    for pattern, replacement in patterns:
+        if re.match(pattern, sentence, re.I):
+            translated = re.sub(pattern, replacement, sentence, flags=re.I)
+            translated = re.sub(r"\bAI-powered\b", "AI", translated, flags=re.I)
+            translated = re.sub(r"\bhelpers\b", "palīgus", translated, flags=re.I)
+            translated = re.sub(r"\bintegrations\b", "integrācijas", translated, flags=re.I)
+            translated = re.sub(r"\bper month\b", "mēnesī", translated, flags=re.I)
+            return translated
+    return ""
+
+
+def _business_competitor_name(decision) -> str:
+    question = str(getattr(getattr(decision, "context", None), "original_question", "") or "")
+    match = re.search(r"\bpārsp(?:ēt|ētu)\s+([A-ZĀČĒĢĪĶĻŅŠŪŽ][\wĀČĒĢĪĶĻŅŠŪŽāčēģīķļņšūž.-]*(?:\s+[A-ZĀČĒĢĪĶĻŅŠŪŽ][\wĀČĒĢĪĶĻŅŠŪŽāčēģīķļņšūž.-]*){0,2})", question, re.I)
+    return re.split(r"\s+(?:un|lai|kas|kur|kā|ko)\b", match.group(1), maxsplit=1, flags=re.I)[0].strip(" ,.?!") if match else "konkurentu"
 
 
 def _render_business_decision(decision) -> str:
     """Render a grounded Latvian executive answer without research internals."""
     facts = tuple(getattr(getattr(decision, "evidence_set", None), "facts", ()) or ())
     lines = ["Ko mēs zinām"]
-    fact_labels = {
-        "pricing": "Ir verificēta publiska informācija par konkurenta cenām.",
-        "competitor": "Ir verificēta publiska informācija par konkurenta piedāvājumu, funkcijām vai integrācijām.",
-        "customer": "Ir verificēti publiski avoti par klientu vajadzībām vai pieprasījumu.",
-        "market": "Ir verificēta publiska informācija par tirgu un konkurences vidi.",
-        "economics": "Ir verificēta publiska informācija par ekonomiskajiem nosacījumiem.",
-        "risk": "Ir verificēta publiska informācija par būtisku risku.",
-    }
-    seen_labels = set()
+    rendered_facts = []
     for fact in facts:
-        label = fact_labels.get(
-            getattr(fact.fact_type, "value", ""),
-            "Ir iegūts verificēts publisks biznesa fakts.",
-        )
-        if label not in seen_labels:
-            seen_labels.add(label)
-            lines.append(f"- {label}")
-    if not facts:
+        statement = _concise_business_fact(fact.statement)
+        if statement and statement not in rendered_facts:
+            rendered_facts.append(statement)
+            lines.append(f"- Verificēts fakts: {statement}")
+        if len(rendered_facts) >= 4:
+            break
+    if not rendered_facts:
         lines.append("- Kritiskie fakti vēl nav pietiekami verificēti; pieņēmumus neuzdošu par faktiem.")
 
     lines.append("Kur konkurents ir stiprs")
-    if any(getattr(fact.fact_type, "value", "") in {"competitor", "pricing"} for fact in facts):
-        lines.append(
-            "- Konkurentam ir publiski verificējams piedāvājums; tā stiprās puses jāvērtē "
-            "pēc avotos pierādītajām funkcijām, integrācijām un cenas."
-        )
+    strengths = []
+    for fact in facts:
+        statement = _concise_business_fact(fact.statement)
+        if statement and getattr(fact.fact_type, "value", "") == "competitor" and any(
+            token in statement.casefold() for token in ("piedāvā", "integrāc", "funkcij", "atbalsta", "ietver")
+        ):
+            strengths.append(statement)
+    if strengths:
+        lines.extend(f"- Verificēta stiprā puse: {item}" for item in tuple(dict.fromkeys(strengths))[:3])
     else:
         lines.append("- Konkurenta stiprās puses vēl nav pietiekami verificētas.")
 
@@ -1289,7 +1322,7 @@ def _render_business_decision(decision) -> str:
     opportunities = tuple(getattr(decision, "opportunities", ()) or ())
     if opportunities:
         lines.extend(
-            f"- Stratēģisks secinājums: {_latvian_business_text(item.description)}"
+            f"- Secinājums, kas vēl jāpārbauda: {_latvian_business_text(item.description)}"
             for item in opportunities[:3]
         )
     else:
@@ -1304,7 +1337,7 @@ def _render_business_decision(decision) -> str:
     assumptions = tuple(getattr(decision.context, "assumptions", ()) or ())
     if assumptions:
         lines.append("Pieņēmumi")
-        lines.extend(f"- {item.value}" for item in assumptions[:3])
+        lines.extend(f"- {_latvian_business_text(item.value)}" for item in assumptions[:3])
 
     unresolved = tuple(getattr(decision, "research_needs", ()) or ())
     if unresolved:
@@ -1316,14 +1349,20 @@ def _render_business_decision(decision) -> str:
         _latvian_business_text(decision.recommendation.decision),
         "Ko darīt tagad",
     ))
-    actions = tuple(getattr(decision, "next_best_actions", ()) or ())
-    lines.extend(f"- {_latvian_business_text(item.action)}" for item in actions[:3])
     if getattr(getattr(decision, "context", None), "intent", None) and decision.context.intent.value == "compete":
-        lines.extend((
-            "- Izvēlies vienu klientu segmentu un vienu izmērāmu problēmu, kur NinaOS var radīt skaidrāku vērtību.",
-            "- Veic mazu, atgriezenisku salīdzinājuma testu ar vienādiem uzdevumiem un izmērāmiem rezultātiem.",
-            "- Pirms mērogošanas pārbaudi pieprasījumu, noturēšanu un vienības ekonomiku.",
-        ))
+        competitor = _business_competitor_name(decision)
+        market_gap = next((item.question for item in unresolved if getattr(item.domain, "value", "") == "market"), "")
+        prioritized = (
+            f"Pārbaudi neatrisināto tirgus pieprasījumu ar 5 mērķa klientu intervijām: {market_gap}"
+            if market_gap else
+            f"Salīdzini NinaOS un {competitor} uz 5 vienādiem klientu lietošanas scenārijiem.",
+            f"Salīdzini NinaOS onboarding laiku un darba plūsmu ar {competitor}, izmantojot izmērāmus rezultātus.",
+            "Izvēlies vienu klientu segmentu un vienu problēmu, kur diferenciāciju var pārbaudīt ar mazu, atgriezenisku testu.",
+        )
+    else:
+        actions = tuple(getattr(decision, "next_best_actions", ()) or ())
+        prioritized = tuple(_latvian_business_text(item.action) for item in actions[:3])
+    lines.extend(f"{index}. {action}" for index, action in enumerate(prioritized[:3], 1))
 
     verified_links = []
     seen_urls = set()

@@ -17,11 +17,25 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
         return Decision(**values)
 
     def result_for_need(self, need, workspace="workspace-a", contact="contact-a", *, completed=True):
-        fact_type = BusinessFactType.CUSTOMER if "pieprasījums" in need.question else (
-            BusinessFactType.PRICING if "cenas" in need.question else BusinessFactType.ECONOMICS
+        folded = need.question.casefold()
+        fact_type = BusinessFactType.CUSTOMER if "pieprasījums" in folded else (
+            BusinessFactType.PRICING if "cenas" in folded else
+            BusinessFactType.COMPETITOR if "sintra" in folded or "konkur" in folded else
+            BusinessFactType.ECONOMICS
+        )
+        statement = (
+            "Sintra publiski piedāvā mēneša abonēšanas cenu plānus."
+            if fact_type is BusinessFactType.PRICING else
+            "Sintra publiski piedāvā integrācijas ar klientu darba rīkiem."
+            if "funkcijas" in folded or "integrācijas" in folded else
+            "Sintra publiski piedāvā vairākus specializētus AI palīgus."
+            if fact_type is BusinessFactType.COMPETITOR else
+            "Publiskie avoti rāda pieprasījumu pēc AI darbaspēka risinājumiem."
+            if fact_type is BusinessFactType.CUSTOMER else
+            "Klienta ekonomiskais nosacījums ir verificēts."
         )
         facts = (BusinessFact(
-            f"Verified {fact_type.value} fact", (f"evidence-{fact_type.value}",),
+            statement, (f"evidence-{fact_type.value}",),
             (f"https://verified.example/{fact_type.value}",), EvidenceConfidence.HIGH,
             need.freshness, fact_type,
         ),) if completed else ()
@@ -175,7 +189,7 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
             question, workspace_id="workspace-a", contact_id="contact-a", research_results=results,
         )
         rendered = messaging._render_business_decision(decision)
-        self.assertIn("Ir verificēta publiska informācija", rendered)
+        self.assertIn("Sintra publiski piedāvā", rendered)
         self.assertIn("Ko mēs vēl nezinām", rendered)
         self.assertIn("https://verified.example/", rendered)
 
@@ -236,13 +250,13 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
 
     def test_failed_research_creates_no_rendered_fact(self):
         rendered = messaging._render_business_decision(self.enriched(completed=False))
-        self.assertNotIn("Verified customer fact", rendered)
+        self.assertNotIn("Publiskie avoti rāda pieprasījumu", rendered)
 
     def test_executive_renderer_hides_internal_outcomes_and_raw_english_snippets(self):
         rendered = messaging._render_business_decision(self.enriched())
         for forbidden in (
             "budget_exceeded", "verification_failed", "provider_unavailable",
-            "Verified customer fact",
+            "revolutionary all-in-one",
         ):
             self.assertNotIn(forbidden, rendered)
         for section in (
@@ -250,6 +264,44 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
             "Mans lēmums", "Ko darīt tagad", "Verificēti avoti",
         ):
             self.assertIn(section, rendered)
+
+    def test_sintra_three_completed_one_unresolved_renders_substantive_latvian_answer(self):
+        question = "Vai NinaOS var pārspēt Sintra AI un ko mums darīt, lai viņus pārspētu?"
+        initial = analyze_business_decision(question, workspace_id="workspace-a", contact_id="contact-a")
+        results = tuple(
+            self.result_for_need(need, completed=index < 3)
+            for index, need in enumerate(initial.research_needs)
+        )
+        decision = analyze_business_decision_with_evidence(
+            question, workspace_id="workspace-a", contact_id="contact-a",
+            research_results=results,
+        )
+        rendered = messaging._render_business_decision(decision)
+        self.assertIn("Sintra publiski piedāvā vairākus specializētus AI palīgus", rendered)
+        self.assertIn("Sintra publiski piedāvā mēneša abonēšanas cenu plānus", rendered)
+        self.assertIn("Sintra publiski piedāvā integrācijas ar klientu darba rīkiem", rendered)
+        self.assertIn("Verificēta stiprā puse", rendered)
+        self.assertIn("Secinājums, kas vēl jāpārbauda", rendered)
+        self.assertIn("pieprasījumu pēc AI darbinieku", rendered)
+        self.assertIn("Mans lēmums", rendered)
+        self.assertIn("1. Pārbaudi neatrisināto tirgus pieprasījumu", rendered)
+        self.assertIn("2. Salīdzini NinaOS onboarding laiku un darba plūsmu ar Sintra AI", rendered)
+        self.assertIn("3. Izvēlies vienu klientu segmentu", rendered)
+        self.assertGreaterEqual(rendered.count("https://verified.example/"), 2)
+        for forbidden in (
+            "budget_exceeded", "verification_failed", "provider_unavailable",
+            "insufficient_evidence", "EvidenceRecord", "BusinessFact", "ResearchNeed",
+            "Jāpārbauda", "Verified", "revolutionary all-in-one",
+        ):
+            self.assertNotIn(forbidden, rendered)
+
+    def test_supported_english_fact_is_paraphrased_without_marketing_dump(self):
+        self.assertEqual(
+            messaging._concise_business_fact(
+                "Sintra AI offers a suite of AI-powered helpers. Revolutionary all-in-one marketing follows."
+            ),
+            "Sintra AI piedāvā AI palīgus.",
+        )
 
     def test_verified_links_only_are_rendered(self):
         rendered = messaging._render_business_decision(self.enriched())
@@ -262,7 +314,8 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
     def test_assumptions_remain_labeled(self):
         rendered = messaging._render_business_decision(self.enriched())
         self.assertIn("Pieņēmumi", rendered)
-        self.assertIn("retention will improve", rendered)
+        self.assertIn("klientu noturēšana uzlabosies", rendered)
+        self.assertNotIn("retention will improve", rendered)
 
     def test_competitor_strength_can_be_acknowledged(self):
         decision = self.enriched()
