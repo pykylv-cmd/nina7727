@@ -1,4 +1,7 @@
 # NinaOS Constitution V5.1
+
+> Historical constitution retained as a decision record. Superseded by
+> `NINAOS_CONSTITUTION_V5.md`.
 ## AI Workforce Operating System Constitution
 ### Fresh master constitution for GitHub + new chat handoff
 

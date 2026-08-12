@@ -1,14 +1,17 @@
 # NinaOS Constitution V6
 
-Status: AUTHORITATIVE
+> Historical constitution retained as a decision record. Superseded by the
+> officially adopted `NINAOS_CONSTITUTION_V5.md`.
+
+Status: HISTORICAL / SUPERSEDED
 
 Adopted: 2026-07-27
 
-Supersedes as current law: `NinaOS_Constitution_V5.md` (V5.1)
+Formerly superseded as current law: `NinaOS_Constitution_V5.md` (V5.1)
 
-Historical constitutions remain decision records. Where they conflict with V6,
-V6 governs. The architecture ledger controls implementation order; this
-Constitution controls enduring direction.
+Historical constitutions remain decision records. The officially adopted
+`NINAOS_CONSTITUTION_V5.md` now governs where this historical document conflicts
+with it.
 
 ## 0. Supreme law
 
