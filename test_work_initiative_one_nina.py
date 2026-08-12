@@ -4,6 +4,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+from work_initiative_models import WorkExecutionDisposition, WorkExecutionResult
+
 from test_runtime_support import bind_sqlite_database, install_test_environment
 
 install_test_environment()
@@ -152,7 +154,7 @@ class WorkInitiativeOneNinaTests(unittest.TestCase):
         proof = self.send("gribu tevi pārdot, bet vajag lai tu pierādi ko māki")
         self.assertIn("Izpētīt potenciālos klientus", proof["text"])
         clients = self.send("tu vari atrast klientus kas tevi lietos?")
-        self.assertIn("Sāktu tagad", clients["text"])
+        self.assertIn("work_execution", clients)
         self.assertNotIn("ko tu gribi, lai es daru", clients["text"].casefold())
         trust = self.send("iesaki kaut ko dēļ kā es gribētu tev uzticēt savu biznesu")
         self.assertIn("Izpētīt potenciālos klientus", trust["text"])
@@ -170,6 +172,95 @@ class WorkInitiativeOneNinaTests(unittest.TestCase):
         self.assertNotEqual(reminder["source"], "work_initiative")
         task = self.send("Uztaisi uzdevumu piezvanīt klientam")
         self.assertNotEqual(task["source"], "work_initiative")
+
+    def completed_research(self, title="Izpētīt potenciālos klientus"):
+        return WorkExecutionResult(
+            WorkExecutionDisposition.EXECUTABLE_NOW, "completed", title,
+            summary="Atradu divus verificētus klientu segmentus.",
+            evidence_references=("https://example.com/evidence",),
+        )
+
+    @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
+    @patch("nina_message_service._execute_initiative_research")
+    def test_proof_of_value_executes_and_persists_real_result(self, research, _business):
+        research.return_value = self.completed_research()
+        response = self.send("Gribu tevi pārdot. Pierādi, ko tu māki.")
+        self.assertEqual(research.call_count, 1)
+        self.assertEqual(response["work_execution"]["state"], "completed")
+        self.assertIn("Izdarīju pirmo drošo iekšējo darbu", response["text"])
+        self.assertIn("https://example.com/evidence", response["text"])
+        project = self.projects()[0]
+        self.assertEqual(project.metadata["initiative_state"], "completed")
+        self.assertEqual(project.metadata["evidence_references"], ["https://example.com/evidence"])
+
+    @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
+    @patch("nina_message_service._execute_initiative_research")
+    def test_nu_nu_does_not_duplicate_completed_work(self, research, _business):
+        research.return_value = self.completed_research()
+        first = self.send("Gribu tevi pārdot. Pierādi, ko tu māki.")
+        second = self.send("nu nu?", channel="telegram")
+        self.assertEqual(research.call_count, 1)
+        self.assertEqual(second["work_object_id"], first["work_object_id"])
+        self.assertTrue(second["duplicate_execution_prevented"])
+        self.assertNotIn("Ko tieši vēlies", second["text"])
+
+    @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
+    @patch("nina_message_service._execute_initiative_research")
+    def test_other_contact_cannot_continue_selected_work(self, research, _business):
+        research.return_value = self.completed_research()
+        self.send("Gribu tevi pārdot. Pierādi, ko tu māki.", contact="person-a")
+        other = self.send("dari", channel="telegram", contact="person-b")
+        self.assertNotEqual(other.get("source"), "work_initiative")
+        self.assertEqual(research.call_count, 1)
+
+    @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
+    @patch("nina_message_service._execute_initiative_research")
+    def test_expired_context_cannot_execute_dari(self, research, _business):
+        research.return_value = self.completed_research()
+        self.send("Gribu tevi pārdot. Pierādi, ko tu māki.")
+        conn = self.work._connect()
+        cur = conn.cursor()
+        expired = (datetime.now(timezone.utc) - timedelta(hours=1)).replace(tzinfo=None).isoformat(" ")
+        cur.execute("UPDATE conversation_state SET created_at=? WHERE intent='work_initiative_context'", (expired,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        response = self.send("dari")
+        self.assertNotEqual(response.get("source"), "work_initiative")
+        self.assertEqual(research.call_count, 1)
+
+    @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
+    @patch("nina_message_service._execute_initiative_research")
+    def test_youtube_goal_returns_one_executed_answer_and_keeps_objective(self, research, _business):
+        research.return_value = self.completed_research("Izpētīt nišas un auditoriju")
+        response = self.send(
+            "Gribu uzsākt bērnu YouTube biznesu, kur tu soli pa solim palīdzi līdz tas strādā un ir automatizēts."
+        )
+        self.assertEqual(response["work_execution"]["state"], "completed")
+        self.assertIn("bērnu", self.projects()[0].metadata["known_context"].casefold() if "known_context" in self.projects()[0].metadata else response["initiative"]["goal"]["original_text"].casefold())
+        self.assertNotIn("Sāktu tagad", response["text"])
+        self.assertFalse(response["external_action_executed"])
+
+    @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
+    @patch("nina_message_service._execute_initiative_research")
+    def test_research_failure_is_honest_and_persisted(self, research, _business):
+        research.return_value = WorkExecutionResult(
+            WorkExecutionDisposition.EXECUTABLE_NOW, "failed", "Izpētīt potenciālos klientus",
+            summary="Izpēti sāku, bet nepabeidzu ar pietiekami verificētiem avotiem.",
+            failure_reason="verification_failed",
+        )
+        response = self.send("Gribu tevi pārdot. Pierādi, ko tu māki.")
+        self.assertIn("nepabeidzu", response["text"])
+        self.assertNotIn("Atradu", response["text"])
+        self.assertEqual(self.projects()[0].metadata["initiative_state"], "failed")
+
+    def test_external_email_and_calendar_remain_non_executing(self):
+        email = self.send("atbildi manā vietā e-pastā")
+        calendar = self.send("Vari sak\u0101rtot manu kalend\u0101ru?")
+        self.assertFalse(email["external_action_executed"])
+        self.assertFalse(calendar["external_action_executed"])
+        self.assertNotIn("work_execution", email)
+        self.assertNotIn("work_execution", calendar)
 
 
 if __name__ == "__main__":

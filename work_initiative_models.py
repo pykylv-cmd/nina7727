@@ -3,12 +3,32 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from enum import Enum
 from typing import Any
 
 
 class StableModel:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+class WorkExecutionDisposition(str, Enum):
+    EXECUTABLE_NOW = "executable_now"
+    PREPARATION_ONLY = "preparation_only"
+    REQUIRES_APPROVAL = "requires_approval"
+    REQUIRES_CAPABILITY = "requires_capability"
+    UNSUPPORTED = "unsupported"
+
+
+@dataclass(frozen=True)
+class WorkExecutionResult(StableModel):
+    disposition: WorkExecutionDisposition
+    state: str
+    work_title: str
+    summary: str = ""
+    evidence_references: tuple[str, ...] = ()
+    failure_reason: str = ""
+    external_action_executed: bool = False
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,7 @@
 import unittest
 
-from work_initiative_engine import analyze_work_initiative
+from work_initiative_engine import analyze_work_initiative, classify_next_best_work
+from work_initiative_models import WorkExecutionDisposition
 
 
 class WorkInitiativeEngineTests(unittest.TestCase):
@@ -56,6 +57,12 @@ class WorkInitiativeEngineTests(unittest.TestCase):
 
     def test_ordinary_chat_is_not_actionable(self):
         self.assertFalse(analyze_work_initiative("kā tev iet?").decision.should_act)
+
+    def test_research_is_safe_executable_but_external_work_is_not(self):
+        proof = analyze_work_initiative("Gribu tevi pārdot. Pierādi, ko tu māki.")
+        self.assertEqual(classify_next_best_work(proof.next_best_work), WorkExecutionDisposition.EXECUTABLE_NOW)
+        email = analyze_work_initiative("atbildi manā vietā e-pastā")
+        self.assertEqual(classify_next_best_work(email.next_best_work), WorkExecutionDisposition.PREPARATION_ONLY)
 
 
 if __name__ == "__main__":

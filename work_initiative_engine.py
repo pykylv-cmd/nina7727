@@ -8,7 +8,7 @@ from typing import Mapping
 from capability_registry import CapabilityId, CapabilityState, get_capability_registry
 from work_initiative_models import (
     CapabilityAnswer, InitiativeDecision, NextBestWork, ProposedWork,
-    UserGoal, WorkInitiativeResult,
+    UserGoal, WorkExecutionDisposition, WorkInitiativeResult,
 )
 
 
@@ -128,7 +128,7 @@ def analyze_work_initiative(
             ProposedWork("Izpētīt potenciālos klientus", objective, "research", "Publiski verificēts kandidātu saraksts rada demonstrējamu vērtību", (CapabilityId.WEB_RESEARCH.value,), expected_output="Verificēts klientu segments un kandidāti"),
             ProposedWork("Sagatavot outreach un follow-up plānu", objective, "work_plan", "Pārvērš izpēti izpildāmā darbā", (CapabilityId.DOCUMENT_GENERATION.value, CapabilityId.TASKS.value), approval_required=True, expected_output="Outreach melnraksti un follow-up plāns"),
         )
-        return WorkInitiativeResult(UserGoal(clean, objective, scope="proof_of_value"), InitiativeDecision(True, "proof_mode", .98, True), works, NextBestWork(works[1], "Var sākt ar publisku izpēti bez ārējas darbības", True), response_kind="proof", use_business_thinking=True, use_research=True, context_update={"objective": objective, "project_kind": "proof_of_value", "known_context": clean})
+        return WorkInitiativeResult(UserGoal(clean, objective, scope="proof_of_value"), InitiativeDecision(True, "proof_mode", .98, True), works, NextBestWork(works[1], "Var sākt ar publisku izpēti bez ārējas darbības", True), response_kind="proof", project_candidate=True, use_business_thinking=True, use_research=True, context_update={"objective": objective, "project_kind": "proof_of_value", "known_context": clean})
 
     business_objective = (
         "Izveidot dzīvotspējīgu pārtikas biznesu" if "partikas biznes" in text else
@@ -160,3 +160,21 @@ def analyze_work_initiative(
         )
     update = {"objective": objective, "project_kind": project_kind, "known_context": clean}
     return WorkInitiativeResult(UserGoal(clean, objective, scope=project_kind, known_context=(clean,), missing_context=("private preferences",)), InitiativeDecision(True, "durable_project_goal", .96, True), works, NextBestWork(works[0], "Drošākais augstas vērtības sākums ir atgriezeniska izpēte vai strukturēšana", True), project_candidate=True, use_business_thinking=project_kind in {"business_launch", "youtube_business"}, use_research=True, context_update=update)
+
+
+def classify_next_best_work(next_best_work: NextBestWork, *, environment=None) -> WorkExecutionDisposition:
+    """Classify execution without implementing or bypassing any capability."""
+    work = next_best_work.work
+    if work.approval_required:
+        return WorkExecutionDisposition.REQUIRES_APPROVAL
+    registry = get_capability_registry(environment)
+    states = [registry.get(CapabilityId(item)) for item in work.capability_ids if item in CapabilityId._value2member_map_]
+    if not states or any(item is None or item.state in {
+        CapabilityState.REQUIRES_CONNECTION, CapabilityState.NOT_IMPLEMENTED, CapabilityState.DEGRADED,
+    } for item in states):
+        return WorkExecutionDisposition.REQUIRES_CAPABILITY
+    if work.work_type == "research" and CapabilityId.WEB_RESEARCH.value in work.capability_ids:
+        return WorkExecutionDisposition.EXECUTABLE_NOW
+    if work.work_type in {"analysis", "strategy", "work_plan", "project_plan", "task_plan", "calendar_plan", "email_draft"}:
+        return WorkExecutionDisposition.PREPARATION_ONLY
+    return WorkExecutionDisposition.UNSUPPORTED
