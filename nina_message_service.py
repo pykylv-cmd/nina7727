@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 import json
 import os
 import re
@@ -1445,6 +1446,121 @@ def _run_business_thinking(text: str, workspace_id: str, contact_id: str):
     )
 
 
+def _work_initiative_context(conversation_id: str) -> Dict[str, str]:
+    """Read the latest ONE NINA initiative context from the existing store."""
+    scope = str(conversation_id or "").strip()
+    if not scope:
+        return {}
+    _ensure_conversation_store()
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        cur.execute(_sql("""
+            SELECT topic FROM conversation_state
+            WHERE user_id = %s AND intent = %s ORDER BY id DESC LIMIT 1
+        """), (scope, "work_initiative_context"))
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+    if not row:
+        return {}
+    try:
+        payload = json.loads(str(row[0] or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return {
+        key: str(payload.get(key) or "")[:1000]
+        for key in ("objective", "project_kind", "known_context", "object_id")
+        if payload.get(key)
+    } if isinstance(payload, dict) else {}
+
+
+def _save_work_initiative_context(conversation_id: str, payload: Dict[str, str]) -> None:
+    """Persist scoped continuity without introducing a new store or schema."""
+    scope = str(conversation_id or "").strip()
+    if not scope or not payload:
+        return
+    safe = {
+        key: str(payload.get(key) or "")[:1000]
+        for key in ("objective", "project_kind", "known_context", "object_id")
+        if payload.get(key)
+    }
+    _ensure_conversation_store()
+    conn = _connect()
+    cur = conn.cursor()
+    try:
+        cur.execute(_sql("""
+            INSERT INTO conversation_state
+                (user_id, user_text, nina_text, intent, emotion, topic)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """), (scope, "", "", "work_initiative_context", "", json.dumps(safe, ensure_ascii=False)))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _render_capability_answer(answer) -> str:
+    lines = ["Šobrīd varu:"]
+    lines.extend(f"- {item};" for item in answer.available_now[:12])
+    if answer.available_after_connection:
+        lines.append("Pēc savienojuma varu:")
+        lines.extend(f"- {item};" for item in answer.available_after_connection[:6])
+    if answer.not_yet_available:
+        lines.append("Vēl nevaru:")
+        lines.extend(f"- {item};" for item in answer.not_yet_available[:4])
+    lines.extend(("Ko sākt vispirms", answer.suggested_first_use))
+    return "\n".join(lines)
+
+
+def _render_work_initiative(result, business_text: str = "") -> str:
+    if result.capability_answer is not None:
+        return _render_capability_answer(result.capability_answer)
+    if result.response_kind == "email":
+        return (
+            "Varu sagatavot atbildes melnrakstu tagad. Nosūtīt to varu tikai pēc "
+            "e-pasta savienojuma un tava apstiprinājuma.\n\n"
+            "Nākamais solis: ielīmē e-pastu, uz kuru jāatbild."
+        )
+    lines = []
+    if business_text:
+        lines.append(business_text)
+        lines.append("Darba iniciatīva")
+    lines.append(f"Sapratu mērķi: {result.goal.objective}.")
+    lines.append("Varu sākt ar šiem darbiem:")
+    for index, work in enumerate(result.proposed_work[:5], 1):
+        lines.append(f"{index}. {work.title} — rezultāts: {work.expected_output}.")
+    if result.next_best_work:
+        lines.append(f"Sāktu tagad: {result.next_best_work.work.title}.")
+        lines.append(f"Kāpēc: {result.next_best_work.why_now}.")
+        if result.next_best_work.owner_question_if_blocked:
+            lines.append(result.next_best_work.owner_question_if_blocked)
+    return "\n".join(lines)[:4000]
+
+
+def _initiative_project_object(result, workspace_id: str, contact_id: str, channel: str):
+    """Create one deduplicated canonical project only for a strong durable goal."""
+    if not result.project_candidate or result.decision.reason != "durable_project_goal":
+        return None
+    identity = "\0".join((workspace_id, contact_id, result.goal.objective.casefold()))
+    source_key = "work-initiative:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    metadata = {
+        "source": "work_initiative_engine",
+        "objective": result.goal.objective,
+        "project_kind": result.goal.scope,
+        "initiative_state": "proposed",
+        "work_plan": [work.to_dict() for work in result.proposed_work],
+        "external_action_executed": False,
+    }
+    return create_work_object(
+        object_type="project", title=result.goal.objective,
+        workspace_id=workspace_id, priority="high" if result.goal.scope == "ninaos" else "normal",
+        metadata=metadata, origin_channel=channel, origin_user_id=contact_id,
+        source_key=source_key,
+    )
+
+
 def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, channel: str = "web",
                          generator: Optional[Callable[[str], str]] = None,
                          conversation_id: str = "", contact_id: str = "",
@@ -1544,6 +1660,67 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         # and continue through ONE NINA's normal channel-neutral routing.
         _clear_pending_reminder_context(semantic_context_id)
         pending_reminder = {}
+
+    # Work Initiative is a shared ONE NINA capability. It runs only after
+    # deterministic reminder/action handling and declines ordinary chat,
+    # explicit research, tasks, URLs and memory/profile statements.
+    from work_initiative_engine import analyze_work_initiative
+    initiative_context = _work_initiative_context(semantic_context_id)
+    explicit_shared_action = bool(
+        getattr(decision, "reminder_operation", "")
+        or getattr(decision, "create_reminder", False)
+        or getattr(decision, "create_work_object", False)
+        or re.search(r"https?://", clean, re.I)
+        or re.search(r"\b(?:atgādini|atgadini|reminder|uzdevum|task)\b", clean, re.I)
+        or re.search(r"\b(?:atrodi|meklē|mekle|izpēti|izpeti)\s+(?:internetā|interneta|tīmeklī|timekli|informāciju|informaciju)\b", clean, re.I)
+        or bool(_memory_candidate(clean))
+    )
+    initiative = analyze_work_initiative(
+        clean, previous_context=initiative_context if not explicit_shared_action else {},
+    ) if not explicit_shared_action else None
+    if initiative is not None and initiative.decision.should_act:
+        business_text = ""
+        business_state = ""
+        if initiative.use_business_thinking and initiative.project_candidate:
+            try:
+                business_owner = str(contact_id or conversation_id or _conversation_id(workspace_id)).strip()
+                business_decision = _run_business_thinking(clean, target_workspace, business_owner)
+                business_text = _customer_safe_text(_render_business_decision(business_decision))
+                business_state = business_decision.state.value
+            except Exception as exc:
+                logger.error("Work Initiative Business Thinking delegation failed: exception=%s", type(exc).__name__)
+                business_text = "Biznesa izvērtējumu nepabeidzu; trūkstošus faktus neizdomāšu."
+        project = None
+        try:
+            project = _initiative_project_object(
+                initiative, target_workspace,
+                str(contact_id or conversation_id or _conversation_id(workspace_id)).strip(), channel,
+            )
+        except Exception as exc:
+            logger.error("Work Initiative persistence failed: exception=%s", type(exc).__name__)
+            answer = "Darba plānu sapratu, bet canonical projektu neizdevās droši saglabāt. Neapgalvošu, ka darbs ir sākts."
+            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+            return {
+                "ok": False, "error": "work_initiative_persistence_failed", "text": answer,
+                "source": "work_initiative", "channel": channel,
+                "initiative": initiative.to_dict(), "external_action_executed": False,
+            }
+        context_payload = dict(initiative.context_update or {})
+        if project is not None:
+            context_payload["object_id"] = project.object_id
+        if context_payload:
+            _save_work_initiative_context(semantic_context_id, context_payload)
+        answer = _customer_safe_text(_render_work_initiative(initiative, business_text=business_text))
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+        response = {
+            "ok": True, "text": answer, "source": "work_initiative", "channel": channel,
+            "initiative": initiative.to_dict(), "external_action_executed": False,
+        }
+        if project is not None:
+            response.update({"work_object_id": project.object_id, "work_object_type": "project"})
+        if business_state:
+            response["business_state"] = business_state
+        return response
 
     if _is_business_decision_request(clean, decision):
         business_owner = str(contact_id or conversation_id or _conversation_id(workspace_id)).strip()
