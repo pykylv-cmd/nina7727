@@ -59,13 +59,62 @@ def _has(facts: tuple[DecisionEvidence, ...], *tokens: str) -> bool:
     return any(token in text for token in tokens)
 
 
-def _research_needs(intent: BusinessIntent, facts: tuple[DecisionEvidence, ...]) -> tuple[ResearchNeed, ...]:
+def _named_competitor(question: str) -> str:
+    """Extract a named comparison target without treating generic nouns as names."""
+    clean = re.sub(r"\s+", " ", str(question or "")).strip()
+    patterns = (
+        r"\bpārsp(?:ēt|ētu)\s+([A-ZĀČĒĢĪĶĻŅŠŪŽ][\wĀČĒĢĪĶĻŅŠŪŽāčēģīķļņšūž.-]*(?:\s+[A-ZĀČĒĢĪĶĻŅŠŪŽ][\wĀČĒĢĪĶĻŅŠŪŽāčēģīķļņšūž.-]*){0,2})",
+        r"\b(?:pret|vs\.?|salīdzinot ar)\s+([A-ZĀČĒĢĪĶĻŅŠŪŽ][\wĀČĒĢĪĶĻŅŠŪŽāčēģīķļņšūž.-]*(?:\s+[A-ZĀČĒĢĪĶĻŅŠŪŽ][\wĀČĒĢĪĶĻŅŠŪŽāčēģīķļņšūž.-]*){0,2})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, clean, re.IGNORECASE)
+        if not match:
+            continue
+        candidate = re.split(r"\s+(?:un|lai|kas|kur|kā|ko)\b", match.group(1), maxsplit=1, flags=re.IGNORECASE)[0].strip(" ,.?!")
+        if candidate.casefold().split()[0] not in {"konkurents", "konkurentu", "konkurentus", "konkurentiem", "competition", "competitor", "competitors"}:
+            return candidate
+    return ""
+
+
+def _research_needs(question: str, intent: BusinessIntent, facts: tuple[DecisionEvidence, ...]) -> tuple[ResearchNeed, ...]:
     needs = []
+    competitor = _named_competitor(question) if intent is BusinessIntent.COMPETE else ""
+    folded = str(question or "").casefold()
+    strategic_growth = intent is BusinessIntent.COMPETE and any(
+        token in folded for token in ("stratēģ", "augt", "izaugs", "virzien", "biznesa lēm")
+    ) and not competitor
+    if competitor and not _has(facts, competitor.casefold(), "competitor", "konkur"):
+        for need_question, domain, freshness, why_needed in (
+            (f"Ko {competitor} pašlaik piedāvā klientiem?", ResearchDomain.COMPETITOR, FreshnessRequirement.CURRENT,
+             "Named competitor offer and customer value must be verified."),
+            (f"Kādas ir {competitor} pašreizējās publiskās cenas?", ResearchDomain.COMPETITOR, FreshnessRequirement.CURRENT,
+             "Named competitor pricing must be verified, not inferred."),
+            (f"Kādas publiski verificējamas {competitor} funkcijas, integrācijas, stiprās puses un ierobežojumi ir būtiski šim lēmumam?",
+             ResearchDomain.COMPETITOR, FreshnessRequirement.CURRENT,
+             "Capabilities, integrations, strengths and limitations define lawful competitive opportunities."),
+        ):
+            needs.append(ResearchNeed(need_question, domain, freshness, StrategicPriority.HIGH, why_needed))
+    elif strategic_growth:
+        for need_question, domain, freshness, why_needed in (
+            ("Kuram mērķa klientam un problēmai ir spēcīgākais publiski pierādāmais pieprasījums?", ResearchDomain.MARKET,
+             FreshnessRequirement.RECENT, "Target customer and highest-value problem determine strategic focus."),
+            ("Kādi diferenciācijas, izplatīšanas, monetizācijas un noturēšanas modeļi darbojas šajā konkurences vidē?",
+             ResearchDomain.MARKET, FreshnessRequirement.RECENT,
+             "Growth strategy needs evidence about distribution, monetization and retention."),
+            ("Kādas konkurentu priekšrocības, tirgus nepilnības un aizsargājamas pozīcijas ir publiski verificējamas?",
+             ResearchDomain.COMPETITOR, FreshnessRequirement.CURRENT,
+             "Strategy must account for competitor strengths, learning speed and defensibility."),
+        ):
+            needs.append(ResearchNeed(need_question, domain, freshness, StrategicPriority.HIGH, why_needed))
     if not _has(facts, "customer", "klient", "demand", "piepras"):
-        needs.append(ResearchNeed("Kāds ir pierādītais klientu pieprasījums?", ResearchDomain.MARKET,
+        demand_question = (
+            "Kādi pierādījumi ir par pieprasījumu pēc AI darbinieku un AI darbaspēka produktiem?"
+            if competitor else "Kāds ir pierādītais klientu pieprasījums?"
+        )
+        needs.append(ResearchNeed(demand_question, ResearchDomain.MARKET,
                                   FreshnessRequirement.RECENT, StrategicPriority.CRITICAL,
                                   "Customer value and demand must be evidenced before committing resources."))
-    if intent in {BusinessIntent.COMPETE, BusinessIntent.PRICING, BusinessIntent.MARKET_ENTRY} and not _has(facts, "competitor", "konkur", "price", "cen"):
+    if not competitor and not strategic_growth and intent in {BusinessIntent.COMPETE, BusinessIntent.PRICING, BusinessIntent.MARKET_ENTRY} and not _has(facts, "competitor", "konkur", "price", "cen"):
         needs.append(ResearchNeed("Kādi ir aktuālie konkurentu piedāvājumi un cenas?", ResearchDomain.COMPETITOR,
                                   FreshnessRequirement.CURRENT, StrategicPriority.HIGH,
                                   "Competitive position and pricing cannot be inferred safely."))
@@ -100,7 +149,18 @@ def analyze_business_decision(
         tuple(sorted({str(item).strip() for item in constraints if str(item).strip()})), facts, assumed,
         unknown, str(time_horizon), str(risk_tolerance), dict(business_context or {}),
     )
-    needs = _research_needs(intent, facts) if clean else ()
+    competitor = _named_competitor(clean) if intent is BusinessIntent.COMPETE else ""
+    strategic_growth = intent is BusinessIntent.COMPETE and not competitor and any(
+        token in clean.casefold() for token in ("stratēģ", "augt", "izaugs", "virzien", "biznesa lēm")
+    )
+    if intent is BusinessIntent.COMPETE:
+        comparison_unknowns = (
+            "NinaOS internal economics, retention and delivery performance",
+            "NinaOS capability evidence for a like-for-like comparison",
+        )
+        unknown = tuple(sorted(set(unknown + comparison_unknowns)))
+        context = replace(context, unknowns=unknown)
+    needs = _research_needs(clean, intent, facts) if clean else ()
     confidence = _confidence(facts, needs)
     high_downside = bool((business_context or {}).get("high_downside"))
     bottleneck = str((business_context or {}).get("bottleneck") or "Evidence-backed customer validation")
@@ -118,8 +178,15 @@ def analyze_business_decision(
         ("Use the next euro/hour where expected learning-adjusted value is highest.",),
         ("Evaluate data, workflow lock-in, integrations, brand, distribution, cost and switching advantages.",),
     )
+    opportunity_description = (
+        f"Pirms konkurences virziena izvēles atrodi likumīgas klientu vērtības nepilnības {competitor} verificētajā piedāvājumā."
+        if competitor else
+        "Pirms mērogošanas izvēlies fokusētu mērķa klienta, diferenciācijas un izplatīšanas hipotēzi."
+        if strategic_growth else
+        "Validate the highest-value customer problem before scaling commitment."
+    )
     opportunity = Opportunity(
-        "Validate the highest-value customer problem before scaling commitment.", "customer_value",
+        opportunity_description, "customer_value",
         str((business_context or {}).get("estimated_impact") or "unknown"), confidence,
         tuple(need.question for need in needs), StrategicPriority.HIGH,
         {"customer_value": 3 if _has(facts, "customer", "klient") else None,
@@ -128,7 +195,7 @@ def analyze_business_decision(
          "downside_risk": 3 if high_downside else None, "evidence_confidence": 3 if confidence is EvidenceConfidence.HIGH else 1},
     )
     risks = [BusinessRisk(
-        "Material assumptions may be wrong.", "unknown", "high" if high_downside else "unknown",
+        "Būtiskie pieņēmumi var būt kļūdaini.", "unknown", "high" if high_downside else "unknown",
         "Run a bounded reversible validation before irreversible commitment.", confidence,
         StrategicPriority.CRITICAL if high_downside else StrategicPriority.HIGH,
     )]
@@ -147,7 +214,14 @@ def analyze_business_decision(
         tuple(item.source_reference for item in facts if item.source_reference), "low", StrategicPriority.LOW if needs or high_downside else StrategicPriority.HIGH,
     )
     state = DecisionState.NEEDS_CLARIFICATION if not clean else (DecisionState.NEEDS_RESEARCH if needs else DecisionState.READY)
-    decision_text = "Run the reversible validation first." if needs or high_downside else "Proceed with the evidence-backed option under stated constraints."
+    if competitor:
+        decision_text = (
+            f"Izmanto verificētus pierādījumus par {competitor}, lai izvēlētos vienu aizsargājamu klientu vērtības nišu; neapgalvo, ka NinaOS ir pārāks, kamēr to neapstiprina salīdzināms tests."
+        )
+    elif strategic_growth:
+        decision_text = "Izvēlies fokusētu izaugsmes hipotēzi par mērķa klientu, diferenciāciju un izplatīšanu, pēc tam pārbaudi to ar atgriezenisku tirgus testu."
+    else:
+        decision_text = "Run the reversible validation first." if needs or high_downside else "Proceed with the evidence-backed option under stated constraints."
     recommendation = Recommendation(
         decision_text,
         ("Prioritizes customer value, fast learning and controlled downside.", f"Execution bottleneck is {bottleneck}."),
@@ -155,8 +229,14 @@ def analyze_business_decision(
         tuple(item.value for item in assumed), confidence,
         tuple(need.question for need in needs) or ("New contradictory evidence", "Material economics deterioration"),
     )
+    if competitor:
+        action_text = f"Sagatavo pierādījumos balstītu {competitor} salīdzinājumu par piedāvājumu, cenām, ieviešanu, integrācijām un klientu vērtību, tad izvēlies vienu atgriezenisku diferenciācijas testu."
+    elif strategic_growth:
+        action_text = "Izvēlies vienu mērķa klienta un izplatīšanas hipotēzi, nosaki noturēšanas signālu un veic mazāko atgriezenisko izaugsmes testu."
+    else:
+        action_text = "Resolve the highest-priority evidence gap with a bounded validation." if needs else "Execute the recommended option and monitor its stated conditions."
     actions = () if state is DecisionState.NEEDS_CLARIFICATION else (NextBestAction(
-        "Resolve the highest-priority evidence gap with a bounded validation." if needs else "Execute the recommended option and monitor its stated conditions.",
+        action_text,
         "It unlocks the next decision while limiting irreversible cost.",
         "Faster validated learning; no unsupported monetary estimate.",
         (needs[0].question,) if needs else ("Owner approval",), True, True,

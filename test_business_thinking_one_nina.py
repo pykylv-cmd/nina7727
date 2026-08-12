@@ -161,6 +161,23 @@ class BusinessThinkingOneNinaTests(unittest.TestCase):
         self.assertNotIn("Run the reversible validation first", rendered)
         self.assertNotIn("Validate the highest-value customer problem", rendered)
         self.assertNotIn("Verify:", rendered)
+        self.assertNotIn("Material assumptions may be wrong", rendered)
+        self.assertIn("Būtiskie pieņēmumi var būt kļūdaini", rendered)
+
+    def test_named_competitor_and_strategy_render_different_next_actions(self):
+        named = analyze_business_decision(
+            "Vai NinaOS var pārspēt Sintra AI un ko mums darīt, lai viņus pārspētu?",
+            workspace_id="workspace-a", contact_id="contact-a",
+        )
+        strategy = analyze_business_decision(
+            "Kādu biznesa stratēģiju mums izvēlēties, lai NinaOS augtu ātrāk par konkurentiem?",
+            workspace_id="workspace-a", contact_id="contact-a",
+        )
+        named_text = messaging._render_business_decision(named)
+        strategy_text = messaging._render_business_decision(strategy)
+        self.assertIn("Sintra AI", named_text)
+        self.assertIn("mērķa klienta", strategy_text)
+        self.assertNotEqual(named_text, strategy_text)
 
     def test_failed_research_creates_no_rendered_fact(self):
         rendered = messaging._render_business_decision(self.enriched(completed=False))

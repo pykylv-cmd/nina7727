@@ -48,6 +48,37 @@ class BusinessThinkingResearchTests(unittest.TestCase):
         self.assertTrue(decision.competitive_analysis.advantages)
         self.assertTrue(decision.competitive_analysis.gaps)
 
+    def test_verified_named_competitor_facts_affect_recommendation(self):
+        question = "Vai NinaOS var pārspēt Sintra AI un ko mums darīt, lai viņus pārspētu?"
+        needs = self.initial_needs(question)
+        results = tuple(
+            self.result(
+                need,
+                BusinessFactType.CUSTOMER if "piepras" in need.question.casefold() else BusinessFactType.COMPETITOR,
+                f"Verified finding for {need.question}",
+            )
+            for need in needs
+        )
+        decision = analyze_business_decision_with_evidence(
+            question, workspace_id="workspace-a", contact_id="contact-a", research_results=results,
+        )
+        self.assertEqual(len(decision.evidence_set.facts), len(needs))
+        self.assertTrue(decision.recommendation.evidence_basis)
+        self.assertEqual(decision.recommendation.confidence, EvidenceConfidence.HIGH)
+        self.assertIn("Sintra AI", decision.recommendation.decision)
+
+    def test_partial_public_evidence_is_retained_with_private_unknowns(self):
+        question = "Vai NinaOS var pārspēt Sintra AI un ko mums darīt, lai viņus pārspētu?"
+        needs = self.initial_needs(question)
+        completed = self.result(needs[0], BusinessFactType.COMPETITOR, "Verified Sintra offer")
+        decision = analyze_business_decision_with_evidence(
+            question, workspace_id="workspace-a", contact_id="contact-a", research_results=(completed,),
+        )
+        self.assertIn("Verified Sintra offer", decision.to_json())
+        self.assertTrue(decision.research_needs)
+        self.assertIn("NinaOS internal economics", decision.to_json())
+        self.assertNotEqual(decision.recommendation.confidence, EvidenceConfidence.HIGH)
+
     def test_pricing_unknown_remains_unresolved(self):
         question = "Vai NinaOS var pārspēt konkurentu X?"
         decision = analyze_business_decision_with_evidence(

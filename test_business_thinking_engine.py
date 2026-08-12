@@ -50,6 +50,36 @@ class BusinessThinkingEngineTests(unittest.TestCase):
         decision = self.analyze("Kā konkurēt tirgū?")
         self.assertTrue(any(need.domain.value == "competitor" for need in decision.research_needs))
 
+    def test_named_competitor_is_preserved_in_specific_research_needs(self):
+        decision = self.analyze("Vai NinaOS var pārspēt Sintra AI un ko mums darīt, lai viņus pārspētu?")
+        questions = tuple(need.question for need in decision.research_needs)
+        self.assertTrue(any("Sintra AI" in question and "cenas" in question for question in questions))
+        self.assertTrue(any("Sintra AI" in question and "integrācijas" in question for question in questions))
+        self.assertTrue(any("AI darbaspēka" in question for question in questions))
+
+    def test_named_competitor_is_extracted_not_hard_coded(self):
+        questions = tuple(need.question for need in self.analyze("Kā pārspēt Acme Cloud?").research_needs)
+        self.assertTrue(any("Acme Cloud" in question for question in questions))
+        self.assertFalse(any("Sintra" in question for question in questions))
+
+    def test_generic_competitor_question_remains_generic(self):
+        questions = tuple(need.question for need in self.analyze("Kā pārspēt konkurentus?").research_needs)
+        self.assertTrue(any("konkurentu piedāvājumi" in question for question in questions))
+
+    def test_strategy_question_has_strategy_specific_research_needs(self):
+        decision = self.analyze("Kādu biznesa stratēģiju mums izvēlēties, lai NinaOS augtu ātrāk par konkurentiem?")
+        questions = " ".join(need.question for need in decision.research_needs)
+        self.assertIn("mērķa klientam", questions)
+        self.assertIn("izplatīšanas", questions)
+        self.assertIn("aizsargājamas", questions)
+
+    def test_live_questions_do_not_collapse_to_identical_analysis(self):
+        named = self.analyze("Vai NinaOS var pārspēt Sintra AI un ko mums darīt, lai viņus pārspētu?")
+        strategy = self.analyze("Kādu biznesa stratēģiju mums izvēlēties, lai NinaOS augtu ātrāk par konkurentiem?")
+        self.assertNotEqual(named.research_needs, strategy.research_needs)
+        self.assertNotEqual(named.recommendation.decision, strategy.recommendation.decision)
+        self.assertNotEqual(named.next_best_actions, strategy.next_best_actions)
+
     def test_pricing_decision_framing(self):
         decision = self.analyze("Kādu cenu noteikt?")
         self.assertTrue(any("cenas" in need.question for need in decision.research_needs))
