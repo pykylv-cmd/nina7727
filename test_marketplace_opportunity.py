@@ -9,11 +9,11 @@ install_test_environment()
 
 
 def seller(url, price=17500, text="Dzīvokli pārdod īpašnieks", location="Rīga"):
-    return {"source_url": url, "price": price, "title": text, "location": location, "rooms": "2", "area": "40"}
+    return {"source_url": url, "price": price, "title": text, "location": location, "rooms": "2", "area": "40", "verified_result_id": "verified-seller"}
 
 
 def buyer(url, text="Pērku dzīvokli Rīgā", location="Rīga"):
-    return {"source_url": url, "title": text, "location": location, "price": "20000"}
+    return {"source_url": url, "title": text, "location": location, "price": "20000", "verified_result_id": "verified-buyer"}
 
 
 class MarketplaceOpportunityTests(unittest.TestCase):
@@ -145,8 +145,49 @@ class MarketplaceOpportunityTests(unittest.TestCase):
     def test_provider_unavailable_is_honest_and_persisted(self, search):
         search.side_effect = self.market.web_research.WebResearchError("search_provider_not_configured")
         result = self.send("Meklē ss.lv dzīvokli līdz 18000 kas pārdod")
-        self.assertIn("neatradu nevienu verificētu", result["text"])
+        self.assertIn("meklētājs neatdeva nevienu pārbaudāmu SS.lv", result["text"])
         self.assertEqual(self.project().metadata["acquisition_error"], "acquisition_unavailable")
+
+    def test_transaction_classifier_never_mixes_sale_buyer_or_rent(self):
+        self.assertEqual(self.market.classify_transaction("Īpašnieks pārdod dzīvokli"), "sale")
+        self.assertEqual(self.market.classify_transaction("Pērku dzīvokli"), "buyer_wanted")
+        self.assertEqual(self.market.classify_transaction("Sieviete meklē dzīvokli īrei"), "rent")
+        self.assertEqual(self.market.classify_transaction("Jauns puisis meklē dzīvokli"), "other")
+
+    @patch("marketplace_opportunity._search")
+    def test_verified_seller_and_buyer_create_only_a_hypothesis(self, search):
+        search.side_effect = [
+            ([seller("https://www.ss.lv/msg/s", 18000)], {"results": []}),
+            ([buyer("https://www.ss.lv/msg/b")], {"results": []}),
+        ]
+        self.send("Meklē ss.lv dzīvokli līdz 18000 kas pārdod")
+        result = self.send("atrodi tam pircēju")
+        project = self.project()
+        self.assertFalse(result["external_action_executed"])
+        self.assertEqual(len(project.metadata["opportunity_matches"]), 1)
+        self.assertTrue(project.metadata["opportunity_matches"][0]["price_compatible"])
+
+    @patch("marketplace_opportunity._search")
+    def test_exact_a_to_j_conversation_keeps_one_project(self, search):
+        search.return_value = ([], {"results": []})
+        replies = [
+            self.send("Tu ss.lv vari atsūtīt dzīvokli lētu"),
+            self.send("18000 eiro budžets"),
+            self.send("Meklē dzīvokli!"),
+            self.send("Skaties cenu es pārējo pats novērtēšu pēc bildēm"),
+            self.send("Meklē dzīvokli līdz 18000 eiro kas pārdod"),
+            self.send("līdz 20000"),
+            self.send("jebkur Latvijā"),
+            self.send("turpini"),
+            self.send("atrodi tam pircēju"),
+            self.send("atrodi kas ko līdzīgu grib pirkt"),
+        ]
+        self.assertEqual(len({reply["work_object_id"] for reply in replies}), 1)
+        project = self.project()
+        self.assertEqual(project.metadata["search_job"]["max_price"], 20000)
+        self.assertEqual(project.metadata["search_job"]["location"], "Latvia")
+        self.assertEqual(project.metadata["search_job"]["owner_preference"], "prioritize_price_owner_reviews_images")
+        self.assertEqual(replies[-1]["mode"], "buyer_demand")
 
 
 if __name__ == "__main__":

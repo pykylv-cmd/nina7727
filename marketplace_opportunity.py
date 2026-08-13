@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 import hashlib
 import re
 from typing import Any
@@ -30,6 +31,10 @@ class ListingRecord:
     rooms: str = ""
     area: str = ""
     description: str = ""
+    transaction_type: str = "sale"
+    property_type: str = "apartment"
+    observed_at: str = ""
+    evidence_reference: str = ""
 
 
 @dataclass(frozen=True)
@@ -39,6 +44,9 @@ class DemandRecord:
     max_price: int = 0
     property_type: str = "apartment"
     description: str = ""
+    transaction_type: str = "buyer_wanted"
+    observed_at: str = ""
+    evidence_reference: str = ""
 
 
 @dataclass(frozen=True)
@@ -65,7 +73,7 @@ def _intent(text: str, *, has_job: bool) -> bool:
     folded = text.casefold()
     return bool(
         re.search(r"(?:\bss\.lv\b|\bdzīvok\w*|\bdzivok\w*|\bpircēj\w*|\bpircej\w*|\bgrib pirkt\b)", folded)
-        or (has_job and re.search(r"(?:\bturpini\b|\bjebkur\b|\bbudžet\w*|\bbudzet\w*|\bvērtīb\w*|\bvertib\w*|\bbild\w*|\beiro\b|\bero\b|\beur\b)", folded))
+        or (has_job and re.search(r"(?:\bturpini\b|\bjebkur\b|\blīdz\s+\d|\blidz\s+\d|\bbudžet\w*|\bbudzet\w*|\bvērtīb\w*|\bvertib\w*|\bbild\w*|\beiro\b|\bero\b|\beur\b)", folded))
     )
 
 
@@ -87,6 +95,17 @@ def _mode(text: str) -> str:
     return "seller_listing"
 
 
+def classify_transaction(text: str) -> str:
+    value = str(text or "")
+    if _RENT.search(value):
+        return "rent"
+    if _BUY.search(value):
+        return "buyer_wanted"
+    if _SALE.search(value):
+        return "sale"
+    return "other"
+
+
 def _search(job: SearchJob, mode: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if mode == "buyer_demand":
         query = f'site:ss.lv pērku dzīvokli {job.location or "Latvija"}'
@@ -99,7 +118,7 @@ def _search(job: SearchJob, mode: str) -> tuple[list[dict[str, Any]], dict[str, 
 
 def _seller(item: dict[str, Any], job: SearchJob) -> ListingRecord | None:
     text = " ".join(str(item.get(k) or "") for k in ("title", "page_title", "description_summary", "extracted_snippet"))
-    if _BUY.search(text) or _RENT.search(text) or not _SALE.search(text):
+    if classify_transaction(text) != "sale":
         return None
     raw_price = str(item.get("price") or "")
     found = re.search(r"\d[\d .]*", raw_price)
@@ -109,16 +128,31 @@ def _seller(item: dict[str, Any], job: SearchJob) -> ListingRecord | None:
     return ListingRecord(
         str(item.get("source_url") or ""), price, str(item.get("location") or ""),
         str(item.get("rooms") or ""), str(item.get("area") or ""), text[:240],
+        "sale", "apartment", str(item.get("fetched_at") or datetime.now(timezone.utc).isoformat()),
+        str(item.get("verified_result_id") or ""),
     )
 
 
 def _buyer(item: dict[str, Any]) -> DemandRecord | None:
     text = " ".join(str(item.get(k) or "") for k in ("title", "page_title", "description_summary", "extracted_snippet"))
-    if not _BUY.search(text) or _RENT.search(text):
+    if classify_transaction(text) != "buyer_wanted":
         return None
     raw = str(item.get("price") or "")
     digits = re.sub(r"\D", "", raw)
-    return DemandRecord(str(item.get("source_url") or ""), str(item.get("location") or ""), int(digits or 0), "apartment", text[:240])
+    return DemandRecord(
+        str(item.get("source_url") or ""), str(item.get("location") or ""), int(digits or 0),
+        "apartment", text[:240], "buyer_wanted",
+        str(item.get("fetched_at") or datetime.now(timezone.utc).isoformat()),
+        str(item.get("verified_result_id") or ""),
+    )
+
+
+def match_opportunity(seller: ListingRecord, buyer: DemandRecord) -> OpportunityMatch:
+    location = None if not seller.location or not buyer.location else seller.location.casefold() == buyer.location.casefold()
+    price = None if not buyer.max_price else seller.price <= buyer.max_price
+    property_type = seller.property_type == buyer.property_type
+    unknowns = tuple(name for name, known in (("buyer_budget", buyer.max_price > 0), ("location", location is not None)) if not known)
+    return OpportunityMatch(seller.canonical_url, buyer.canonical_url, price, location, property_type, unknowns)
 
 
 def _render(rows, mode: str, payload: dict[str, Any]) -> str:
@@ -167,10 +201,24 @@ def handle_marketplace_message(text: str, *, workspace_id: str, contact_id: str)
     parsed = [(_buyer(item) if mode == "buyer_demand" else _seller(item, job)) for item in rows]
     fresh = [row for row in parsed if row is not None and row.canonical_url not in seen]
     seen.update(row.canonical_url for row in fresh)
+    seller_records = list(metadata.get("verified_seller_records") or ())
+    buyer_records = list(metadata.get("verified_buyer_records") or ())
+    if mode == "seller_listing":
+        seller_records.extend(asdict(row) for row in fresh)
+    else:
+        buyer_records.extend(asdict(row) for row in fresh)
+    matches = []
+    if seller_records and buyer_records:
+        matches.append(asdict(match_opportunity(
+            ListingRecord(**seller_records[-1]), DemandRecord(**buyer_records[-1]),
+        )))
     metadata.update({
         "marketplace_scouting": True, "search_job": asdict(job), "last_mode": mode,
         "seen_listing_urls": sorted(seen), "last_verified_count": len(fresh),
         "external_action_executed": False, "acquisition_error": str(payload.get("error") or ""),
+        "verified_seller_records": seller_records[-20:],
+        "verified_buyer_records": buyer_records[-20:],
+        "opportunity_matches": matches,
     })
     if project is None:
         project, _ = save_or_get_work_object(
@@ -185,6 +233,8 @@ def handle_marketplace_message(text: str, *, workspace_id: str, contact_id: str)
     )
     if payload.get("error") == "filters_updated":
         answer = "Meklēšanas filtri saglabāti."
+    elif payload.get("error") == "acquisition_unavailable":
+        answer = "Šobrīd meklētājs neatdeva nevienu pārbaudāmu SS.lv sludinājumu."
     return {
         "ok": True, "text": answer, "source": "marketplace_opportunity",
         "work_object_id": project.object_id, "mode": mode, "verified_count": len(fresh),
