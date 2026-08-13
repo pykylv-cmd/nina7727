@@ -73,6 +73,18 @@ class ReminderConversationTests(unittest.TestCase):
             generator=lambda _: self.fail("generic provider must not handle reminder operations"),
         )
 
+    def send_as(self, text, contact_id, conversation=None):
+        return self.messaging.send_message_to_nina(
+            text,
+            workspace_id="tenant-a",
+            channel="whatsapp_company",
+            conversation_id=conversation or f"company:{contact_id}",
+            contact_id=contact_id,
+            canonical_work_workspace_id="tenant-a",
+            delivery_recipient=f"{contact_id}@s.whatsapp.net",
+            generator=lambda _: self.fail("generic provider must not handle reminder operations"),
+        )
+
     def sources(self):
         return [
             obj for obj in self.work.list_work_objects(workspace_id="tenant-a", limit=500)
@@ -96,6 +108,83 @@ class ReminderConversationTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(len(result["object_ids"]), 3)
         return self.sources()
+
+    def test_delivered_whatsapp_reply_deletes_exact_canonical_reminder(self):
+        created = self.send(
+            "Atgādini man ik pa apaļai stundai: jau pa dienu apmēram"
+        )
+        source = self.work.get_work_object(created["object_ids"][0])
+        metadata = dict(source.metadata or {})
+        metadata["reminder_at"] = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+        self.work.update_work_object(source.object_id, metadata=metadata)
+        materialized = self.messaging.materialize_due_reminders(
+            "tenant-a", now=datetime.now(timezone.utc), owner_id="contact-a",
+        )
+        self.assertEqual(len(materialized), 1)
+        claimed = self.delivery.claim_next(now=datetime.now(timezone.utc))
+        with patch("personal_whatsapp.bridge_request", return_value={"ok": True, "message_id": "safe-message-id"}):
+            delivered = asyncio.run(self.delivery.deliver_claimed(claimed, now=datetime.now(timezone.utc)))
+        self.assertEqual(delivered.metadata["delivery_status"], "delivered")
+
+        result = self.send(
+            "Citētā ziņa: ⏰ Atgādinājums: jau pa dienu apmēram\n\nDzēs šo atgādinājumu"
+        )
+        persisted = self.work.get_work_object(source.object_id)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["decision"]["reminder_operation"], "CANCEL")
+        self.assertEqual(result["reminder_object_id"], source.object_id)
+        self.assertEqual(persisted.status, "cancelled")
+        self.assertEqual(persisted.metadata["reminder_state"], "cancelled")
+        self.assertNotIn("Kad tieši", result["text"])
+
+    def test_single_obvious_reminder_deletes_without_reply_context(self):
+        created = self.send("Atgādini man rīt 11 piezvanīt Jānim")
+        result = self.send("Dzēs šo atgādinājumu")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["reminder_object_id"], created["object_ids"][0])
+        self.assertNotIn("Kad tieši", result["text"])
+
+    def test_multiple_reminders_require_delete_target_clarification(self):
+        before = {obj.object_id for obj in self.create_daily_set()}
+        result = self.send("Dzēs šo atgādinājumu")
+        after = {obj.object_id for obj in self.sources()}
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["text"], "Kuru atgādinājumu dzēst?")
+        self.assertEqual(result["error"], "reminder_cancel_target_ambiguous")
+        self.assertEqual(after, before)
+        self.assertNotIn("Kad tieši", result["text"])
+
+    def test_quoted_text_resolves_one_of_multiple_reminders(self):
+        sources = self.create_production_daily_set()
+        target = next(item for item in sources if item.metadata["reminder_text"] == "Tu esi miljardieris")
+        result = self.send(
+            "Citētā ziņa: ⏰ Atgādinājums: Tu esi miljardieris\n\nDzēs šo atgādinājumu"
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["reminder_object_id"], target.object_id)
+        remaining = {item.object_id for item in self.sources()}
+        self.assertNotIn(target.object_id, remaining)
+        self.assertEqual(len(remaining), 2)
+
+    def test_other_contact_cannot_delete_replied_reminder(self):
+        created = self.send("Atgādini man rīt 11 piezvanīt Jānim")
+        result = self.send_as(
+            "Citētā ziņa: ⏰ Atgādinājums: piezvanīt Jānim\n\nDzēs šo atgādinājumu",
+            "contact-b",
+        )
+        persisted = self.work.get_work_object(created["object_ids"][0])
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["text"], "Kuru atgādinājumu dzēst?")
+        self.assertEqual(persisted.metadata["reminder_state"], "scheduled")
+
+    def test_delete_precedes_pending_create_clarification(self):
+        existing = self.send("Atgādini man rīt 11 piezvanīt Jānim")
+        pending = self.send("Atgādini man nopirkt pienu")
+        self.assertIn("Kad tieši", pending["text"])
+        deleted = self.send("Dzēs šo atgādinājumu")
+        self.assertTrue(deleted["ok"])
+        self.assertEqual(deleted["reminder_object_id"], existing["object_ids"][0])
+        self.assertNotIn("Kad tieši", deleted["text"])
 
     def test_exact_latvian_production_conversation_uses_persisted_truth(self):
         sources = self.create_production_daily_set()

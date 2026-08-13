@@ -355,10 +355,18 @@ def _understand_natural_action(clean: str, decision, action_context: Dict[str, A
     folded = clean.casefold()
     operation = str(getattr(decision, "reminder_operation", "") or "")
     if operation:
+        decision_reason = str(getattr(decision, "reason", "") or "")
         return NaturalUnderstanding(
             intent=f"reminder_{operation.casefold()}", domain="reminders", operation=operation,
-            target_type="reminder", target_reference=str(action_context.get("object_id") or ""),
-            destructive_scope="all" if getattr(decision, "reason", "") == "cancel_all_reminders" else "",
+            target_type="reminder", target_reference=(
+                "" if decision_reason == "cancel_single_reminder"
+                else str(action_context.get("object_id") or "")
+            ),
+            destructive_scope=(
+                "all" if decision_reason == "cancel_all_reminders"
+                else "single" if decision_reason == "cancel_single_reminder"
+                else ""
+            ),
             confidence=float(getattr(decision, "confidence", 1.0)),
             needs_clarification=bool(getattr(decision, "needs_clarification", False)),
         )
@@ -386,7 +394,7 @@ def _understand_natural_action(clean: str, decision, action_context: Dict[str, A
             target_type="reminder", target_reference=str(action_context["object_id"]),
             time_reference=time_match.group(0), conversation_reference="previous_action", confidence=0.99,
         )
-    if referenced_reminder and re.search(r"\b(?:izdzēs|izdzes|atcel|novāc|novac)\s+(?:to|šo|so|pēdējo|pedejo)\b", folded):
+    if referenced_reminder and re.search(r"\b(?:dzēs|dzes|izdzēs|izdzes|atcel|novāc|novac)\s+(?:to|šo|so|pēdējo|pedejo)\b", folded):
         return NaturalUnderstanding(
             intent="reminder_cancel", domain="reminders", operation="CANCEL",
             target_type="reminder", target_reference=str(action_context["object_id"]),
@@ -446,6 +454,56 @@ def _cancel_referenced_reminder(workspace_id: str, owner_id: str, object_id: str
     metadata = dict(target.metadata or {})
     metadata["reminder_state"] = "cancelled"
     return update_work_object(target.object_id, status="cancelled", metadata=metadata)
+
+
+def _single_reminder_cancel_signal(text: str) -> bool:
+    """Recognize a singular reminder deletion before CREATE clarification."""
+    folded = str(text or "").casefold()
+    command = folded.rsplit("\n\n", 1)[-1].strip()
+    return bool(
+        re.search(r"\b(?:dzēs|dzes|izdzēs|izdzes|atcel|novāc|novac)\b", command)
+        and re.search(r"\b(?:šo|so|to|vienu|pēdējo|pedejo)?\s*(?:atgādinājumu|atgadinajumu|reminderi)\b", command)
+        and not re.search(r"\b(?:visus|all)\b", command)
+    )
+
+
+def _quoted_reminder_text(text: str) -> str:
+    match = re.match(r"(?is)^citētā ziņa:\s*(.*?)\s*\n\n", str(text or "").strip())
+    if not match:
+        return ""
+    quoted = match.group(1).strip()
+    quoted = re.sub(r"^⏰\s*atgādinājums:\s*", "", quoted, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", quoted).strip().casefold()
+
+
+def _resolve_single_reminder_target(workspace_id: str, owner_id: str, text: str,
+                                    object_id: str = ""):
+    """Resolve only an owner-scoped, unambiguous canonical reminder source."""
+    reminders = _active_reminder_sources(workspace_id, owner_id)
+    requested_id = str(object_id or "").strip()
+    if requested_id:
+        target = next((item for item in reminders if item.object_id == requested_id), None)
+        if target is not None:
+            return target, reminders
+    quoted = _quoted_reminder_text(text)
+    if quoted:
+        exact_matches = []
+        partial_matches = []
+        for reminder in reminders:
+            metadata = dict(getattr(reminder, "metadata", {}) or {})
+            reminder_text = str(metadata.get("reminder_text") or reminder.title or "").strip()
+            reminder_text = re.sub(r"^atgādinājums:\s*", "", reminder_text, flags=re.IGNORECASE)
+            normalized = re.sub(r"\s+", " ", reminder_text).strip().casefold()
+            if normalized == quoted:
+                exact_matches.append(reminder)
+            elif normalized and (normalized in quoted or quoted in normalized):
+                partial_matches.append(reminder)
+        if len(exact_matches) == 1:
+            return exact_matches[0], reminders
+        if not exact_matches and len(partial_matches) == 1:
+            return partial_matches[0], reminders
+        return None, reminders
+    return (reminders[0], reminders) if len(reminders) == 1 else (None, reminders)
 
 
 def _next_reminder_occurrence(workspace_id: str, owner_id: str, object_id: str,
@@ -2090,6 +2148,11 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         channel=channel,
         conversation_id=semantic_context_id,
     ))
+    if _single_reminder_cancel_signal(clean):
+        decision = Decision(
+            reply_required=True, confidence=1.0,
+            reason="cancel_single_reminder", reminder_operation="CANCEL",
+        )
     supersedes_pending_reminder = bool(
         pending_reminder and _is_explicit_complete_reminder_create(clean, decision)
     )
@@ -2521,13 +2584,28 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
                     "decision": decision_payload, "understanding": understanding.to_dict(),
                     "reminder_object_id": updated.object_id}
     if understanding.domain == "reminders" and understanding.operation == "CANCEL" and understanding.destructive_scope == "single":
-        cancelled = _cancel_referenced_reminder(target_workspace, reminder_owner, understanding.target_reference)
+        target, candidates = _resolve_single_reminder_target(
+            target_workspace, reminder_owner, clean, understanding.target_reference,
+        )
+        cancelled = (
+            _cancel_referenced_reminder(target_workspace, reminder_owner, target.object_id)
+            if target is not None else None
+        )
         if cancelled is not None:
+            _clear_pending_reminder_context(semantic_context_id)
             answer = "Atgādinājums atcelts."
             _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
             return {"ok": True, "text": answer, "source": "shared_work", "channel": channel,
                     "decision": decision_payload, "understanding": understanding.to_dict(),
                     "reminder_object_id": cancelled.object_id}
+        answer = "Kuru atgādinājumu dzēst?"
+        _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+        return {
+            "ok": False, "error": "reminder_cancel_target_ambiguous",
+            "text": answer, "source": "shared_work", "channel": channel,
+            "decision": decision_payload, "understanding": understanding.to_dict(),
+            "reminder_object_ids": [item.object_id for item in candidates],
+        }
     if understanding.domain == "tasks" and understanding.operation == "LIST":
         tasks = _contact_tasks(target_workspace, reminder_owner)
         answer = "Tev nav aktīvu uzdevumu." if not tasks else "Tavi uzdevumi:\n" + "\n".join(
