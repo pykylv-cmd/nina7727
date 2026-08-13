@@ -2111,6 +2111,19 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
     if len(clean) > 4000:
         return {"ok": False, "error": "message_too_long", "text": ""}
 
+    # Marketplace scouting is a shared ONE NINA capability backed by the
+    # canonical Work Object, not a channel adapter or parallel store.
+    from marketplace_opportunity import handle_marketplace_message
+    marketplace = handle_marketplace_message(
+        clean,
+        workspace_id=canonical_work_workspace_id or workspace_id,
+        contact_id=str(contact_id or conversation_id or _conversation_id(workspace_id)).strip(),
+    )
+    if marketplace is not None:
+        marketplace["channel"] = channel
+        _save_turn(workspace_id, clean, marketplace["text"], conversation_id=conversation_id, channel=channel)
+        return marketplace
+
     semantic_context_id = str(semantic_conversation_id or conversation_id or "").strip()
     pending_reminder = _pending_reminder_context(semantic_context_id)
     pending_destructive = _pending_destructive_context(semantic_context_id)
