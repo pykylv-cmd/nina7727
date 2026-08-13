@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
@@ -1483,6 +1484,7 @@ def _work_initiative_context(conversation_id: str) -> Dict[str, str]:
             "objective", "project_kind", "known_context", "object_id",
             "next_work_title", "next_work_objective", "next_work_type",
             "next_work_capability_ids", "next_work_state", "next_work_summary",
+            "next_work_id", "next_work_approval_required",
         )
         if payload.get(key)
     } if isinstance(payload, dict) else {}
@@ -1499,6 +1501,7 @@ def _save_work_initiative_context(conversation_id: str, payload: Dict[str, str])
             "objective", "project_kind", "known_context", "object_id",
             "next_work_title", "next_work_objective", "next_work_type",
             "next_work_capability_ids", "next_work_state", "next_work_summary",
+            "next_work_id", "next_work_approval_required",
         )
         if payload.get(key)
     }
@@ -1596,6 +1599,9 @@ def _initiative_project_object(result, workspace_id: str, contact_id: str, chann
         "project_kind": result.goal.scope,
         "initiative_state": "proposed",
         "work_plan": [work.to_dict() for work in result.proposed_work],
+        "goal_original_text": result.goal.original_text,
+        "goal_known_context": list(result.goal.known_context),
+        "automation_target": "automatizēts" if "automatiz" in result.goal.original_text.casefold() else "",
         "external_action_executed": False,
     }
     return create_work_object(
@@ -1622,8 +1628,133 @@ def _initiative_research_query(project_kind: str, work_title: str, objective: st
     return " ".join(part for part in (work_title, objective) if part).strip()
 
 
+def _initiative_work_id(work) -> str:
+    identity = "\0".join((str(work.work_type), str(work.title), str(work.objective)))
+    return "initiative-work:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+
+
+def _initiative_work_from_payload(payload):
+    from work_initiative_models import ProposedWork
+
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return ProposedWork(
+            title=str(payload.get("title") or "").strip(),
+            objective=str(payload.get("objective") or "").strip(),
+            work_type=str(payload.get("work_type") or "").strip(),
+            why_it_matters=str(payload.get("why_it_matters") or "").strip(),
+            capability_ids=tuple(str(item) for item in payload.get("capability_ids") or ()),
+            required_inputs=tuple(str(item) for item in payload.get("required_inputs") or ()),
+            approval_required=bool(payload.get("approval_required")),
+            reversible=bool(payload.get("reversible", True)),
+            priority=str(payload.get("priority") or "normal"),
+            expected_output=str(payload.get("expected_output") or ""),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _initiative_project_works(project):
+    metadata = dict(getattr(project, "metadata", {}) or {})
+    return tuple(
+        work for work in (
+            _initiative_work_from_payload(item) for item in metadata.get("work_plan") or ()
+        ) if work is not None and work.title and work.work_type
+    )
+
+
+def _initiative_context_for_work(context, work, *, state="proposed", summary=""):
+    updated = dict(context or {})
+    updated.update({
+        "next_work_id": _initiative_work_id(work),
+        "next_work_title": work.title,
+        "next_work_objective": work.objective,
+        "next_work_type": work.work_type,
+        "next_work_capability_ids": ",".join(work.capability_ids),
+        "next_work_approval_required": "true" if work.approval_required else "false",
+        "next_work_state": state,
+        "next_work_summary": summary,
+    })
+    return updated
+
+
+def _initiative_reconstruct_next_work(project, context):
+    """Reconstruct a legacy V1 selection only when canonical metadata is unambiguous."""
+    from work_initiative_engine import analyze_work_initiative, classify_next_best_work
+    from work_initiative_models import NextBestWork, WorkExecutionDisposition
+
+    works = _initiative_project_works(project)
+    states = dict((project.metadata or {}).get("initiative_work_states") or {})
+    remaining = tuple(work for work in works if states.get(_initiative_work_id(work), {}).get("state") != "completed")
+    known = str((context or {}).get("known_context") or (project.metadata or {}).get("goal_original_text") or "").strip()
+    if known:
+        analyzed = analyze_work_initiative(known)
+        selected = analyzed.next_best_work.work if analyzed.next_best_work else None
+        matches = tuple(work for work in remaining if selected and _initiative_work_id(work) == _initiative_work_id(selected))
+        if len(matches) == 1:
+            return matches[0], ""
+    safe = tuple(
+        work for work in remaining
+        if classify_next_best_work(NextBestWork(work, "legacy reconstruction", True))
+        in {WorkExecutionDisposition.EXECUTABLE_NOW, WorkExecutionDisposition.PREPARATION_ONLY}
+    )
+    if len(safe) == 1:
+        return safe[0], ""
+    return None, "legacy_next_work_ambiguous"
+
+
+def _initiative_context_work(project, context):
+    work_id = str((context or {}).get("next_work_id") or "")
+    title = str((context or {}).get("next_work_title") or "")
+    matches = tuple(
+        work for work in _initiative_project_works(project)
+        if (work_id and _initiative_work_id(work) == work_id) or (not work_id and title and work.title == title)
+    )
+    return matches[0] if len(matches) == 1 else None
+
+
+def _initiative_next_remaining_work(project, completed_work_id: str):
+    works = _initiative_project_works(project)
+    states = dict((project.metadata or {}).get("initiative_work_states") or {})
+    seen_completed = False
+    for work in works:
+        work_id = _initiative_work_id(work)
+        if work_id == completed_work_id:
+            seen_completed = True
+            continue
+        if seen_completed and states.get(work_id, {}).get("state") != "completed":
+            return work
+    return None
+
+
+def _mark_initiative_started(project, work):
+    attempt_id = "initiative-attempt:" + uuid.uuid4().hex
+    started_at = datetime.now(ZoneInfo("UTC")).isoformat()
+    metadata = dict(project.metadata or {})
+    states = dict(metadata.get("initiative_work_states") or {})
+    work_id = _initiative_work_id(work)
+    states[work_id] = {
+        "state": "started", "work_title": work.title, "work_type": work.work_type,
+        "attempt_id": attempt_id, "started_at": started_at,
+    }
+    history = list(metadata.get("initiative_execution_history") or [])
+    history.append({
+        "work_id": work_id, "work_title": work.title, "state": "started",
+        "attempt_id": attempt_id, "started_at": started_at, "external_action_executed": False,
+    })
+    metadata.update({
+        "initiative_state": "started", "active_work_id": work_id,
+        "active_work_title": work.title, "active_work_type": work.work_type,
+        "execution_attempt_id": attempt_id, "started_at": started_at,
+        "initiative_work_states": states, "initiative_execution_history": history[-40:],
+        "external_action_executed": False,
+    })
+    return update_work_object(project.object_id, metadata=metadata), attempt_id
+
+
 def _execute_initiative_research(*, project_kind: str, work_title: str, objective: str,
-                                 workspace_id: str, contact_id: str):
+                                 workspace_id: str, contact_id: str, attempt_id: str = ""):
     """Execute only the existing verified Research V1 capability."""
     from business_research_planner import plan_business_research
     from research_models import ResearchOutcome, VerificationState
@@ -1644,6 +1775,7 @@ def _execute_initiative_research(*, project_kind: str, work_title: str, objectiv
             WorkExecutionDisposition.EXECUTABLE_NOW, "failed", work_title,
             summary="Izpēti sāku, bet nepabeidzu ar pietiekami verificētiem avotiem.",
             failure_reason=research_result.outcome.value,
+            attempt_id=attempt_id,
         )
     approved_urls = {
         record.canonical_url for record in research_result.evidence
@@ -1656,52 +1788,154 @@ def _execute_initiative_research(*, project_kind: str, work_title: str, objectiv
         WorkExecutionDisposition.EXECUTABLE_NOW, "completed", work_title,
         summary=summary or "Izpēte pabeigta ar verificētiem avotiem.",
         evidence_references=evidence[:6],
+        attempt_id=attempt_id,
     )
 
 
-def _persist_initiative_execution(project, execution, *, next_work_title: str = ""):
+def _execute_initiative_preparation(work, *, attempt_id: str = ""):
+    """Produce a safe internal artifact without claiming an external side effect."""
+    from work_initiative_models import WorkExecutionDisposition, WorkExecutionResult
+
+    summaries = {
+        "strategy": (
+            "Sagatavoju stratēģijas karkasu: mērķa auditorija, vērtības piedāvājums, "
+            "satura formāts, monetizācijas hipotēze un mazs pārbaudes eksperiments."
+        ),
+        "work_plan": (
+            "Sagatavoju darba plānu: segmentēt kandidātus, izveidot personalizētus "
+            "melnrakstus un ārēju nosūtīšanu atstāt īpašnieka apstiprinājumam."
+        ),
+        "project_plan": "Sagatavoju prioritizētu projekta posmu un pārbaudāmu rezultātu secību.",
+        "task_plan": "Sagatavoju prioritizētu darbu secību canonical projekta turpināšanai.",
+        "analysis": "Sagatavoju iekšēju analīzes kopsavilkumu un pārbaudāmos pieņēmumus.",
+    }
+    summary = summaries.get(work.work_type)
+    if not summary:
+        return WorkExecutionResult(
+            WorkExecutionDisposition.UNSUPPORTED, "failed", work.title,
+            summary="Šim darbam nav drošas iekšējas izpildes robežas.",
+            failure_reason="unsupported_internal_execution", attempt_id=attempt_id,
+        )
+    return WorkExecutionResult(
+        WorkExecutionDisposition.PREPARATION_ONLY, "completed", work.title,
+        summary=summary, external_action_executed=False, attempt_id=attempt_id,
+    )
+
+
+def _persist_initiative_execution(project, execution, *, work=None, next_work=None):
     """Record execution in the same canonical Work Object metadata."""
     if project is None:
         return None
     metadata = dict(project.metadata or {})
     history = list(metadata.get("initiative_execution_history") or [])
+    work_id = _initiative_work_id(work) if work is not None else str(metadata.get("active_work_id") or "")
+    completed_at = datetime.now(ZoneInfo("UTC")).isoformat()
     history.append({
+        "work_id": work_id,
         "work_title": execution.work_title,
         "state": execution.state,
         "summary": execution.summary,
         "failure_reason": execution.failure_reason,
         "evidence_references": list(execution.evidence_references),
         "external_action_executed": execution.external_action_executed,
-        "completed_at": datetime.now(ZoneInfo("UTC")).isoformat(),
+        "attempt_id": execution.attempt_id,
+        "completed_at": completed_at,
     })
+    states = dict(metadata.get("initiative_work_states") or {})
+    if work_id:
+        previous = dict(states.get(work_id) or {})
+        previous.update({
+            "state": execution.state, "work_title": execution.work_title,
+            "work_type": getattr(work, "work_type", previous.get("work_type", "")),
+            "attempt_id": execution.attempt_id or previous.get("attempt_id", ""),
+            "completed_at": completed_at, "summary": execution.summary,
+            "failure_reason": execution.failure_reason,
+        })
+        states[work_id] = previous
     metadata.update({
         "initiative_state": execution.state,
         "initiative_execution_history": history[-20:],
         "last_result_summary": execution.summary,
         "evidence_references": list(execution.evidence_references),
-        "next_best_work": next_work_title,
+        "initiative_work_states": states,
+        "next_best_work": next_work.title if next_work is not None else "",
+        "next_work_id": _initiative_work_id(next_work) if next_work is not None else "",
         "external_action_executed": False,
     })
     return update_work_object(project.object_id, metadata=metadata)
 
 
-def _render_initiative_execution(result, execution, *, business_text: str = "", next_work_title: str = "") -> str:
+def _run_initiative_work(project, work, *, project_kind: str, workspace_id: str, contact_id: str):
+    """Persist started before invoking one existing safe internal capability."""
+    from work_initiative_engine import classify_next_best_work
+    from work_initiative_models import NextBestWork, WorkExecutionDisposition, WorkExecutionResult
+
+    disposition = classify_next_best_work(NextBestWork(work, "canonical continuation", True))
+    if disposition not in {WorkExecutionDisposition.EXECUTABLE_NOW, WorkExecutionDisposition.PREPARATION_ONLY}:
+        return project, None, None, disposition
+    started_project, attempt_id = _mark_initiative_started(project, work)
+    try:
+        execution = (
+            _execute_initiative_research(
+                project_kind=project_kind, work_title=work.title, objective=work.objective,
+                workspace_id=workspace_id, contact_id=contact_id, attempt_id=attempt_id,
+            )
+            if disposition is WorkExecutionDisposition.EXECUTABLE_NOW else
+            _execute_initiative_preparation(work, attempt_id=attempt_id)
+        )
+    except Exception as exc:
+        execution = WorkExecutionResult(
+            disposition, "failed", work.title,
+            summary="Darbu sāku, bet izpildi droši nepabeidzu.",
+            failure_reason=type(exc).__name__, attempt_id=attempt_id,
+        )
+    if not execution.attempt_id:
+        execution = WorkExecutionResult(
+            execution.disposition, execution.state, execution.work_title,
+            summary=execution.summary, evidence_references=execution.evidence_references,
+            failure_reason=execution.failure_reason,
+            external_action_executed=execution.external_action_executed,
+            attempt_id=attempt_id,
+        )
+    next_work = _initiative_next_remaining_work(started_project, _initiative_work_id(work)) if execution.state == "completed" else work
+    persisted = _persist_initiative_execution(started_project, execution, work=work, next_work=next_work) or started_project
+    return persisted, execution, next_work, disposition
+
+
+def _initiative_business_contribution(decision) -> tuple[str, str]:
+    """Return only the recommendation and first unresolved unknown for unified composition."""
+    recommendation = _latvian_business_text(
+        str(getattr(getattr(decision, "recommendation", None), "decision", "") or "")
+    )
+    needs = tuple(getattr(decision, "research_needs", ()) or ())
+    unknown = str(getattr(needs[0], "question", "") or "").strip() if needs else ""
+    return recommendation, unknown
+
+
+def _render_initiative_execution(result, execution, *, business_recommendation: str = "",
+                                 business_unknown: str = "", next_work=None) -> str:
     """Compose one user answer from planning, execution and grounded result."""
-    lines = [f"Sapratu mērķi: {result.goal.objective}."]
+    lines = [f"Sapratu: {result.goal.objective}."]
     if execution.state == "completed":
-        lines.extend(("Izdarīju pirmo drošo iekšējo darbu.", f"Pabeigts: {execution.work_title}.", execution.summary))
+        lines.extend((f"Izdarīju: {execution.work_title}.", f"Rezultāts: {execution.summary}"))
         if execution.evidence_references:
             lines.append("Verificēti avoti:")
             lines.extend(f"{index}. {url}" for index, url in enumerate(execution.evidence_references, 1))
         lines.append("Rezultātu saglabāju canonical projekta darba patiesībā.")
     else:
-        lines.extend((f"Mēģināju: {execution.work_title}.", execution.summary))
+        lines.extend((f"Izdarīju mēģinājumu: {execution.work_title}.", f"Rezultāts: {execution.summary}"))
         if execution.failure_reason:
             lines.append(f"Neizpildīts iemesls: {execution.failure_reason}.")
-    if next_work_title:
-        lines.append(f"Nākamais darbs: {next_work_title}.")
-    if business_text:
-        lines.extend(("Biznesa izvērtējums, kas pamato nākamos soļus:", business_text))
+    unknowns = [item for item in (business_unknown, execution.failure_reason) if item]
+    if unknowns:
+        lines.append("Kas vēl nav zināms vai bloķē: " + " ".join(unknowns))
+    if business_recommendation:
+        lines.append(f"Lēmuma pamatojums: {business_recommendation}")
+    if next_work is not None:
+        suffix = " (vajag apstiprinājumu)" if next_work.approval_required else ""
+        lines.append(f"Nākamais darbs: {next_work.title}.{suffix}")
+    else:
+        lines.append("Nākamais darbs: šis projekta posms ir pabeigts; var izvēlēties nākamo milestone.")
     return "\n".join(line for line in lines if line)[:4000]
 
 
@@ -1723,6 +1957,10 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
     semantic_context_id = str(semantic_conversation_id or conversation_id or "").strip()
     pending_reminder = _pending_reminder_context(semantic_context_id)
     pending_destructive = _pending_destructive_context(semantic_context_id)
+    initiative_confirmation_context = (
+        _work_initiative_context(semantic_context_id)
+        if not pending_reminder and not pending_destructive else {}
+    )
     confirmation_contact_id = str(contact_id or conversation_id or _conversation_id(workspace_id)).strip()
     if pending_destructive and pending_destructive.get("canonical_contact_id") != confirmation_contact_id:
         pending_destructive = {}
@@ -1737,7 +1975,7 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
             "ok": True, "text": answer, "source": "shared_work", "channel": channel,
             "destructive_confirmation": "rejected",
         }
-    if supplied_destructive_answer == "confirm" and not pending_destructive:
+    if supplied_destructive_answer == "confirm" and not pending_destructive and not initiative_confirmation_context:
         decision = Decision(
             reply_required=False, no_action=True, priority="low", confidence=1.0,
             reason="destructive_confirmation_absent",
@@ -1809,7 +2047,7 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
     # deterministic reminder/action handling and declines ordinary chat,
     # explicit research, tasks, URLs and memory/profile statements.
     from work_initiative_engine import analyze_work_initiative
-    initiative_context = _work_initiative_context(semantic_context_id)
+    initiative_context = initiative_confirmation_context or _work_initiative_context(semantic_context_id)
     ninaos_priority_transition = bool(
         re.search(r"\bninaos\b", clean, re.I)
         and re.search(r"\b(?:vispirms|svarīgāk|svarigak)\b", clean, re.I)
@@ -1831,39 +2069,67 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         project = get_work_object(initiative_context.get("object_id", "")) if initiative_context.get("object_id") else None
         if project is None or project.workspace_id != target_workspace or project.origin_user_id != reminder_owner:
             initiative_context = {}
-        elif initiative_context.get("next_work_state") == "completed":
-            answer = (
-                f"Darbs “{initiative_context.get('next_work_title', 'izvēlētais darbs')}” jau ir pabeigts; "
-                "to neatkārtoju. Rezultāts ir saglabāts canonical projektā."
-            )
-            if initiative_context.get("next_work_summary"):
-                answer += "\n" + initiative_context["next_work_summary"]
-            _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
-            return {
-                "ok": True, "text": answer, "source": "work_initiative", "channel": channel,
-                "work_object_id": project.object_id, "duplicate_execution_prevented": True,
-                "external_action_executed": False,
-            }
-        elif initiative_context.get("next_work_type") == "research":
-            execution = _execute_initiative_research(
-                project_kind=initiative_context.get("project_kind", ""),
-                work_title=initiative_context.get("next_work_title", "Izpētīt publiskos avotus"),
-                objective=initiative_context.get("next_work_objective", initiative_context.get("objective", "")),
+        else:
+            selected_work = _initiative_context_work(project, initiative_context)
+            reconstruction_error = ""
+            if selected_work is None:
+                selected_work, reconstruction_error = _initiative_reconstruct_next_work(project, initiative_context)
+            if selected_work is None:
+                answer = "Kuru no saglabātajiem projekta darbiem turpināt?"
+                _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+                return {
+                    "ok": False, "error": reconstruction_error or "initiative_next_work_ambiguous",
+                    "text": answer, "source": "work_initiative", "channel": channel,
+                    "work_object_id": project.object_id, "external_action_executed": False,
+                }
+            initiative_context = _initiative_context_for_work(initiative_context, selected_work)
+            states = dict((project.metadata or {}).get("initiative_work_states") or {})
+            if states.get(_initiative_work_id(selected_work), {}).get("state") == "completed":
+                selected_work = _initiative_next_remaining_work(project, _initiative_work_id(selected_work))
+            if selected_work is None:
+                answer = "Izvēlētais projekta posms jau ir pabeigts; to neatkārtoju. Var izvēlēties nākamo milestone."
+                _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+                return {
+                    "ok": True, "text": answer, "source": "work_initiative", "channel": channel,
+                    "work_object_id": project.object_id, "duplicate_execution_prevented": True,
+                    "project_step_completed": True, "external_action_executed": False,
+                }
+            project, execution, next_work, disposition = _run_initiative_work(
+                project, selected_work, project_kind=initiative_context.get("project_kind", ""),
                 workspace_id=target_workspace, contact_id=reminder_owner,
             )
-            _persist_initiative_execution(project, execution)
+            if execution is None:
+                answer = (
+                    f"Nākamais darbs ir saglabāts: {selected_work.title}. "
+                    "Pirms šīs darbības vajag īpašnieka apstiprinājumu vai nepieciešamo capability savienojumu."
+                )
+                updated_context = _initiative_context_for_work(initiative_context, selected_work)
+                _save_work_initiative_context(semantic_context_id, updated_context)
+                _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
+                return {
+                    "ok": True, "text": answer, "source": "work_initiative", "channel": channel,
+                    "work_object_id": project.object_id, "execution_classification": disposition.value,
+                    "external_action_executed": False,
+                }
             updated_context = dict(initiative_context)
-            updated_context.update({"next_work_state": execution.state, "next_work_summary": execution.summary})
+            if next_work is not None:
+                updated_context = _initiative_context_for_work(updated_context, next_work)
+            else:
+                updated_context.update({"next_work_state": "project_step_completed", "next_work_summary": execution.summary})
             _save_work_initiative_context(semantic_context_id, updated_context)
             answer = (
-                f"Turpināju izvēlēto darbu: {execution.work_title}.\n{execution.summary}"
+                f"Izdarīju: {execution.work_title}.\nRezultāts: {execution.summary}"
                 if execution.state == "completed" else
-                f"Darbu sāku, bet droši nepabeidzu: {execution.summary}"
+                f"Darbu sāku, bet droši nepabeidzu.\nRezultāts: {execution.summary}"
             )
             if execution.evidence_references:
                 answer += "\nVerificēti avoti:\n" + "\n".join(
                     f"{index}. {url}" for index, url in enumerate(execution.evidence_references, 1)
                 )
+            if next_work is not None:
+                answer += f"\nNākamais darbs: {next_work.title}."
+            else:
+                answer += "\nNākamais darbs: šis projekta posms ir pabeigts."
             _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
             return {
                 "ok": execution.state == "completed", "text": answer, "source": "work_initiative",
@@ -1874,17 +2140,18 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         clean, previous_context=initiative_context if not explicit_shared_action else {},
     ) if not explicit_shared_action else None
     if initiative is not None and initiative.decision.should_act:
-        business_text = ""
+        business_recommendation = ""
+        business_unknown = ""
         business_state = ""
         if initiative.use_business_thinking and initiative.project_candidate:
             try:
                 business_owner = str(contact_id or conversation_id or _conversation_id(workspace_id)).strip()
                 business_decision = _run_business_thinking(clean, target_workspace, business_owner)
-                business_text = _customer_safe_text(_render_business_decision(business_decision))
+                business_recommendation, business_unknown = _initiative_business_contribution(business_decision)
                 business_state = business_decision.state.value
             except Exception as exc:
                 logger.error("Work Initiative Business Thinking delegation failed: exception=%s", type(exc).__name__)
-                business_text = "Biznesa izvērtējumu nepabeidzu; trūkstošus faktus neizdomāšu."
+                business_unknown = "Biznesa izvērtējumu nepabeidzu; trūkstošus faktus neizdomāšu."
         project = None
         try:
             project = _initiative_project_object(
@@ -1904,41 +2171,28 @@ def send_message_to_nina(user_text: str, workspace_id: str = WORKSPACE_ID, chann
         if project is not None:
             context_payload["object_id"] = project.object_id
         execution = None
-        next_work_title = ""
+        next_work = None
         if initiative.next_best_work is not None:
-            from work_initiative_engine import classify_next_best_work
-            from work_initiative_models import WorkExecutionDisposition
             selected_work = initiative.next_best_work.work
-            context_payload.update({
-                "next_work_title": selected_work.title,
-                "next_work_objective": selected_work.objective,
-                "next_work_type": selected_work.work_type,
-                "next_work_capability_ids": ",".join(selected_work.capability_ids),
-                "next_work_state": "proposed",
-            })
-            disposition = classify_next_best_work(initiative.next_best_work)
-            if disposition is WorkExecutionDisposition.EXECUTABLE_NOW and selected_work.work_type == "research":
-                execution = _execute_initiative_research(
-                    project_kind=initiative.goal.scope, work_title=selected_work.title,
-                    objective=selected_work.objective, workspace_id=target_workspace,
-                    contact_id=reminder_owner,
+            context_payload = _initiative_context_for_work(context_payload, selected_work)
+            if project is not None:
+                project, execution, next_work, disposition = _run_initiative_work(
+                    project, selected_work, project_kind=initiative.goal.scope,
+                    workspace_id=target_workspace, contact_id=reminder_owner,
                 )
-                selected_index = next(
-                    (index for index, item in enumerate(initiative.proposed_work) if item.title == selected_work.title), -1
-                )
-                if selected_index >= 0 and selected_index + 1 < len(initiative.proposed_work):
-                    next_work_title = initiative.proposed_work[selected_index + 1].title
-                project = _persist_initiative_execution(project, execution, next_work_title=next_work_title) or project
-                context_payload.update({
-                    "next_work_state": execution.state,
-                    "next_work_summary": execution.summary,
-                })
+                if execution is not None:
+                    context_payload = (
+                        _initiative_context_for_work(context_payload, next_work)
+                        if next_work is not None else
+                        {**context_payload, "next_work_state": "project_step_completed", "next_work_summary": execution.summary}
+                    )
         if context_payload:
             _save_work_initiative_context(semantic_context_id, context_payload)
         answer = _customer_safe_text(
             _render_initiative_execution(
-                initiative, execution, business_text=business_text, next_work_title=next_work_title,
-            ) if execution is not None else _render_work_initiative(initiative, business_text=business_text)
+                initiative, execution, business_recommendation=business_recommendation,
+                business_unknown=business_unknown, next_work=next_work,
+            ) if execution is not None else _render_work_initiative(initiative)
         )
         _save_turn(workspace_id, clean, answer, conversation_id=conversation_id, channel=channel)
         response = {

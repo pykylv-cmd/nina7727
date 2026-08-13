@@ -187,7 +187,7 @@ class WorkInitiativeOneNinaTests(unittest.TestCase):
         response = self.send("Gribu tevi pārdot. Pierādi, ko tu māki.")
         self.assertEqual(research.call_count, 1)
         self.assertEqual(response["work_execution"]["state"], "completed")
-        self.assertIn("Izdarīju pirmo drošo iekšējo darbu", response["text"])
+        self.assertIn("Izdarīju: Izpētīt potenciālos klientus", response["text"])
         self.assertIn("https://example.com/evidence", response["text"])
         project = self.projects()[0]
         self.assertEqual(project.metadata["initiative_state"], "completed")
@@ -201,7 +201,8 @@ class WorkInitiativeOneNinaTests(unittest.TestCase):
         second = self.send("nu nu?", channel="telegram")
         self.assertEqual(research.call_count, 1)
         self.assertEqual(second["work_object_id"], first["work_object_id"])
-        self.assertTrue(second["duplicate_execution_prevented"])
+        self.assertEqual(second["execution_classification"], "requires_approval")
+        self.assertIn("Sagatavot outreach", second["text"])
         self.assertNotIn("Ko tieši vēlies", second["text"])
 
     @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
@@ -237,9 +238,117 @@ class WorkInitiativeOneNinaTests(unittest.TestCase):
             "Gribu uzsākt bērnu YouTube biznesu, kur tu soli pa solim palīdzi līdz tas strādā un ir automatizēts."
         )
         self.assertEqual(response["work_execution"]["state"], "completed")
-        self.assertIn("bērnu", self.projects()[0].metadata["known_context"].casefold() if "known_context" in self.projects()[0].metadata else response["initiative"]["goal"]["original_text"].casefold())
+        project = self.projects()[0]
+        self.assertIn("bērnu", project.metadata["goal_original_text"].casefold())
+        self.assertEqual(project.metadata["automation_target"], "automatizēts")
         self.assertNotIn("Sāktu tagad", response["text"])
+        self.assertNotIn("Ko mēs zinām", response["text"])
+        self.assertNotIn("Kur konkurents ir stiprs", response["text"])
+        self.assertNotIn("generic reply", response["text"])
         self.assertFalse(response["external_action_executed"])
+
+    @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
+    @patch("nina_message_service._execute_initiative_research")
+    def test_youtube_dari_advances_to_internal_strategy_without_repeating_research(self, research, _business):
+        research.return_value = self.completed_research("Izpētīt nišas un auditoriju")
+        first = self.send("Gribu uzsākt bērnu YouTube biznesu līdz tas strādā un ir automatizēts.")
+        second = self.send("dari", channel="whatsapp_company")
+        self.assertEqual(research.call_count, 1)
+        self.assertIn("work_execution", second, second)
+        self.assertEqual(second["work_execution"]["work_title"], "Izveidot monetizācijas un satura stratēģiju")
+        self.assertEqual(second["work_execution"]["state"], "completed")
+        self.assertEqual(second["work_object_id"], first["work_object_id"])
+        self.assertFalse(second["external_action_executed"])
+
+    @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
+    @patch("nina_message_service._execute_initiative_research")
+    def test_started_is_persisted_before_research_and_success_transitions(self, research, _business):
+        observed = {}
+        def inspect_started(**kwargs):
+            project = self.projects()[0]
+            observed.update({
+                "state": project.metadata["initiative_state"],
+                "attempt_id": project.metadata["execution_attempt_id"],
+                "started_at": project.metadata["started_at"],
+                "active_work_type": project.metadata["active_work_type"],
+            })
+            return self.completed_research()
+        research.side_effect = inspect_started
+        response = self.send("Gribu tevi pārdot. Pierādi, ko tu māki.")
+        self.assertEqual(observed["state"], "started")
+        self.assertTrue(observed["attempt_id"].startswith("initiative-attempt:"))
+        self.assertTrue(observed["started_at"])
+        self.assertEqual(observed["active_work_type"], "research")
+        states = self.projects()[0].metadata["initiative_work_states"]
+        self.assertIn("completed", {item["state"] for item in states.values()})
+        self.assertEqual(response["work_execution"]["state"], "completed")
+
+    @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
+    @patch("nina_message_service._execute_initiative_research", side_effect=KeyboardInterrupt())
+    def test_interrupted_execution_remains_observable_as_started(self, _research, _business):
+        with self.assertRaises(KeyboardInterrupt):
+            self.send("Gribu tevi pārdot. Pierādi, ko tu māki.")
+        project = self.projects()[0]
+        self.assertEqual(project.metadata["initiative_state"], "started")
+        self.assertTrue(project.metadata["execution_attempt_id"])
+
+    @patch("nina_message_service._execute_initiative_research")
+    def test_legacy_context_without_execution_fields_reconstructs_safe_work(self, research):
+        from work_initiative_engine import analyze_work_initiative
+        initiative = analyze_work_initiative("Gribu tevi pārdot. Pierādi, ko tu māki.")
+        project = self.messaging._initiative_project_object(initiative, "tenant-a", "person-a", "web")
+        self.messaging._save_work_initiative_context("contact:tenant-a:person-a:one_nina", {
+            "objective": initiative.goal.objective, "project_kind": "proof_of_value",
+            "known_context": initiative.goal.original_text, "object_id": project.object_id,
+        })
+        research.return_value = self.completed_research()
+        response = self.send("nu nu?", channel="telegram")
+        self.assertEqual(research.call_count, 1)
+        self.assertEqual(response["work_execution"]["state"], "completed")
+        self.assertEqual(response["work_object_id"], project.object_id)
+
+    def test_ambiguous_legacy_context_fails_safely(self):
+        from work_initiative_engine import analyze_work_initiative
+        initiative = analyze_work_initiative("Gribu YouTube biznesu.")
+        project = self.messaging._initiative_project_object(initiative, "tenant-a", "person-a", "web")
+        metadata = dict(project.metadata)
+        metadata.pop("goal_original_text", None)
+        research_work = dict(metadata["work_plan"][0])
+        second = dict(research_work)
+        second["title"] = "Izpētīt otru tirgus virzienu"
+        metadata["work_plan"] = [research_work, second]
+        self.work.update_work_object(project.object_id, metadata=metadata)
+        self.messaging._save_work_initiative_context("contact:tenant-a:person-a:one_nina", {
+            "objective": initiative.goal.objective, "project_kind": "youtube_business",
+            "object_id": project.object_id,
+        })
+        response = self.send("nu nu?")
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"], "legacy_next_work_ambiguous")
+        self.assertIn("Kuru", response["text"])
+
+    @patch("nina_message_service._execute_initiative_research")
+    def test_project_with_no_remaining_work_reports_step_complete(self, research):
+        from work_initiative_engine import analyze_work_initiative
+        initiative = analyze_work_initiative("Gribu tevi pārdot. Pierādi, ko tu māki.")
+        project = self.messaging._initiative_project_object(initiative, "tenant-a", "person-a", "web")
+        metadata = dict(project.metadata)
+        selected = initiative.next_best_work.work
+        metadata["work_plan"] = [selected.to_dict()]
+        self.work.update_work_object(project.object_id, metadata=metadata)
+        self.messaging._save_work_initiative_context("contact:tenant-a:person-a:one_nina", {
+            "objective": initiative.goal.objective, "project_kind": "proof_of_value",
+            "known_context": initiative.goal.original_text, "object_id": project.object_id,
+        })
+        research.return_value = self.completed_research()
+        first = self.send("nu nu?")
+        second = self.send("dari", channel="telegram")
+        self.assertEqual(first["work_execution"]["state"], "completed")
+        self.assertEqual(research.call_count, 1)
+        self.assertIn("duplicate_execution_prevented", second, second)
+        self.assertTrue(second["duplicate_execution_prevented"])
+        self.assertTrue(second["project_step_completed"])
+        self.assertIn("posms jau ir pabeigts", second["text"])
 
     @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
     @patch("nina_message_service._execute_initiative_research")
@@ -252,7 +361,12 @@ class WorkInitiativeOneNinaTests(unittest.TestCase):
         response = self.send("Gribu tevi pārdot. Pierādi, ko tu māki.")
         self.assertIn("nepabeidzu", response["text"])
         self.assertNotIn("Atradu", response["text"])
-        self.assertEqual(self.projects()[0].metadata["initiative_state"], "failed")
+        project = self.projects()[0]
+        self.assertEqual(project.metadata["initiative_state"], "failed")
+        self.assertEqual(
+            [item["state"] for item in project.metadata["initiative_execution_history"][-2:]],
+            ["started", "failed"],
+        )
 
     def test_external_email_and_calendar_remain_non_executing(self):
         email = self.send("atbildi manā vietā e-pastā")

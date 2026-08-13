@@ -29,6 +29,7 @@ class WorkExecutionResult(StableModel):
     evidence_references: tuple[str, ...] = ()
     failure_reason: str = ""
     external_action_executed: bool = False
+    attempt_id: str = ""
 
 
 @dataclass(frozen=True)
