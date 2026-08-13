@@ -201,7 +201,7 @@ class WorkInitiativeOneNinaTests(unittest.TestCase):
         second = self.send("nu nu?", channel="telegram")
         self.assertEqual(research.call_count, 1)
         self.assertEqual(second["work_object_id"], first["work_object_id"])
-        self.assertEqual(second["execution_classification"], "requires_approval")
+        self.assertTrue(second["status_only"])
         self.assertIn("Sagatavot outreach", second["text"])
         self.assertNotIn("Ko tieši vēlies", second["text"])
 
@@ -303,8 +303,9 @@ class WorkInitiativeOneNinaTests(unittest.TestCase):
         })
         research.return_value = self.completed_research()
         response = self.send("nu nu?", channel="telegram")
-        self.assertEqual(research.call_count, 1)
-        self.assertEqual(response["work_execution"]["state"], "completed")
+        self.assertEqual(research.call_count, 0)
+        self.assertTrue(response["status_only"])
+        self.assertIn("Izpētīt potenciālos klientus", response["text"])
         self.assertEqual(response["work_object_id"], project.object_id)
 
     def test_ambiguous_legacy_context_fails_safely(self):
@@ -341,7 +342,7 @@ class WorkInitiativeOneNinaTests(unittest.TestCase):
             "known_context": initiative.goal.original_text, "object_id": project.object_id,
         })
         research.return_value = self.completed_research()
-        first = self.send("nu nu?")
+        first = self.send("dari")
         second = self.send("dari", channel="telegram")
         self.assertEqual(first["work_execution"]["state"], "completed")
         self.assertEqual(research.call_count, 1)
@@ -362,11 +363,137 @@ class WorkInitiativeOneNinaTests(unittest.TestCase):
         self.assertIn("nepabeidzu", response["text"])
         self.assertNotIn("Atradu", response["text"])
         project = self.projects()[0]
-        self.assertEqual(project.metadata["initiative_state"], "failed")
+        self.assertEqual(project.metadata["initiative_state"], "active")
         self.assertEqual(
             [item["state"] for item in project.metadata["initiative_execution_history"][-2:]],
             ["started", "failed"],
         )
+
+    @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
+    @patch("nina_message_service._execute_initiative_research")
+    def test_failed_research_advances_to_safe_work_without_generic_retry(self, research, _business):
+        research.return_value = WorkExecutionResult(
+            WorkExecutionDisposition.EXECUTABLE_NOW, "failed", "Izpētīt potenciālos klientus",
+            summary="partial internal diagnostic", failure_reason="budget_exceeded",
+            evidence_references=("https://example.com/preserved",),
+        )
+        first = self.send("Gribu tevi pārdot. Pierādi, ko tu māki.")
+        project = self.projects()[0]
+        failed_id = next(
+            work_id for work_id, state in project.metadata["initiative_work_states"].items()
+            if state["state"] == "failed"
+        )
+        failed_before = dict(project.metadata["initiative_work_states"][failed_id])
+        history_before = list(project.metadata["initiative_execution_history"])
+
+        self.assertEqual(research.call_count, 1)
+        self.assertEqual(project.metadata["initiative_state"], "active")
+        self.assertEqual(project.metadata["next_best_work"], "Definēt mērķa klienta hipotēzi")
+        self.assertNotEqual(project.metadata["next_work_id"], failed_id)
+        self.assertNotIn("budget_exceeded", first["text"])
+        self.assertEqual(first["work_execution"]["failure_reason"], "")
+        self.assertEqual(failed_before["evidence_references"], ["https://example.com/preserved"])
+
+        status = self.send("nu nu?", channel="telegram")
+        self.assertEqual(research.call_count, 1)
+        self.assertTrue(status["status_only"])
+        self.assertIn("Definēt mērķa klienta hipotēzi", status["text"])
+        self.assertNotIn("budget_exceeded", status["text"])
+        self.assertEqual(self.projects()[0].metadata["initiative_execution_history"], history_before)
+
+        executed = self.send("dari", channel="whatsapp_company")
+        project = self.projects()[0]
+        self.assertEqual(research.call_count, 1)
+        self.assertEqual(executed["work_execution"]["state"], "completed")
+        self.assertEqual(executed["work_execution"]["work_title"], "Definēt mērķa klienta hipotēzi")
+        self.assertFalse(executed["external_action_executed"])
+        self.assertEqual(project.metadata["initiative_work_states"][failed_id], failed_before)
+        self.assertEqual(project.metadata["initiative_work_states"][failed_id]["failure_reason"], "budget_exceeded")
+
+        advanced = self.send("turpini", channel="web")
+        self.assertEqual(research.call_count, 1)
+        self.assertEqual(advanced["execution_classification"], "requires_approval")
+        self.assertFalse(advanced["external_action_executed"])
+
+    @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
+    @patch("nina_message_service._execute_initiative_research")
+    def test_explicit_research_retry_is_bounded_to_one_retry(self, research, _business):
+        research.return_value = WorkExecutionResult(
+            WorkExecutionDisposition.EXECUTABLE_NOW, "failed", "Izpētīt potenciālos klientus",
+            summary="failed", failure_reason="provider_error",
+        )
+        self.send("Gribu tevi pārdot. Pierādi, ko tu māki.")
+        retried = self.send("mēģini vēlreiz", channel="telegram")
+        blocked = self.send("atkārto izpēti", channel="whatsapp_company")
+        self.assertEqual(research.call_count, 2)
+        self.assertEqual(retried["work_execution"]["state"], "failed")
+        self.assertTrue(blocked["retry_limit_reached"])
+        self.assertNotIn("provider_error", retried["text"])
+        self.assertNotIn("provider_error", str(retried["work_execution"]))
+        history = self.projects()[0].metadata["initiative_execution_history"]
+        self.assertEqual([item["state"] for item in history], ["started", "failed", "started", "failed"])
+
+    @patch("nina_message_service._run_business_thinking", side_effect=RuntimeError("offline"))
+    @patch("nina_message_service._execute_initiative_research")
+    def test_provider_failure_uses_shared_recovery_on_all_channels(self, research, _business):
+        research.return_value = WorkExecutionResult(
+            WorkExecutionDisposition.EXECUTABLE_NOW, "failed", "Izpētīt potenciālos klientus",
+            summary="internal", failure_reason="fetch_error_503",
+        )
+        self.send("Gribu tevi pārdot. Pierādi, ko tu māki.", channel="web")
+        status = self.send("nu nu?", channel="telegram")
+        executed = self.send("dari", channel="whatsapp_company")
+        self.assertEqual(research.call_count, 1)
+        self.assertTrue(status["status_only"])
+        self.assertEqual(executed["work_execution"]["work_title"], "Definēt mērķa klienta hipotēzi")
+        self.assertNotIn("fetch_error_503", status["text"] + executed["text"])
+
+    @patch("nina_message_service._execute_initiative_research")
+    def test_failure_with_only_approval_work_activates_without_execution(self, research):
+        from work_initiative_engine import analyze_work_initiative
+        initiative = analyze_work_initiative("Gribu tevi pārdot. Pierādi, ko tu māki.")
+        project = self.messaging._initiative_project_object(initiative, "tenant-a", "person-a", "web")
+        metadata = dict(project.metadata)
+        metadata["work_plan"] = [initiative.proposed_work[1].to_dict(), initiative.proposed_work[2].to_dict()]
+        self.work.update_work_object(project.object_id, metadata=metadata)
+        self.messaging._save_work_initiative_context("contact:tenant-a:person-a:one_nina", {
+            "objective": initiative.goal.objective, "project_kind": "proof_of_value",
+            "known_context": initiative.goal.original_text, "object_id": project.object_id,
+            **self.messaging._initiative_context_for_work({}, initiative.proposed_work[1]),
+        })
+        research.return_value = WorkExecutionResult(
+            WorkExecutionDisposition.EXECUTABLE_NOW, "failed", initiative.proposed_work[1].title,
+            failure_reason="budget_exceeded",
+        )
+        response = self.send("dari")
+        project = self.projects()[0]
+        self.assertEqual(research.call_count, 1)
+        self.assertEqual(project.metadata["next_best_work"], initiative.proposed_work[2].title)
+        self.assertTrue(initiative.proposed_work[2].approval_required)
+        self.assertFalse(response["external_action_executed"])
+
+    @patch("nina_message_service._execute_initiative_research")
+    def test_failure_with_no_alternative_reports_honest_blocker(self, research):
+        from work_initiative_engine import analyze_work_initiative
+        initiative = analyze_work_initiative("Gribu tevi pārdot. Pierādi, ko tu māki.")
+        project = self.messaging._initiative_project_object(initiative, "tenant-a", "person-a", "web")
+        metadata = dict(project.metadata)
+        metadata["work_plan"] = [initiative.proposed_work[1].to_dict()]
+        self.work.update_work_object(project.object_id, metadata=metadata)
+        self.messaging._save_work_initiative_context("contact:tenant-a:person-a:one_nina", {
+            "objective": initiative.goal.objective, "project_kind": "proof_of_value",
+            "known_context": initiative.goal.original_text, "object_id": project.object_id,
+            **self.messaging._initiative_context_for_work({}, initiative.proposed_work[1]),
+        })
+        research.return_value = WorkExecutionResult(
+            WorkExecutionDisposition.EXECUTABLE_NOW, "failed", initiative.proposed_work[1].title,
+            failure_reason="budget_exceeded",
+        )
+        response = self.send("dari")
+        self.assertEqual(research.call_count, 1)
+        self.assertIn("nav droši izpildāms", response["text"])
+        self.assertNotIn("budget_exceeded", response["text"])
+        self.assertEqual(self.projects()[0].metadata["initiative_state"], "failed")
 
     def test_external_email_and_calendar_remain_non_executing(self):
         email = self.send("atbildi manā vietā e-pastā")
