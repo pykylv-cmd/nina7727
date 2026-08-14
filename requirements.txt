@@ -1,6 +1,16 @@
 flask
+gunicorn
 python-telegram-bot
 openai
 psycopg2-binary
 stripe
 pypdf
+cryptography
+qrcode
+pywebpush
+Pillow
+python-docx
+openpyxl
+python-pptx
+PyMuPDF
+imageio-ffmpeg

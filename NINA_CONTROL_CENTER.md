@@ -1,116 +1,117 @@
-# NINA_CONTROL_CENTER.md
+# NinaOS Control Center
 
-## NinaOS patiesība
+## Governing direction
 
-Nina nav Telegram bots.
-NinaOS ir AI darbinieku operētājsistēma / platforma.
-Telegram ir tikai testa kanāls jeb adapters.
+`NinaOS_Constitution_V6.md` is authoritative.
 
-Mērķis: izveidot pasaulē labāko AI darbinieku platformu, kur AI darbinieki sniedz pakalpojumus, pārdod idejas, palīdz cilvēkiem un uzņēmumiem, un vēlāk darbojas Nina Exchange platformā.
+Official motto:
 
-## Produkta virziens
+> One Nina. Infinite Workforce.
+>
+> One conversation. Unlimited intelligence. Unlimited workers.
+>
+> One trusted operating system.
 
-- Nina AI — pirmais AI darbinieks
-- Nina Core — domāšanas kodols
-- Nina Memory — kopīgā atmiņa
-- Nina Identity — pastāvīga identitāte
-- Nina Vision — attēlu/dokumentu saprašana
-- Nina Voice — balss slānis
-- Nina Business — biznesa AI darbinieki
-- Nina Exchange — AI darbinieku, ideju un pakalpojumu tirgus
-- Nina Pay — maksājumi un komisijas
-- Nina API — ārējās integrācijas
+ONE NINA is the highest architecture principle. Nina is the face and one
+coherent customer relationship; the workforce behind Nina may expand through
+governed Ready Worker definitions and Agent Assignments. “Infinite” means
+extensible worker capacity, never unlimited permission, cost, or autonomy.
 
-## Pareizā arhitektūra
+NinaOS is a universal AI workforce operating system. The customer speaks with
+Nina and defines the result; Nina coordinates permitted providers, ready
+workers, people, systems, channels, devices, and future robots. Nina is not one
+model. Provider neutrality and stable provider adapters are mandatory.
 
-NinaOS → Nina Core → Employee Brain → Think Engine → Learning Engine → Quality Engine → Reply Builder → Channel Adapter → Telegram
+The Nina Trust Layer applies across identity, permissions, providers, tools,
+actions, approvals, privacy, cost, audit, and future physical systems. Voice is
+strategic product infrastructure. Robot coordination is strategic future
+architecture; no current physical-control implementation is claimed and local
+controllers retain low-level safety.
 
-Telegram nav arhitektūras sākums. Telegram ir tikai viens no kanāliem.
+## Current, next, and future
 
-## Failu lomas
+- **Implemented:** Platform Core V1, RolePack System V1, Ready Worker
+  Catalog V1, Agent Assignment V1, Knowledge Vault V1, and Universal Work
+  Objects V1.
+- **Planned next:** Channel Layer V1.
+- **Implemented in limited scope:** existing WhatsApp paths; these precede but
+  do not complete the platform-wide future Channel Layer.
+- **Experimental:** current browser/OpenAI voice input capabilities.
+- **Long-Term Vision:** AI Provider Hub, Model Router/Evaluation, complete
+  Voice and Trust layers, connectors, devices/robots, fleet orchestration, and
+  Global Control Plane.
 
-### app.py
-Routeris / adapteris. Saņem Telegram ziņu un nodod tālāk. Nedrīkst kļūt par biznesa loģikas miskasti.
+OpenAI is the only evidenced AI runtime provider in the repository. Other
+provider brands are strategic until real adapters, configuration, and tests
+exist.
 
-### employee_brain.py
-AI darbinieka darba vadības slānis. Šeit Core statusi un darba ceļi tiek pārvērsti atbildēs.
+## Runtime and persistence guardrails
 
-### think_engine.py
-Klasificē nodomu. Neveido gala tekstu.
+- PostgreSQL is authoritative in hosted runtimes; hosted startup fails closed.
+- Migrations are managed and EXPAND-first; destructive change requires an
+  explicit later CONTRACT phase.
+- Preserve restart persistence, rolling compatibility, request gating,
+  separated liveness/readiness, and tenant isolation.
+- `app.py` is Telegram/Core and `web_app.py` is Web; do not couple startup.
+- Railway staging is `confident-expression`; Web/Core is `secure-rebirth` and
+  the Node Company WhatsApp bridge is `happy-education`.
+- Tests do not establish deployment or production success.
 
-### learning_engine.py
-Mācīšanās un kļūdu atziņu slānis.
+## Do not violate
 
-### quality_engine.py
-Kvalitātes pārbaude.
+- Do not turn NinaOS into a chatbot, bot builder, provider console, or
+  channel-specific product.
+- Do not fragment ONE NINA into provider-, worker-, or channel-specific
+  customer identities or competing sources of truth.
+- Do not interpret Infinite Workforce as unlimited authority, spending,
+  autonomous replication, or a bypass around Ready Worker and Agent Assignment.
+- Do not equate Nina with OpenAI or any other provider.
+- Do not collapse definitions, customer assignments, permissions, credentials,
+  channels, work, devices, billing, or audit into one object.
+- Do not claim vision, implementation, tests, deployment, or production
+  verification interchangeably.
+- Do not grant capability as permission; require least privilege and approval.
+- Do not bypass local robot safety or claim physical control that does not
+  exist.
+- Do not rebuild completed foundation layers.
 
-### reply_builder.py
-Centrālais gala atbildes veidošanas princips.
+## Agent Assignment V1 boundary
 
-### initiative_engine.py
-Core 2.6 iniciatīvas loģika. Nedrīkst apiet Reply Builder.
+Agent Assignment V1 now binds one authenticated tenant to one exact Ready
+Worker version and stable assignment ID. It provides validated configuration,
+least-privilege permission narrowing, and `draft`, `active`, `suspended`, and
+terminal `archived` lifecycle management through shared persistence and
+tenant-scoped APIs.
 
-### memory.py / memory_service.py
-Atmiņas saglabāšana un lasīšana.
+It does not execute autonomous work, provision channels, route providers,
+create separate Nina identities, or own memory/work truth.
 
-### user_profile_engine.py
-Lietotāja profila fakti: vārds, profesija, intereses, projekti.
+## Immediate build task
 
-### conversation_engine.py
-Dzīvās sarunas slānis. Nedrīkst apēst Core komandas.
+Implement **Channel Layer V1** next according to the canonical sequence,
+preserving ONE NINA, tenant isolation, and the established Agent Assignment,
+Knowledge Vault, and Universal Work Object boundaries.
 
-## Core Evolution
+## Universal Work Objects V1 boundary
 
-- Core 2.0 — Employee Brain: DONE
-- Core 2.1 — Identity + Employee State: DONE
-- Core 2.2 — Responsibility Brain: DONE
-- Core 2.3 — Think Engine: DONE
-- Core 2.4 — Learning Engine: DONE
-- Core 2.5 — Quality Engine: DONE
-- Core 2.5.1 — Reply Builder: ACTIVE
-- Core 2.6 — Initiative Engine: IN PROGRESS
-- Core 2.6.1 — Initiative Detector: CURRENT
-- Core 2.6.2 — Initiative Generator: NEXT
+Universal Work Objects V1 uses the existing `nina_work_objects` table as the
+single tenant-scoped work truth. It provides closed core types, lifecycle,
+priority, ownership, optional same-tenant active Agent Assignment references,
+parent/child work, scheduling, source provenance, bounded search, and audit
+events. Web, Telegram task, planner, client, task, and follow-up paths use or
+project this registry; no new task-memory writes are made.
 
-## Atrastā kļūda
+It does not provide autonomous execution, channel completion, provider
+routing, or a second Nina. Legacy specialized Work Engine values remain
+compatible in the same table, while the V1 service governs new core objects.
 
-Simptoms:
-`core 2.6.1` Telegramā aizgāja uz parastu OpenAI sarunu.
+## Knowledge Vault V1 boundary
 
-Cēlonis:
-`app.py` Employee Brain vārti laida tikai līdz `core 2.5`.
-Tāpēc `core 2.6.1` netika nodots uz `employee_brain.py`.
+Knowledge Vault V1 provides tenant-owned `KnowledgeItem` CRUD, controlled
+activation/archive lifecycle, immutable active-content version history,
+checksums, provenance, bounded metadata, and tenant-scoped keyword search.
 
-Pareizais labojums:
-`app.py` Employee Brain vārtos jābūt:
-- core 2.5.1
-- core 2.6
-- core 2.6.1
-- reply builder status
-- initiative engine
-- initiative detector status
-
-## Darba noteikumi
-
-Lietotājs nekad nelabo atsevišķas rindas.
-ChatGPT vienmēr sagatavo pilnus failus.
-
-Pirms koda:
-1. Nosaki moduli.
-2. Nosaki izsaukumu ķēdi.
-3. Nelabo uz minējumiem.
-4. Nelabo Telegram slāni, ja problēma ir NinaOS Core.
-
-Pēc katra Core:
-1. Atjaunina kodu.
-2. Atjaunina šo failu.
-3. Tikai tad iet tālāk.
-
-## Jaunā čata starts
-
-NINA RESET.
-Strādājam ar NinaOS, nevis Telegram botu.
-Izlasi NINA_CONTROL_CENTER.md.
-Telegram ir tikai testa adapters.
-Pašreizējais Core: 2.6.1 Initiative Detector.
-Pirms koda rakstīšanas nosaki moduli un izsaukumu ķēdi.
+It is not conversation memory, a customer profile, worker/channel memory,
+binary file storage, PDF/DOCX ingestion, semantic retrieval, RAG, a prompt
+library, or a secrets manager. Stored client instructions remain inert data
+until a separately governed future workflow uses them.

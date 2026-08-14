@@ -1,15 +1,17 @@
 import os
 import re
 import json
-import sqlite3
 import asyncio
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-try:
-    import psycopg2
-except Exception:
-    psycopg2 = None
+from persistence_backend import (
+    DATABASE_URL,
+    DB_FILE,
+    USE_POSTGRES,
+    connect as persistence_connect,
+    psycopg2,
+)
 
 try:
     import stripe
@@ -32,9 +34,6 @@ TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 ADMIN_USER_IDS = os.environ.get("ADMIN_USER_IDS", "")
 
 DEFAULT_TIMEZONE = "Europe/Riga"
-DATABASE_URL = os.environ.get("DATABASE_URL")
-DB_FILE = "nina_memory.db"
-USE_POSTGRES = bool(DATABASE_URL and psycopg2)
 
 FREE_BACKUP_LIMIT = 5
 FREE_REMINDER_LIMIT = 5
@@ -79,9 +78,7 @@ def db_execute(cursor, sql, params=None):
 
 
 def get_db():
-    if USE_POSTGRES:
-        return psycopg2.connect(DATABASE_URL)
-    return sqlite3.connect(DB_FILE)
+    return persistence_connect()
 
 
 def init_db():
@@ -6025,7 +6022,17 @@ def home():
     return "Nina7727 V11.9 Stripe Test Router Fix darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
-init_db()
+_SALES_RUNTIME_INITIALIZED = False
+
+
+def initialize_sales_runtime():
+    """Perform legacy Sales runtime startup work exactly once, never during import."""
+    global _SALES_RUNTIME_INITIALIZED
+    if _SALES_RUNTIME_INITIALIZED:
+        return False
+    init_db()
+    _SALES_RUNTIME_INITIALIZED = True
+    return True
 
 telegram_app = (
     Application.builder()
@@ -6037,6 +6044,7 @@ telegram_app = (
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
 
 if __name__ == "__main__":
+    initialize_sales_runtime()
     print("Nina7727 V11.9 Stripe Test Router Fix darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
     telegram_app.run_polling()
 

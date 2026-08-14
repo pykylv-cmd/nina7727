@@ -1,44 +1,89 @@
 {
   "project": "NinaOS",
-  "identity": {
-    "company": "NinaOS",
-    "platform": "AI Economy Operating System",
-    "first_worker": "Nina",
-    "telegram_role": "test and communication channel only"
+  "repository": "pykylv-cmd/nina7727",
+  "branch": "feature/web-chat-v1",
+  "constitution": {
+    "version": 6,
+    "status": "authoritative",
+    "file": "NinaOS_Constitution_V6.md",
+    "governing_vision": "Universal AI workforce operating system: the customer defines the result and Nina coordinates the permitted people, AI workers, providers, systems, channels, devices, and future robots."
   },
-  "current_versions": {
-    "blueprint": "1.1",
-    "app_router": "V116 Router Priority",
-    "core": "2.6.1 Initiative Detector",
-    "employee_brain": "Core Evolution 2.6.1",
-    "think_engine": "2.6.1",
-    "profile": "restored",
-    "premium": "working"
+  "architecture": {
+    "checkpoint": "Platform Foundation V1",
+    "foundation_implementation_commit": "fe5dba4839e59daa4b0ad0b7d3f3fb812b2f3e70",
+    "completed_layers": ["Platform Core V1", "RolePack System V1", "Ready Worker Catalog V1", "Agent Assignment V1", "Knowledge Vault V1", "Universal Work Objects V1"],
+    "next_layer": "Channel Layer V1",
+    "planned_layers": ["Channel Layer V1", "Billing V1", "Nina Exchange V1", "Mobile and extended interfaces"],
+    "strategic_future_layers": ["Nina Experience Layer", "Voice Layer", "AI Provider Hub", "Model Router", "Model Evaluation", "Nina Trust Layer", "Connector Layer", "Human Approval Layer", "Device and Robot Layer", "Fleet Orchestration", "Global Control Plane"]
   },
-  "fixed_bugs": {
-    "BUG-001": "core 2.6.1 routing fixed",
-    "BUG-002": "profile/memory restored with seed and bridge",
-    "BUG-003": "premium responds and uses profile name"
+  "railway_release_engineering_minimum": {
+    "status": "implemented_locally",
+    "production_release": "pending_manual_environment_and_preflight_verification",
+    "runtime": "Python 3.12",
+    "server": "Gunicorn web_app:app",
+    "predeploy": ["python manage_migrations.py preflight", "python manage_migrations.py expand"],
+    "healthcheck": "/ready"
   },
-  "current_focus": [
-    "Stabilize Nina AI as first worker",
-    "Move routing logic from app.py into router.py",
-    "Keep app.py as adapter only",
-    "Maintain documentation before code changes"
-  ],
-  "next_tests": [
-    "core 2.6.1",
-    "ko tu par mani zini",
-    "premium",
-    "kā mani sauc"
-  ],
-  "source_of_truth": [
-    "NINA_START.md",
-    "NinaOS_Blueprint_1.1.md",
-    "NINA_PROJECT_STATE.json",
-    "NINA_MANIFEST.json",
-    "NINA_BUG_TRACKER.md",
-    "TEST_PROTOCOL.md"
-  ],
-  "last_updated_utc": "2026-07-01T18:52:52.226606+00:00"
+  "agent_assignment_v1": {
+    "status": "implemented",
+    "scope": "Tenant-scoped assignment management and lifecycle for exact Ready Worker versions under ONE NINA.",
+    "persistence_table": "nina_agent_assignments",
+    "migration": "0002_agent_assignment_v1",
+    "lifecycle": ["draft", "active", "suspended", "archived"],
+    "autonomous_execution": false,
+    "channel_provisioning": false,
+    "provider_routing": false
+  },
+  "knowledge_vault_v1": {
+    "status": "implemented",
+    "scope": "Tenant-owned authorized structured knowledge items, lifecycle, immutable active-content version history, checksums, provenance, and bounded keyword search under ONE NINA.",
+    "persistence_table": "nina_knowledge_items",
+    "migration": "0003_knowledge_vault_v1",
+    "lifecycle": ["draft", "active", "archived"],
+    "content_formats": ["plain_text", "markdown", "json"],
+    "binary_ingestion": false,
+    "semantic_search": false,
+    "rag": false,
+    "autonomous_execution": false
+  },
+  "universal_work_objects_v1": {
+    "status": "implemented",
+    "scope": "Single tenant-scoped canonical work registry with governed core lifecycle, ownership, active Agent Assignment references, hierarchy, scheduling, provenance, bounded search, and audit under ONE NINA.",
+    "persistence_table": "nina_work_objects",
+    "audit_table": "nina_work_object_events",
+    "migration": "0004_universal_work_objects_v1",
+    "autonomous_execution": false,
+    "channel_layer_complete": false
+  },
+  "current_capability_truth": {
+    "whatsapp": {
+      "status": "partial",
+      "evidence": "Meta Cloud API adapter plus Personal and Company WhatsApp Baileys bridge paths, persistence, web endpoints, and tests exist; platform-wide Channel Layer and universal production status are not established."
+    },
+    "ai_providers": {
+      "status": "partial",
+      "active_runtime_integrations": ["OpenAI"],
+      "not_evidenced_as_runtime_integrations": ["Anthropic", "Google Gemini", "xAI", "Mistral", "Ollama", "other local models"],
+      "strategic_target": "Provider-neutral AI Provider Hub with adapter-based routing and evaluation."
+    },
+    "voice": {
+      "status": "experimental",
+      "present": ["browser audio capture/input", "OpenAI audio transcription", "voice-related engine and tests"],
+      "not_established": ["provider-neutral text-to-speech", "full duplex streaming conversation", "telephony", "interrupt handling", "persistent voice selection or voice memory"]
+    },
+    "robots_and_humanoids": {
+      "status": "strategic future",
+      "physical_control_implemented": false,
+      "requirements": ["device identity", "fleet assignment", "telemetry", "authorization", "local certified safety controllers"]
+    }
+  },
+  "staging": {
+    "project": "confident-expression",
+    "environment": "staging",
+    "web_service": "secure-rebirth",
+    "whatsapp_bridge_service": "happy-education",
+    "deployed_commit": "fe5dba4839e59daa4b0ad0b7d3f3fb812b2f3e70"
+  },
+  "source_of_truth": ["NinaOS_Constitution_V6.md", "NINA_ARCHITECTURE_LEDGER.md", "NINA_PROJECT_STATE.json", "NINA_CONTROL_CENTER.md", "NINA_BLUEPRINT.md", "NINA_NEW_CHAT_START_PACK.md"],
+  "last_updated_utc": "2026-07-27T00:00:00Z"
 }

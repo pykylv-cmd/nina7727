@@ -3,6 +3,56 @@
 
 # NinaOS Roadmap
 
+## Constitution V6 alignment
+
+The authoritative direction is `NinaOS_Constitution_V6.md`: customers speak
+with Nina, and Nina coordinates permitted ready workers, providers, systems,
+channels, people, and future physical workers. Customers receive ready workers;
+they are not required to build bots.
+
+The immediate architecture sequence is Platform Core V1 (Implemented),
+RolePack System V1 (Implemented), Ready Worker Catalog V1 (Implemented), Agent
+Assignment V1 (Implemented), Knowledge Vault V1 (Implemented), then
+Universal Work Objects V1 (Implemented), then **Channel Layer V1 (Planned,
+next)**. The
+older phase roadmap below is retained as
+historical product context where it does not conflict with that sequence.
+
+WhatsApp is no longer merely future: Meta Cloud API and Personal/Company
+WhatsApp paths exist at partial status. The complete provider-neutral Channel
+Layer remains planned. OpenAI is the evidenced runtime AI provider; the
+multi-provider Hub is strategic. Voice is experimental/partial. Robot and
+humanoid orchestration is strategic future architecture with no current
+physical-control implementation.
+
+## ONE NINA North Star
+
+> One Nina. Infinite Workforce.
+
+ONE NINA is the highest principle. The roadmap grows one coherent Nina
+experience over many governed workers and technologies. Infinite Workforce is
+delivered through the Ready Worker architecture and customer-owned Agent
+Assignments—not by making uncontrolled bots.
+
+Roadmap status language is constitutional:
+
+- **Implemented** means code exists for the stated scope.
+- **Experimental** means a limited validation path exists.
+- **Planned** means an agreed future delivery layer.
+- **Long-Term Vision** means strategic direction, not current functionality.
+
+Agent Assignment V1 is **Implemented** as tenant-scoped management and
+lifecycle, not autonomous worker execution. Knowledge Vault V1 is
+**Implemented** for versioned authorized structured knowledge and bounded
+keyword search. Binary ingestion, parsing, embeddings, semantic retrieval,
+RAG, and autonomous knowledge use remain Planned. Universal Work Objects V1
+is **Implemented** as the single tenant-scoped work registry, lifecycle,
+assignment reference, hierarchy, scheduling, and audit boundary. The current
+immediate item is **Planned: Channel Layer V1**. Provider Hub,
+complete Voice, robots/humanoids, fleet orchestration, and global control are
+**Long-Term Vision**. Existing WhatsApp and OpenAI paths remain limited current
+implementation evidence and must not be generalized into complete layers.
+
 Version: 1.0
 Status: Active
 

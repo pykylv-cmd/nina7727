@@ -10,16 +10,197 @@ The Reply Builder does not extract Telegram/Web text and does not persist work t
 from __future__ import annotations
 
 import re
-from typing import Any, Dict
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable
+
+from initiative_engine import InitiativeCandidate
+from rolepack_system import RolePackError, action_for_workspace
+from work_objects import WorkObject, list_work_objects
 
 REPLY_BUILDER_VERSION = "Reply Builder V1.2 — ONE NINA Client Deliverable Privacy"
 APP_VERSION = "V116.6 + ONE NINA Forwarded Work Intake V1.1"
+
+SUGGESTED_ACTIONS = frozenset({
+    "FOLLOW_UP", "REMIND", "CHECK_IN", "ASK_FOR_UPDATE", "NO_ACTION",
+})
 
 _VERSION_PATTERNS = [
     r"\n{0,2}Versija:\s*V[0-9.]+\s*$",
     r"\n{0,2}Versija:\s*V[0-9.]+\s*\+\s*Core\s*2\.5\.1\s*$",
     r"\n{0,2}Versija:\s*V[0-9.]+\s*\+\s*.*$",
 ]
+
+
+@dataclass(frozen=True)
+class ReplyDraft:
+    reply_id: str
+    initiative_id: str
+    workspace_id: str
+    work_object_id: str
+    title: str
+    draft_message: str
+    suggested_action: str
+    reason: str
+    confidence: float
+    created_at: str
+
+    def as_dict(self):
+        return {
+            "reply_id": self.reply_id,
+            "initiative_id": self.initiative_id,
+            "workspace_id": self.workspace_id,
+            "work_object_id": self.work_object_id,
+            "title": self.title,
+            "draft_message": self.draft_message,
+            "suggested_action": self.suggested_action,
+            "reason": self.reason,
+            "confidence": self.confidence,
+            "created_at": self.created_at,
+        }
+
+
+def _initiative_value(initiative, name):
+    if isinstance(initiative, dict):
+        return initiative.get(name)
+    return getattr(initiative, name, None)
+
+
+def _initiative_work_object(initiative) -> WorkObject | None:
+    workspace_id = str(_initiative_value(initiative, "workspace_id") or "").strip()
+    work_object_id = str(
+        _initiative_value(initiative, "work_object_id") or ""
+    ).strip()
+    if not workspace_id or not work_object_id:
+        return None
+    return next((
+        item for item in list_work_objects(workspace_id=workspace_id, limit=1000)
+        if item.object_id == work_object_id
+    ), None)
+
+
+def _suggested_action(initiative_type: str, item: WorkObject) -> str:
+    initiative_type = str(initiative_type or "").casefold()
+    if initiative_type == "follow_up_waiting":
+        return "FOLLOW_UP"
+    if initiative_type == "inactive_client":
+        return "CHECK_IN"
+    if initiative_type == "relationship_signal":
+        return "CHECK_IN"
+    if initiative_type == "overdue":
+        return "ASK_FOR_UPDATE" if item.client_id else "REMIND"
+    if initiative_type in {"today_priority", "deadline_upcoming"}:
+        return "REMIND"
+    return "NO_ACTION"
+
+
+def _client_name(item: WorkObject) -> str:
+    metadata = item.metadata if isinstance(item.metadata, dict) else {}
+    details = metadata.get("business_details")
+    details = details if isinstance(details, dict) else {}
+    return str(
+        details.get("client_name") or metadata.get("client_name")
+        or item.client_id or ""
+    ).strip()
+
+
+def _draft_message(action: str, item: WorkObject) -> str:
+    client_name = _client_name(item)
+    greeting = f"Labdien, {client_name}!" if client_name else "Labdien!"
+    title = str(item.title or "šo jautājumu").strip()
+    if action == "FOLLOW_UP":
+        return f"{greeting} Vēlos sekot līdzi jautājumam “{title}”. Vai ir jaunumi?"
+    if action == "ASK_FOR_UPDATE":
+        return f"{greeting} Vēlos precizēt aktuālo statusu jautājumam “{title}”."
+    if action == "CHECK_IN":
+        return f"{greeting} Vēlos apjautāties, kā Jums šobrīd klājas un vai varu palīdzēt."
+    if action == "REMIND":
+        return f"Atgādinājums: {title}."
+    return ""
+
+
+def _reply_confidence(initiative, item: WorkObject, action: str) -> float:
+    try:
+        initiative_score = int(_initiative_value(initiative, "score") or 0)
+    except (TypeError, ValueError):
+        initiative_score = 0
+    confidence = 0.55 + min(max(initiative_score, 0), 100) / 500
+    if _client_name(item):
+        confidence += 0.08
+    if item.due_date:
+        confidence += 0.05
+    if action == "NO_ACTION":
+        confidence -= 0.15
+    return round(max(0.0, min(confidence, 0.95)), 2)
+
+
+class ReplyBuilder:
+    """Deterministic read-only drafts for Initiative Engine candidates."""
+
+    @staticmethod
+    def build(initiative) -> ReplyDraft:
+        initiative_id = str(
+            _initiative_value(initiative, "initiative_id") or ""
+        ).strip()
+        workspace_id = str(
+            _initiative_value(initiative, "workspace_id") or ""
+        ).strip()
+        work_object_id = str(
+            _initiative_value(initiative, "work_object_id") or ""
+        ).strip()
+        if not initiative_id or not workspace_id or not work_object_id:
+            raise ValueError("initiative identity is required")
+        item = _initiative_work_object(initiative)
+        if item is None:
+            raise ValueError("initiative work object not found in workspace")
+        initiative_type = str(
+            _initiative_value(initiative, "type") or ""
+        ).strip()
+        action = _suggested_action(initiative_type, item)
+        if action not in SUGGESTED_ACTIONS:
+            action = "NO_ACTION"
+        try:
+            _definition, rolepack = action_for_workspace(
+                workspace_id, action,
+            )
+            if rolepack is None:
+                fallback, fallback_rolepack = action_for_workspace(
+                    workspace_id, "NO_ACTION",
+                )
+                if fallback is None or fallback_rolepack is None:
+                    raise ValueError("rolepack_action_not_allowed")
+                action = "NO_ACTION"
+        except RolePackError:
+            raise
+        except Exception:
+            # During additive rolling deploys, an older schema can still be
+            # serving. Readiness blocks the new runtime until migration, while
+            # legacy unit fixtures retain the canonical pre-RolePack action.
+            pass
+        return ReplyDraft(
+            reply_id=f"reply:{initiative_id}",
+            initiative_id=initiative_id,
+            workspace_id=workspace_id,
+            work_object_id=work_object_id,
+            title=item.title,
+            draft_message=_draft_message(action, item),
+            suggested_action=action,
+            reason=str(_initiative_value(initiative, "reason") or "").strip(),
+            confidence=_reply_confidence(initiative, item, action),
+            created_at=str(
+                _initiative_value(initiative, "created_at") or ""
+            ).strip(),
+        )
+
+
+def build_reply_queue(
+    initiatives: Iterable[InitiativeCandidate],
+) -> tuple[ReplyDraft, ...]:
+    """Build one stable draft per initiative and suppress duplicate candidates."""
+    replies = {}
+    for initiative in initiatives or ():
+        reply = ReplyBuilder.build(initiative)
+        replies[reply.reply_id] = reply
+    return tuple(replies[key] for key in sorted(replies))
 
 
 def rb_clean_text(value: Any) -> str:

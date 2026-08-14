@@ -1,7 +1,7 @@
 import os
 import re
 import json
-import sqlite3
+import hashlib
 import asyncio
 import threading
 import time
@@ -9,10 +9,14 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from io import BytesIO
 
-try:
-    import psycopg2
-except Exception:
-    psycopg2 = None
+from persistence_backend import (
+    DATABASE_URL,
+    DB_FILE,
+    USE_POSTGRES,
+    assert_backend_ready,
+    connect as persistence_connect,
+    psycopg2,
+)
 
 try:
     import stripe
@@ -22,7 +26,15 @@ except Exception:
 from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
+from contact_identity import compact_contact_context, resolve_contact_identity
 from openai import OpenAI
+from nina_identity import NINA_PROMPT as SHARED_NINA_PROMPT
+from channel_connections import consume_telegram_token, is_telegram_connection_token, mark_telegram_runtime_state, telegram_workspace_resolution, workspace_for_telegram_identity
+from runtime_readiness import get_runtime_readiness
+from platform_core import initialize_platform_runtime
+from rolepack_system import initialize_rolepack_system
+from ready_worker_catalog import initialize_ready_worker_catalog
+from nina_message_service import NinaMessageEnvelope, route_nina_message
 
 # ONE NINA Canonical Channel Content + Document Work Intake V1
 # V117.8: channel-content and document-action imports are isolated.
@@ -6259,9 +6271,6 @@ TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 ADMIN_USER_IDS = os.environ.get("ADMIN_USER_IDS", "")
 
 DEFAULT_TIMEZONE = "Europe/Riga"
-DATABASE_URL = os.environ.get("DATABASE_URL")
-DB_FILE = "nina_memory.db"
-USE_POSTGRES = bool(DATABASE_URL and psycopg2)
 
 FREE_BACKUP_LIMIT = 5
 FREE_REMINDER_LIMIT = 5
@@ -6306,9 +6315,7 @@ def db_execute(cursor, sql, params=None):
 
 
 def get_db():
-    if USE_POSTGRES:
-        return psycopg2.connect(DATABASE_URL)
-    return sqlite3.connect(DB_FILE)
+    return persistence_connect()
 
 
 def init_db():
@@ -10881,33 +10888,26 @@ def add_reminder(user_id, user_text):
     allowed, message = can_create_reminder(user_id)
     if not allowed:
         return message
+    # Route the established Telegram command through the same ONE NINA Brain,
+    # Work Object and active-reminder delivery chain used by Web and WhatsApp.
+    # Historical reminder rows remain readable, but new truth is not duplicated.
+    from nina_message_service import send_message_to_nina
 
-    user = get_user(user_id)
-    task, remind_at_utc, local_time_text = parse_reminder(user_text, user["timezone"])
-
-    conn = get_db()
-    c = conn.cursor()
-    if USE_POSTGRES:
-        db_execute(c,
-            "INSERT INTO reminders (user_id, text, remind_at, local_time, status) VALUES (%s, %s, %s, %s, %s) RETURNING id",
-            (user_id, task, remind_at_utc, local_time_text, "active")
-        )
-        reminder_id = c.fetchone()[0]
-    else:
-        db_execute(c,
-            "INSERT INTO reminders (user_id, text, remind_at, local_time, status) VALUES (%s, %s, %s, %s, %s)",
-            (user_id, task, remind_at_utc, local_time_text, "active")
-        )
-        reminder_id = c.lastrowid
-    conn.commit()
-    c.close()
-    conn.close()
-
-    add_xp(user_id, 3)
-
-    if local_time_text:
-        return f"Pierakstīju atgādinājumu #{reminder_id}: {task}\nLaiks: {local_time_text} ({user['timezone']})"
-    return f"Pierakstīju atgādinājumu #{reminder_id}: {task}"
+    workspace_id = workspace_for_telegram_identity(
+        telegram_user_id=str(user_id),
+    ) or "demo_small_business"
+    result = send_message_to_nina(
+        user_text,
+        workspace_id=workspace_id,
+        channel="telegram",
+        conversation_id=f"telegram:{user_id}",
+        contact_id=str(user_id),
+        canonical_work_workspace_id=workspace_id,
+    )
+    answer = str(result.get("text") or "").strip() if isinstance(result, dict) else ""
+    if answer:
+        return answer
+    return "Atgādinājumu šoreiz nevarēju droši ieplānot. Precizē laiku un mēģini vēlreiz."
 
 
 def list_reminders(user_id):
@@ -10977,10 +10977,63 @@ async def reminder_worker(application):
         await asyncio.sleep(30)
 
 
+async def active_work_object_reminder_worker(application):
+    """Deliver due ONE NINA Reminder Work Objects from the Telegram/Core owner."""
+    from reminder_delivery import process_due_reminders
+    print("reminder_scheduler=started runtime=telegram_core")
+    while True:
+        try:
+            await process_due_reminders(
+                telegram_sender=application.bot.send_message,
+                worker_id="telegram-core",
+            )
+        except Exception as exc:
+            print("Active reminder worker error:", type(exc).__name__)
+        await asyncio.sleep(30)
+
+
+ACTIVE_REMINDER_SCHEDULER_TASK = None
+
+
+def start_active_reminder_scheduler(application):
+    """Start the Core-owned scheduler once for this Application lifecycle."""
+    global ACTIVE_REMINDER_SCHEDULER_TASK
+    if (
+        ACTIVE_REMINDER_SCHEDULER_TASK is not None
+        and not ACTIVE_REMINDER_SCHEDULER_TASK.done()
+    ):
+        return ACTIVE_REMINDER_SCHEDULER_TASK
+    ACTIVE_REMINDER_SCHEDULER_TASK = asyncio.create_task(
+        active_work_object_reminder_worker(application),
+        name="nina-active-reminder-scheduler",
+    )
+    return ACTIVE_REMINDER_SCHEDULER_TASK
+
+
+async def stop_active_reminder_scheduler():
+    """Cancel and join the Core-owned scheduler during graceful shutdown."""
+    global ACTIVE_REMINDER_SCHEDULER_TASK
+    task = ACTIVE_REMINDER_SCHEDULER_TASK
+    ACTIVE_REMINDER_SCHEDULER_TASK = None
+    if task is None or task.done():
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    print("reminder_scheduler=stopped runtime=telegram_core")
+
+
 async def post_init(application):
     init_backup_scheduler()
     asyncio.create_task(reminder_worker(application))
+    start_active_reminder_scheduler(application)
     asyncio.create_task(auto_backup_worker(application))
+
+
+async def post_shutdown(application):
+    await stop_active_reminder_scheduler()
 
 
 
@@ -11098,25 +11151,7 @@ def admin_revenue_forecast(user_id, command_text="revenue forecast"):
     )
 
 
-NINA_PROMPT = """
-Tu esi Nina 7727.
-
-Tu esi silta, gudra, interesanta un dabiska sarunu biedrene.
-Tu neesi parasts bots. Tu esi sajūta, pie kuras cilvēkam gribas atgriezties.
-
-Noteikumi:
-- Vienmēr runā latviešu valodā.
-- Nerunā kā robots vai klientu atbalsts.
-- Neatkārto "Sveiks!" katrā atbildē.
-- Neizdomā faktus par lietotāju.
-- Ja runā par lietotāju, balsties tikai uz profilu, ilgtermiņa kopsavilkumu un sarunas vēsturi.
-- Ja profilā ir mērķi/projekti/sapņi, vari tos dabiski izmantot sarunā.
-- Neatkārto visu profilu katrā atbildē.
-- Atbildi īsi, dzīvi, sirsnīgi.
-- Ja cilvēkam ir stress, nomierini.
-- Vari būt viegli asprātīga un silta.
-- Tavs mērķis: lai cilvēkam pēc sarunas ar tevi kļūst vieglāk.
-"""
+NINA_PROMPT = SHARED_NINA_PROMPT
 
 
 COMMAND_LINES = {
@@ -12366,13 +12401,37 @@ def nina_launch_invite_text(user_id):
     )
 
 
+def telegram_workspace_connection_answer(payload, update):
+    """Handle only high-confidence NinaOS connection payloads.
+
+    Returning None delegates unchanged to the existing referral/default start flow.
+    """
+    if not is_telegram_connection_token(payload):
+        return None
+    user = getattr(update, "effective_user", None)
+    chat = getattr(update, "effective_chat", None)
+    linked = consume_telegram_token(
+        payload,
+        telegram_user_id=getattr(user, "id", ""),
+        telegram_username=getattr(user, "username", "") or "",
+        telegram_chat_id=getattr(chat, "id", ""),
+        telegram_display_name=getattr(user, "full_name", "") or "",
+    )
+    if linked:
+        return "Telegram ir veiksmīgi savienots ar tavu NinaOS darba vidi. ✅"
+    return "Šī savienošanas saite nav derīga vai ir beigusies. Izveido jaunu savienojumu NinaOS Web sadaļā Kanāli."
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """V12.6: pirmais iespaids + referral capture."""
     user_id = str(update.effective_user.id)
     args = context.args or []
     referral_code = args[0].strip() if args else ""
 
-    if referral_code and re.fullmatch(r"NINA-\d{4,}", referral_code):
+    connection_answer = telegram_workspace_connection_answer(referral_code, update)
+    if connection_answer is not None:
+        answer = connection_answer
+    elif referral_code and re.fullmatch(r"NINA-\d{4,}", referral_code):
         answer = referral_capture_welcome_answer(user_id, referral_code)
         answer += (
             "\n\n"
@@ -13584,7 +13643,76 @@ def v1151_vision_smart_reply(user_id, raw_answer, caption=""):
     return v1151_clean_version(answer)
 
 
+def _telegram_contact_diagnostic(reason_code, stage, workspace_id="", exception=None):
+    payload = {
+        "event": "telegram_contact_resolution",
+        "reason_code": str(reason_code),
+        "stage": str(stage),
+        "workspace_ref": hashlib.sha256(str(workspace_id).encode()).hexdigest()[:12] if workspace_id else "",
+    }
+    if exception is not None:
+        payload["exception_class"] = type(exception).__name__
+    print(json.dumps(payload, ensure_ascii=True, separators=(",", ":")))
+
+
+def _telegram_contact_exception_reason(exc):
+    message = str(exc or "").casefold()
+    if isinstance(exc, RuntimeError) and "contact_identity_key_missing" in message:
+        return "telegram_identity_config_missing"
+    if isinstance(exc, ValueError) and "contact_not_found" in message:
+        return "telegram_contact_not_found"
+    if any(marker in message for marker in ("no such table", "undefined table", "undefined column", "does not exist")):
+        return "telegram_schema_error"
+    if type(exc).__module__.startswith(("sqlite3", "psycopg")):
+        return "telegram_contact_persistence_error"
+    return "telegram_identity_resolution_exception"
+
+
+def resolve_telegram_contact(update, context=None):
+    user = getattr(update, "effective_user", None)
+    external = str(getattr(user, "id", "") or "")
+    if not external:
+        _telegram_contact_diagnostic("telegram_workspace_not_found", "workspace_lookup")
+        return None
+    _telegram_contact_diagnostic("telegram_contact_lookup_start", "workspace_lookup")
+    workspace_id = ""
+    try:
+        chat = getattr(update, "effective_chat", None)
+        workspace_result = telegram_workspace_resolution(
+            telegram_user_id=external,
+            telegram_chat_id=str(getattr(chat, "id", "") or ""),
+        )
+        workspace_id = str(workspace_result.get("workspace_id") or "")
+        if not workspace_id:
+            _telegram_contact_diagnostic(workspace_result["reason_code"], "workspace_lookup")
+            return None
+        contact = resolve_contact_identity(
+            workspace_id, "telegram", external,
+            {
+                "display_name": str(getattr(user, "full_name", "") or getattr(user, "username", "") or ""),
+                "display_name_quality": 60 if getattr(user, "full_name", "") else 30,
+                "language": str(getattr(user, "language_code", "") or ""),
+                "language_verified": bool(getattr(user, "language_code", "")),
+                "relationship_type": "client",
+            },
+        )
+    except Exception as exc:
+        _telegram_contact_diagnostic(
+            _telegram_contact_exception_reason(exc), "contact_resolution", workspace_id, exc,
+        )
+        return None
+    try:
+        if context is not None:
+            context.chat_data["contact_id"] = contact["contact_id"]
+            context.chat_data["contact_context"] = compact_contact_context(contact)
+    except Exception:
+        pass
+    _telegram_contact_diagnostic("telegram_contact_resolved", "contact_resolution", workspace_id)
+    return contact
+
+
 async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    resolve_telegram_contact(update, context)
     """V114.0: Telegram location support."""
     try:
         user_id = update.effective_user.id if update.effective_user else "unknown"
@@ -13634,6 +13762,7 @@ class VoiceTextUpdateProxy:
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    resolve_telegram_contact(update, context)
     """Voice Intake V1.8.2: Telegram voice/audio -> cleanup routing -> existing reply router via proxy update."""
     try:
         if not update.message:
@@ -13706,6 +13835,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    resolve_telegram_contact(update, context)
     """Telegram adapter -> canonical channel envelope -> shared document intake -> one Work Object."""
     try:
         message = update.message
@@ -14173,6 +14303,7 @@ def nina_is_recent_photo_series_continuation(obj, caption="", max_age_seconds=12
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    resolve_telegram_contact(update, context)
     """ONE NINA Forwarded Photo Series Context V1.
 
     A captioned work photo creates/resolves canonical context. Photos arriving immediately
@@ -14573,69 +14704,71 @@ def nina_task_owner_name(user_id):
 
 
 def nina_save_task_to_memory(user_id, task):
-    """
-    V1.0 safe persistence:
-    saglabā task kā JSON tekstu memory_backups tabulā ar source='task_engine'.
-    Tas dod uzdevumiem pastāvīgu atmiņu bez jaunas DB migrācijas.
-    """
+    """Compatibility adapter over the canonical nina_work_objects truth."""
     if not task:
         return False
 
     try:
-        conn = get_db()
-        c = conn.cursor()
-        import json
-        db_execute(
-            c,
-            """
-            INSERT INTO memory_backups (user_id, backup_text, source)
-            VALUES (%s, %s, %s)
-            """,
-            (str(user_id), json.dumps(task, ensure_ascii=False), "task_engine")
-        )
-        conn.commit()
-        c.close()
-        conn.close()
+        title = nina_task_work_object_title(task)
+        status = str((task or {}).get("status") or "open")
+        match = next((
+            item for item in list_work_objects(
+                workspace_id="demo_small_business", limit=5000
+            )
+            if str(item.origin_user_id) == str(user_id)
+            and str(item.title).strip().casefold() == title.casefold()
+        ), None)
+        if match and status in {"completed", "cancelled"}:
+            from universal_work_objects import transition_work_object
+            target = "completed" if status == "completed" else "cancelled"
+            if match.status != target:
+                transition_work_object(
+                    match.workspace_id,
+                    match.object_id,
+                    target,
+                    actor="telegram_task_adapter",
+                )
         return True
     except Exception as e:
-        print("nina_save_task_to_memory kļūda:", repr(e))
+        print("canonical task adapter update kļūda:", repr(e))
         return False
 
 
 def nina_latest_tasks(user_id, limit=10):
-    tasks = []
+    """Compatibility projection from nina_work_objects; no memory truth."""
     try:
-        conn = get_db()
-        c = conn.cursor()
-        db_execute(
-            c,
-            """
-            SELECT backup_text, created_at
-            FROM memory_backups
-            WHERE user_id = %s AND source = %s
-            ORDER BY id DESC
-            LIMIT %s
-            """,
-            (str(user_id), "task_engine", int(limit or 10))
-        )
-        rows = c.fetchall() or []
-        c.close()
-        conn.close()
-
-        import json
-        for row in rows:
-            if not row or not row[0]:
+        tasks = []
+        for item in list_work_objects(
+            workspace_id="demo_small_business", limit=5000
+        ):
+            if str(item.origin_user_id) != str(user_id):
                 continue
-            try:
-                obj = json.loads(str(row[0]))
-                if isinstance(obj, dict):
-                    tasks.append(obj)
-            except Exception:
-                tasks.append({"title": str(row[0]), "priority": "normal"})
+            if item.object_type not in {"task", "followup_task", "follow_up"}:
+                continue
+            legacy = dict(item.metadata.get("legacy_task") or {})
+            legacy.update({
+                "work_object_id": item.object_id,
+                "title": item.title,
+                "client": item.client_id,
+                "priority": item.priority,
+                "deadline": item.due_date,
+                "status": (
+                    "completed"
+                    if item.status in {"done", "completed"}
+                    else item.status
+                ),
+                "followup": item.object_type in {
+                    "followup_task", "follow_up"
+                },
+                "source": item.origin_channel or "canonical_work",
+            })
+            tasks.append(legacy)
+            if len(tasks) >= max(1, min(int(limit or 10), 500)):
+                break
+        return tasks
     except Exception as e:
-        print("nina_latest_tasks kļūda:", repr(e))
-
-    return tasks
+        print("canonical task projection kļūda:", repr(e))
+        return []
 
 
 def nina_task_source_key(user_id, message_id=None, user_text=""):
@@ -14719,6 +14852,8 @@ def nina_save_task_to_one_nina(
         "legacy_task": task if isinstance(task, dict) else {"raw": str(task)},
         "raw_text": str(user_text or "").strip(),
         "one_nina_bridge": "telegram_detect_task_v1",
+        "reminder_at": str(task.get("reminder_at") or "") if isinstance(task, dict) else "",
+        "reminder_state": "scheduled" if isinstance(task, dict) and task.get("reminder_at") else "",
     }
 
     try:
@@ -14768,9 +14903,6 @@ def nina_task_answer(user_id, user_text, message_id=None):
         user_text=user_text,
         message_id=message_id,
     )
-
-    # Preserve old memory during migration. No client information is deleted.
-    nina_save_task_to_memory(user_id, task)
 
     if work_object is not None:
         print(
@@ -16467,12 +16599,73 @@ def nina_save_forwarded_text_to_one_nina(update, user_id, user_text, force_busin
     }
 
 
+_TELEGRAM_OWNER_ONLY_EXACT = {
+    "admin", "admin center", "admin command center", "command center",
+    "admin stats", "admin revenue", "platform stats", "v40 stats",
+    "admin notifications", "admin activity", "admin users", "user management",
+    "user actions", "db backup", "database backup", "backup stats",
+    "auto backup", "backup scheduler", "recovery", "recovery center",
+    "restore backup", "restore latest", "stripe webhook", "stripe statuss",
+    "revenue", "revenue analytics", "revenue forecast", "income analytics",
+    "income forecast", "kpi", "admin kpi", "business dashboard", "alerts",
+    "admin alerts", "system alerts", "launch", "launch dashboard", "production launch",
+    "admin logs", "audit logs", "audit stats", "health", "system status",
+    "analytics", "user stats", "user analytics", "notifications", "activity",
+}
+_TELEGRAM_OWNER_ONLY_PREFIXES = (
+    "grant premium", "remove premium", "add xp", "remove xp", "set level",
+    "reset streak", "search user", "find user", "user lookup", "user ",
+    "db backup", "database backup", "auto backup", "backup scheduler",
+    "restore latest", "atjauno pēdējo", "atjauno pedejo", "atjauno no backup",
+    "dzēs backup", "izdzēs backup", "dzes backup", "izdzes backup",
+)
+
+
+def telegram_owner_only_command(text):
+    """Classify only guarded operations that intentionally remain Telegram-local."""
+    clean = re.sub(r"\s+", " ", str(text or "").strip().casefold())
+    return clean in _TELEGRAM_OWNER_ONLY_EXACT or clean.startswith(_TELEGRAM_OWNER_ONLY_PREFIXES)
+
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # V117.7 ONE NINA Document Action Terminal Routing V1
     try:
         user_text = update.message.text
         user_id = str(update.effective_user.id)
         lower = user_text.strip().lower()
+        contact = resolve_telegram_contact(update, context)
+
+        # Telegram is a transport adapter. Only explicitly guarded owner commands
+        # stay local; every ordinary human message enters the shared ONE NINA path.
+        if telegram_owner_only_command(user_text):
+            if not is_admin(user_id):
+                await safe_reply_text(update, admin_locked_answer())
+                return
+        else:
+            if not contact:
+                await safe_reply_text(update, "Nevarēju droši sasaistīt šo Telegram kontaktu. Nekāda darbība netika veikta.")
+                return
+            workspace_id = str(contact.get("workspace_id") or "").strip()
+            contact_id = str(contact.get("contact_id") or "").strip()
+            if not workspace_id or not contact_id:
+                _telegram_contact_diagnostic(
+                    "telegram_contact_persistence_error", "shared_route_identity"
+                )
+                await safe_reply_text(update, "Nevarēju droši sasaistīt šo Telegram kontaktu. Nekāda darbība netika veikta.")
+                return
+            result = route_nina_message(NinaMessageEnvelope(
+                text=user_text,
+                workspace_id=workspace_id,
+                channel="telegram",
+                conversation_id=f"contact:{contact_id}:telegram",
+                contact_id=contact_id,
+                contact_context=compact_contact_context(contact),
+                canonical_client_id=str(contact.get("client_id") or ""),
+                canonical_work_workspace_id=workspace_id,
+                delivery_recipient=user_id,
+            ))
+            await safe_reply_text(update, str(result.get("text") or ""), disable_web_page_preview=True)
+            return
 
         # V118.1.5 — explicit client decisions are terminal and have routing priority.
         # They must never fall through into document actions, generic document Q&A,
@@ -17245,6 +17438,43 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if lower in ["mani uzdevumi", "uzdevumi", "task list", "tasks"]:
             await safe_reply_text(update, nina_public_append_hint(nina_task_list_answer(user_id), "task_list"))
+            return
+
+        # ONE NINA reminder routing: Telegram uses the same Brain decision and
+        # shared Work Object effect as Web, WhatsApp and API surfaces. Legacy
+        # reminder parsers below remain historical compatibility code only.
+        from brain import Brain as OneNinaBrain, BrainContext as OneNinaBrainContext
+        from nina_message_service import send_message_to_nina as send_one_nina_message
+        reminder_workspace = workspace_for_telegram_identity(
+            telegram_user_id=str(user_id),
+        ) or "demo_small_business"
+        reminder_decision = OneNinaBrain.decide(
+            user_text,
+            OneNinaBrainContext(
+                workspace_id=reminder_workspace,
+                channel="telegram",
+                conversation_id=f"telegram:{user_id}",
+            ),
+        )
+
+        if reminder_decision is not None and (
+            reminder_decision.create_reminder
+            or reminder_decision.reason == "cancel_all_reminders"
+        ):
+            reminder_result = send_one_nina_message(
+                user_text,
+                workspace_id=reminder_workspace,
+                channel="telegram",
+                conversation_id=f"telegram:{user_id}",
+                contact_id=str(user_id),
+                canonical_work_workspace_id=reminder_workspace,
+                precomputed_decision=reminder_decision,
+            )
+            await safe_reply_text(
+                update,
+                str(reminder_result.get("text") or "").strip(),
+                disable_web_page_preview=True,
+            )
             return
 
         # ONE NINA Natural Channel Work Execution V1
@@ -18489,12 +18719,77 @@ def home():
     return "NinaOS Runtime V116.2 — ONE NINA darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
-init_db()
+_APP_RUNTIME_INITIALIZED = False
+APP_RUNTIME_READINESS = get_runtime_readiness("telegram_core")
+
+
+def validate_mandatory_startup_components():
+    """Fail clearly before runtime startup when core Nina capabilities are unavailable."""
+    unavailable = []
+    if not ONE_NINA_WORK_OBJECTS_READY:
+        unavailable.append("work_objects")
+    if not ONE_NINA_DOCUMENT_INTAKE_READY:
+        unavailable.append("document_intake")
+    if unavailable:
+        raise RuntimeError(
+            "nina_mandatory_startup_components_unavailable:" + ",".join(unavailable)
+        )
+    return True
+
+
+def initialize_app_runtime():
+    """Perform Telegram/Core startup work exactly once, never during import."""
+    global _APP_RUNTIME_INITIALIZED
+    if _APP_RUNTIME_INITIALIZED and APP_RUNTIME_READINESS.ready:
+        return False
+    APP_RUNTIME_READINESS.begin_startup()
+    try:
+        validate_mandatory_startup_components()
+        init_db()
+        APP_RUNTIME_READINESS.run_checks()
+        APP_RUNTIME_READINESS.complete_startup()
+    except Exception as exc:
+        APP_RUNTIME_READINESS.fail_startup(exc)
+        _APP_RUNTIME_INITIALIZED = False
+        raise
+    _APP_RUNTIME_INITIALIZED = True
+    return True
+
+
+def _app_message_service_ready():
+    from nina_message_service import send_message_to_nina
+    return callable(send_message_to_nina)
+
+
+APP_RUNTIME_READINESS.register("persistence_backend", assert_backend_ready)
+APP_RUNTIME_READINESS.register(
+    "work_objects",
+    lambda: ONE_NINA_WORK_OBJECTS_READY and work_objects_persistence_health(),
+)
+APP_RUNTIME_READINESS.register(
+    "contact_identity",
+    lambda: callable(resolve_contact_identity) and callable(compact_contact_context),
+)
+APP_RUNTIME_READINESS.register("message_service", _app_message_service_ready)
+APP_RUNTIME_READINESS.register(
+    "channel_services",
+    lambda: (
+        callable(consume_telegram_token)
+        and callable(is_telegram_connection_token)
+        and callable(workspace_for_telegram_identity)
+    ),
+)
+APP_RUNTIME_READINESS.register("platform_core", initialize_platform_runtime)
+APP_RUNTIME_READINESS.register("rolepack_system", initialize_rolepack_system)
+APP_RUNTIME_READINESS.register(
+    "ready_worker_catalog", initialize_ready_worker_catalog
+)
 
 telegram_app = (
     Application.builder()
     .token(TELEGRAM_TOKEN)
     .post_init(post_init)
+    .post_shutdown(post_shutdown)
     .build()
 )
 
@@ -18605,7 +18900,14 @@ def release_one_nina_telegram_runtime_lock():
             pass
 
 
-if __name__ == "__main__":
+def run_telegram_core():
+    """Run the existing Telegram/Core startup sequence after all definitions exist."""
+    initialize_app_runtime()
+    print(
+        "runtime=telegram_core",
+        "database=ready" if assert_backend_ready() else "database=unavailable",
+    )
+
     try:
         mapping_result = migrate_canonical_work_mapping_v2()
         print("ONE NINA Canonical Work Mapping V2:", "updated=" + str(mapping_result.get("updated", 0)))
@@ -18666,9 +18968,25 @@ if __name__ == "__main__":
         )
         time.sleep(retry_seconds)
 
+    heartbeat_stop = threading.Event()
+
+    def telegram_runtime_heartbeat():
+        while not heartbeat_stop.wait(15):
+            try:
+                mark_telegram_runtime_state(True)
+            except Exception as exc:
+                print("Telegram runtime heartbeat error:", repr(exc))
+
     try:
+        mark_telegram_runtime_state(True)
+        threading.Thread(target=telegram_runtime_heartbeat, daemon=True).start()
         telegram_app.run_polling()
     finally:
+        heartbeat_stop.set()
+        try:
+            mark_telegram_runtime_state(False)
+        except Exception as exc:
+            print("Telegram runtime shutdown state error:", repr(exc))
         release_one_nina_telegram_runtime_lock()
 
 def stripe_production_checklist_answer(user_id=None):
@@ -18749,3 +19067,7 @@ def referral_start_code(text):
     except Exception:
         pass
     return ""
+
+
+if __name__ == "__main__":
+    run_telegram_core()

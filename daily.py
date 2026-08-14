@@ -1,17 +1,19 @@
 import os
 import re
 import json
-import sqlite3
 import asyncio
 import threading
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from io import BytesIO
 
-try:
-    import psycopg2
-except Exception:
-    psycopg2 = None
+from persistence_backend import (
+    DATABASE_URL,
+    DB_FILE,
+    USE_POSTGRES,
+    connect as persistence_connect,
+    psycopg2,
+)
 
 try:
     import stripe
@@ -428,96 +430,89 @@ except Exception as e:
             f"Versija: {version}"
         )
 
-# V114.0 Safe Daily Module Import
-# Ja daily.py vēl nav augšupielādēts, app.py joprojām startē ar iebūvētiem fallback tekstiem.
-try:
-    from daily import (
-        build_daily_answer,
-        build_morning_answer,
-        build_evening_answer,
-        build_goal_prompt_answer,
+# V114.0 Daily response builders.
+# daily.py owns these public functions; importing this module must not import itself.
+def build_daily_answer(name="", plan="Free", is_premium=False, goals=None, memories=None, reminders=0, version="V114.0"):
+    goals = goals or []
+    memories = memories or []
+    greeting = f"👋 Sveiks, {name}!" if name else "👋 Sveiks!"
+    premium_line = "💎 Premium aktīvs" if is_premium else "🔓 Free režīms"
+
+    if goals:
+        goal_lines = ["🎯 Šodienas galvenais mērķis:"]
+        for goal in goals:
+            goal_lines.append(f"• {goal}")
+        goals_text = "\n".join(goal_lines)
+    else:
+        goals_text = "🎯 Šodien vēl nav pierakstīts galvenais mērķis."
+
+    if memories:
+        memory_lines = ["🧠 Es atceros:"]
+        for memory in memories:
+            memory_lines.append(f"• {memory}")
+        memories_text = "\n".join(memory_lines)
+    else:
+        memories_text = "🧠 Es vēl neatceros nevienu svarīgu lietu, ko esi man uzticējis."
+
+    reminder_text = "⏰ Šobrīd tev nav aktīvu atgādinājumu." if reminders == 0 else f"⏰ Tev ir {reminders} aktīvi atgādinājumi."
+
+    return (
+        f"{greeting}\n\n"
+        "Šī ir tava diena ar Ninu. 🌅\n\n"
+        f"{goals_text}\n\n"
+        f"{memories_text}\n\n"
+        f"{reminder_text}\n\n"
+        f"{premium_line}\n"
+        f"Plāns: {plan}\n\n"
+        "Ko darām tālāk?\n"
+        "• mērķis: tavs šodienas mērķis\n"
+        "• atceries, ka...\n"
+        "• vai vienkārši pastāsti, kas šodien jāizdara.\n\n"
+        f"Versija: {version}"
     )
-except Exception as e:
-    print("daily.py imports nav pieejams, izmantoju fallback:", e)
 
-    def build_daily_answer(name="", plan="Free", is_premium=False, goals=None, memories=None, reminders=0, version="V114.0"):
-        goals = goals or []
-        memories = memories or []
-        greeting = f"👋 Sveiks, {name}!" if name else "👋 Sveiks!"
-        premium_line = "💎 Premium aktīvs" if is_premium else "🔓 Free režīms"
 
-        if goals:
-            goal_lines = ["🎯 Šodienas galvenais mērķis:"]
-            for goal in goals:
-                goal_lines.append(f"• {goal}")
-            goals_text = "\n".join(goal_lines)
-        else:
-            goals_text = "🎯 Šodien vēl nav pierakstīts galvenais mērķis."
+def build_morning_answer(name="", version="V114.0"):
+    greeting = f"🌅 Labrīt, {name}!" if name else "🌅 Labrīt!"
+    return (
+        f"{greeting}\n\n"
+        "Sākam dienu mierīgi un gudri.\n\n"
+        "Pastāsti man vienu lietu:\n"
+        "Kas šodien ir pats svarīgākais?\n\n"
+        "Es varu palīdzēt:\n"
+        "• saplānot dienu;\n"
+        "• atcerēties svarīgo;\n"
+        "• izveidot atgādinājumu;\n"
+        "• sakārtot domas, ja galvā ir haoss.\n\n"
+        "Raksti, piemēram:\n"
+        "Šodien man jāizdara...\n\n"
+        f"Versija: {version}"
+    )
 
-        if memories:
-            memory_lines = ["🧠 Es atceros:"]
-            for memory in memories:
-                memory_lines.append(f"• {memory}")
-            memories_text = "\n".join(memory_lines)
-        else:
-            memories_text = "🧠 Es vēl neatceros nevienu svarīgu lietu, ko esi man uzticējis."
 
-        reminder_text = "⏰ Šobrīd tev nav aktīvu atgādinājumu." if reminders == 0 else f"⏰ Tev ir {reminders} aktīvi atgādinājumi."
+def build_evening_answer(version="V114.0"):
+    return (
+        "🌙 Vakara pārskats ar Ninu\n\n"
+        "Pirms diena beidzas, vari man īsi uzrakstīt:\n"
+        "1. Kas šodien izdevās?\n"
+        "2. Kas palika neizdarīts?\n"
+        "3. Ko vajag atcerēties rītdienai?\n\n"
+        "Es palīdzēšu sakārtot domas un saglabāt svarīgāko.\n\n"
+        "Raksti, piemēram:\n"
+        "Šodien izdevās..., rīt jāatceras...\n\n"
+        f"Versija: {version}"
+    )
 
-        return (
-            f"{greeting}\n\n"
-            "Šī ir tava diena ar Ninu. 🌅\n\n"
-            f"{goals_text}\n\n"
-            f"{memories_text}\n\n"
-            f"{reminder_text}\n\n"
-            f"{premium_line}\n"
-            f"Plāns: {plan}\n\n"
-            "Ko darām tālāk?\n"
-            "• mērķis: tavs šodienas mērķis\n"
-            "• atceries, ka...\n"
-            "• vai vienkārši pastāsti, kas šodien jāizdara.\n\n"
-            f"Versija: {version}"
-        )
 
-    def build_morning_answer(name="", version="V114.0"):
-        greeting = f"🌅 Labrīt, {name}!" if name else "🌅 Labrīt!"
-        return (
-            f"{greeting}\n\n"
-            "Sākam dienu mierīgi un gudri.\n\n"
-            "Pastāsti man vienu lietu:\n"
-            "Kas šodien ir pats svarīgākais?\n\n"
-            "Es varu palīdzēt:\n"
-            "• saplānot dienu;\n"
-            "• atcerēties svarīgo;\n"
-            "• izveidot atgādinājumu;\n"
-            "• sakārtot domas, ja galvā ir haoss.\n\n"
-            "Raksti, piemēram:\n"
-            "Šodien man jāizdara...\n\n"
-            f"Versija: {version}"
-        )
-
-    def build_evening_answer(version="V114.0"):
-        return (
-            "🌙 Vakara pārskats ar Ninu\n\n"
-            "Pirms diena beidzas, vari man īsi uzrakstīt:\n"
-            "1. Kas šodien izdevās?\n"
-            "2. Kas palika neizdarīts?\n"
-            "3. Ko vajag atcerēties rītdienai?\n\n"
-            "Es palīdzēšu sakārtot domas un saglabāt svarīgāko.\n\n"
-            "Raksti, piemēram:\n"
-            "Šodien izdevās..., rīt jāatceras...\n\n"
-            f"Versija: {version}"
-        )
-
-    def build_goal_prompt_answer(version="V114.0"):
-        return (
-            "🎯 Šodienas mērķis\n\n"
-            "Uzraksti vienu galveno lietu, ko šodien gribi paveikt.\n\n"
-            "Piemēram:\n"
-            "mērķis: piezvanīt klientam un pabeigt piedāvājumu\n\n"
-            "Kad mērķis ir skaidrs, diena kļūst vieglāk vadāma.\n\n"
-            f"Versija: {version}"
-        )
+def build_goal_prompt_answer(version="V114.0"):
+    return (
+        "🎯 Šodienas mērķis\n\n"
+        "Uzraksti vienu galveno lietu, ko šodien gribi paveikt.\n\n"
+        "Piemēram:\n"
+        "mērķis: piezvanīt klientam un pabeigt piedāvājumu\n\n"
+        "Kad mērķis ir skaidrs, diena kļūst vieglāk vadāma.\n\n"
+        f"Versija: {version}"
+    )
 
 
 
@@ -5698,9 +5693,6 @@ TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 ADMIN_USER_IDS = os.environ.get("ADMIN_USER_IDS", "")
 
 DEFAULT_TIMEZONE = "Europe/Riga"
-DATABASE_URL = os.environ.get("DATABASE_URL")
-DB_FILE = "nina_memory.db"
-USE_POSTGRES = bool(DATABASE_URL and psycopg2)
 
 FREE_BACKUP_LIMIT = 5
 FREE_REMINDER_LIMIT = 5
@@ -5745,9 +5737,7 @@ def db_execute(cursor, sql, params=None):
 
 
 def get_db():
-    if USE_POSTGRES:
-        return psycopg2.connect(DATABASE_URL)
-    return sqlite3.connect(DB_FILE)
+    return persistence_connect()
 
 
 def init_db():
@@ -16031,7 +16021,17 @@ def home():
     return "Nina7727 V114.0 Premium Sales Text darbojas! DB: " + ("PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
 
-init_db()
+_DAILY_RUNTIME_INITIALIZED = False
+
+
+def initialize_daily_runtime():
+    """Perform legacy Daily runtime startup work exactly once, never during import."""
+    global _DAILY_RUNTIME_INITIALIZED
+    if _DAILY_RUNTIME_INITIALIZED:
+        return False
+    init_db()
+    _DAILY_RUNTIME_INITIALIZED = True
+    return True
 
 telegram_app = (
     Application.builder()
@@ -16054,6 +16054,7 @@ def run_flask_server():
 
 
 if __name__ == "__main__":
+    initialize_daily_runtime()
     print("Nina7727 V114.0 Premium Sales Text darbojas...", "PostgreSQL" if USE_POSTGRES else "SQLite fallback")
 
     # Stripe webhook vajag HTTP serveri. Telegram botam vienlaikus vajag polling.

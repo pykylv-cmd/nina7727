@@ -8,12 +8,14 @@ Work Engine turns canonical Work Objects into real work actions.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import json
 import re
 from typing import Any, Dict, List, Optional
 
 from reply_builder import build_client_estimate_draft, build_client_reply_draft
-from work_objects import get_work_object, list_work_objects, update_work_object
+from task_engine import build_task_title, detect_reminder_schedules, detect_task
+from work_objects import create_work_object, enrich_canonical_business_metadata, get_work_object, list_work_objects, update_work_object
 
 try:
     from work_objects import append_client_conversation_turn as _append_client_conversation_turn
@@ -565,12 +567,150 @@ def execute_natural_work_request(
     user_text: str,
     workspace_id: str = "demo_small_business",
     channel: str = "telegram",
+    contact_id: str = "",
+    canonical_client_id: str = "",
+    reminder_requested: bool = False,
+    delivery_recipient: str = "",
 ) -> Optional[Dict[str, Any]]:
     """Execute a natural work command through the same ONE NINA Work Engine.
 
     Channel is context only. Telegram, WhatsApp and future surfaces must call the
     same function instead of building channel-specific business brains.
     """
+    if reminder_requested:
+        task = detect_task(user_text, reminder_requested=True)
+        schedules = detect_reminder_schedules(user_text, reminder_requested=True)
+        if task and len(schedules) == 1 and _clean(task.get("reminder_at")):
+            schedules[0]["reminder_at"] = _clean(task.get("reminder_at"))
+        if task and schedules:
+            default_title = _clean(build_task_title(user_text))
+            if not default_title and not any(_clean(item.get("reminder_text")) for item in schedules):
+                return {"ok": False, "handled": True, "error": "reminder_text_missing", "text": "Atgādinājuma teksts nav saprotams."}
+            parsed_client_name = _clean(task.get("client"))
+            work_client_id = _clean(canonical_client_id) or parsed_client_name
+            created = []
+            for schedule in schedules:
+                title = _clean(schedule.get("reminder_text")) or default_title
+                if not title:
+                    return {"ok": False, "handled": True, "error": "reminder_text_missing", "text": "Atgādinājuma teksts nav saprotams."}
+                reminder_at = _clean(schedule.get("reminder_at"))
+                recurrence = _clean(schedule.get("recurrence"))
+                identity = "\0".join((
+                    _clean(workspace_id), _clean(contact_id),
+                    title.casefold(), reminder_at, recurrence,
+                ))
+                source_key = "natural-reminder:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
+                metadata = enrich_canonical_business_metadata(
+                    raw_text=user_text,
+                    title=title,
+                    object_type="task",
+                    client_id=parsed_client_name,
+                    due_date=_clean(task.get("deadline")),
+                    metadata={
+                        "raw_text": _clean(user_text),
+                        "reminder_text": title,
+                        "source": "natural_work_request",
+                        "intent": "create_reminder",
+                        "contact_id": _clean(contact_id),
+                        "delivery_channel": _clean(channel) or "unknown",
+                        "delivery_recipient": _clean(delivery_recipient),
+                        "canonical_client_id": _clean(canonical_client_id),
+                        "reminder_at": reminder_at,
+                        "reminder_state": "scheduled",
+                        "recurrence": recurrence,
+                        "timezone": _clean(schedule.get("timezone")) or "Europe/Riga",
+                        "whatsapp_recipient_jid": (
+                            _clean(delivery_recipient)
+                            if _clean(channel) in {"whatsapp_company", "company_whatsapp"}
+                            else ""
+                        ),
+                    },
+                )
+                created.append(create_work_object(
+                    object_type="task",
+                    title=title,
+                    workspace_id=workspace_id,
+                    client_id=work_client_id,
+                    priority=_clean(task.get("priority")) or "normal",
+                    due_date=_clean(task.get("deadline")),
+                    metadata=metadata,
+                    origin_channel=_clean(channel) or "unknown",
+                    origin_user_id=(
+                        _clean(delivery_recipient)
+                        if _clean(channel) == "telegram" and _clean(delivery_recipient)
+                        else _clean(contact_id)
+                    ),
+                    source_key=source_key,
+                ))
+            if not created:
+                return {"ok": False, "handled": True, "error": "reminder_persistence_failed", "text": "Atgādinājumu neizdevās saglabāt."}
+            summary = ", ".join(
+                f"{(obj.metadata or {}).get('reminder_at') or ''}: {(obj.metadata or {}).get('reminder_text') or obj.title}"
+                for obj in created
+            )
+            return {
+                "ok": True,
+                "handled": True,
+                "action": "create_reminders",
+                "object_id": created[0].object_id,
+                "object_ids": [obj.object_id for obj in created],
+                "objects": created,
+                "channel": _clean(channel) or "unknown",
+                "text": f"Atgādinājumi saglabāti — {summary}",
+                "reminder_at": _clean((created[0].metadata or {}).get("reminder_at")),
+            }
+
+    task = (
+        detect_task(user_text, reminder_requested=True)
+        if reminder_requested else detect_task(user_text)
+    )
+    if task:
+        title = _clean(task.get("title"))
+        due_date = _clean(task.get("deadline"))
+        parsed_client_name = _clean(task.get("client"))
+        work_client_id = _clean(canonical_client_id) or parsed_client_name
+        metadata = enrich_canonical_business_metadata(
+            raw_text=user_text,
+            title=title,
+            object_type="task",
+            client_id=parsed_client_name,
+            due_date=due_date,
+            metadata={
+                "raw_text": _clean(user_text),
+                "source": "natural_work_request",
+                "intent": "create_task",
+                "contact_id": _clean(contact_id),
+                "canonical_client_id": _clean(canonical_client_id),
+                "reminder_at": _clean(task.get("reminder_at")),
+                "reminder_state": "scheduled" if _clean(task.get("reminder_at")) else "",
+                "whatsapp_recipient_jid": (
+                    _clean(delivery_recipient)
+                    if _clean(channel) in {"whatsapp_company", "company_whatsapp"}
+                    else ""
+                ),
+            },
+        )
+        obj = create_work_object(
+            object_type="task",
+            title=title,
+            workspace_id=workspace_id,
+            client_id=work_client_id,
+            priority=_clean(task.get("priority")) or "normal",
+            due_date=due_date,
+            metadata=metadata,
+            origin_channel=_clean(channel) or "unknown",
+            origin_user_id=_clean(contact_id),
+        )
+        return {
+            "ok": True,
+            "handled": True,
+            "action": "create_task",
+            "object_id": obj.object_id,
+            "channel": _clean(channel) or "unknown",
+            "text": f"Uzdevums izveidots: {obj.title}",
+            "reminder_at": _clean(task.get("reminder_at")),
+        }
+
     resolved = resolve_canonical_estimate_for_request(user_text, workspace_id=workspace_id)
     if not resolved.get("matched"):
         return None

@@ -3,10 +3,272 @@
 # Web service start command: python web_app.py
 # Telegram service start command stays: python app.py
 
+import json
+import logging
+import base64
+import binascii
+from functools import wraps
 import os
-from datetime import datetime
+import hashlib
+import hmac
+import secrets
+import re
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from urllib.parse import quote_plus, unquote_plus
-from flask import Flask, Response, redirect, request
+from flask import Flask, Response, g, has_request_context, jsonify, redirect, request
+from developer_control import (
+    authorize_agent as authorize_developer_agent,
+    claim_job as claim_developer_job,
+    complete_job as complete_developer_job,
+    connection_status as developer_connection_status,
+    create_approved_patch_job as create_developer_approval_job,
+    create_approved_release_job as create_developer_release_job,
+    create_job as create_developer_job,
+    discard_release_candidate as discard_developer_release,
+    heartbeat as developer_heartbeat,
+    list_jobs as list_developer_jobs,
+    record_verified_lesson as record_developer_lesson,
+    retrieve_relevant_lessons as retrieve_developer_lessons,
+    select_release_services as select_developer_release_services,
+    write_access_status as developer_write_access_status,
+)
+from developer_router import (
+    developer_command as _developer_command,
+    developer_intents as _developer_intents,
+    developer_investigation_plan as _developer_investigation_plan,
+    resolve_developer_targets as _resolve_developer_targets,
+    web_research_source_links_proposal as _web_research_source_links_proposal,
+)
+from nina_message_service import NinaMessageEnvelope, WORKSPACE_ID as NINA_WEB_WORKSPACE_ID, generate_with_nina, load_channel_conversation, load_web_conversation, route_nina_message, save_channel_turn, send_message_to_nina
+from voice_engine import transcribe_audio_with_openai
+from channel_connections import claim_channel_message, consume_whatsapp_onboarding_state, create_telegram_token, create_whatsapp_onboarding_state, disconnect as disconnect_channel, get_connection, resolve_channel_connection_truth, set_connection_for_test, update_whatsapp_verification
+from channel_layer import (
+    CHANNEL_TYPES,
+    ChannelLayerError,
+    create_connection as create_layer_connection,
+    create_outbound as create_channel_outbound,
+    ensure_web_connection,
+    get_message as get_channel_message,
+    ingest_inbound as ingest_channel_inbound,
+    initialize_channel_layer,
+    list_connections as list_layer_connections,
+    list_events as list_channel_events,
+    list_messages as list_channel_messages,
+    update_connection as update_layer_connection,
+)
+from whatsapp_channel import (
+    WhatsAppProviderError,
+    complete_embedded_signup,
+    embedded_signup_public_config,
+    parse_inbound_text,
+    resolve_webhook_verification,
+    resolve_workspace_for_phone_number,
+    send_whatsapp_message,
+    verify_webhook_signature,
+)
+from personal_whatsapp import (
+    CHANNEL as PERSONAL_WHATSAPP_CHANNEL, accept_inbound as accept_personal_whatsapp_inbound,
+    authorize_bridge, bridge_request as personal_whatsapp_bridge_request,
+    create_pairing_session as create_personal_whatsapp_pairing,
+    delete_auth_record as delete_personal_whatsapp_auth,
+    disconnect_personal as disconnect_personal_whatsapp,
+    load_auth_records as load_personal_whatsapp_auth,
+    list_connected_workspaces as list_connected_personal_whatsapp_workspaces,
+    mark_connected as mark_personal_whatsapp_connected,
+    pairing_is_active as personal_whatsapp_pairing_is_active,
+    record_outbound_receipt as record_personal_whatsapp_outbound_receipt,
+    store_auth_record as store_personal_whatsapp_auth,
+    store_auth_records as store_personal_whatsapp_auth_records,
+)
+from ninaos_number import (
+    CHANNEL as NINAOS_NUMBER_CHANNEL,
+    number_for_phone_id as ninaos_number_for_phone_id,
+    primary_number as primary_ninaos_number,
+    public_contact as public_ninaos_contact,
+    resolve_sender_identity as resolve_ninaos_sender_identity,
+    send_reply as send_ninaos_number_reply,
+    verify_signature as verify_ninaos_number_signature,
+    verify_token as verify_ninaos_number_token,
+    resolve_channel_identity as resolve_ninaos_channel_identity,
+)
+from company_whatsapp import (
+    CHANNEL as COMPANY_WHATSAPP_CHANNEL,
+    accept_inbound as accept_company_whatsapp_inbound,
+    configured_number as configured_company_whatsapp_number,
+    configured_workspace as configured_company_whatsapp_workspace,
+    create_pairing_session as create_company_whatsapp_pairing,
+    delete_auth_record as delete_company_whatsapp_auth,
+    disconnect_company as disconnect_company_whatsapp,
+    list_connected_workspaces as list_connected_company_whatsapp_workspaces,
+    load_auth_records as load_company_whatsapp_auth,
+    load_auth_records_with_diagnostics as load_company_whatsapp_auth_with_diagnostics,
+    mark_connected as mark_company_whatsapp_connected,
+    mark_runtime_state as mark_company_whatsapp_runtime_state,
+    pairing_is_active as company_whatsapp_pairing_is_active,
+    sender_digits as company_whatsapp_sender_digits,
+    store_auth_record as store_company_whatsapp_auth,
+)
+from nina_media_service import MediaValidationError, process_media_message
+from admin_auth import (
+    ADMIN_COOKIE, ADMIN_ROLE, CLIENT_ROLE, bootstrap_configured,
+    create_admin_session, verify_admin_session, verify_bootstrap_token,
+)
+from contact_identity import compact_contact_context, list_contacts, resolve_contact_identity
+from client_identity import client_context, get_or_create_client_mapping, list_client_mappings
+from persistence_backend import (
+    DATABASE_URL as PLATFORM_DATABASE_URL,
+    DATABASE_URL_SOURCE as PLATFORM_DATABASE_URL_SOURCE,
+    HOSTED as NINA_HOSTED_RUNTIME,
+    POSTGRES_URL_ENV_NAMES,
+    assert_backend_ready as assert_platform_persistence_ready,
+    safe_backend_diagnostics,
+    safe_table_count,
+)
+from runtime_readiness import get_runtime_readiness
+from reminder_delivery import complete_reminder, snooze_reminder
+from deployment_compatibility import DeploymentCompatibilityContract
+from platform_core import initialize_platform_runtime
+from rolepack_system import initialize_rolepack_system
+from ready_worker_catalog import initialize_ready_worker_catalog
+from billing_service import (
+    BillingError, BillingLimitError, change_workspace_plan, get_effective_entitlements,
+    get_workspace_subscription, initialize_billing_service,
+    list_billing_events, list_invoices, list_plans, list_usage, reserve_usage,
+    set_override, deactivate_override, set_subscription_status,
+)
+from permission_engine import get_permission_rule
+from agent_assignment import (
+    AgentAssignmentConflictError,
+    AgentAssignmentError,
+    AgentAssignmentNotFoundError,
+    AgentAssignmentTransitionError,
+    AgentAssignmentValidationError,
+    activate_assignment,
+    archive_assignment,
+    create_assignment,
+    get_assignment,
+    get_workspace_assignment,
+    initialize_agent_assignment_service,
+    list_workspace_assignment_events,
+    list_tenant_assignments,
+    suspend_assignment,
+    update_assignment,
+)
+from knowledge_vault import (
+    DEFAULT_LIST_LIMIT,
+    KnowledgeVaultConflictError,
+    KnowledgeVaultError,
+    KnowledgeVaultNotFoundError,
+    KnowledgeVaultTransitionError,
+    KnowledgeVaultValidationError,
+    activate_knowledge_item,
+    archive_knowledge_item,
+    create_knowledge_item,
+    create_knowledge_version,
+    get_knowledge_item,
+    initialize_knowledge_vault,
+    list_knowledge_events,
+    list_knowledge_versions,
+    list_tenant_knowledge,
+    update_knowledge_item,
+    update_draft,
+)
+from universal_work_objects import (
+    DEFAULT_LIST_LIMIT as WORK_DEFAULT_LIST_LIMIT,
+    UniversalWorkConflictError,
+    UniversalWorkError,
+    UniversalWorkNotFoundError,
+    UniversalWorkTransitionError,
+    UniversalWorkValidationError,
+    archive_work_object as archive_universal_work_object,
+    assign_work_object,
+    attach_parent,
+    cancel_work_object,
+    complete_work_object,
+    create_work_object as create_universal_work_object,
+    detach_parent,
+    get_work_object as get_universal_work_object,
+    initialize_universal_work_objects,
+    list_children,
+    list_work_events,
+    list_work_objects as list_universal_work_objects,
+    set_priority,
+    transition_work_object,
+    unassign_work_object,
+    update_work_object as update_universal_work_object,
+)
+from initiative_engine import initiative_queue
+from reply_builder import build_reply_queue
+from approval_layer import (
+    ApprovalError,
+    ApprovalValidationError,
+    decide as decide_approval,
+    ensure_approval,
+    list_approvals,
+    snooze_one_hour,
+    snooze_tomorrow,
+    wake_expired,
+)
+from execution_layer import (
+    ALLOWLIST as EXECUTION_ALLOWLIST,
+    ExecutionError,
+    execute_approved,
+    get_execution,
+    list_executions,
+)
+from autonomy_framework import (
+    AutonomyError,
+    MODES as AUTONOMY_MODES,
+    get_profile as get_autonomy_profile,
+    list_events as list_autonomy_events,
+    set_mode as set_autonomy_mode,
+)
+from rolepack_system import (
+    RolePackError,
+    active_rolepack,
+    get_workspace_rolepack,
+    list_workspace_rolepack_events,
+    set_workspace_rolepack,
+)
+from worker_catalog import (
+    WorkerCatalogError,
+    active_worker,
+    get_workspace_worker,
+    list_workers,
+    list_workspace_worker_events,
+    set_workspace_worker,
+)
+
+logger = logging.getLogger(__name__)
+
+_WEB_RUNTIME_INITIALIZED = False
+WEB_RUNTIME_READINESS = get_runtime_readiness("web")
+
+
+def initialize_web_runtime():
+    """Validate all mandatory Web capabilities once before serving customers."""
+    global _WEB_RUNTIME_INITIALIZED
+    if _WEB_RUNTIME_INITIALIZED and WEB_RUNTIME_READINESS.ready:
+        return False
+    WEB_RUNTIME_READINESS.begin_startup()
+    try:
+        WEB_RUNTIME_READINESS.run_checks()
+        WEB_RUNTIME_READINESS.complete_startup()
+    except Exception as exc:
+        WEB_RUNTIME_READINESS.fail_startup(exc)
+        _WEB_RUNTIME_INITIALIZED = False
+        raise
+    _WEB_RUNTIME_INITIALIZED = True
+    return True
+
+
+def _web_persistence_ready():
+    if NINA_HOSTED_RUNTIME:
+        assert_platform_persistence_ready()
+    else:
+        assert_platform_persistence_ready()
+    return True
 
 # ONE NINA V51.3 — shared canonical Work Object read bridge.
 # Web does not classify Telegram text here. It reads the same persistent
@@ -63,7 +325,37 @@ except Exception as e:
         return {"ok": False, "error": "estimate_approval_unavailable"}
 
 WEB_APP_VERSION = "Web App V51.8.1 — ONE NINA Estimate Approval V1 Release-Safe"
+WEB_DEPLOYMENT_COMPATIBILITY = DeploymentCompatibilityContract(
+    application_version=WEB_APP_VERSION,
+    service_role="secure-rebirth:web-core",
+)
 app = Flask(__name__)
+
+
+def _channel_csrf_key():
+    seed = (
+        os.environ.get("NINA_WEB_WORKSPACE_COOKIE_SECRET")
+        or os.environ.get("NINA_CHANNEL_CREDENTIAL_KEY")
+        or ""
+    ).strip()
+    if not seed:
+        return secrets.token_bytes(32)
+    return hmac.new(
+        seed.encode(),
+        b"nina-web-channel-csrf-v1",
+        hashlib.sha256,
+    ).digest()
+
+
+_CHANNEL_CSRF_SECRET = _channel_csrf_key()
+_WORKSPACE_COOKIE = "nina_workspace"
+_WORKSPACE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
+WEB_VOICE_MAX_BYTES = 10 * 1024 * 1024
+WEB_VOICE_TRANSCRIPTION_MODEL = "gpt-4o-transcribe"
+WEB_VOICE_MIME_TYPES = {
+    "audio/aac", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav",
+    "audio/webm", "audio/x-m4a", "audio/x-wav", "video/webm",
+}
 
 # V47.1 safe workspace-object surface polish.
 # This writes only safe web workspace-object snapshots into memory_backups and does NOT touch Telegram app.py.
@@ -81,6 +373,111 @@ DRAFT_REVIEW_STATES = {}
 DRAFT_REVIEW_STATES_LOADED = False
 TELEGRAM_SEND_PREP_STATES = {}
 TELEGRAM_SEND_PREP_STATES_LOADED = False
+
+WEB_RUNTIME_READINESS.register("persistence_backend", _web_persistence_ready)
+WEB_RUNTIME_READINESS.register(
+    "deployment_compatibility",
+    WEB_DEPLOYMENT_COMPATIBILITY.assert_compatible,
+)
+WEB_RUNTIME_READINESS.register(
+    "work_objects",
+    lambda: ONE_NINA_WORK_READ_READY and one_nina_work_persistence_health(),
+)
+WEB_RUNTIME_READINESS.register(
+    "contact_identity",
+    lambda: callable(resolve_contact_identity) and callable(list_contacts),
+)
+WEB_RUNTIME_READINESS.register(
+    "message_service",
+    lambda: callable(send_message_to_nina) and callable(load_channel_conversation),
+)
+WEB_RUNTIME_READINESS.register(
+    "channel_services",
+    lambda: (
+        callable(get_connection)
+        and callable(list_connected_personal_whatsapp_workspaces)
+        and callable(list_connected_company_whatsapp_workspaces)
+        and initialize_channel_layer()
+    ),
+)
+WEB_RUNTIME_READINESS.register("platform_core", initialize_platform_runtime)
+WEB_RUNTIME_READINESS.register("rolepack_system", initialize_rolepack_system)
+WEB_RUNTIME_READINESS.register(
+    "ready_worker_catalog", initialize_ready_worker_catalog
+)
+WEB_RUNTIME_READINESS.register(
+    "agent_assignment", initialize_agent_assignment_service
+)
+WEB_RUNTIME_READINESS.register("knowledge_vault", initialize_knowledge_vault)
+WEB_RUNTIME_READINESS.register(
+    "universal_work_objects", initialize_universal_work_objects
+)
+WEB_RUNTIME_READINESS.register("billing", initialize_billing_service)
+WEB_RUNTIME_READINESS.register(
+    "vision_document_intelligence",
+    lambda: __import__("file_intelligence").readiness_status(),
+)
+
+
+@app.before_request
+def require_runtime_readiness():
+    if request.path in {"/live", "/ready", "/internal/runtime/compatibility"}:
+        return None
+    if not WEB_RUNTIME_READINESS.ready:
+        try:
+            initialize_web_runtime()
+        except Exception:
+            return jsonify({
+                "ok": False,
+                "ready": False,
+                "error": "runtime_not_ready",
+            }), 503
+    if not WEB_RUNTIME_READINESS.ready:
+        return jsonify({
+            "ok": False,
+            "ready": False,
+            "error": "runtime_not_ready",
+        }), 503
+
+
+_COOKIE_MUTATION_PREFIXES = (
+    "/agent-assignments",
+    "/knowledge-vault/items",
+    "/work-objects",
+    "/channel-layer",
+)
+
+
+def _request_origin():
+    origin = str(request.headers.get("Origin") or "").strip().rstrip("/")
+    if not origin:
+        return ""
+    return origin
+
+
+def _expected_request_origin():
+    scheme = (
+        str(request.headers.get("X-Forwarded-Proto") or request.scheme)
+        .split(",", 1)[0].strip().lower()
+    )
+    return f"{scheme}://{request.host}".rstrip("/")
+
+
+@app.before_request
+def protect_cookie_json_mutations():
+    if request.method not in {"POST", "PATCH", "PUT", "DELETE"}:
+        return None
+    if not request.path.startswith(_COOKIE_MUTATION_PREFIXES):
+        return None
+    fetch_site = str(request.headers.get("Sec-Fetch-Site") or "").lower()
+    if fetch_site in {"cross-site", "same-site"}:
+        return jsonify({"ok": False, "error": "cross_origin_forbidden"}), 403
+    origin = _request_origin()
+    if origin and not hmac.compare_digest(origin, _expected_request_origin()):
+        return jsonify({"ok": False, "error": "cross_origin_forbidden"}), 403
+    return None
+
+
 TELEGRAM_RECIPIENT_STATES = {}
 TELEGRAM_RECIPIENT_STATES_LOADED = False
 TELEGRAM_CLIENT_CONTACT_MAPPINGS = {}
@@ -96,9 +493,25 @@ def one_nina_canonical_work_objects(limit=200):
     if not ONE_NINA_WORK_READ_READY:
         return []
     try:
-        raw_objects = one_nina_list_work_objects(
-            workspace_id="demo_small_business",
-            limit=max(1, min(int(limit or 200) * 4, 4000)),
+        raw_objects = []
+        workspaces = ["demo_small_business"]
+        try:
+            company_workspace = configured_company_whatsapp_workspace()
+            if company_workspace not in workspaces:
+                workspaces.append(company_workspace)
+        except Exception:
+            pass
+        for workspace_id in workspaces:
+            raw_objects.extend(one_nina_list_work_objects(
+                workspace_id=workspace_id,
+                limit=max(1, min(int(limit or 200) * 4, 4000)),
+            ))
+        raw_objects.sort(
+            key=lambda obj: (
+                str(getattr(obj, "updated_at", "") or ""),
+                str(getattr(obj, "created_at", "") or ""),
+            ),
+            reverse=True,
         )
         production_objects = []
         for obj in raw_objects:
@@ -265,19 +678,24 @@ def one_nina_client_work_map(limit=2000):
     """
     grouped = {}
     for obj in one_nina_canonical_work_objects(limit=limit):
-        client_name = one_nina_normalize_client_name(
+        client_id = one_nina_normalize_client_name(
             getattr(obj, "client_id", "") or ""
         )
-        if not client_name:
+        if not client_id:
             continue
 
-        key = client_name.casefold()
+        key = client_id.casefold()
         if key not in grouped:
+            workspace_id = str(getattr(obj, "workspace_id", "") or "")
+            context = client_context(workspace_id, client_id) or {}
             grouped[key] = {
-                "name": client_name,
+                "client_id": client_id,
+                "name": context.get("display_name") or (
+                    "WhatsApp client" if client_id.startswith("client_") else client_id
+                ),
                 "objects": [],
                 "types": {},
-                "channels": set(),
+                "channels": set(context.get("channels") or []),
             }
 
         entry = grouped[key]
@@ -302,8 +720,8 @@ def one_nina_client_work_map(limit=2000):
     return grouped
 
 
-def one_nina_find_client_profile(client_name):
-    wanted = one_nina_normalize_client_name(client_name).casefold()
+def one_nina_find_client_profile(client_id):
+    wanted = one_nina_normalize_client_name(client_id).casefold()
     return one_nina_client_work_map().get(wanted)
 
 
@@ -339,7 +757,7 @@ def one_nina_client_rows(empty_text="No canonical clients yet."):
             f"<span class='muted'>canonical work: {len(objects)} · {html_escape(type_summary)}</span>"
             f"<span class='muted'>{html_escape(latest_titles or channel_summary)}</span>"
             "</div>"
-            f"<a class='pill' href='{q('/clients/' + _client_profile_slug(profile['name']))}'>Open client profile</a>"
+            f"<a class='pill' href='{q('/clients/' + _client_profile_slug(profile['client_id']))}'>Open client profile</a>"
             "</div>"
         )
     return rows
@@ -574,6 +992,7 @@ def q(path):
 def tx(key, lang=None):
     lang = lang or current_language()
     d = {
+        "talk_to_nina": {"en": "Talk to Nina", "lv": "Runā ar Ninu", "ru": "Поговорить с Ниной"},
         "search": {"en": "Search anything...", "lv": "Meklēt jebko...", "ru": "Искать..."},
         "dashboard": {"en": "Dashboard", "lv": "Panelis", "ru": "Панель"},
         "workers": {"en": "Workers", "lv": "Darbinieki", "ru": "Работники"},
@@ -799,7 +1218,7 @@ def build_clients_from_objects(objects):
 
 def load_live_objects_from_app_db():
     objects = []
-    database_url = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or ""
+    database_url = PLATFORM_DATABASE_URL
     if not database_url:
         return objects
     try:
@@ -967,23 +1386,8 @@ def db_url_info():
     a plugin. This helper is intentionally broad and read-only. It never prints
     secret values, only the source key and a masked URL.
     """
-    candidates = [
-        "DATABASE_URL",
-        "POSTGRES_URL",
-        "POSTGRES_PRIVATE_URL",
-        "POSTGRES_PUBLIC_URL",
-        "DATABASE_PRIVATE_URL",
-        "DATABASE_PUBLIC_URL",
-        "PGURL",
-        "PG_URL",
-        "RAILWAY_DATABASE_URL",
-        "RAILWAY_POSTGRES_URL",
-        "POSTGRES_CONNECTION_URL",
-        "DATABASE_CONNECTION_URL",
-    ]
-
     found = []
-    for key in candidates:
+    for key in POSTGRES_URL_ENV_NAMES:
         value = os.environ.get(key)
         if value:
             found.append({"key": key, "safe": mask_db_url(value), "length": len(value)})
@@ -994,13 +1398,8 @@ def db_url_info():
         if any(token in k.upper() for token in ["DATABASE", "POSTGRES", "PG", "RAILWAY"])
     ])
 
-    url = ""
-    source = ""
-    if found:
-        # Prefer DATABASE_URL when it exists, otherwise use the first available candidate.
-        preferred = next((x for x in found if x["key"] == "DATABASE_URL"), found[0])
-        source = preferred["key"]
-        url = os.environ.get(source) or ""
+    url = PLATFORM_DATABASE_URL
+    source = PLATFORM_DATABASE_URL_SOURCE
 
     return {
         "url": url,
@@ -3940,11 +4339,7 @@ def load_workspace_data():
     ]
     objects = []
     try:
-        from work_objects import list_work_objects, seed_demo_work_objects
-        try:
-            seed_demo_work_objects()
-        except Exception:
-            pass
+        from work_objects import list_work_objects
         try:
             objects = list_work_objects(workspace_id="demo_small_business") or []
         except TypeError:
@@ -4001,26 +4396,36 @@ def nina_logo_html(size="small"):
 
 def css():
     return """
+.chat-layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:18px}.chat-shell{height:calc(100vh - 130px);min-height:520px;max-height:820px;display:flex;flex-direction:column;overflow:hidden}.chat-head{display:flex;align-items:center;gap:14px;padding-bottom:18px;border-bottom:1px solid var(--line2);flex:0 0 auto}.chat-stream{display:flex;flex:1 1 auto;flex-direction:column;gap:14px;min-height:0;overflow-y:auto;padding:22px 4px}.chat-message{max-width:78%;padding:14px 17px;border-radius:18px;line-height:1.55;white-space:pre-wrap}.chat-message.user{align-self:flex-end;background:linear-gradient(135deg,#187fff,#6544ff)}.chat-message.nina{align-self:flex-start;background:rgba(255,255,255,.07);border:1px solid var(--line)}.chat-message small{display:block;margin-top:7px;color:#bfd0ef}.chat-compose{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px;flex:0 0 auto;margin-top:0;padding-top:16px;border-top:1px solid var(--line2);background:rgba(9,12,24,.96)}.chat-input{min-width:0}.chat-compose textarea{width:100%;min-width:0;min-height:72px;max-height:160px;resize:vertical;border:1px solid var(--line);border-radius:16px;background:rgba(5,9,20,.62);color:var(--text);padding:15px;font:inherit}.chat-compose .form-actions{margin:0;flex-wrap:nowrap}.chat-compose .btn{min-width:96px;min-height:48px}.voice-btn{min-width:52px!important;font-size:20px;cursor:pointer}.voice-btn[hidden]{display:none!important}.voice-btn.recording{background:#d83b58;border-color:#ff7890}.voice-status{min-height:18px;margin-top:6px;color:var(--muted);font-size:12px;font-weight:800}.voice-status[data-state=recording]{color:#ff9aad}.voice-status[data-state=processing]{color:#8fe7ff}.voice-status[data-state=error]{color:#ffb08f}.channel-card{display:flex;justify-content:space-between;gap:10px;padding:14px 0;border-bottom:1px solid var(--line2)}.channel-card:last-child{border-bottom:0}.channel-state{font-size:12px;font-weight:950;color:var(--green)}.channel-state.next{color:#ffd057}@media(max-width:1100px){.chat-layout{grid-template-columns:1fr}.chat-shell{height:min(720px,calc(100vh - 40px));min-height:500px}}@media(max-width:640px){.chat-message{max-width:92%}.chat-shell{height:auto;min-height:520px;max-height:none}.chat-stream{min-height:260px;max-height:48vh}.chat-compose{grid-template-columns:1fr}.chat-compose .form-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));flex-wrap:wrap}.chat-compose .btn{width:100%;min-width:0}}
 :root{--line:rgba(120,153,255,.26);--line2:rgba(255,255,255,.08);--text:#f8fbff;--muted:#a8b7d4;--green:#34e6a4;--shadow:0 30px 100px rgba(0,0,0,.36)}*{box-sizing:border-box}body{margin:0;min-height:100vh;color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif;background:radial-gradient(circle at 13% 14%,rgba(30,105,255,.20),transparent 25%),radial-gradient(circle at 80% 12%,rgba(80,70,255,.20),transparent 28%),linear-gradient(135deg,#080910 0%,#0a0d19 48%,#05060b 100%)}body:before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(rgba(255,255,255,.026) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.021) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(to bottom,rgba(0,0,0,.5),transparent 70%)}a{color:inherit;text-decoration:none}.layout{display:grid;grid-template-columns:210px 1fr;min-height:100vh}.sidebar{position:sticky;top:0;height:100vh;padding:22px 14px;background:radial-gradient(circle at 28px 28px,rgba(44,142,255,.24),transparent 75px),linear-gradient(180deg,rgba(18,22,37,.86),rgba(8,9,15,.83));border-right:1px solid var(--line2);backdrop-filter:blur(16px)}.brand{display:flex;align-items:center;gap:10px;margin:0 6px 28px;font-weight:950}.brand-word span:last-child{color:#2a91ff}
 .nina-logo{position:relative;border-radius:50%;overflow:hidden;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.9),transparent 5%),radial-gradient(circle at 65% 25%,rgba(84,232,255,.9),transparent 10%),radial-gradient(circle at 50% 50%,#1de0ff 0%,#2358ff 38%,#7f45ff 72%,#11152a 100%);box-shadow:0 0 24px rgba(49,140,255,.52),inset 0 0 30px rgba(255,255,255,.12)}.nina-logo.small{width:34px;height:34px}.nina-logo.hero{width:156px;height:156px;flex:0 0 156px}.dot-grid{position:absolute;inset:0;background:radial-gradient(circle,rgba(255,255,255,.86) 0 2px,transparent 2.8px);background-size:16px 16px;transform:rotate(-18deg) scale(1.1);opacity:.58;mask-image:radial-gradient(circle,#000 62%,transparent 70%)}.orbit{position:absolute;left:-22%;right:-22%;top:44%;height:2px;background:rgba(255,255,255,.45);border-radius:999px;transform:rotate(-16deg);box-shadow:0 0 14px rgba(90,190,255,.8)}.orbit-b{transform:rotate(28deg);opacity:.28;top:54%}.nav{display:flex;flex-direction:column;gap:7px}.nav-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:13px;color:#dce7ff;font-size:14px;border:1px solid transparent}.nav-item:hover{background:rgba(255,255,255,.06)}.nav-item.active{background:linear-gradient(90deg,rgba(28,128,255,.95),rgba(90,63,255,.86));color:#fff;box-shadow:0 14px 32px rgba(23,109,255,.23)}.new{margin-left:auto;font-size:10px;padding:2px 7px;border-radius:999px;background:#5638ff}.user{position:absolute;bottom:18px;left:14px;right:14px;border:1px solid var(--line);background:rgba(255,255,255,.045);border-radius:16px;padding:12px;color:var(--muted);font-size:13px}.user b{color:#fff}
-.main{padding:22px 26px 40px;max-width:1460px;width:100%;margin:0 auto}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.search{width:min(520px,55vw);border:1px solid var(--line);border-radius:18px;padding:14px 18px;color:var(--muted);background:rgba(16,24,45,.72);box-shadow:inset 0 0 0 1px rgba(255,255,255,.03),0 12px 34px rgba(0,0,0,.18)}.icons{display:flex;gap:10px;align-items:center}.icon{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.10)}.avatar{background:linear-gradient(135deg,#7c43ff,#dc42ff);font-weight:950}.lang-switch{display:flex;gap:6px}.lang-switch a{font-size:12px;font-weight:950;padding:8px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.06);color:#dbe8ff}.lang-switch a.active{background:linear-gradient(90deg,#168dff,#6443ff);color:#fff}.grid{display:grid;gap:18px}.hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:18px}.card{background:linear-gradient(180deg,rgba(26,36,68,.72),rgba(9,12,24,.70)),radial-gradient(circle at 25% 15%,rgba(40,140,255,.12),transparent 38%);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}.card-pad{padding:24px}.hero-card{min-height:390px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}.hero-lockup{display:flex;align-items:center;justify-content:center;gap:26px}.hero-title{font-size:78px;line-height:.9;font-weight:1000;letter-spacing:-5px;text-shadow:0 10px 40px rgba(0,0,0,.5)}.hero-title span{color:#2493ff}.subtitle{color:#dbe8ff;font-weight:900;letter-spacing:2px;font-size:13px;margin-top:10px}.bigline{margin-top:34px;font-size:25px;line-height:1.35;font-weight:950}.trust{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:24px}.trust span{font-size:12px;font-weight:900;padding:7px 12px;border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:999px}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.kpi{display:block;padding:18px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.025));border-radius:18px;min-height:118px}.kpi small{color:#dbe7ff;font-weight:900}.kpi strong{display:block;font-size:38px;margin:9px 0 2px}.kpi em{color:#71e9ff;font-style:normal;font-size:13px;font-weight:900}.page-title h1{margin:0;font-size:42px;letter-spacing:-1.8px;line-height:1}.page-title p{margin:8px 0 0;color:#c3d4f5;font-weight:800}.section-title{font-size:21px;font-weight:1000;margin:6px 0 13px}.worker-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:16px}.worker-card{overflow:hidden;border-radius:20px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(28,35,60,.78),rgba(9,12,24,.78));min-height:248px;box-shadow:0 20px 55px rgba(0,0,0,.22)}.worker-top{height:112px;display:grid;place-items:center;position:relative;overflow:hidden}.worker-top:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(110deg,rgba(255,255,255,.10) 0 2px,transparent 2px 10px);opacity:.35}.tone-purple{background:linear-gradient(135deg,#4830d8,#6322b7)}.tone-blue{background:linear-gradient(135deg,#058aff,#053c8c)}.tone-green{background:linear-gradient(135deg,#02b973,#095a3b)}.tone-orange{background:linear-gradient(135deg,#d47418,#56321c)}.worker-avatar{position:relative;z-index:1;width:82px;height:82px;border-radius:50%;background:radial-gradient(circle at 36% 30%,#ffe8c8 0 16%,transparent 17%),radial-gradient(circle at 53% 65%,#ffdba8 0 23%,transparent 24%),radial-gradient(circle at 46% 45%,#ef973a 0 45%,#5d3928 46% 62%,#f6c58b 63% 100%);box-shadow:0 16px 34px rgba(0,0,0,.32)}.worker-body{padding:16px}.worker-body h3{margin:0 0 4px;font-size:20px;line-height:1.02}.muted{color:var(--muted)}.status{font-weight:950;font-size:12px;margin:10px 0}.active-dot{color:var(--green)}.idle-dot{color:#ffd057}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px}.list{display:flex;flex-direction:column;gap:10px}.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 15px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(90deg,rgba(28,111,255,.12),rgba(255,255,255,.035))}.row b{display:block;margin-bottom:4px}.pill{display:inline-flex;align-items:center;padding:7px 11px;border-radius:999px;background:rgba(31,124,255,.16);border:1px solid rgba(76,147,255,.32);color:#d7e8ff;font-size:12px;font-weight:950;white-space:nowrap}.btns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}.btn{display:inline-flex;align-items:center;justify-content:center;padding:13px 18px;border-radius:14px;border:1px solid var(--line);font-weight:950;background:rgba(255,255,255,.055);box-shadow:0 12px 26px rgba(0,0,0,.18)}.btn.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.footer-note{margin-top:22px;color:var(--muted);font-size:13px;text-align:center;font-weight:700}.console-nav{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}.console-nav a{padding:10px 13px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.055);font-weight:950}.console-nav a.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.metric-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.metric-mini{padding:13px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.045)}.metric-mini small{color:var(--muted);font-weight:900}.metric-mini b{display:block;font-size:24px;margin-top:4px}.panel-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:18px}.stack-grid{display:grid;gap:12px}.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field{display:flex;flex-direction:column;gap:6px}.field label{font-size:12px;font-weight:950;color:#dbe7ff}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(5,9,20,.58);color:var(--text);padding:12px 13px;font:inherit;outline:none}.field textarea{min-height:92px;resize:vertical}.form-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.preview-box{border:1px solid var(--line);border-radius:18px;background:rgba(31,124,255,.10);padding:16px;margin-bottom:16px}.preview-box b{display:block;margin-bottom:6px}.safe-note{color:#8fe7ff;font-weight:800;font-size:13px;margin-top:10px}@media(max-width:1100px){.layout{grid-template-columns:1fr}.sidebar{position:relative;height:auto}.user{position:static;margin-top:18px}.hero-grid,.two-col{grid-template-columns:1fr}.worker-grid{grid-template-columns:repeat(2,1fr)}.kpis{grid-template-columns:repeat(2,1fr)}}@media(max-width:640px){.main{padding:16px}.worker-grid,.kpis{grid-template-columns:1fr}.hero-lockup{flex-direction:column}.hero-title{font-size:56px;letter-spacing:-3px}.nina-logo.hero{width:128px;height:128px;flex-basis:128px}.search{width:58vw}}
+ .main{padding:22px 26px 40px;max-width:1460px;width:100%;margin:0 auto}.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.search{width:min(520px,55vw);border:1px solid var(--line);border-radius:18px;padding:14px 18px;color:var(--muted);background:rgba(16,24,45,.72);box-shadow:inset 0 0 0 1px rgba(255,255,255,.03),0 12px 34px rgba(0,0,0,.18)}.icons{display:flex;gap:10px;align-items:center}.icon{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.10)}.avatar{background:linear-gradient(135deg,#7c43ff,#dc42ff);font-weight:950}.lang-switch{display:flex;gap:6px}.lang-switch a{font-size:12px;font-weight:950;padding:8px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.06);color:#dbe8ff}.lang-switch a.active{background:linear-gradient(90deg,#168dff,#6443ff);color:#fff}.grid{display:grid;gap:18px}.hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:18px}.card{background:linear-gradient(180deg,rgba(26,36,68,.72),rgba(9,12,24,.70)),radial-gradient(circle at 25% 15%,rgba(40,140,255,.12),transparent 38%);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}.card-pad{padding:24px}.hero-card{min-height:390px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}.hero-lockup{display:flex;align-items:center;justify-content:center;gap:26px}.hero-title{font-size:78px;line-height:.9;font-weight:1000;letter-spacing:-5px;text-shadow:0 10px 40px rgba(0,0,0,.5)}.hero-title span{color:#2493ff}.subtitle{color:#dbe8ff;font-weight:900;letter-spacing:2px;font-size:13px;margin-top:10px}.bigline{margin-top:34px;font-size:25px;line-height:1.35;font-weight:950}.trust{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:24px}.trust span{font-size:12px;font-weight:900;padding:7px 12px;border:1px solid var(--line);background:rgba(255,255,255,.04);border-radius:999px}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.kpi{display:block;padding:18px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.025));border-radius:18px;min-height:118px}.kpi small{color:#dbe7ff;font-weight:900}.kpi strong{display:block;font-size:38px;margin:9px 0 2px}.kpi em{color:#71e9ff;font-style:normal;font-size:13px;font-weight:900}.page-title h1{margin:0;font-size:42px;letter-spacing:-1.8px;line-height:1}.page-title p{margin:8px 0 0;color:#c3d4f5;font-weight:800}.section-title{font-size:21px;font-weight:1000;margin:6px 0 13px}.worker-grid{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:16px}.worker-card{overflow:hidden;border-radius:20px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(28,35,60,.78),rgba(9,12,24,.78));min-height:248px;box-shadow:0 20px 55px rgba(0,0,0,.22)}.worker-top{height:112px;display:grid;place-items:center;position:relative;overflow:hidden}.worker-top:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(110deg,rgba(255,255,255,.10) 0 2px,transparent 2px 10px);opacity:.35}.tone-purple{background:linear-gradient(135deg,#4830d8,#6322b7)}.tone-blue{background:linear-gradient(135deg,#058aff,#053c8c)}.tone-green{background:linear-gradient(135deg,#02b973,#095a3b)}.tone-orange{background:linear-gradient(135deg,#d47418,#56321c)}.worker-avatar{position:relative;z-index:1;width:82px;height:82px;border-radius:50%;background:radial-gradient(circle at 36% 30%,#ffe8c8 0 16%,transparent 17%),radial-gradient(circle at 53% 65%,#ffdba8 0 23%,transparent 24%),radial-gradient(circle at 46% 45%,#ef973a 0 45%,#5d3928 46% 62%,#f6c58b 63% 100%);box-shadow:0 16px 34px rgba(0,0,0,.32)}.worker-body{padding:16px}.worker-body h3{margin:0 0 4px;font-size:20px;line-height:1.02}.muted{color:var(--muted)}.status{font-weight:950;font-size:12px;margin:10px 0}.active-dot{color:var(--green)}.idle-dot{color:#ffd057}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px}.list{display:flex;flex-direction:column;gap:10px}.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 15px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(90deg,rgba(28,111,255,.12),rgba(255,255,255,.035))}.row b{display:block;margin-bottom:4px}.pill{display:inline-flex;align-items:center;padding:7px 11px;border-radius:999px;background:rgba(31,124,255,.16);border:1px solid rgba(76,147,255,.32);color:#d7e8ff;font-size:12px;font-weight:950;white-space:nowrap}.btns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}.btn{display:inline-flex;align-items:center;justify-content:center;padding:13px 18px;border-radius:14px;border:1px solid var(--line);font-weight:950;background:rgba(255,255,255,.055);box-shadow:0 12px 26px rgba(0,0,0,.18)}.btn.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.footer-note{margin-top:22px;color:var(--muted);font-size:13px;text-align:center;font-weight:700}.console-nav{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}.console-nav a{padding:10px 13px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.055);font-weight:950}.console-nav a.primary{background:linear-gradient(90deg,#168dff,#6443ff);border-color:transparent}.metric-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.metric-mini{padding:13px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.045)}.metric-mini small{color:var(--muted);font-weight:900}.metric-mini b{display:block;font-size:24px;margin-top:4px}.panel-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:18px}.stack-grid{display:grid;gap:12px}.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field{display:flex;flex-direction:column;gap:6px}.field label{font-size:12px;font-weight:950;color:#dbe7ff}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(5,9,20,.58);color:var(--text);padding:12px 13px;font:inherit;outline:none}.field textarea{min-height:92px;resize:vertical}.form-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.preview-box{border:1px solid var(--line);border-radius:18px;background:rgba(31,124,255,.10);padding:16px;margin-bottom:16px}.preview-box b{display:block;margin-bottom:6px}.safe-note{color:#8fe7ff;font-weight:800;font-size:13px;margin-top:10px}@media(max-width:1100px){.layout{grid-template-columns:1fr}.sidebar,.main{min-width:0}.sidebar{position:relative;height:auto}.user{position:static;margin-top:18px}.hero-grid,.two-col{grid-template-columns:1fr}.worker-grid{grid-template-columns:repeat(2,1fr)}.kpis{grid-template-columns:repeat(2,1fr)}}@media(max-width:640px){.main{padding:16px}.topbar{gap:12px;flex-wrap:wrap}.search{order:2;width:100%}.icons{max-width:100%;flex-wrap:wrap}.worker-grid,.kpis{grid-template-columns:1fr}.hero-lockup{flex-direction:column}.hero-title{font-size:56px;letter-spacing:-3px}.nina-logo.hero{width:128px;height:128px;flex-basis:128px}}
+
+.channels-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.connection-card{display:flex;flex-direction:column;gap:14px;min-height:260px}.connection-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.connection-head h2{margin:0}.connection-status{padding:7px 11px;border-radius:999px;font-size:12px;font-weight:950;background:rgba(255,255,255,.07);border:1px solid var(--line)}.connection-status.connected,.connection-status.active,.connection-status.ready{color:var(--green)}.connection-status.pending,.connection-status.qr_pending{color:#ffd057}.connection-status.error,.connection-status.attention,.connection-status.reconnect_required{color:#ff9aad}.connection-actions{margin-top:auto}.connection-actions form{display:inline-block;margin:0 8px 8px 0}.connection-actions button{cursor:pointer;color:var(--text)}.channel-form{display:grid;gap:12px}.channel-form input{width:100%;border:1px solid var(--line);border-radius:14px;background:rgba(5,9,20,.58);color:var(--text);padding:12px 13px;font:inherit}.channel-message{padding:12px 14px;border-radius:14px;background:rgba(31,124,255,.12);color:#d9eaff;font-weight:800}.whatsapp-stack{grid-column:1/-1}.whatsapp-products{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}.whatsapp-product{padding:18px;border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.035)}.whatsapp-product h3{margin:0 0 8px}.qr-shell{max-width:320px;padding:12px;background:#fff;border-radius:16px;margin:8px auto}.qr-shell svg{display:block;width:100%;height:auto}.pairing-steps{line-height:1.65}.connection-lost{color:#ff9aad}@media(max-width:640px){.channels-grid,.whatsapp-products{grid-template-columns:1fr}.connection-card{min-height:0}.whatsapp-stack{grid-column:auto}.qr-shell{max-width:280px}body.channels .sidebar{padding-bottom:14px}body.channels .brand{margin-bottom:14px}body.channels .nav{flex-direction:row;overflow-x:auto;padding-bottom:6px}body.channels .nav-item{flex:0 0 auto}body.channels .user{display:none}}
 """
 
 
 def page(title, body, active="dashboard"):
     lang = current_language()
+    admin_role = current_web_role() == ADMIN_ROLE
+    admin_surface = admin_role and request.path.startswith("/admin/")
+    channels_label = {"en": "Channels", "lv": "Kanāli", "ru": "Каналы"}[lang]
     nav = [
+        ("nina", tx("talk_to_nina", lang), "/nina", "N"),
+        ("channels", channels_label, "/channels", "◉"),
         ("dashboard", tx("dashboard", lang), "/dashboard", "⌂"),
         ("inbox", tx("inbox", lang), "/inbox", "✦"),
         ("workers", tx("workers", lang), "/workers", "♙"),
         ("tasks", tx("tasks", lang), "/tasks", "☑"),
-        ("clients", tx("clients", lang), "/clients", "●"),
+        ("clients", tx("clients", lang), "/admin/clients" if admin_surface else "/clients", "●"),
         ("projects", tx("projects", lang), "/projects", "▣"),
         ("calendar", tx("calendar", lang), "/calendar", "◫"),
         ("files", tx("files", lang), "/files", "▤"),
         ("analytics", tx("analytics", lang), "/analytics", "⌁"),
         ("exchange", tx("exchange", lang), "/exchange", "◎"),
     ]
+    if admin_surface:
+        nav.append(("admin", "Admin", "/admin/channels", "A"))
     nav_html = ""
     for key, label, href, icon in nav:
         cls = "nav-item active" if key == active else "nav-item"
@@ -4029,7 +4434,10 @@ def page(title, body, active="dashboard"):
     def lang_link(l):
         cls = "active" if lang == l else ""
         return f'<a class="{cls}" href="?lang={l}">{l.upper()}</a>'
-    return f"""<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{html_escape(title)} · NinaOS</title><style>{css()}</style></head><body><div class="layout"><aside class="sidebar"><a href="/dashboard?lang={lang}" class="brand">{nina_logo_html("small")}<div class="brand-word"><span>Nina</span><span>OS</span></div></a><nav class="nav">{nav_html}</nav><div class="user"><b>Katrin</b><br>Owner<br><br><span class="pill">Runtime: web_app.py</span></div></aside><main class="main"><div class="topbar"><div class="search">{tx("search", lang)}</div><div class="icons"><div class="icon">🔔</div><div class="icon">🌐</div><div class="lang-switch">{lang_link("en")}{lang_link("lv")}{lang_link("ru")}</div><div class="icon">☼</div><div class="icon avatar">K</div></div></div>{body}<div class="footer-note">{WEB_APP_VERSION} · Web service separate from Telegram app.py</div></main></div></body></html>"""
+    customer_page = active in {"nina", "channels"}
+    user_status = "<span class='pill'>Web active</span>" if customer_page else "<span class='pill'>Runtime: web_app.py</span>"
+    footer = "NinaOS" if customer_page else f"{WEB_APP_VERSION} · Web service separate from Telegram app.py"
+    return f"""<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{html_escape(title)} · NinaOS</title><style>{css()}</style></head><body><div class="layout"><aside class="sidebar"><a href="/dashboard?lang={lang}" class="brand">{nina_logo_html("small")}<div class="brand-word"><span>Nina</span><span>OS</span></div></a><nav class="nav">{nav_html}</nav><div class="user"><b>Katrin</b><br>Owner<br><br>{user_status}</div></aside><main class="main"><div class="topbar"><div class="search">{tx("search", lang)}</div><div class="icons"><div class="icon">🔔</div><div class="icon">🌐</div><div class="lang-switch">{lang_link("en")}{lang_link("lv")}{lang_link("ru")}</div><div class="icon">☼</div><div class="icon avatar">K</div></div></div>{body}<div class="footer-note">{footer}</div></main></div></body></html>"""
 
 
 def kpi_card(label, value, hint):
@@ -4049,10 +4457,1116 @@ def activity_row(a):
     return f"<div class='row'><div><b>{html_escape(a.get('title'))}</b><span class='muted'>{html_escape(a.get('body'))}</span></div><span class='pill'>{html_escape(a.get('kind','info'))}</span></div>"
 
 
+def _web_push_client_script():
+    return r"""
+(function () {
+  const config = window.NinaPushConfig || {};
+  const state = document.getElementById('push-notification-state');
+  const enable = document.getElementById('push-enable');
+  const disable = document.getElementById('push-disable');
+  if (!state || !enable || !disable) return;
+
+  window.NinaPushState = {stage: 'initializing', handlerAttached: false};
+  function setStage(stage, text, enabled) {
+    window.NinaPushState.stage = stage;
+    state.textContent = text;
+    enable.hidden = enabled;
+    disable.hidden = !enabled;
+    enable.disabled = false;
+  }
+  function applicationServerKey(value) {
+    const padding = '='.repeat((4 - value.length % 4) % 4);
+    const bytes = atob((value + padding).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from([...bytes].map(item => item.charCodeAt(0)));
+  }
+  function supported() {
+    return Boolean(
+      config.available && config.publicKey && 'Notification' in window &&
+      'serviceWorker' in navigator && 'PushManager' in window
+    );
+  }
+  async function readyRegistration() {
+    await navigator.serviceWorker.register('/service-worker.js', {scope: '/'});
+    return navigator.serviceWorker.ready;
+  }
+  async function persistSubscription(subscription) {
+    window.NinaPushState.stage = 'subscription_post';
+    const response = await fetch('/nina/push/subscribe', {
+      method: 'POST', credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': config.subscribeCsrf},
+      body: JSON.stringify({subscription: subscription.toJSON()})
+    });
+    if (!response.ok) throw new Error('subscription_post_' + response.status);
+  }
+  async function refresh() {
+    if (!supported()) {
+      setStage('unsupported', 'Notifications unavailable', false);
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      setStage('permission_denied', 'Notifications blocked in browser settings', false);
+      return;
+    }
+    const registration = await readyRegistration();
+    const subscription = await registration.pushManager.getSubscription();
+    setStage(subscription ? 'enabled' : 'ready', subscription ? 'Notifications enabled' : 'Notifications available', Boolean(subscription));
+  }
+  async function enableNotifications() {
+    let stage = 'permission';
+    try {
+      setStage('permission', 'Requesting notification permission...', false);
+      if (!supported()) throw new Error('unsupported');
+      const permission = Notification.permission === 'default'
+        ? await Notification.requestPermission()
+        : Notification.permission;
+      if (permission !== 'granted') {
+        setStage('permission_denied', 'Notifications blocked in browser settings', false);
+        return;
+      }
+      stage = 'service_worker_ready';
+      window.NinaPushState.stage = stage;
+      const registration = await readyRegistration();
+      stage = 'push_subscribe';
+      window.NinaPushState.stage = stage;
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: applicationServerKey(config.publicKey)
+        });
+      }
+      stage = 'subscription_post';
+      await persistSubscription(subscription);
+      setStage('enabled', 'Notifications enabled', true);
+    } catch (error) {
+      console.error('Nina Web Push enable failed', stage, error && error.name ? error.name : 'Error');
+      setStage('failed_' + stage, 'Notifications could not be enabled (' + stage + ')', false);
+    }
+  }
+  async function disableNotifications() {
+    try {
+      const registration = await readyRegistration();
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        const response = await fetch('/nina/push/unsubscribe', {
+          method: 'POST', credentials: 'same-origin',
+          headers: {'Content-Type': 'application/json', 'X-CSRF-Token': config.unsubscribeCsrf},
+          body: JSON.stringify({endpoint: subscription.endpoint})
+        });
+        if (!response.ok) throw new Error('unsubscribe');
+        await subscription.unsubscribe();
+      }
+      setStage('ready', 'Notifications available', false);
+    } catch (_) {
+      setStage('disable_failed', 'Could not disable notifications', true);
+    }
+  }
+  enable.addEventListener('click', enableNotifications);
+  disable.addEventListener('click', disableNotifications);
+  enable.dataset.handlerAttached = 'true';
+  window.NinaPushState.handlerAttached = true;
+  refresh().catch(error => {
+    console.error('Nina Web Push refresh failed', error && error.name ? error.name : 'Error');
+    setStage('refresh_failed', 'Notifications unavailable', false);
+  });
+})();
+""".strip()
+
+
+def _verified_source_links_html(text, verified_urls):
+    rendered = html_escape(text or "")
+    for url in sorted({str(value) for value in verified_urls if str(value).startswith("https://")}, key=len, reverse=True):
+        escaped_url = html_escape(url)
+        rendered = rendered.replace(escaped_url, "<a href='" + escaped_url + "' target='_blank' rel='noopener noreferrer'>" + escaped_url + "</a>")
+    return rendered
+
+
+def nina_chat_body(messages):
+    lang = current_language()
+    verified_source_urls = set()
+    try:
+        from web_research import latest_research_session, verified_results
+        research_contact = current_web_contact()
+        latest_research = latest_research_session(NINA_WEB_WORKSPACE_ID, research_contact["contact_id"], research_contact["conversation_id"])
+        verified_source_urls = {item["source_url"] for item in verified_results(latest_research or {})}
+    except Exception:
+        verified_source_urls = set()
+    copy = {
+        "en": {"title": "Talk to Nina", "sub": "Ask a question, plan work, or tell Nina what needs attention.", "empty": "Start a conversation with Nina.", "placeholder": "Write a message...", "send": "Send", "channels": "Channels", "active": "Active", "connected": "Connected", "connect": "Connect", "next": "Coming next", "ready": "Ready", "recording": "Recording", "processing": "Processing", "error": "Voice input could not be processed.", "denied": "Microphone permission was denied.", "unsupported": "Voice recording is not supported in this browser.", "stop": "Stop", "cancel": "Cancel", "mic": "Start voice input"},
+        "lv": {"title": "Runā ar Ninu", "sub": "Uzdod jautājumu, plāno darbu vai pasaki, kam jāpievērš uzmanība.", "empty": "Sāc sarunu ar Ninu.", "placeholder": "Raksti ziņu...", "send": "Sūtīt", "channels": "Kanāli", "active": "Aktīvs", "connected": "Savienots", "connect": "Savienot", "next": "Drīzumā", "ready": "Gatavs", "recording": "Ieraksta", "processing": "Apstrādā", "error": "Balss ziņu neizdevās apstrādāt.", "denied": "Mikrofona atļauja tika liegta.", "unsupported": "Šī pārlūkprogramma neatbalsta balss ierakstu.", "stop": "Apturēt", "cancel": "Atcelt", "mic": "Sākt balss ievadi"},
+        "ru": {"title": "Поговорить с Ниной", "sub": "Задайте вопрос, спланируйте работу или расскажите, что требует внимания.", "empty": "Начните разговор с Ниной.", "placeholder": "Напишите сообщение...", "send": "Отправить", "channels": "Каналы", "active": "Активен", "connected": "Подключён", "connect": "Подключить", "next": "Скоро", "ready": "Готово", "recording": "Запись", "processing": "Обработка", "error": "Не удалось обработать голосовое сообщение.", "denied": "Доступ к микрофону запрещён.", "unsupported": "Этот браузер не поддерживает запись голоса.", "stop": "Стоп", "cancel": "Отмена", "mic": "Начать голосовой ввод"},
+    }[lang]
+    bubbles = ""
+    for message in messages:
+        role = "user" if message.get("role") == "user" else "nina"
+        label = "You" if role == "user" and lang == "en" else ("Tu" if role == "user" else "Nina")
+        message_id = html_escape(message.get("message_id") or "")
+        timeline_key = html_escape(message.get("timeline_key") or "")
+        rendered_text = (_verified_source_links_html(message.get("text"), verified_source_urls)
+                         if role == "nina" else html_escape(message.get("text")))
+        bubbles += f"<div class='chat-message {role}' data-message-id='{message_id}' data-timeline-key='{timeline_key}'>{rendered_text}<small>{label}</small></div>"
+    if not bubbles:
+        bubbles = f"<div class='chat-message nina'>{html_escape(copy['empty'])}<small>Nina</small></div>"
+
+    channels = (
+        f"<div class='channel-card'><div><b>Web</b></div><span class='channel-state'>{copy['active']}</span></div>"
+    )
+    from web_push import configuration_status
+    push_config = configuration_status()
+    push_ui = (
+        "<div class='channel-card' style='margin-top:14px'><div><b>Device notifications</b>"
+        "<p class='muted'>Nina can send a device notification. Sound and vibration depend on your device and browser settings.</p>"
+        "<div id='push-notification-state' class='channel-state'>Checking...</div></div>"
+        "<div class='form-actions'><button id='push-enable' class='btn primary' type='button'>Enable notifications</button>"
+        "<button id='push-disable' class='btn' type='button' hidden>Disable notifications</button></div></div>"
+    )
+    push_browser_config = {
+        "available": bool(push_config["available"]),
+        "publicKey": push_config["public_key"],
+        "subscribeCsrf": _channel_csrf("web-push:subscribe"),
+        "unsubscribeCsrf": _channel_csrf("web-push:unsubscribe"),
+    }
+    try:
+        from file_intelligence import get_extraction, list_files
+        current_contact = current_web_contact()
+        files = list_files(NINA_WEB_WORKSPACE_ID, current_contact["contact_id"], current_contact["conversation_id"])
+    except Exception:
+        files = []
+    file_cards = ""
+    for item in files[:10]:
+        analysis_html = ""
+        if item.status == "READY":
+            try:
+                extraction = get_extraction(NINA_WEB_WORKSPACE_ID, current_contact["contact_id"], item.file_id)
+                document_type = str(extraction.get("document_type") or "GENERAL_DOCUMENT").replace("_", " ").title()
+                facts = "".join("<li>" + html_escape(str(fact)[:220]) + "</li>" for fact in (extraction.get("important_facts") or ())[:3])
+                action_html = ""
+                for action in (extraction.get("recommended_actions") or ())[:5]:
+                    action_id = str(action.get("action_id") or "")
+                    label = html_escape(action.get("label") or action_id)
+                    if action.get("supported"):
+                        action_html += (
+                            "<form method='post' action='/nina/files/" + html_escape(item.file_id) + "/action'>"
+                            "<input type='hidden' name='csrf_token' value='" + _channel_csrf("file:action:" + item.file_id + ":" + action_id) + "'>"
+                            "<input type='hidden' name='action_id' value='" + html_escape(action_id) + "'>"
+                            "<button class='btn' type='submit'>" + label + "</button></form>"
+                        )
+                    else:
+                        action_html += "<div><button class='btn' type='button' disabled>" + label + "</button><p class='muted'>" + html_escape(action.get("disabled_reason") or "This action is not available.") + "</p></div>"
+                analysis_html = (
+                    "<div style='width:100%'><p><b>" + html_escape(document_type) + "</b></p>"
+                    + ("<ul>" + facts + "</ul>" if facts else "")
+                    + "<p><b>Ko Nina var izdarīt tālāk?</b></p><div class='form-actions'>" + action_html + "</div></div>"
+                )
+            except Exception:
+                analysis_html = "<p class='muted'>Structured analysis is unavailable.</p>"
+        file_cards += (
+            "<div class='channel-card' style='display:block'><div><b>" + html_escape(item.safe_filename) + "</b>"
+            + "<p class='muted'>" + html_escape(item.media_type.upper() + " / " + str(item.size_bytes) + " bytes") + "</p></div>"
+            + "<span class='channel-state'>" + html_escape(item.status) + "</span>" + analysis_html
+            + ("<form method='post' action='/nina/files/" + html_escape(item.file_id) + "/archive'><input type='hidden' name='csrf_token' value='" + _channel_csrf("file:archive:" + item.file_id) + "'><button class='btn' type='submit'>Archive</button></form>" if item.status != "ARCHIVED" else "")
+            + "</div>"
+        )
+    upload_ui = (
+        "<section class='card card-pad' style='margin-top:16px'><div class='section-title'>Files</div>"
+        "<form id='nina-file-upload' method='post' action='/nina/files' enctype='multipart/form-data'>"
+        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('file:upload')}'>"
+        "<label class='channel-card' id='nina-file-drop'><input name='file' type='file' required accept='.jpg,.jpeg,.png,.webp,.pdf,.docx,.xlsx,.csv,.pptx,.mp4,.mov,.webm'>"
+        "<span><b>Add a file</b><br><span class='muted'>Image, PDF, Word, Excel, CSV, PowerPoint or short video</span></span></label>"
+        "<div class='form-actions'><button class='btn primary' type='submit'>Upload and analyze</button></div>"
+        "<div id='nina-file-progress' class='muted' role='status'></div></form>" + file_cards + "</section>"
+        "<script>(function(){const f=document.getElementById('nina-file-upload'),s=document.getElementById('nina-file-progress'),d=document.getElementById('nina-file-drop');"
+        "if(!f)return;['dragenter','dragover'].forEach(x=>d.addEventListener(x,e=>{e.preventDefault();d.classList.add('active')}));"
+        "['dragleave','drop'].forEach(x=>d.addEventListener(x,e=>{e.preventDefault();d.classList.remove('active')}));"
+        "d.addEventListener('drop',e=>{if(e.dataTransfer.files.length)f.elements.file.files=e.dataTransfer.files});"
+        "f.addEventListener('submit',()=>{s.textContent='Uploading and processing…';f.querySelector('button').disabled=true});})();</script>"
+    )
+    research_ui = ""
+    try:
+        from web_research import latest_research_session, verified_results
+        research = latest_research_session(NINA_WEB_WORKSPACE_ID, current_contact["contact_id"], current_contact["conversation_id"])
+        if research:
+            rows = ""
+            verified_items = verified_results(research)
+            for item in verified_items[:20]:
+                direct_url = item.get("source_url") if item.get("source_url_verified") else None
+                direct_action = (
+                    "<a class='btn' href='" + html_escape(direct_url)
+                    + "' target='_blank' rel='noopener noreferrer'>Open source</a>"
+                    if direct_url else "<span class='muted'>Tiešā saite nav pieejama</span>"
+                )
+                rows += (
+                    "<div class='row'><div><b>" + html_escape(item.get("title") or "Unknown listing") + "</b>"
+                    "<span class='muted'>" + html_escape(str(item.get("year") or "unknown")) + " · "
+                    + html_escape(str(item.get("price") or "unknown")) + " " + html_escape(item.get("currency") or "") + " · "
+                    + html_escape(str(item.get("mileage") or "unknown")) + " km · "
+                    + html_escape(item.get("fuel") or "unknown") + " · " + html_escape(item.get("transmission") or "unknown")
+                    + "</span></div>" + direct_action + "</div>"
+                )
+            comparison = research.get("comparison") or {}
+            state = "Source read" if research.get("source_access") == "read" else "Source access limited"
+            save_action = (
+                "<form method='post' action='/nina/research/" + html_escape(research["session_id"]) + "/save'>"
+                + "<input type='hidden' name='csrf_token' value='" + _channel_csrf("research:save:" + research["session_id"]) + "'>"
+                + "<button class='btn' type='submit'>Save this search</button></form>"
+                if verified_items else ""
+            )
+            research_ui = (
+                "<section class='card card-pad' style='margin-top:16px'><div class='section-title'>Web Research</div>"
+                "<p class='muted'>" + html_escape(state) + " · " + html_escape(str(len(verified_items))) + " verified results</p>"
+                + ("<div class='list'>" + rows + "</div>" if rows else "<p>Neizdevās iegūt verificētus sludinājumus.</p>")
+                + "<div class='form-actions'><a class='btn' href='" + html_escape(research.get("source_url") or "#") + "' target='_blank' rel='noopener noreferrer'>Open public search</a>"
+                + save_action + "</div></section>"
+            )
+    except Exception:
+        research_ui = ""
+    return (
+        "<div class='chat-layout'>"
+        "<section class='card card-pad chat-shell'>"
+        f"<div class='chat-head'>{nina_logo_html('small')}<div><div class='section-title' style='margin:0'>{copy['title']}</div><span class='muted'>{copy['sub']}</span></div></div>"
+        f"<div id='nina-chat-stream' class='chat-stream'>{bubbles}</div>"
+        f"<form id='nina-chat-compose' class='chat-compose' method='post' action='/nina?lang={lang}'>"
+        f"<div class='chat-input'><textarea name='message' maxlength='4000' required placeholder='{copy['placeholder']}'></textarea>"
+        f"<div id='voice-status' class='voice-status' data-state='ready' role='status' aria-live='polite'>{copy['ready']}</div></div>"
+        f"<div class='form-actions'><button id='voice-start' class='btn voice-btn' type='button' aria-label='{copy['mic']}' title='{copy['mic']}'>🎤</button>"
+        f"<button id='voice-stop' class='btn voice-btn recording' type='button' hidden>{copy['stop']}</button>"
+        f"<button id='voice-cancel' class='btn voice-btn' type='button' hidden>{copy['cancel']}</button>"
+        f"<button id='chat-send' class='btn primary' type='submit'>{copy['send']}</button></div></form>"
+        "</section>"
+        f"<aside class='card card-pad'><div class='section-title'>{copy['channels']}</div>{channels}<div class='form-actions'><a class='btn' href='/channels?lang={lang}'>{copy['channels']}</a></div>{push_ui}</aside>"
+        "</div>" + research_ui + upload_ui
+        + f"<script>window.NinaVoiceConfig={json.dumps({'lang': lang, 'ready': copy['ready'], 'recording': copy['recording'], 'processing': copy['processing'], 'error': copy['error'], 'denied': copy['denied'], 'unsupported': copy['unsupported']}, ensure_ascii=False)};</script>"
+        f"<script>window.NinaPushConfig={json.dumps(push_browser_config)};</script>"
+        f"<script>{_web_push_client_script()}</script>"
+        "<script>(function(){const f=document.getElementById('nina-chat-compose'),b=document.getElementById('chat-send'),s=document.getElementById('voice-status');if(f)f.addEventListener('submit',()=>{if(b)b.disabled=true;if(s)s.textContent='Meklēju…'});})();</script>"
+        "<script>(function(){const stream=document.getElementById('nina-chat-stream');if(!stream)return;const bottom=()=>{stream.scrollTop=stream.scrollHeight};const order=()=>{[...stream.querySelectorAll('.chat-message[data-timeline-key]')].sort((a,b)=>(a.dataset.timelineKey||'').localeCompare(b.dataset.timelineKey||'')).forEach(node=>stream.appendChild(node))};order();bottom();async function poll(){try{const response=await fetch('/nina/notifications',{credentials:'same-origin',cache:'no-store'});if(!response.ok)return;const payload=await response.json();let added=false;for(const item of payload.notifications||[]){if(stream.querySelector('[data-message-id=\"'+item.message_id+'\"]'))continue;const bubble=document.createElement('div');bubble.className='chat-message nina';bubble.dataset.messageId=item.message_id;bubble.dataset.timelineKey=item.timeline_key;bubble.textContent=item.text;const label=document.createElement('small');label.textContent='Nina';bubble.appendChild(label);stream.appendChild(bubble);added=true;}if(added){order();bottom();}}catch(e){}}setInterval(poll,10000);})();</script>"
+        "<script>(function(){const c=window.NinaVoiceConfig,s=document.getElementById('voice-status'),start=document.getElementById('voice-start'),stop=document.getElementById('voice-stop'),cancel=document.getElementById('voice-cancel'),send=document.getElementById('chat-send');let recorder=null,stream=null,chunks=[],cancelled=false;function state(name,text){s.dataset.state=name;s.textContent=text;}function tracksOff(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}function controls(active){start.hidden=active;stop.hidden=!active;cancel.hidden=!active;send.disabled=active;}function reset(){tracksOff();controls(false);recorder=null;chunks=[];cancelled=false;state('ready',c.ready);}async function upload(blob){state('processing',c.processing);controls(false);start.disabled=true;send.disabled=true;const data=new FormData();const ext=blob.type.includes('mp4')?'m4a':blob.type.includes('ogg')?'ogg':blob.type.includes('mpeg')?'mp3':'webm';data.append('audio',blob,'voice.'+ext);data.append('lang',c.lang);try{const response=await fetch('/nina/voice?lang='+encodeURIComponent(c.lang),{method:'POST',body:data,credentials:'same-origin'});if(!response.ok)throw new Error('upload');window.location.href='/nina?lang='+encodeURIComponent(c.lang);}catch(e){state('error',c.error);start.disabled=false;send.disabled=false;}}start.addEventListener('click',async function(){if(!navigator.mediaDevices||!window.MediaRecorder){state('error',c.unsupported);return;}try{stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});chunks=[];cancelled=false;const preferred=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4','audio/webm','audio/ogg'].find(t=>MediaRecorder.isTypeSupported(t));const options={audioBitsPerSecond:128000};if(preferred)options.mimeType=preferred;recorder=new MediaRecorder(stream,options);recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};recorder.onerror=()=>{tracksOff();controls(false);state('error',c.error);};recorder.onstop=()=>{tracksOff();controls(false);if(cancelled){reset();return;}const blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});if(!blob.size){state('error',c.error);return;}upload(blob);};recorder.start();controls(true);state('recording',c.recording);}catch(e){tracksOff();controls(false);state('error',e&&e.name==='NotAllowedError'?c.denied:c.error);}});stop.addEventListener('click',()=>{if(recorder&&recorder.state!=='inactive')recorder.stop();});cancel.addEventListener('click',()=>{cancelled=true;if(recorder&&recorder.state!=='inactive')recorder.stop();else reset();});})();</script>"
+    )
+
+
+def nina_contact_html(lang=None):
+    lang = lang or current_language()
+    try:
+        contact = public_ninaos_contact(primary_ninaos_number())
+    except ValueError:
+        contact = None
+    if not contact:
+        return ""
+    copy = {
+        "en": {"title": "Nina on WhatsApp", "text": "Message Nina directly from WhatsApp.", "talk": "Talk to Nina", "save": "Save Nina", "qr": "QR code"},
+        "lv": {"title": "Nina WhatsApp", "text": "Raksti Ninai tieši no WhatsApp.", "talk": "Runāt ar Ninu", "save": "Saglabāt Ninu", "qr": "QR kods"},
+        "ru": {"title": "Нина в WhatsApp", "text": "Напишите Нине прямо в WhatsApp.", "talk": "Поговорить с Ниной", "save": "Сохранить Нину", "qr": "QR-код"},
+    }[lang]
+    return (
+        "<section class='nina-contact' style='margin-bottom:22px'>"
+        f"<div class='section-title'>{html_escape(copy['title'])}</div>"
+        f"<p class='muted'>{html_escape(copy['text'])}</p>"
+        f"<div><b>{html_escape(contact['name'])}</b><span class='muted'>{html_escape(contact['display_number'])}</span></div>"
+        "<div class='form-actions'>"
+        f"<a class='btn primary' href='{html_escape(contact['whatsapp_url'])}' target='_blank' rel='noopener noreferrer'>{html_escape(copy['talk'])}</a>"
+        f"<a class='btn' href='/nina/contact.vcf'>{html_escape(copy['save'])}</a>"
+        f"<a class='btn' href='/nina/contact-qr.svg' target='_blank' rel='noopener noreferrer'>{html_escape(copy['qr'])}</a>"
+        "</div></section>"
+    )
+
+
+def _knowledge_permission(permission_id):
+    """Use the canonical registry; authenticated workspace clients own their Vault."""
+    return (
+        get_permission_rule(permission_id) is not None
+        and current_web_role() in {CLIENT_ROLE, ADMIN_ROLE}
+    )
+
+
+def _channel_permission(permission_id):
+    """Fail closed until a distinct workspace-admin identity is implemented."""
+    if get_permission_rule(permission_id) is None:
+        return False
+    if permission_id in {"channel_read", "channel_message_read"}:
+        return current_web_role() in {CLIENT_ROLE, ADMIN_ROLE}
+    return current_web_role() == ADMIN_ROLE
+
+
+def _channel_workspace_id():
+    """Resolve channel data from a server-authoritative access surface."""
+    if current_web_role() == ADMIN_ROLE:
+        return NINA_WEB_WORKSPACE_ID
+    return current_workspace_id()
+
+
+def knowledge_vault_html():
+    workspace_id = current_workspace_id()
+    query = (request.args.get("knowledge_query") or "").strip()
+    items = list_tenant_knowledge(
+        workspace_id, query=query or None, limit=50, offset=0
+    )
+    notice = (request.args.get("knowledge_status") or "").strip()
+    rows = []
+    for item in items:
+        history = list_knowledge_versions(workspace_id, item.knowledge_id)
+        history_text = ", ".join(f"v{entry.version}" for entry in history)
+        action = f"knowledge:archive:{item.knowledge_id}"
+        update_action = f"knowledge:update:{item.knowledge_id}"
+        rows.append(
+            "<div class='row'><div><b>"
+            + html_escape(item.title)
+            + "</b><span class='muted'>"
+            + html_escape(item.knowledge_type)
+            + " · "
+            + html_escape(", ".join(item.tags) or "no tags")
+            + " · "
+            + html_escape(item.source_type)
+            + " · v"
+            + html_escape(str(item.version))
+            + " · "
+            + html_escape(item.updated_at)
+            + " · "
+            + html_escape(item.status)
+            + "</span><details><summary>View history</summary><span class='muted'>"
+            + html_escape(history_text)
+            + "</span></details>"
+            + "<details><summary>Edit</summary>"
+            + f"<form method='post' action='/knowledge-vault/{html_escape(item.knowledge_id)}/update'>"
+            + f"<input type='hidden' name='csrf_token' value='{_channel_csrf(update_action)}'>"
+            + f"<input type='hidden' name='expected_version' value='{item.version}'>"
+            + f"<input name='title' value='{html_escape(item.title)}' required>"
+            + "<textarea name='content' required>"
+            + html_escape(item.content)
+            + "</textarea><button class='btn' type='submit'>Save version</button></form>"
+            + "</details></div>"
+            + f"<form method='post' action='/knowledge-vault/{html_escape(item.knowledge_id)}/archive'>"
+            + f"<input type='hidden' name='csrf_token' value='{_channel_csrf(action)}'>"
+            + "<button class='btn' type='submit'>Archive</button></form></div>"
+        )
+    row_html = "".join(rows) or (
+        "<div class='row'><span class='muted'>No active knowledge items.</span></div>"
+    )
+    type_options = "".join(
+        f"<option value='{value}'>{value}</option>"
+        for value in (
+            "FACT", "INSTRUCTION", "POLICY", "PROCEDURE",
+            "PRODUCT", "SERVICE", "FAQ", "NOTE",
+        )
+    )
+    return (
+        "<section class='card card-pad'><div class='section-title'>Knowledge Vault</div>"
+        "<p class='muted'>Canonical workspace knowledge. Conversation Memory remains separate.</p>"
+        + (f"<div class='safe-note'>{html_escape(notice)}</div>" if notice else "")
+        + f"<div class='safe-note'><b>{len(items)}</b> ACTIVE items</div>"
+        + "<form method='get' action='/dashboard'><div class='field'>"
+        + f"<input name='knowledge_query' value='{html_escape(query)}' placeholder='Search title or content'>"
+        + "</div><button class='btn' type='submit'>Search</button></form>"
+        + "<details><summary>Create Knowledge</summary>"
+        + "<form method='post' action='/knowledge-vault/create'>"
+        + f"<input type='hidden' name='csrf_token' value='{_channel_csrf('knowledge:create')}'>"
+        + "<div class='field'><label>Title</label><input name='title' required></div>"
+        + "<div class='field'><label>Content</label><textarea name='content' required></textarea></div>"
+        + f"<div class='field'><label>Type</label><select name='knowledge_type'>{type_options}</select></div>"
+        + "<div class='field'><label>Tags</label><input name='tags' placeholder='support, policy'></div>"
+        + "<div class='field'><label>Source</label><select name='source_type'>"
+        + "<option>MANUAL</option><option>IMPORTED_TEXT</option><option>SYSTEM</option>"
+        + "</select></div><div class='field'><label>Source reference</label>"
+        + "<input name='source_reference'></div>"
+        + "<button class='btn primary' type='submit'>Create Knowledge</button></form></details>"
+        + "<div class='list'>" + row_html + "</div></section>"
+    )
+
+
+def channel_layer_html():
+    workspace_id = _channel_workspace_id()
+    ensure_web_connection(workspace_id, actor="system")
+    connections = list_layer_connections(workspace_id, limit=20)
+    messages = list_channel_messages(workspace_id, limit=30)
+    events = list_channel_events(workspace_id, limit=20)
+    connection_rows = []
+    for item in connections:
+        update_action = f"channel:update:{item.channel_connection_id}"
+        suspend_action = f"channel:suspend:{item.channel_connection_id}"
+        disconnect_action = f"channel:disconnect:{item.channel_connection_id}"
+        controls = ""
+        if _channel_permission("channel_manage"):
+            controls = (
+                "<details><summary>Edit</summary>"
+                f"<form method='post' action='/channel-layer/{html_escape(item.channel_connection_id)}/update'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(update_action)}'>"
+                f"<input name='display_name' value='{html_escape(item.display_name)}' required>"
+                "<button class='btn' type='submit'>Save</button></form></details>"
+            )
+        if _channel_permission("channel_manage") and item.status == "CONNECTED" and item.channel_type != "WEB":
+            controls += (
+                f"<form method='post' action='/channel-layer/{html_escape(item.channel_connection_id)}/suspend'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(suspend_action)}'>"
+                "<button class='btn' type='submit'>Suspend</button></form>"
+            )
+        if _channel_permission("channel_manage") and item.status != "DISCONNECTED" and item.channel_type != "WEB":
+            controls += (
+                f"<form method='post' action='/channel-layer/{html_escape(item.channel_connection_id)}/disconnect'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(disconnect_action)}'>"
+                "<button class='btn' type='submit'>Disconnect</button></form>"
+            )
+        last_inbound = next(
+            (message.created_at for message in messages
+             if message.channel_connection_id == item.channel_connection_id
+             and message.direction == "INBOUND"),
+            "none",
+        )
+        last_outbound = next(
+            (message.created_at for message in messages
+             if message.channel_connection_id == item.channel_connection_id
+             and message.direction == "OUTBOUND"),
+            "none",
+        )
+        connection_rows.append(
+            "<div class='row'><div><b>" + html_escape(item.display_name)
+            + "</b><span class='muted'>" + html_escape(item.channel_type)
+            + " · " + html_escape(item.status)
+            + " · Account: "
+            + html_escape(item.as_dict()["external_account_safe_label"] or "internal")
+            + " · Capabilities: "
+            + html_escape(", ".join(item.capabilities) or "none")
+            + " · Last inbound: " + html_escape(last_inbound)
+            + " · Last outbound: " + html_escape(last_outbound)
+            + " · Updated: " + html_escape(item.updated_at)
+            + "</span></div><div>" + controls + "</div></div>"
+        )
+    message_rows = "".join(
+        "<div class='row'><div><b>" + html_escape(message.direction)
+        + " · " + html_escape(message.channel_type)
+        + "</b><span class='muted'>Contact: "
+        + html_escape(message.contact_id)
+        + " · " + html_escape(message.text_content[:120])
+        + " · "
+        + html_escape(
+            message.processing_status if message.direction == "INBOUND"
+            else message.delivery_status
+        )
+        + " · Work: " + html_escape(message.related_work_object_id or "none")
+        + " · " + html_escape(message.created_at)
+        + "</span></div></div>"
+        for message in messages
+    )
+    event_rows = "".join(
+        "<div class='row'><div><b>" + html_escape(event["event_type"])
+        + "</b><span class='muted'>" + html_escape(event["actor"])
+        + " · " + html_escape(event["created_at"])
+        + "</span></div></div>"
+        for event in events
+    )
+    create_controls = ""
+    if _channel_permission("channel_manage"):
+        type_options = "".join(
+            f"<option>{html_escape(channel_type)}</option>"
+            for channel_type in sorted(CHANNEL_TYPES - {"WEB"})
+        )
+        create_controls = (
+            "<details><summary>Add Channel Connection</summary>"
+            "<form method='post' action='/channel-layer/create'>"
+            f"<input type='hidden' name='csrf_token' value='{_channel_csrf('channel:create')}'>"
+            f"<select name='channel_type'>{type_options}</select>"
+            "<input name='display_name' required placeholder='Display name'>"
+            "<input name='external_account_id' placeholder='Safe external account ID'>"
+            "<button class='btn primary' type='submit'>Add Channel Connection</button>"
+            "</form></details>"
+        )
+    return (
+        "<section class='card card-pad'><div class='section-title'>Channels</div>"
+        "<p class='muted'>ONE NINA canonical communication surfaces.</p>"
+        + create_controls + "<div class='list'>"
+        + ("".join(connection_rows) or "<div class='row'>No channels.</div>")
+        + "</div><details><summary>Messages</summary><div class='list'>"
+        + (message_rows or "<div class='row'>No canonical messages.</div>")
+        + "</div></details><details><summary>Channel Audit</summary>"
+        "<div class='list'>"
+        + (event_rows or "<div class='row'>No channel events.</div>")
+        + "</div></details></section>"
+    )
+
+
+def universal_work_objects_html():
+    workspace_id = current_workspace_id()
+    query = (request.args.get("work_query") or "").strip()
+    items = list_universal_work_objects(
+        workspace_id, query=query or None, limit=50, offset=0
+    )
+    rows = []
+    for item in items:
+        update_action = f"work:update:{item.work_object_id}"
+        complete_action = f"work:complete:{item.work_object_id}"
+        archive_action = f"work:archive:{item.work_object_id}"
+        controls = (
+            "<details><summary>Edit</summary>"
+            f"<form method='post' action='/work-objects/{html_escape(item.work_object_id)}/update-form'>"
+            f"<input type='hidden' name='csrf_token' value='{_channel_csrf(update_action)}'>"
+            f"<input name='title' required value='{html_escape(item.title)}'>"
+            "<textarea name='description'>"
+            + html_escape(item.description)
+            + "</textarea><button class='btn' type='submit'>Save</button>"
+            "</form></details>"
+        )
+        if item.status in {"open", "in_progress"}:
+            controls += (
+                f"<form method='post' action='/work-objects/{html_escape(item.work_object_id)}/complete-form'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(complete_action)}'>"
+                "<button class='btn' type='submit'>Complete</button></form>"
+            )
+        if item.status in {"completed", "cancelled"}:
+            controls += (
+                f"<form method='post' action='/work-objects/{html_escape(item.work_object_id)}/archive-form'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(archive_action)}'>"
+                "<button class='btn' type='submit'>Archive</button></form>"
+            )
+        rows.append(
+            "<div class='row'><div><b>" + html_escape(item.title)
+            + "</b><span class='muted'>"
+            + html_escape(item.object_type.upper()) + " В· "
+            + html_escape(item.status.upper()) + " В· "
+            + html_escape(item.priority.upper()) + " В· Owner: "
+            + html_escape(item.owner_assignment_id or "unassigned")
+            + " В· Updated: " + html_escape(item.updated_at)
+            + " В· Knowledge: "
+            + html_escape(", ".join(item.knowledge_refs) or "none")
+            + "</span></div><div>" + controls + "</div></div>"
+        )
+    return (
+        "<section class='card card-pad'><div class='section-title'>Work Objects</div>"
+        "<p class='muted'>ONE NINA canonical workspace work.</p>"
+        "<form method='get' action='/dashboard'><input name='work_query' "
+        f"value='{html_escape(query)}' placeholder='Search Work Objects'>"
+        "<button class='btn' type='submit'>Search</button></form>"
+        "<details><summary>Create Work Object</summary>"
+        "<form method='post' action='/work-objects/create-form'>"
+        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('work:create')}'>"
+        "<input name='title' required placeholder='Title'>"
+        "<textarea name='description' placeholder='Description'></textarea>"
+        "<select name='object_type'><option>TASK</option><option>REMINDER</option>"
+        "<option>CLIENT_REQUEST</option><option>FOLLOW_UP</option><option>LEAD</option>"
+        "<option>CASE</option><option>NOTE</option><option>INITIATIVE</option></select>"
+        "<select name='priority'><option>NORMAL</option><option>LOW</option>"
+        "<option>HIGH</option><option>CRITICAL</option></select>"
+        "<button class='btn primary' type='submit'>Create Work Object</button>"
+        "</form></details><div class='list'>"
+        + ("".join(rows) or "<div class='row'>No Work Objects.</div>")
+        + "</div></section>"
+    )
+
+
 def dashboard_body(data):
     lang = current_language()
     c = data["counts"]
     one_nina_surface = one_nina_work_surface_html(limit=6)
+    try:
+        autonomy_profile = get_autonomy_profile(
+            NINA_WEB_WORKSPACE_ID, actor="system",
+        )
+        autonomy_events = list_autonomy_events(
+            NINA_WEB_WORKSPACE_ID, limit=5,
+        )
+        autonomy_options = "".join(
+            f"<option value='{mode}'"
+            + (" selected" if mode == autonomy_profile.mode else "")
+            + f">{mode}</option>"
+            for mode in ("MANUAL", "SUGGEST", "SEMI_AUTO", "AUTO")
+        )
+        autonomy_event_rows = "".join(
+            "<div class='row'><div><b>Mode changed</b>"
+            + "<span class='muted'>"
+            + html_escape(event[3] or "not configured")
+            + " → "
+            + html_escape(event[4])
+            + " · "
+            + html_escape(event[5])
+            + " · "
+            + html_escape(event[6])
+            + "</span></div></div>"
+            for event in autonomy_events
+        )
+        if not autonomy_event_rows:
+            autonomy_event_rows = (
+                "<div class='row'><span class='muted'>No mode changes.</span></div>"
+            )
+        autonomy_notice = request.args.get("autonomy_status", "")
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "Workspace Settings</div><p class='muted'>Autonomy Mode controls "
+            "policy only. It does not create a scheduler or execute work.</p>"
+            + (
+                f"<div class='safe-note'>{html_escape(autonomy_notice)}</div>"
+                if autonomy_notice else ""
+            )
+            + "<form method='post' action='/settings/autonomy'>"
+            + "<div class='field'><label for='autonomy-mode'>Autonomy Mode</label>"
+            + f"<select id='autonomy-mode' name='mode'>{autonomy_options}</select></div>"
+            + f"<input type='hidden' name='csrf_token' value='{_channel_csrf('autonomy:mode')}'>"
+            + "<div class='form-actions'><button class='btn' type='submit'>"
+            + "Save mode</button></div></form><div class='list'>"
+            + autonomy_event_rows
+            + "</div></section>"
+        )
+    except Exception:
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "Workspace Settings</div><div class='safe-note'>"
+            "Autonomy profile unavailable.</div></section>"
+        )
+    try:
+        worker_selection = get_workspace_worker(
+            NINA_WEB_WORKSPACE_ID, actor="system",
+        )
+        worker = active_worker(NINA_WEB_WORKSPACE_ID)
+        assignment = get_workspace_assignment(
+            NINA_WEB_WORKSPACE_ID, actor="system",
+        )
+        assignment_events = list_workspace_assignment_events(
+            NINA_WEB_WORKSPACE_ID, limit=5,
+        )
+        worker_events = list_workspace_worker_events(
+            NINA_WEB_WORKSPACE_ID, limit=5,
+        )
+        worker_options = "".join(
+            f"<option value='{item.worker_id}'"
+            + (
+                " selected"
+                if item.worker_id == worker_selection.worker_id else ""
+            )
+            + f">{html_escape(item.display_name)}</option>"
+            for item in list_workers()
+        )
+        worker_event_rows = "".join(
+            "<div class='row'><div><b>AI Worker changed</b>"
+            + "<span class='muted'>"
+            + html_escape(event[3] or "not configured")
+            + " to "
+            + html_escape(event[4])
+            + " by "
+            + html_escape(event[5])
+            + " at "
+            + html_escape(event[6])
+            + "</span></div></div>"
+            for event in worker_events
+        ) or (
+            "<div class='row'><span class='muted'>"
+            "No AI Worker changes.</span></div>"
+        )
+        worker_notice = request.args.get("worker_status", "")
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "Workspace Settings</div><p class='muted'>Choose a ready AI "
+            "Worker. There is still only one Nina; the Worker selects her "
+            "professional RolePack composition.</p>"
+            + (
+                f"<div class='safe-note'>{html_escape(worker_notice)}</div>"
+                if worker_notice else ""
+            )
+            + "<form method='post' action='/settings/worker'>"
+            + "<div class='field'><label for='worker-id'>AI Worker</label>"
+            + f"<select id='worker-id' name='worker_id'>{worker_options}</select></div>"
+            + f"<input type='hidden' name='csrf_token' value='{_channel_csrf('worker:change')}'>"
+            + "<div class='form-actions'><button class='btn' type='submit'>"
+            + "Save AI Worker</button></div></form>"
+            + "<div class='safe-note'><b>"
+            + html_escape(worker.display_name)
+            + "</b> В· "
+            + html_escape(worker.description)
+            + "<br>RolePack composition: "
+            + html_escape(" + ".join(worker.rolepacks))
+            + "<br><b>Worker Instance ID:</b> "
+            + html_escape(assignment.worker_instance_id)
+            + "<br><b>Status:</b> "
+            + html_escape(assignment.status)
+            + "<br><b>Language:</b> "
+            + html_escape(assignment.language)
+            + "<br><b>Timezone:</b> "
+            + html_escape(assignment.timezone)
+            + "<br><b>Version:</b> "
+            + html_escape(assignment.worker_version)
+            + "<br><b>Assignment audit events:</b> "
+            + html_escape(str(len(assignment_events)))
+            + "</div><div class='list'>"
+            + worker_event_rows
+            + "</div></section>"
+        )
+    except Exception:
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "Workspace Settings</div><div class='safe-note'>"
+            "AI Worker profile unavailable.</div></section>"
+        )
+    try:
+        one_nina_surface += knowledge_vault_html()
+    except Exception:
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "Knowledge Vault</div><div class='safe-note'>"
+            "Knowledge Vault unavailable.</div></section>"
+        )
+    try:
+        one_nina_surface += universal_work_objects_html()
+    except Exception:
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "Work Objects</div><div class='safe-note'>"
+            "Work Objects unavailable.</div></section>"
+        )
+    try:
+        one_nina_surface += channel_layer_html()
+    except Exception:
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "Channels</div><div class='safe-note'>"
+            "Channel Layer unavailable.</div></section>"
+        )
+    try:
+        rolepack_selection = get_workspace_rolepack(
+            NINA_WEB_WORKSPACE_ID, actor="system",
+        )
+        rolepack = active_rolepack(NINA_WEB_WORKSPACE_ID)
+        rolepack_events = list_workspace_rolepack_events(
+            NINA_WEB_WORKSPACE_ID, limit=5,
+        )
+        rolepack_choices = (
+            ("office_manager", "Office Manager"),
+            ("sales_assistant", "Sales Assistant"),
+            ("client_manager", "Client Manager"),
+            ("personal_assistant", "Personal Assistant"),
+        )
+        rolepack_options = "".join(
+            f"<option value='{identifier}'"
+            + (
+                " selected"
+                if identifier == rolepack_selection.rolepack_id else ""
+            )
+            + f">{label}</option>"
+            for identifier, label in rolepack_choices
+        )
+        rolepack_event_rows = "".join(
+            "<div class='row'><div><b>RolePack changed</b>"
+            + "<span class='muted'>"
+            + html_escape(event[3] or "not configured")
+            + " → "
+            + html_escape(event[4])
+            + " · "
+            + html_escape(event[5])
+            + " · "
+            + html_escape(event[6])
+            + "</span></div></div>"
+            for event in rolepack_events
+        )
+        if not rolepack_event_rows:
+            rolepack_event_rows = (
+                "<div class='row'><span class='muted'>"
+                "No RolePack changes.</span></div>"
+            )
+        rolepack_notice = request.args.get("rolepack_status", "")
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "Active RolePack</div><p class='muted'>Read-only composition "
+            "detail managed by the selected AI Worker. The canonical "
+            "execution chain does not change.</p>"
+            + (
+                f"<div class='safe-note'>{html_escape(rolepack_notice)}</div>"
+                if rolepack_notice else ""
+            )
+            + "<div class='safe-note'>Active: "
+            + html_escape(rolepack.display_name)
+            + "<br>Capabilities: "
+            + html_escape(", ".join(rolepack.capabilities))
+            + "</div><div class='list'>"
+            + rolepack_event_rows
+            + "</div></section>"
+        )
+    except Exception:
+        one_nina_surface += (
+            "<section class='card card-pad'><div class='section-title'>"
+            "RolePack</div><div class='safe-note'>"
+            "RolePack profile unavailable.</div></section>"
+        )
+    try:
+        from nina_message_service import daily_work_summary
+        today = daily_work_summary(
+            NINA_WEB_WORKSPACE_ID, owner_id=current_web_contact()["contact_id"],
+        )
+    except Exception:
+        today = {"today": [], "overdue": [], "upcoming": []}
+
+    def today_rows(items, empty):
+        if not items:
+            return f"<div class='row'><div><span class='muted'>{html_escape(empty)}</span></div></div>"
+        return "".join(
+            f"<div class='row'><div><b>{html_escape(getattr(item, 'title', ''))}</b>"
+            f"<span class='muted'>{html_escape(getattr(item, 'priority', 'normal'))}</span></div></div>"
+            for item in items[:4]
+        )
+
+    today_panel = (
+        "<section class='card card-pad'><div class='section-title'>Today</div>"
+        "<div class='two-col'><div><b>Today's Tasks</b><div class='list'>"
+        + today_rows(today["today"], "No tasks due today.")
+        + "</div></div><div><b>Overdue</b><div class='list'>"
+        + today_rows(today["overdue"], "Nothing overdue.")
+        + "</div></div></div><br><b>Upcoming</b><div class='list'>"
+        + today_rows(today["upcoming"], "No upcoming tasks.")
+        + "</div></section>"
+    )
+    one_nina_surface += today_panel
+    try:
+        initiatives = initiative_queue(NINA_WEB_WORKSPACE_ID, limit=6)
+    except Exception:
+        initiatives = ()
+
+    if initiatives:
+        initiative_rows = "".join(
+            "<div class='row'><div><b>"
+            + html_escape(item.reason)
+            + "</b><span class='muted'>"
+            + html_escape(item.type.replace("_", " ").title())
+            + " · Work Object "
+            + html_escape(item.work_object_id)
+            + "</span></div><span class='pill'>"
+            + str(item.score)
+            + "</span></div>"
+            for item in initiatives
+        )
+    else:
+        initiative_rows = (
+            "<div class='row'><div><span class='muted'>"
+            "No initiative candidates right now."
+            "</span></div></div>"
+        )
+    one_nina_surface += (
+        "<section class='card card-pad'><div class='section-title'>"
+        "Initiative</div><p class='muted'>Read-only suggestions from Nina. "
+        "No action is taken automatically.</p><div class='list'>"
+        + initiative_rows
+        + "</div></section>"
+    )
+    try:
+        wake_expired(NINA_WEB_WORKSPACE_ID)
+        reply_drafts = build_reply_queue(initiatives)
+        approval_by_reply = {
+            reply.reply_id: ensure_approval(
+                reply.workspace_id, reply.initiative_id, reply.reply_id,
+                reply.work_object_id,
+            )
+            for reply in reply_drafts
+        }
+    except Exception:
+        reply_drafts = ()
+        approval_by_reply = {}
+    pending_replies = [
+        reply for reply in reply_drafts
+        if approval_by_reply.get(reply.reply_id)
+        and approval_by_reply[reply.reply_id].status == "pending"
+    ]
+    if pending_replies:
+        reply_rows = "".join(
+            "<div class='row'><div><b>"
+            + html_escape(reply.title)
+            + "</b><span class='muted'>Initiative: "
+            + html_escape(reply.initiative_id)
+            + "</span><span class='muted'>Suggested Action: "
+            + html_escape(reply.suggested_action)
+            + "</span><span class='muted'>Draft Message: "
+            + html_escape(reply.draft_message)
+            + "</span><span class='muted'>Approval status: Pending</span>"
+            + "<div class='form-actions'>"
+            + "".join(
+                "<form method='post' action='/approvals/decision'>"
+                + f"<input type='hidden' name='initiative_id' value='{html_escape(reply.initiative_id)}'>"
+                + f"<input type='hidden' name='reply_id' value='{html_escape(reply.reply_id)}'>"
+                + f"<input type='hidden' name='decision' value='{decision}'>"
+                + f"<input type='hidden' name='csrf_token' value='{_channel_csrf(f'approval:{decision}:{reply.reply_id}')}'>"
+                + f"<button class='btn' type='submit'>{label}</button></form>"
+                for decision, label in (
+                    ("approved", "Approve"), ("dismissed", "Dismiss"),
+                    ("snoozed_1h", "Snooze 1 hour"),
+                    ("snoozed_tomorrow", "Snooze until tomorrow"),
+                )
+            )
+            + "</div></div><span class='pill'>"
+            + f"{reply.confidence:.0%}"
+            + "</span></div>"
+            for reply in pending_replies
+        )
+    else:
+        reply_rows = (
+            "<div class='row'><div><span class='muted'>"
+            "No reply drafts right now."
+            "</span></div></div>"
+        )
+    one_nina_surface += (
+        "<section class='card card-pad'><div class='section-title'>"
+        "Reply Builder</div><p class='muted'>Read-only drafts. Nothing is "
+        "sent or changed automatically.</p><div class='list'>"
+        + reply_rows
+        + "</div></section>"
+    )
+    try:
+        approval_history = list_approvals(
+            NINA_WEB_WORKSPACE_ID,
+            statuses=("approved", "dismissed", "snoozed"),
+            limit=12,
+        )
+    except Exception:
+        approval_history = ()
+    if approval_history:
+        history_rows = "".join(
+            "<div class='row'><div><b>"
+            + html_escape(item.decision.title())
+            + "</b><span class='muted'>Status: "
+            + html_escape(item.status)
+            + " · Work Object "
+            + html_escape(item.work_object_id)
+            + "</span><span class='muted'>Decision time: "
+            + html_escape(item.decided_at)
+            + " · By "
+            + html_escape(item.decided_by or "—")
+            + "</span></div></div>"
+            for item in approval_history
+        )
+    else:
+        history_rows = (
+            "<div class='row'><div><span class='muted'>"
+            "No approval decisions yet.</span></div></div>"
+        )
+    notice = request.args.get("approval_status", "")
+    notice_html = (
+        f"<div class='safe-note'>{html_escape(notice)}</div>" if notice else ""
+    )
+    one_nina_surface += (
+        "<section class='card card-pad'><div class='section-title'>"
+        "Approval History</div>"
+        + notice_html
+        + "<div class='list'>"
+        + history_rows
+        + "</div></section>"
+    )
+    try:
+        execution_history = list_executions(NINA_WEB_WORKSPACE_ID, limit=12)
+        canonical_initiatives = {
+            item.initiative_id: item
+            for item in initiative_queue(NINA_WEB_WORKSPACE_ID, limit=100)
+        }
+    except Exception:
+        execution_history = ()
+        canonical_initiatives = {}
+    execution_by_approval = {
+        item.approval_id: item for item in execution_history
+    }
+    execution_rows = []
+    for approval in approval_history:
+        if approval.status != "approved":
+            continue
+        initiative = canonical_initiatives.get(approval.initiative_id)
+        try:
+            reply = (
+                build_reply_queue((initiative,))[0] if initiative else None
+            )
+        except (IndexError, TypeError, ValueError):
+            reply = None
+        execution = execution_by_approval.get(approval.approval_id)
+        action_type = reply.suggested_action if reply else ""
+        if execution:
+            action_type = execution.action_type
+            action_html = (
+                "<span class='muted'>Status: "
+                + html_escape(execution.status)
+                + " · Result: "
+                + html_escape(execution.result_type or "—")
+                + " "
+                + html_escape(execution.result_reference or "")
+                + " · Completed: "
+                + html_escape(execution.completed_at or "—")
+                + " · By "
+                + html_escape(execution.requested_by)
+                + "</span>"
+            )
+        elif reply and action_type in EXECUTION_ALLOWLIST:
+            csrf_action = f"execution:run:{approval.approval_id}"
+            action_html = (
+                "<form method='post' action='/executions/run'>"
+                f"<input type='hidden' name='approval_id' value='{html_escape(approval.approval_id)}'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(csrf_action)}'>"
+                "<button class='btn' type='submit'>Execute</button></form>"
+            )
+        else:
+            action_html = (
+                "<span class='muted'>Not supported in Execution Layer V1</span>"
+            )
+        execution_rows.append(
+            "<div class='row'><div><b>"
+            + html_escape(action_type or "Stale approval")
+            + "</b><span class='muted'>Approval "
+            + html_escape(approval.approval_id)
+            + " · Work Object "
+            + html_escape(approval.work_object_id)
+            + "</span><div class='form-actions'>"
+            + action_html
+            + "</div></div></div>"
+        )
+    execution_notice = request.args.get("execution_status", "")
+    execution_notice_html = (
+        f"<div class='safe-note'>{html_escape(execution_notice)}</div>"
+        if execution_notice else ""
+    )
+    one_nina_surface += (
+        "<section class='card card-pad'><div class='section-title'>"
+        "Execution</div><p class='muted'>Approved actions require a separate "
+        "explicit Execute. Only REMIND and NO_ACTION are supported in V1.</p>"
+        + execution_notice_html
+        + "<div class='list'>"
+        + (
+            "".join(execution_rows)
+            if execution_rows else
+            "<div class='row'><div><span class='muted'>"
+            "No approved actions ready for execution.</span></div></div>"
+        )
+        + "</div></section>"
+    )
+    try:
+        notification_owner = current_web_contact()["contact_id"]
+        reminders = [
+            item for item in one_nina_list_work_objects(
+                workspace_id=NINA_WEB_WORKSPACE_ID, object_type="reminder", limit=50,
+            )
+            if item.origin_user_id == notification_owner
+        ]
+    except Exception:
+        reminders = []
+    reminder_rows = ""
+    for item in reminders[:8]:
+        metadata = item.metadata if isinstance(item.metadata, dict) else {}
+        delivery_status = str(metadata.get("delivery_status") or "scheduled")
+        if item.status == "cancelled":
+            display_status = "Done"
+        elif delivery_status == "scheduled" and metadata.get("delivery_history"):
+            display_status = "Snoozed"
+        else:
+            display_status = delivery_status.capitalize()
+        planned_at = str(metadata.get("planned_at") or metadata.get("reminder_at") or item.due_date)
+        actions = ""
+        if item.status != "cancelled":
+            done_action = f"reminder:done:{item.object_id}"
+            snooze_action = f"reminder:snooze:{item.object_id}"
+            actions = (
+                f"<form method='post' action='/reminders/{item.object_id}/done' style='display:inline'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(done_action)}'>"
+                "<button class='btn' type='submit'>Mark done</button></form>"
+                f"<form method='post' action='/reminders/{item.object_id}/snooze' style='display:inline'>"
+                f"<input type='hidden' name='csrf_token' value='{_channel_csrf(snooze_action)}'>"
+                "<button class='btn' type='submit'>Snooze 1 hour</button></form>"
+            )
+        reminder_rows += (
+            "<div class='row'><div><b>" + html_escape(item.title) + "</b>"
+            f"<span class='muted'>{html_escape(planned_at)} · {html_escape(display_status)}</span>"
+            f"<div class='form-actions'>{actions}</div></div>"
+            f"<span class='pill'>{html_escape('Unread' if metadata.get('unread') else display_status)}</span></div>"
+        )
+    if not reminder_rows:
+        reminder_rows = "<div class='row'><div><span class='muted'>No reminders yet.</span></div></div>"
+    one_nina_surface += (
+        "<section class='card card-pad'><div class='section-title'>Notifications / Reminders</div>"
+        "<div class='list'>" + reminder_rows + "</div></section>"
+    )
     kpis = (
         "<div class='kpis'>"
         + kpi_card(tx("tasks_today", lang), c["tasks_today"], {"text": tx("open_work_label", lang), "href": "/tasks"})
@@ -4945,6 +6459,3260 @@ def office_manager_body(data):
     )
 
 
+def _workspace_cookie_secret():
+    value = (os.environ.get("NINA_WEB_WORKSPACE_COOKIE_SECRET") or os.environ.get("NINA_CHANNEL_CREDENTIAL_KEY") or "").strip()
+    if not value:
+        raise RuntimeError("workspace_cookie_secret_missing")
+    return value.encode()
+
+
+def _workspace_cookie_value(workspace_id):
+    signature = hmac.new(_workspace_cookie_secret(), workspace_id.encode(), hashlib.sha256).hexdigest()
+    return f"{workspace_id}.{signature}"
+
+
+def _verified_workspace_cookie(value):
+    raw = str(value or "")
+    try:
+        workspace_id, supplied = raw.rsplit(".", 1)
+    except ValueError:
+        return ""
+    if not re.fullmatch(r"web_[a-f0-9]{32}", workspace_id):
+        return ""
+    expected = hmac.new(_workspace_cookie_secret(), workspace_id.encode(), hashlib.sha256).hexdigest()
+    return workspace_id if hmac.compare_digest(supplied, expected) else ""
+
+
+def current_workspace_id():
+    """Resolve a server-authenticated browser workspace; never trust request parameters."""
+    if not has_request_context():
+        return NINA_WEB_WORKSPACE_ID
+    existing = getattr(g, "nina_workspace_id", "")
+    if existing:
+        return existing
+    workspace_id = _verified_workspace_cookie(request.cookies.get(_WORKSPACE_COOKIE))
+    if not workspace_id:
+        workspace_id = "web_" + secrets.token_hex(16)
+        g.nina_workspace_cookie_new = True
+    g.nina_workspace_id = workspace_id
+    return workspace_id
+
+
+def current_web_role():
+    """Workspace identity is always client unless a separate signed admin session verifies."""
+    if not has_request_context():
+        return CLIENT_ROLE
+    try:
+        if verify_admin_session(request.cookies.get(ADMIN_COOKIE), _workspace_cookie_secret()):
+            return ADMIN_ROLE
+    except RuntimeError:
+        pass
+    return CLIENT_ROLE
+
+
+def current_web_contact():
+    return resolve_contact_identity(
+        NINA_WEB_WORKSPACE_ID,
+        "web",
+        current_workspace_id(),
+        {"relationship_type": "client"},
+    )
+
+
+def platform_admin_required(view):
+    @wraps(view)
+    def protected(*args, **kwargs):
+        if current_web_role() != ADMIN_ROLE:
+            return Response("Forbidden", status=403)
+        return view(*args, **kwargs)
+    return protected
+
+
+@app.after_request
+def persist_workspace_identity(response):
+    workspace_id = getattr(g, "nina_workspace_id", "")
+    if workspace_id and getattr(g, "nina_workspace_cookie_new", False):
+        response.set_cookie(
+            _WORKSPACE_COOKIE,
+            _workspace_cookie_value(workspace_id),
+            max_age=_WORKSPACE_COOKIE_MAX_AGE,
+            httponly=True,
+            secure=request.is_secure or request.headers.get("X-Forwarded-Proto") == "https",
+            samesite="Lax",
+        )
+    if current_web_role() == ADMIN_ROLE or request.path.startswith("/admin/") or request.path in {
+        "/channels/whatsapp-personal/status",
+        "/channels/whatsapp-company/status",
+    }:
+        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
+
+def _channel_csrf(action):
+    message = f"{NINA_WEB_WORKSPACE_ID}:{action}".encode()
+    return hmac.new(_CHANNEL_CSRF_SECRET, message, hashlib.sha256).hexdigest()
+
+
+def _valid_channel_csrf(action):
+    supplied = (request.form.get("csrf_token") or "").strip()
+    return bool(supplied) and hmac.compare_digest(supplied, _channel_csrf(action))
+
+
+def _telegram_bot_username():
+    candidate = (os.environ.get("TELEGRAM_BOT_USERNAME") or "Nina7727_bot").strip().lstrip("@")
+    return candidate if re.fullmatch(r"[A-Za-z0-9_]{5,64}", candidate) else "Nina7727_bot"
+
+
+def _channels_copy(lang):
+    return {
+        "en": {"title": "Channels", "sub": "Choose where you want to talk with Nina.", "active": "Active", "connected": "Connected", "disconnected": "Not connected", "pending": "Connecting", "error": "Connection needs attention", "web_text": "Your Web workspace is ready.", "telegram_text": "Connect your Telegram account to this workspace.", "connect_telegram": "Connect Telegram", "open_telegram": "Open Telegram", "disconnect": "Disconnect", "pending_text": "Open the bot and press Start. Confirmation will appear here when linking is enabled in Telegram.", "whatsapp_text": "Connect your WhatsApp and talk to Nina from the app you already use.", "connect_whatsapp": "Connect WhatsApp", "whatsapp_failed": "This number could not be connected. Your existing WhatsApp account was not changed.", "prepare": "Your current number can be kept. To connect Nina, this number first needs to use WhatsApp Business App.", "backup": "Back up your chats in WhatsApp first, then switch the same number to WhatsApp Business App using WhatsApp's supported process.", "already_business": "I already use WhatsApp Business", "switch_safely": "How to switch safely", "cancel": "Cancel", "retry": "Retry", "email_text": "Email connection is coming soon.", "coming": "Coming soon"},
+        "lv": {"title": "Kanāli", "sub": "Izvēlies, kur vēlies sarunāties ar Ninu.", "active": "Aktīvs", "connected": "Savienots", "disconnected": "Nav savienots", "pending": "Savieno", "error": "Savienojumam jāpievērš uzmanība", "web_text": "Tava tīmekļa darba vide ir gatava.", "telegram_text": "Savieno savu Telegram kontu ar šo darba vidi.", "connect_telegram": "Savienot Telegram", "open_telegram": "Atvērt Telegram", "disconnect": "Atvienot", "pending_text": "Atver botu un nospied Start. Apstiprinājums šeit parādīsies, kad Telegram savienošana būs iespējota.", "whatsapp_text": "Savieno savu WhatsApp un runā ar Ninu lietotnē, ko jau izmanto.", "connect_whatsapp": "Savienot WhatsApp", "whatsapp_failed": "Šo numuru neizdevās savienot. Tavs esošais WhatsApp konts netika mainīts.", "prepare": "Vari paturēt savu pašreizējo numuru. Lai savienotu Ninu, šim numuram vispirms jāizmanto WhatsApp Business lietotne.", "backup": "Vispirms izveido sarunu rezerves kopiju WhatsApp, pēc tam pārej ar to pašu numuru uz WhatsApp Business lietotni, izmantojot WhatsApp drošo pāreju.", "already_business": "Es jau izmantoju WhatsApp Business", "switch_safely": "Kā droši pāriet", "cancel": "Atcelt", "retry": "Mēģināt vēlreiz", "email_text": "E-pasta savienojums būs drīzumā.", "coming": "Drīzumā"},
+        "ru": {"title": "Каналы", "sub": "Выберите, где вы хотите общаться с Ниной.", "active": "Активен", "connected": "Подключён", "disconnected": "Не подключён", "pending": "Подключение", "error": "Подключение требует внимания", "web_text": "Ваше веб-пространство готово.", "telegram_text": "Подключите Telegram к этому рабочему пространству.", "connect_telegram": "Подключить Telegram", "open_telegram": "Открыть Telegram", "disconnect": "Отключить", "pending_text": "Откройте бота и нажмите Start. Подтверждение появится здесь, когда подключение в Telegram будет включено.", "whatsapp_text": "Подключите WhatsApp и общайтесь с Ниной в привычном приложении.", "connect_whatsapp": "Подключить WhatsApp", "whatsapp_failed": "Не удалось подключить этот номер. Существующий аккаунт WhatsApp не был изменён.", "prepare": "Текущий номер можно сохранить. Чтобы подключить Нину, сначала используйте этот номер в приложении WhatsApp Business.", "backup": "Сначала создайте резервную копию чатов в WhatsApp, затем перейдите с тем же номером в WhatsApp Business официальным способом.", "already_business": "Я уже использую WhatsApp Business", "switch_safely": "Как перейти безопасно", "cancel": "Отмена", "retry": "Повторить", "email_text": "Подключение электронной почты появится позже.", "coming": "Скоро"},
+    }[lang]
+
+
+def _whatsapp_connect_script():
+    return r"""
+(() => {
+  const button = document.getElementById('whatsapp-business-connect');
+  if (!button) return;
+  let setup = null, signup = null, code = '';
+  const fail = async () => {
+    button.disabled = false;
+    if (setup && setup.state) {
+      try { await fetch('/channels/whatsapp/attention', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({csrf_token:window.NinaWhatsApp.callbackCsrf,state:setup.state})}); } catch (_) {}
+    }
+    window.location.href = '/admin/channels?lang=' + encodeURIComponent(window.NinaWhatsApp.lang) + '&notice=whatsapp_failed';
+  };
+  const finish = async () => {
+    if (!setup || !signup || !code) return;
+    try {
+      const response = await fetch('/channels/whatsapp/callback', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({csrf_token: window.NinaWhatsApp.callbackCsrf, state: setup.state, code,
+          phone_number_id: signup.phone_number_id, business_account_id: signup.waba_id,
+          business_portfolio_id: signup.business_id || ''})
+      });
+      if (!response.ok) return fail();
+      window.location.href = '/admin/channels?lang=' + encodeURIComponent(window.NinaWhatsApp.lang);
+    } catch (_) { fail(); }
+  };
+  window.addEventListener('message', (event) => {
+    if (!(event.origin === 'https://www.facebook.com' || event.origin.endsWith('.facebook.com'))) return;
+    try {
+      const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+      if (data && data.type === 'WA_EMBEDDED_SIGNUP' && data.event === 'FINISH') { signup = data.data || {}; finish(); }
+    } catch (_) {}
+  });
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      const response = await fetch('/channels/whatsapp/start', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({csrf_token:window.NinaWhatsApp.startCsrf})});
+      if (!response.ok) return fail();
+      setup = await response.json();
+      if (!window.FB) return fail();
+      const init = {appId: setup.app_id, cookie:true, xfbml:false}; init['ver'+'sion'] = setup.gv; FB.init(init);
+      const extras = {setup:{}, featureType:'whatsapp_business_app_onboarding'}; extras['sessionInfo'+'Ver'+'sion'] = '3';
+      FB.login((result) => {
+        code = result && result.authResponse ? (result.authResponse.code || '') : '';
+        if (!code) return fail();
+        finish();
+      }, {config_id:setup.config_id, response_type:'code', override_default_response_type:true, extras});
+    } catch (_) { fail(); }
+  });
+})();
+"""
+
+
+def channels_body(telegram_setup=None, notice="", whatsapp_view=""):
+    lang = current_language()
+    c = _channels_copy(lang)
+    workspace_id = current_workspace_id()
+    telegram = get_connection(NINA_WEB_WORKSPACE_ID, "telegram")
+    whatsapp = get_connection(NINA_WEB_WORKSPACE_ID, "whatsapp")
+    personal = get_connection(workspace_id, PERSONAL_WHATSAPP_CHANNEL)
+    try:
+        company_workspace = configured_company_whatsapp_workspace()
+        company_number = configured_company_whatsapp_number()
+        company = get_connection(company_workspace, COMPANY_WHATSAPP_CHANNEL)
+    except ValueError:
+        company_workspace, company_number = "ninaos_company", ""
+        company = {"status": "error", "metadata": {}}
+    tmeta, wmeta = telegram["metadata"], whatsapp["metadata"]
+    telegram_truth = resolve_channel_connection_truth(
+        NINA_WEB_WORKSPACE_ID,
+        "telegram",
+        telegram,
+        {
+            "state": "ready" if tmeta.get("polling_ready") else "unavailable",
+            "last_heartbeat_at": tmeta.get("last_heartbeat_at"),
+        },
+    )
+    try:
+        company_runtime_payload = personal_whatsapp_bridge_request(
+            "/v1/company/status", {"workspace_id": company_workspace}
+        )
+        company_runtime_status = str(company_runtime_payload.get("status") or "")
+        company_runtime_qr = str(company_runtime_payload.get("qr_svg") or "")
+    except Exception:
+        company_runtime_status, company_runtime_qr = "unavailable", ""
+    company_truth = resolve_channel_connection_truth(
+        company_workspace,
+        COMPANY_WHATSAPP_CHANNEL,
+        company,
+        {"state": company_runtime_status, "qr_available": bool(company_runtime_qr)},
+    )
+    web_truth = resolve_channel_connection_truth(
+        NINA_WEB_WORKSPACE_ID,
+        "web",
+        {"status": "connected"},
+        {"service_ready": WEB_RUNTIME_READINESS.ready},
+        {"workspace_usable": current_web_role() == ADMIN_ROLE and bool(
+            _verified_workspace_cookie(request.cookies.get(_WORKSPACE_COOKIE))
+        )},
+    )
+    refresh_label = {"en": "Refresh status", "lv": "Atjaunot statusu", "ru": "Обновить статус"}[lang]
+    status_label = {
+        "connected": c["connected"], "pending": c["pending"],
+        "error": c["error"], "disconnected": c["disconnected"],
+        "ready": c["connected"], "qr_pending": c["pending"],
+        "attention": c["error"], "reconnect_required": c["error"],
+        "not_connected": c["disconnected"], "not_ready": c["disconnected"],
+    }
+    saved_username = str(tmeta.get("bot_username") or "").strip().lstrip("@")
+    bot_username = saved_username if re.fullmatch(r"[A-Za-z0-9_]{5,64}", saved_username) else _telegram_bot_username()
+    telegram_action = ""
+    if telegram_setup and telegram_setup.get("deep_link"):
+        telegram_action = f"<a class='btn primary' href='{html_escape(telegram_setup['deep_link'])}' rel='noopener noreferrer'>{c['open_telegram']}</a><div class='safe-note'>{c['pending_text']}</div>"
+    elif telegram["status"] != "connected":
+        telegram_action = f"<form method='post' action='/channels/telegram/connect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('telegram_connect')}'><button class='btn primary' type='submit'>{c['connect_telegram']}</button></form>"
+    if telegram["status"] in {"connected", "pending", "error"}:
+        telegram_action += f"<form method='post' action='/channels/telegram/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('telegram_disconnect')}'><button class='btn' type='submit'>{c['disconnect']}</button></form>"
+    telegram_action += f"<a class='btn' href='/admin/channels?lang={lang}'>{refresh_label}</a>"
+    linked_account = ""
+    if telegram["status"] == "connected":
+        account_name = str(tmeta.get("telegram_display_name") or tmeta.get("telegram_username") or "").strip()
+        username = str(tmeta.get("telegram_username") or "").strip().lstrip("@")
+        account_label = account_name + (f" · @{username}" if username and username.lower() not in account_name.lower() else "")
+        linked_account = f"<div class='safe-note'>{html_escape(account_label)}</div>" if account_label else ""
+    whatsapp_action = ""
+    whatsapp_help = ""
+    if whatsapp["status"] == "disconnected" and whatsapp_view == "prepare":
+        whatsapp_help = f"<div class='channel-message'>{html_escape(c['prepare'])}</div>"
+        whatsapp_action = f"<button class='btn primary' id='whatsapp-business-connect' type='button'>{c['already_business']}</button><a class='btn' href='/admin/channels?lang={lang}&whatsapp=switch'>{c['switch_safely']}</a><a class='btn' href='/admin/channels?lang={lang}'>{c['cancel']}</a>"
+    elif whatsapp["status"] == "disconnected" and whatsapp_view == "switch":
+        whatsapp_help = f"<div class='channel-message'>{html_escape(c['backup'])}</div>"
+        whatsapp_action = f"<button class='btn primary' id='whatsapp-business-connect' type='button'>{c['already_business']}</button><a class='btn' href='https://business.whatsapp.com/products/business-app' rel='noopener noreferrer' target='_blank'>{c['switch_safely']}</a><a class='btn' href='/admin/channels?lang={lang}'>{c['cancel']}</a>"
+    elif whatsapp["status"] == "disconnected":
+        whatsapp_action = f"<a class='btn primary' href='/admin/channels?lang={lang}&whatsapp=prepare'>{c['connect_whatsapp']}</a>"
+    elif whatsapp["status"] == "error":
+        whatsapp_action = f"<a class='btn primary' href='/admin/channels?lang={lang}&whatsapp=prepare'>{c['retry']}</a>"
+    if whatsapp["status"] in {"connected", "pending", "error"}:
+        whatsapp_action += f"<form method='post' action='/channels/whatsapp/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_disconnect')}'><button class='btn' type='submit'>{c['disconnect']}</button></form>"
+    whatsapp_identity = " · ".join(filter(None, [str(wmeta.get("business_display_name") or ""), str(wmeta.get("display_phone_number") or "")]))
+    whatsapp_identity_html = f"<div class='safe-note'>{html_escape(whatsapp_identity)}</div>" if whatsapp_identity else ""
+    whatsapp_error_html = f"<div class='channel-message'>{html_escape(c['whatsapp_failed'])}</div>" if whatsapp["status"] == "error" else ""
+    pc = {
+        "en": {"title":"Personal WhatsApp","text":"Talk and work with Nina through the WhatsApp you already use.","connect":"Connect WhatsApp","steps":"WhatsApp → Settings → Linked Devices → Link a Device","waiting":"Waiting for connection…","lost":"Connection lost","reconnect":"Reconnect","business":"WhatsApp Business","business_text":"For business customer messaging","privacy":"V1 responds only in your Message yourself chat. Groups and other chats are ignored.","remove":"For full revocation, also remove NinaOS under Linked Devices in WhatsApp."},
+        "lv": {"title":"Personīgais WhatsApp","text":"Runā un strādā ar Ninu savā esošajā WhatsApp.","connect":"Savienot WhatsApp","steps":"WhatsApp → Iestatījumi → Saistītās ierīces → Saistīt ierīci","waiting":"Gaida savienojumu…","lost":"Savienojums zaudēts","reconnect":"Savienot atkārtoti","business":"WhatsApp Business","business_text":"Uzņēmuma klientu saziņai","privacy":"V1 Nina atbild tikai tavā čatā “Ziņa sev”. Grupas un citi čati tiek ignorēti.","remove":"Pilnīgai atsaukšanai noņem NinaOS arī WhatsApp sadaļā Saistītās ierīces."},
+        "ru": {"title":"Личный WhatsApp","text":"Общайтесь и работайте с Ниной в своём обычном WhatsApp.","connect":"Подключить WhatsApp","steps":"WhatsApp → Настройки → Связанные устройства → Привязка устройства","waiting":"Ожидание подключения…","lost":"Соединение потеряно","reconnect":"Подключить снова","business":"WhatsApp Business","business_text":"Для общения с клиентами компании","privacy":"В V1 Нина отвечает только в чате «Сообщение себе». Группы и другие чаты игнорируются.","remove":"Для полного отзыва также удалите NinaOS в разделе «Связанные устройства» WhatsApp."},
+    }[lang]
+    pstatus = personal["status"]
+    pmeta = personal.get("metadata") or {}
+    if pstatus == "connected":
+        personal_body = f"<div class='safe-note'>{html_escape(pmeta.get('masked_identity') or '')}</div><div class='channel-message'>{html_escape(pc['privacy'])}</div><form method='post' action='/channels/whatsapp-personal/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_personal_disconnect')}'><button class='btn' type='submit'>{c['disconnect']}</button></form><p class='muted'>{html_escape(pc['remove'])}</p>"
+    elif pstatus == "pending":
+        personal_body = f"<div id='personal-whatsapp-qr' class='qr-shell' hidden></div><div id='personal-whatsapp-state' class='channel-message'>{html_escape(pc['waiting'])}</div><p class='pairing-steps'>{html_escape(pc['steps'])}</p><form method='post' action='/channels/whatsapp-personal/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_personal_disconnect')}'><button class='btn' type='submit'>{c['cancel']}</button></form>"
+    else:
+        label = pc["reconnect"] if pstatus == "error" else pc["connect"]
+        personal_body = f"<form method='post' action='/channels/whatsapp-personal/connect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_personal_connect')}'><button class='btn primary' type='submit'>{html_escape(label)}</button></form><div class='safe-note'>{html_escape(pc['privacy'])}</div>"
+    cc = {
+        "en": {"title":"NinaOS Company WhatsApp","text":"Nina's official private contact for direct conversations.","connect":"Connect company phone","reconnect":"Reconnect WhatsApp","waiting":"Waiting for the company phone to scan the QR…","privacy":"External private conversations are isolated from one another.","not_configured":"Configure the company number before connecting."},
+        "lv": {"title":"NinaOS uzņēmuma WhatsApp","text":"Ninas oficiālais privātais kontakts tiešām sarunām.","connect":"Savienot uzņēmuma tālruni","waiting":"Gaida, kad uzņēmuma tālrunis noskenēs QR kodu…","privacy":"Ārējo cilvēku privātās sarunas ir savstarpēji nodalītas.","not_configured":"Pirms savienošanas konfigurē uzņēmuma numuru."},
+        "ru": {"title":"WhatsApp компании NinaOS","text":"Официальный личный контакт Нины для прямого общения.","connect":"Подключить телефон компании","waiting":"Ожидание сканирования QR-кода телефоном компании…","privacy":"Личные разговоры разных людей изолированы друг от друга.","not_configured":"Перед подключением настройте номер компании."},
+    }[lang]
+    company_status = company_truth["state"]
+    company_meta = company.get("metadata") or {}
+    company_masked = str(company_meta.get("masked_identity") or "")
+    if not company_masked and company_number:
+        digits = re.sub(r"\D", "", company_number)
+        company_masked = ("*" * max(0, len(digits) - 4)) + digits[-4:]
+    if not company_number:
+        company_body = f"<div class='channel-message'>{html_escape(cc['not_configured'])}</div>"
+    elif company_status == "ready":
+        company_body = f"<div class='safe-note'>{html_escape(company_masked)}</div><div class='channel-message'>{html_escape(cc['privacy'])}</div><form method='post' action='/channels/whatsapp-company/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_company_disconnect')}'><button class='btn' type='submit'>{c['disconnect']}</button></form>"
+    elif company_status == "qr_pending":
+        safe_qr = company_runtime_qr
+        if len(safe_qr) > 250000 or not safe_qr.lstrip().startswith("<svg") or "<script" in safe_qr.lower() or "onload=" in safe_qr.lower():
+            safe_qr = ""
+        qr_attributes = ">" + safe_qr if safe_qr else " hidden>"
+        preparing = cc["waiting"] if safe_qr else "Preparing QR"
+        company_body = f"<div id='company-whatsapp-qr' class='qr-shell'{qr_attributes}</div><div id='company-whatsapp-state' class='channel-message'>{html_escape(preparing)}</div><form method='post' action='/channels/whatsapp-company/disconnect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_company_disconnect')}'><button class='btn' type='submit'>{c['cancel']}</button></form>"
+    else:
+        company_action = cc.get("reconnect", cc["connect"]) if company_status == "reconnect_required" else cc["connect"]
+        company_body = f"<form method='post' action='/channels/whatsapp-company/connect?lang={lang}'><input type='hidden' name='csrf_token' value='{_channel_csrf('whatsapp_company_connect')}'><button class='btn primary' type='submit'>{html_escape(company_action)}</button></form><div class='safe-note'>{html_escape(cc['privacy'])}</div>"
+    notice_text = c.get(notice, notice)
+    notice_html = f"<div class='channel-message'>{html_escape(notice_text)}</div>" if notice else ""
+    return (
+        "<style>@media(max-width:640px){.sidebar{padding-bottom:14px}.brand{margin-bottom:14px}.nav{flex-direction:row;overflow-x:auto;padding-bottom:6px}.nav-item{flex:0 0 auto}.user{display:none}}</style>"
+        f"<div class='page-title'><h1>{c['title']}</h1><p>{c['sub']}</p></div><br>{notice_html}"
+        f"{nina_contact_html(lang)}<div class='channels-grid'>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>{html_escape(cc['title'])}</h2><span class='connection-status {company_status}'>{status_label[company_status]}</span></div><p class='muted'>{html_escape(cc['text'])}</p>{company_body}</section>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Web</h2><span class='connection-status {web_truth['state']}'>{status_label[web_truth['state']]}</span></div><p class='muted'>{c['web_text']}</p></section>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Telegram</h2><span class='connection-status {telegram_truth['state']}'>{status_label[telegram_truth['state']]}</span></div><p class='muted'>{c['telegram_text']}</p><div><b>@{html_escape(bot_username)}</b></div>{linked_account}<div class='connection-actions'>{telegram_action}</div></section>"
+        f"<section class='card card-pad connection-card whatsapp-stack'><div class='connection-head'><h2>WhatsApp</h2></div><div class='whatsapp-products'><div class='whatsapp-product'><div class='connection-head'><h3>{html_escape(pc['title'])}</h3><span class='connection-status {pstatus}'>{status_label[pstatus]}</span></div><p class='muted'>{html_escape(pc['text'])}</p>{personal_body}</div><div class='whatsapp-product'><div class='connection-head'><h3>{html_escape(pc['business'])}</h3><span class='connection-status {whatsapp['status']}'>{status_label[whatsapp['status']]}</span></div><p class='muted'>{html_escape(pc['business_text'])}</p>{whatsapp_help}{whatsapp_error_html}{whatsapp_identity_html}<div class='connection-actions'>{whatsapp_action}</div></div></div></section>"
+        f"<section class='card card-pad connection-card'><div class='connection-head'><h2>Email</h2><span class='connection-status'>{c['coming']}</span></div><p class='muted'>{c['email_text']}</p></section>"
+        "</div>"
+        "<script async defer crossorigin='anonymous' src='https://connect.facebook.net/en_US/sdk.js'></script>"
+        f"<script>window.NinaWhatsApp={{startCsrf:{json.dumps(_channel_csrf('whatsapp_start'))},callbackCsrf:{json.dumps(_channel_csrf('whatsapp_callback'))},lang:{json.dumps(lang)}}};</script>"
+        "<script>" + _whatsapp_connect_script() + "</script>"
+        "<script>(()=>{const q=document.getElementById('personal-whatsapp-qr'),s=document.getElementById('personal-whatsapp-state');if(!q||!s)return;const poll=async()=>{try{const r=await fetch('/channels/whatsapp-personal/status',{cache:'no-store'}),d=await r.json();if(d.status==='connected'){location.reload();return}if(d.qr_svg){q.innerHTML=d.qr_svg;q.hidden=false}if(d.status==='connection_lost'||d.status==='logged_out'){s.textContent=" + json.dumps(pc["lost"]) + ";s.classList.add('connection-lost');return}}catch(_){}setTimeout(poll,2000)};poll()})()</script>"
+        "<script>(()=>{const q=document.getElementById('company-whatsapp-qr'),s=document.getElementById('company-whatsapp-state');if(!q||!s)return;const poll=async()=>{try{const r=await fetch('/channels/whatsapp-company/status',{cache:'no-store'}),d=await r.json();if(d.status==='ready'){location.reload();return}if(d.qr_svg){q.innerHTML=d.qr_svg;q.hidden=false}if(d.status==='reconnect_required'||d.status==='attention'){s.textContent='Connection needs attention';s.classList.add('connection-lost');return}}catch(_){}setTimeout(poll,2000)};poll()})()</script>"
+    )
+
+
+def client_channels_body():
+    """Product communication choices without private connection controls or state."""
+    lang = current_language()
+    copy = {
+        "en": {"title":"Talk to Nina","sub":"Choose where you want to talk to Nina.","web":"Web","web_text":"Continue in your private Web Chat.","telegram":"Telegram","telegram_text":"Open Nina's public Telegram bot.","whatsapp":"WhatsApp","whatsapp_text":"Open a private conversation with Nina in WhatsApp.","open_web":"Open Web Chat","open_telegram":"Open Telegram","open_whatsapp":"Open WhatsApp","available":"Available"},
+        "lv": {"title":"Runāt ar Ninu","sub":"Izvēlies, kur vēlies sarunāties ar Ninu.","web":"Web","web_text":"Turpini savā privātajā Web Chat.","telegram":"Telegram","telegram_text":"Atver Ninas publisko Telegram botu.","whatsapp":"WhatsApp","whatsapp_text":"Atver privātu sarunu ar Ninu WhatsApp.","open_web":"Atvērt Web Chat","open_telegram":"Atvērt Telegram","open_whatsapp":"Atvērt WhatsApp","available":"Pieejams"},
+        "ru": {"title":"Поговорить с Ниной","sub":"Выберите, где хотите общаться с Ниной.","web":"Web","web_text":"Продолжите в своём приватном Web Chat.","telegram":"Telegram","telegram_text":"Откройте публичного Telegram-бота Нины.","whatsapp":"WhatsApp","whatsapp_text":"Откройте приватный разговор с Ниной в WhatsApp.","open_web":"Открыть Web Chat","open_telegram":"Открыть Telegram","open_whatsapp":"Открыть WhatsApp","available":"Доступно"},
+    }[lang]
+    try:
+        public_contact = public_ninaos_contact(primary_ninaos_number()) or {}
+    except ValueError:
+        public_contact = {}
+    choices = [
+        (copy["web"], copy["web_text"], f"/nina?lang={lang}", copy["open_web"], ""),
+        (copy["telegram"], copy["telegram_text"], f"https://t.me/{_telegram_bot_username()}", copy["open_telegram"], " target='_blank' rel='noopener noreferrer'"),
+        (copy["whatsapp"], copy["whatsapp_text"], str(public_contact.get("whatsapp_url") or f"/nina?lang={lang}"), copy["open_whatsapp"], " target='_blank' rel='noopener noreferrer'"),
+    ]
+    cards = "".join(
+        "<section class='card card-pad connection-card'>"
+        f"<div class='connection-head'><h2>{html_escape(title)}</h2><span class='connection-status active'>{html_escape(copy['available'])}</span></div>"
+        f"<p class='muted'>{html_escape(text)}</p><div class='connection-actions'><a class='btn primary' href='{html_escape(href)}'{extra}>{html_escape(action)}</a></div></section>"
+        for title, text, href, action, extra in choices
+    )
+    return (
+        f"<div class='page-title'><h1>{html_escape(copy['title'])}</h1><p>{html_escape(copy['sub'])}</p></div><br>"
+        f"<div class='channels-grid'>{cards}</div>"
+    )
+
+
+def _transcribe_web_voice(audio_bytes, filename, mime_type, language_hint):
+    api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        return ""
+    from openai import OpenAI
+    return transcribe_audio_with_openai(
+        OpenAI(api_key=api_key),
+        audio_bytes,
+        filename=filename,
+        language_hint=language_hint,
+        force_language=False,
+        model=WEB_VOICE_TRANSCRIPTION_MODEL,
+        mime_type=mime_type,
+    )
+
+
+@app.post("/nina/voice")
+def nina_voice():
+    if request.content_length and request.content_length > WEB_VOICE_MAX_BYTES + (1024 * 1024):
+        return jsonify({"ok": False, "error": "audio_too_large"}), 413
+
+    upload = request.files.get("audio")
+    if upload is None:
+        return jsonify({"ok": False, "error": "audio_required"}), 400
+
+    content_type = (upload.content_type or upload.mimetype or "").lower().strip()
+    mime_type = content_type.split(";", 1)[0].strip()
+    if mime_type not in WEB_VOICE_MIME_TYPES:
+        return jsonify({"ok": False, "error": "unsupported_audio"}), 415
+
+    audio_bytes = upload.stream.read(WEB_VOICE_MAX_BYTES + 1)
+    if not audio_bytes:
+        return jsonify({"ok": False, "error": "audio_required"}), 400
+    if len(audio_bytes) > WEB_VOICE_MAX_BYTES:
+        return jsonify({"ok": False, "error": "audio_too_large"}), 413
+
+    lang = (request.form.get("lang") or current_language()).strip().lower()
+    lang = lang if lang in {"lv", "en", "ru"} else "en"
+    logger.info(
+        "Web voice transcription started mime=%s bytes=%d model=%s language_hint=%s",
+        content_type,
+        len(audio_bytes),
+        WEB_VOICE_TRANSCRIPTION_MODEL,
+        lang,
+    )
+    try:
+        transcript = _transcribe_web_voice(
+            audio_bytes,
+            upload.filename or "voice.webm",
+            content_type,
+            lang,
+        ).strip()
+    except Exception:
+        logger.warning(
+            "Web voice transcription completed success=False chars=0 model=%s language_hint=%s",
+            WEB_VOICE_TRANSCRIPTION_MODEL,
+            lang,
+        )
+        return jsonify({"ok": False, "error": "transcription_unavailable"}), 502
+    logger.info(
+        "Web voice transcription completed success=%s chars=%d model=%s language_hint=%s",
+        bool(transcript),
+        len(transcript),
+        WEB_VOICE_TRANSCRIPTION_MODEL,
+        lang,
+    )
+    if not transcript:
+        return jsonify({"ok": False, "error": "transcription_unavailable"}), 502
+
+    contact = current_web_contact()
+    route_nina_message(NinaMessageEnvelope(
+        text=transcript, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web",
+        conversation_id=contact["conversation_id"], contact_id=contact["contact_id"],
+        contact_context=compact_contact_context(contact),
+    ))
+    return jsonify({"ok": True})
+
+
+@app.get("/channels")
+def channels():
+    current_workspace_id()
+    return Response(page(_channels_copy(current_language())["title"], client_channels_body(), active="channels"), mimetype="text/html")
+
+
+def _admin_subnav():
+    if current_web_role() != ADMIN_ROLE or not request.path.startswith("/admin/"):
+        return ""
+    lang = current_language()
+    return (
+        "<div class='console-nav'>"
+        f"<a href='/admin/channels?lang={lang}'>Channels</a>"
+        f"<a href='/admin/clients?lang={lang}'>Clients</a>"
+        f"<a href='/admin/workers?lang={lang}'>Workers</a>"
+        f"<a href='/admin/system?lang={lang}'>System</a>"
+        f"<a href='/admin/billing?lang={lang}'>Billing</a>"
+        f"<a href='/admin/developer?lang={lang}'>Developer</a>"
+        f"<form method='post' action='/admin/logout?lang={lang}'><button class='btn' type='submit'>Sign out</button></form>"
+        "</div>"
+    )
+
+
+def _billing_summary(workspace_id, admin=False):
+    subscription = get_workspace_subscription(workspace_id)
+    plans = list_plans(public_only=not admin)
+    plan = next((item for item in list_plans() if item["plan_id"] == subscription["plan_id"]), {})
+    entitlements = get_effective_entitlements(workspace_id)
+    rows = "".join(f"<div class='row'><b>{html_escape(key)}</b><span>{html_escape(value)}</span></div>" for key, value in sorted(entitlements.items())) or "<div class='safe-note'>No entitlements.</div>"
+    plan_options = "".join(f"<option value='{html_escape(item['plan_id'])}'>{html_escape(item['display_name'])}</option>" for item in plans)
+    controls = ""
+    if admin:
+        usage = list_usage(workspace_id)
+        invoices = list_invoices(workspace_id)
+        events = list_billing_events(workspace_id)
+        usage_rows = "".join(f"<div class='row'><b>{html_escape(r[0])}</b><span>{html_escape(r[1])} {html_escape(r[2])} · {html_escape(r[5])}</span></div>" for r in usage) or "<div class='safe-note'>No usage events.</div>"
+        invoice_rows = "".join(f"<div class='row'><b>{html_escape(r[0])}</b><span>{html_escape(r[1])} · {html_escape(r[2])} {html_escape(r[3])}</span></div>" for r in invoices) or "<div class='safe-note'>No invoice or payment records.</div>"
+        event_rows = "".join(f"<div class='row'><b>{html_escape(r[1])}</b><span>{html_escape(r[2])} · {html_escape(r[4])}</span></div>" for r in events) or "<div class='safe-note'>No billing events.</div>"
+        controls = (
+            "<section class='card card-pad'><h2>Change workspace plan</h2>"
+            "<form method='post' action='/admin/billing/plan'>"
+            f"<input type='hidden' name='csrf_token' value='{_channel_csrf('billing:plan')}'>"
+            f"<input name='workspace_id' required value='{html_escape(workspace_id)}'>"
+            f"<select name='plan_id'>{plan_options}</select><button class='btn primary' type='submit'>Apply plan</button></form>"
+            "<h2>Entitlement override</h2><form method='post' action='/admin/billing/override'>"
+            f"<input type='hidden' name='csrf_token' value='{_channel_csrf('billing:override')}'>"
+            f"<input name='workspace_id' required value='{html_escape(workspace_id)}'><input name='entitlement_key' required placeholder='entitlement key'>"
+            "<select name='value'><option value='true'>Enabled</option><option value='false'>Disabled</option></select>"
+            "<button class='btn primary' type='submit'>Set override</button></form></section>"
+            "<section class='card card-pad'><h2>Subscription status</h2><form method='post' action='/admin/billing/status'>"
+            f"<input type='hidden' name='csrf_token' value='{_channel_csrf('billing:status')}'><input name='workspace_id' required value='{html_escape(workspace_id)}'>"
+            "<select name='status'><option>active</option><option>trialing</option><option>past_due</option><option>suspended</option><option>cancelled</option><option>expired</option><option>incomplete</option></select><button class='btn primary'>Change status</button></form>"
+            "<h2>Remove override</h2><form method='post' action='/admin/billing/override/remove'>"
+            f"<input type='hidden' name='csrf_token' value='{_channel_csrf('billing:override:remove')}'><input name='workspace_id' required value='{html_escape(workspace_id)}'><input name='entitlement_key' required><button class='btn'>Remove override</button></form></section>"
+            f"<section class='card card-pad'><h2>Usage</h2><div class='list'>{usage_rows}</div><h2>Invoices / payments</h2><div class='list'>{invoice_rows}</div><h2>Billing events</h2><div class='list'>{event_rows}</div></section>"
+        )
+    return (
+        f"<div class='page-title'><h1>Billing</h1><p>Plan and effective workspace access.</p></div><br>"
+        f"<section class='card card-pad'><h2>{html_escape(plan.get('display_name') or subscription['plan_id'])}</h2>"
+        f"<p class='muted'>Status: {html_escape(subscription['status'])} · source: {html_escape(subscription['source'])}</p><div class='list'>{rows}</div></section>{controls}"
+    )
+
+
+@app.get("/billing")
+def workspace_billing():
+    workspace_id = current_workspace_id()
+    return Response(page("Billing", _billing_summary(workspace_id), active="settings"), mimetype="text/html")
+
+
+@app.get("/admin/billing")
+@platform_admin_required
+def admin_billing():
+    workspace_id = (request.args.get("workspace_id") or current_workspace_id()).strip()
+    try:
+        body = _admin_subnav() + _billing_summary(workspace_id, admin=True)
+    except BillingError as exc:
+        body = _admin_subnav() + f"<div class='channel-message'>{html_escape(str(exc))}</div>"
+    return Response(page("Admin Billing", body, active="admin"), mimetype="text/html")
+
+
+@app.post("/admin/billing/plan")
+@platform_admin_required
+def admin_billing_plan():
+    if not _valid_channel_csrf("billing:plan"): return Response("Forbidden", status=403)
+    workspace_id = (request.form.get("workspace_id") or "").strip()
+    try: change_workspace_plan(workspace_id, request.form.get("plan_id"), actor="platform_admin")
+    except BillingError: return redirect(q("/admin/billing") + "&notice=invalid")
+    return redirect(q("/admin/billing") + "&workspace_id=" + quote_plus(workspace_id))
+
+
+@app.post("/admin/billing/override")
+@platform_admin_required
+def admin_billing_override():
+    if not _valid_channel_csrf("billing:override"): return Response("Forbidden", status=403)
+    workspace_id = (request.form.get("workspace_id") or "").strip()
+    value = (request.form.get("value") or "false") == "true"
+    try: set_override(workspace_id, request.form.get("entitlement_key"), value, actor="platform_admin")
+    except BillingError: return redirect(q("/admin/billing") + "&notice=invalid")
+    return redirect(q("/admin/billing") + "&workspace_id=" + quote_plus(workspace_id))
+
+
+@app.post("/admin/billing/status")
+@platform_admin_required
+def admin_billing_status():
+    if not _valid_channel_csrf("billing:status"): return Response("Forbidden", status=403)
+    workspace_id = (request.form.get("workspace_id") or "").strip()
+    try: set_subscription_status(workspace_id, request.form.get("status"), actor="platform_admin")
+    except BillingError: return redirect(q("/admin/billing") + "&notice=invalid")
+    return redirect(q("/admin/billing") + "&workspace_id=" + quote_plus(workspace_id))
+
+
+@app.post("/admin/billing/override/remove")
+@platform_admin_required
+def admin_billing_override_remove():
+    if not _valid_channel_csrf("billing:override:remove"): return Response("Forbidden", status=403)
+    workspace_id = (request.form.get("workspace_id") or "").strip()
+    try: deactivate_override(workspace_id, request.form.get("entitlement_key"), actor="platform_admin")
+    except BillingError: return redirect(q("/admin/billing") + "&notice=invalid")
+    return redirect(q("/admin/billing") + "&workspace_id=" + quote_plus(workspace_id))
+
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "POST":
+        submitted_token = request.form.get("bootstrap_token", "").strip()
+        if not verify_bootstrap_token(submitted_token):
+            return redirect(q("/admin/login") + "&notice=invalid")
+        response = redirect(q("/admin/channels"))
+        response.set_cookie(
+            ADMIN_COOKIE,
+            create_admin_session(_workspace_cookie_secret()),
+            max_age=8 * 60 * 60,
+            httponly=True,
+            secure=request.is_secure or request.headers.get("X-Forwarded-Proto") == "https",
+            samesite="Strict",
+        )
+        logger.info("Platform admin session issued")
+        return response
+    notice = (request.args.get("notice") or "").strip()
+    if not bootstrap_configured():
+        status = "<div class='channel-message'>Admin bootstrap is not configured.</div>"
+    elif notice == "invalid":
+        status = "<div class='channel-message'>Invalid admin access token. Please try again.</div>"
+    else:
+        status = ""
+    body = (
+        "<div class='page-title'><h1>Platform Admin</h1><p>Authorized NinaOS operators only.</p></div><br>"
+        f"{status}<section class='card card-pad'><form method='post' class='channel-form'>"
+        "<label for='bootstrap-token'>Admin access token</label>"
+        "<input id='bootstrap-token' name='bootstrap_token' type='password' required "
+        "autocomplete='off' autocapitalize='none' spellcheck='false'>"
+        "<button class='btn primary' type='submit'>Continue</button></form></section>"
+    )
+    return Response(page("Platform Admin", body, active="channels"), mimetype="text/html")
+
+
+@app.post("/admin/logout")
+def admin_logout():
+    response = redirect(q("/channels"))
+    response.delete_cookie(ADMIN_COOKIE)
+    return response
+
+
+@app.get("/admin")
+@platform_admin_required
+def admin_home():
+    return redirect(q("/admin/channels"))
+
+
+@app.get("/admin/channels")
+@platform_admin_required
+def admin_channels():
+    notice = (request.args.get("notice") or "").strip()
+    notice = notice if notice in {"whatsapp_failed"} else ""
+    whatsapp_view = (request.args.get("whatsapp") or "").strip()
+    whatsapp_view = whatsapp_view if whatsapp_view in {"prepare", "switch"} else ""
+    body = _admin_subnav() + channels_body(notice=notice, whatsapp_view=whatsapp_view)
+    return Response(page("Admin Channels", body, active="admin"), mimetype="text/html")
+
+
+def _admin_placeholder(title, text):
+    return Response(
+        page(title, _admin_subnav() + f"<section class='card card-pad'><div class='page-title'><h1>{html_escape(title)}</h1><p>{html_escape(text)}</p></div></section>", active="admin"),
+        mimetype="text/html",
+    )
+
+
+@app.get("/admin/clients")
+@platform_admin_required
+def admin_clients():
+    try:
+        contacts = list_contacts(limit=200)
+    except Exception:
+        contacts = []
+    try:
+        mappings = {
+            (mapping["workspace_id"], mapping["contact_id"]): mapping["canonical_client_id"]
+            for mapping in list_client_mappings(limit=500)
+        }
+    except Exception:
+        mappings = {}
+    for item in contacts:
+        item["canonical_client_id"] = mappings.get(
+            (item.get("workspace_id"), item.get("contact_id")), "not linked"
+        )
+    rows = "".join(
+        "<div class='row'><div>"
+        f"<b>{html_escape(item.get('preferred_name') or item.get('display_name') or 'Unnamed contact')}</b>"
+        f"<span class='muted'>{html_escape(item.get('contact_id'))} · {html_escape(', '.join(item.get('channels') or []))}"
+        f" · {html_escape(item.get('workspace_id'))}</span>"
+        f"<span class='muted'>canonical client: {html_escape(item.get('canonical_client_id'))}</span></div>"
+        f"<span class='pill'>{html_escape(item.get('relationship_type') or 'contact')} · {html_escape(item.get('status') or 'active')}</span></div>"
+        for item in contacts
+    ) or "<div class='safe-note'>No contacts yet.</div>"
+    body = (
+        _admin_subnav()
+        + "<div class='page-title'><h1>Admin Contacts</h1><p>Tenant-scoped contact identities. Provider identifiers remain hidden.</p></div><br>"
+        + f"<section class='card card-pad'><div class='list'>{rows}</div></section>"
+    )
+    return Response(page("Admin Contacts", body, active="admin"), mimetype="text/html")
+
+
+@app.get("/admin/workers")
+@platform_admin_required
+def admin_workers():
+    return _admin_placeholder("Admin Workers", "Platform worker availability and assignment.")
+
+
+@app.get("/admin/system")
+@platform_admin_required
+def admin_system():
+    workspace_id = configured_company_whatsapp_workspace()
+    connection = get_connection(workspace_id, COMPANY_WHATSAPP_CHANNEL)
+    _, auth = load_company_whatsapp_auth_with_diagnostics(workspace_id)
+    bridge_reachable = False
+    restoration = {}
+    try:
+        restoration = personal_whatsapp_bridge_request("/v1/company/diagnostics", {"workspace_id": workspace_id})
+        bridge_reachable = True
+    except Exception:
+        restoration = {}
+    metadata = connection.get("metadata") or {}
+    persistence = safe_backend_diagnostics()
+    persistence_counts = {
+        "Contact Identity rows": safe_table_count("nina_contacts"),
+        "Client Mapping rows": safe_table_count("nina_contact_client_mappings"),
+        "Company auth rows": safe_table_count(
+            "nina_company_whatsapp_auth", " WHERE workspace_id=%s", (workspace_id,)
+        ),
+        "Work Object rows": safe_table_count("nina_work_objects"),
+    }
+    values = (
+        ("Runtime environment", persistence["runtime_environment"]),
+        ("Persistence backend", persistence["backend"]),
+        ("PostgreSQL URL source", persistence["database_url_source"]),
+        ("Database reachable", "Yes" if persistence["reachable"] else "No"),
+        ("Database identity", persistence["database_fingerprint"]),
+        *tuple(
+            (label, str(count) if count is not None else "unavailable")
+            for label, count in persistence_counts.items()
+        ),
+        ("Bridge reachable", "Yes" if bridge_reachable else "No"),
+        ("Company persisted channel status", str(connection.get("status") or "unknown")),
+        ("Stored auth records", str(auth["stored_record_count"])),
+        ("Auth state", str(auth["error_class"] or "available")),
+        ("Restoration state", str(restoration.get("restoration_state") or metadata.get("runtime_state") or "idle")),
+        ("Last restoration error", str(restoration.get("last_error_class") or auth["error_class"] or "none")),
+        ("Last successful connection", str(metadata.get("last_connected_at") or metadata.get("linked_at") or "not recorded")),
+    )
+    rows = "".join(
+        f"<div class='list-item'><b>{html_escape(label)}</b><span>{html_escape(value)}</span></div>"
+        for label, value in values
+    )
+    body = _admin_subnav() + (
+        "<section class='card card-pad'><div class='page-title'><h1>Admin System</h1>"
+        "<p>Safe platform service status.</p></div><div class='list'>" + rows + "</div></section>"
+    )
+    return Response(page("Admin System", body, active="admin"), mimetype="text/html")
+
+
+def _developer_quality_review(analysis, proposal, evidence):
+    analysis = analysis if isinstance(analysis, dict) else {}
+    proposal = proposal if isinstance(proposal, dict) else {}
+    evidence = evidence if isinstance(evidence, list) else []
+    diff_text = str(proposal.get("diff") or "")
+    normalized_diff = diff_text.casefold()
+    files = [str(path) for path in (proposal.get("files") or []) if str(path).strip()]
+    focused_tests = [str(item) for item in (proposal.get("focused_tests") or []) if str(item).strip()]
+    validation = proposal.get("validation") if isinstance(proposal.get("validation"), dict) else {}
+    evidence_supported = bool(evidence) and all(
+        str(item.get("path") or "").strip()
+        and int(item.get("line") or 0) > 0
+        and str(item.get("source_hash") or "").strip()
+        for item in evidence if isinstance(item, dict)
+    )
+    one_nina_violation = any(marker in normalized_diff for marker in (
+        "second_nina", "second nina", "parallel brain", "new nina service",
+    ))
+    security_violation = any(marker in normalized_diff for marker in (
+        "-@platform_admin_required", "write access</small><b>enabled", "deploy access</small><b>enabled",
+        "+    return true  # bypass", "+    return true # bypass",
+    ))
+    destructive_data_change = any(marker in normalized_diff for marker in (
+        "drop table", "truncate table", "drop column", "delete from nina_",
+    ))
+    architecture = "PASS" if analysis.get("architecture_boundary") and evidence_supported else "FAIL"
+    one_nina = "FAIL" if one_nina_violation else "PASS"
+    security = "FAIL" if security_violation else "PASS"
+    data_integrity = "FAIL" if destructive_data_change else "PASS"
+    test_plan = (
+        "SUFFICIENT" if len(focused_tests) >= 2 and bool(validation.get("py_compile")) else "INSUFFICIENT"
+    )
+    smaller_safe_alternative = "YES" if len(files) > 3 else "NO"
+    proposed_risk = str(proposal.get("risk") or "MEDIUM").upper()
+    regression_risk = proposed_risk if proposed_risk in {"LOW", "MEDIUM", "HIGH"} else "MEDIUM"
+    if "FAIL" in {architecture, one_nina, security, data_integrity}:
+        verdict = "BLOCK"
+    elif test_plan == "INSUFFICIENT" or smaller_safe_alternative == "YES":
+        verdict = "REVISE PROPOSAL"
+    else:
+        verdict = "APPROVE FOR OWNER REVIEW"
+    return {
+        "Architecture": architecture,
+        "ONE NINA": one_nina,
+        "Regression Risk": regression_risk,
+        "Security": security,
+        "Data Integrity": data_integrity,
+        "Test Plan": test_plan,
+        "Smaller Safe Alternative": smaller_safe_alternative,
+        "Assumptions Supported By Evidence": "PASS" if evidence_supported else "FAIL",
+        "Repository Evidence": [
+            {"role": item.get("role"), "path": item.get("path"), "line": item.get("line")}
+            for item in evidence if isinstance(item, dict)
+        ],
+        "Cross-Runtime Review": (
+            "No cross-runtime files changed; shared status and approval consumers remain within Web."
+            if not any("personal_whatsapp_bridge" in path or path == "app.py" for path in files)
+            else "Cross-runtime surface present; focused channel regressions are required."
+        ),
+        "Duplicate Logic Review": (
+            "PASS: proposal reuses the existing _developer_connection_ready predicate."
+            if "_developer_connection_ready" in diff_text else "WARN: no existing shared predicate reuse proven."
+        ),
+        "Backward Compatibility": "PASS" if regression_risk == "LOW" else "WARN",
+        "Verdict": verdict,
+        "Revision Required": verdict == "REVISE PROPOSAL",
+        "Owner Approval Available": verdict == "APPROVE FOR OWNER REVIEW",
+    }
+
+
+def _developer_investigation_answer(kind, jobs):
+    evidence, source_hashes = {}, {}
+    question = ""
+    for job in jobs:
+        arguments = job.get("arguments") or {}
+        role = str(arguments.get("evidence_role") or "")
+        if not question:
+            question = str(arguments.get("question") or "")
+        result = job.get("result") or {}
+        matches = result.get("matches") or []
+        if kind == "target_architecture_analysis":
+            grounded = [match for match in matches
+                        if not str(match.get("path") or "").replace("\\", "/").split("/")[-1].startswith("test_")
+                        and str(match.get("path") or "") != "developer_router.py"]
+            matches = grounded or matches
+        if role and matches:
+            evidence[role] = matches[0]
+            path = str(matches[0].get("path") or "")
+            source_hash = str((result.get("file_hashes") or {}).get(path) or "")
+            if source_hash:
+                source_hashes[path] = source_hash
+    required = {
+        "developer_status_diff_preview": (
+            "backend_status", "freshness_gate", "readiness_helper", "render_gate", "send_gate",
+            "approval_gate", "agent_card", "repository_card", "regression_test",
+        ),
+        "send_message_definition": ("main_definition",),
+        "company_whatsapp_flow": ("bridge_event", "bridge_intake", "web_endpoint", "shared_nina_call",
+                                  "shared_definition", "bridge_reply"),
+        "developer_routing": ("developer_route", "developer_router", "generic_nina_call", "research_router"),
+        "developer_console_architecture": (
+            "admin_route", "brain_plan", "brain_answer", "control_plane", "local_agent",
+        ),
+        "send_message_risk_analysis": ("main_definition", "web_call", "media_call"),
+        "repository_structure_analysis": ("web_entry", "router", "control_plane", "local_agent"),
+        "web_research_source_links_diff_preview": (
+            "search_entry", "verified_gate", "source_summary", "chat_render", "regression_anchor",
+        ),
+    }.get(kind, ())
+    if kind == "target_architecture_analysis":
+        required = tuple(str((job.get("arguments") or {}).get("evidence_role") or "")
+                         for job in jobs if (job.get("arguments") or {}).get("evidence_role"))
+    missing = [role for role in required if role not in evidence]
+    cited = [
+        {"role": role, "path": evidence[role]["path"], "line": evidence[role]["line"],
+         "symbol": str(evidence[role].get("text") or "")[:220],
+         "source_hash": source_hashes.get(str(evidence[role].get("path") or ""), "")}
+        for role in required if role in evidence
+    ]
+    if missing:
+        if kind == "target_architecture_analysis":
+            return {
+                "answer": "TARGET NOT PROVEN",
+                "reason": "The requested target could not be supported by current repository evidence.",
+                "missing_evidence": missing, "evidence": cited,
+                "write_executed": False, "safety_notice": "WRITE NOT EXECUTED.",
+            }
+        if kind in {"developer_status_diff_preview", "web_research_source_links_diff_preview"}:
+            return {
+                "answer": "INSUFFICIENT ARCHITECTURE EVIDENCE",
+                "reason": "A safe diff preview was not generated because required repository evidence is missing.",
+                "missing_evidence": missing, "evidence": cited, "write_executed": False,
+            }
+        return {
+            "answer": "Repository evidence is insufficient to answer safely; no architectural claim was guessed.",
+            "missing_evidence": missing, "evidence": cited,
+        }
+    location = lambda role: f"{evidence[role]['path']}:{evidence[role]['line']}"
+    if kind == "developer_status_diff_preview":
+        raw = lambda role: str(evidence[role].get("raw_text") or evidence[role].get("text") or "")
+        agent_card_line = int(evidence["agent_card"]["line"])
+        repository_card_line = int(evidence["repository_card"]["line"])
+        agent_card = raw("agent_card")
+        repository_card = raw("repository_card")
+        diff_preview = "\n".join((
+            "--- a/web_app.py",
+            "+++ b/web_app.py",
+            f"@@ -{agent_card_line},1 +{agent_card_line},1 @@",
+            "-" + agent_card,
+            "+" + agent_card.replace("\"Local Developer Agent\"", "\"Developer Agent connection\"", 1),
+            f"@@ -{repository_card_line},1 +{repository_card_line},1 @@",
+            "-" + repository_card,
+            "+" + repository_card.replace("\"Repository\"", "\"Repository access\"", 1),
+        ))
+        developer_analysis = {
+            "problem": "Make Developer Console status cards clearer without changing canonical readiness behavior.",
+            "repository_evidence": cited,
+            "architecture_boundary": "Owner-authenticated Web Developer capability; status originates in developer_control and is consumed by web_app.",
+            "affected_modules": {
+                "direct": ["web_app.py", "test_admin_developer_console.py"],
+                "dependencies": ["developer_control.py"],
+            },
+            "call_chain_dependencies": [
+                "developer_control.connection_status",
+                "web_app._developer_connection_ready",
+                "web_app._admin_developer_body / web_app.admin_developer",
+                "developer job creation or owner approval",
+            ],
+            "risks": {
+                "classification": "LOW",
+                "items": [
+                    "Status labels must not imply that UI presentation owns readiness state.",
+                    "The canonical readiness helper must remain unchanged across render, Send, and approval paths.",
+                    "Changing heartbeat freshness semantics would affect all Developer Console readiness consumers.",
+                ],
+            },
+            "Relevant previous lessons": [],
+            "Evidence precedence": "Current repository evidence is authoritative; historical lessons may only refine risk and solution selection.",
+            "alternatives": [
+                {"option": "Keep the shorter status labels", "risk": "The connection/access meaning remains less explicit."},
+                {"option": "Clarify labels only", "risk": "Minimal; no readiness or permission behavior changes."},
+            ],
+            "chosen_solution": "Keep _developer_connection_ready canonical and clarify only the two status-card labels.",
+            "why": "Current evidence proves render, Send, and approval already share the helper, so a label-only preview is the smallest safe improvement.",
+            "focused_validation_plan": [
+                "connected Agent + Repository permits normal Developer Console work",
+                "Repository-disconnected Send remains blocked",
+                "Repository-disconnected owner approval is blocked",
+                "Sprint 5 controlled-write safety tests remain passing",
+            ],
+        }
+        lesson_matches = retrieve_developer_lessons(
+            question or developer_analysis["problem"], ["web_app.py", "test_admin_developer_console.py"]
+        )
+        evidence_paths = {str(item.get("path") or "").replace("\\", "/").casefold() for item in cited}
+        developer_analysis["Relevant previous lessons"] = ([
+            {
+                **lesson,
+                "current_repo_relevance": (
+                    "CONFIRMED BY CURRENT REPO EVIDENCE"
+                    if evidence_paths & {str(path).replace("\\", "/").casefold()
+                                         for path in (lesson.get("affected_modules") or [])}
+                    else "NOT CONFIRMED; CURRENT REPO EVIDENCE TAKES PRECEDENCE"
+                ),
+            }
+            for lesson in lesson_matches
+        ] or ["None found."])
+        proposal = {
+            "files": ["web_app.py"],
+            "functions": ["_admin_developer_body"],
+            "reason": "Clarify that the status cards describe the Agent connection and Repository access.",
+            "risk": "LOW",
+            "diff": diff_preview,
+            "focused_tests": [
+                "connected Agent + connected Repository preserves approval behavior",
+                "connected Agent + disconnected Repository rejects owner approval",
+                "status-card labels remain derived from canonical backend status",
+                "owner-only access and disabled write/deploy status remain enforced",
+            ],
+            "expected_source_hashes": {
+                path: source_hashes.get(path, "")
+                for path in ("web_app.py",)
+            },
+            "validation": {
+                "py_compile": ["web_app.py"],
+                "pytest": [],
+            },
+        }
+        quality_review = _developer_quality_review(developer_analysis, proposal, cited)
+        return {
+            "developer_analysis": developer_analysis,
+            "answer": (
+                "The backend status is defined at " + location("backend_status") +
+                " and expires through the heartbeat freshness gate at " + location("freshness_gate") +
+                ". The shared readiness predicate is defined at " + location("readiness_helper") +
+                " and is used by rendering, Send, and approval at " + location("render_gate") + ", " +
+                location("send_gate") + ", and " + location("approval_gate") +
+                ". The smallest supported clarity improvement is limited to the status-card labels."
+            ),
+            "proposed_change": proposal,
+            "quality_review": quality_review,
+            "evidence": cited,
+            "approval_required": True,
+            "write_executed": False,
+            "safety_notice": "WRITE NOT EXECUTED.",
+        }
+    if kind == "web_research_source_links_diff_preview":
+        developer_analysis, proposal = _web_research_source_links_proposal(cited, source_hashes)
+        developer_analysis["Relevant previous lessons"] = (retrieve_developer_lessons(
+            question or developer_analysis["problem"], ["web_app.py", "web_research.py"]
+        ) or ["None found."])
+        quality_review = _developer_quality_review(developer_analysis, proposal, cited)
+        return {
+            "developer_analysis": developer_analysis,
+            "answer": "The verified-search pipeline provides persisted real URLs; the canonical Web chat escapes them as plain text. The minimal safe change linkifies only the verified set.",
+            "proposed_change": proposal, "quality_review": quality_review, "evidence": cited,
+            "approval_required": True, "write_executed": False, "safety_notice": "WRITE NOT EXECUTED.",
+        }
+    if kind == "send_message_definition":
+        answer = (
+            "Galvenā send_message_to_nina definīcija ir " + location("main_definition") +
+            ". Tā ir ONE NINA kopīgā ziņu ieeja, kuru kanālu un Web virsmas izsauc ar workspace, channel un conversation kontekstu."
+        )
+    elif kind == "company_whatsapp_flow":
+        answer = (
+            "Company WhatsApp call chain: Baileys messages.upsert (" + location("bridge_event") +
+            ") → processCompanyMessageUpsert/companyInbound (" + location("bridge_intake") +
+            ") → POST /internal/company-whatsapp/inbound (" + location("web_endpoint") +
+            ") → shared send_message_to_nina call (" + location("shared_nina_call") +
+            ") → send_message_to_nina definition (" + location("shared_definition") +
+            ") → bridge socket.sendMessage reply (" + location("bridge_reply") + ")."
+        )
+    elif kind == "developer_console_architecture":
+        answer = (
+            "Developer Console architecture: owner-only admin route (" + location("admin_route") +
+            ") uses the intent/evidence planner (" + location("brain_plan") +
+            "), persists read-only jobs through the control plane (" + location("control_plane") +
+            "), executes allowlisted repository reads in the local agent (" + location("local_agent") +
+            "), and synthesizes evidence-backed results in the existing Developer Brain (" +
+            location("brain_answer") + ")."
+        )
+    elif kind == "send_message_risk_analysis":
+        answer = (
+            "send_message_to_nina is defined at " + location("main_definition") +
+            " and is consumed by Web/channel intake at " + location("web_call") +
+            " and media intake at " + location("media_call") +
+            ". Changing its contract therefore has cross-surface regression risk; no diff was requested or generated."
+        )
+    elif kind == "repository_structure_analysis":
+        answer = (
+            "The Developer repository path is composed of the owner-only Web entry (" + location("web_entry") +
+            "), deterministic Router V2 (" + location("router") + "), persistent job control plane (" +
+            location("control_plane") + "), and allowlisted local read-only agent (" + location("local_agent") + ")."
+        )
+    elif kind == "target_architecture_analysis":
+        resolution = _resolve_developer_targets(question)
+        targets = list(resolution.get("targets") or [])
+        evidence_summary = "; ".join(
+            str(item["path"]) + ":" + str(item["line"]) + " " + str(item["symbol"])
+            for item in cited
+        )
+        answer = (
+            "Resolved target: " + " + ".join(targets) + ". Repository architecture evidence: " +
+            evidence_summary + ". No change or diff was requested."
+        )
+    else:
+        answer = (
+            "Current repository evidence shows /admin/developer is isolated and routes commands through "
+            "_developer_command (" + location("developer_route") + ", " + location("developer_router") +
+            "). The generic /nina surface sends text to send_message_to_nina (" + location("generic_nina_call") +
+            "), whose shared path attempts build_search_plan (" + location("research_router") +
+            "). Therefore a Developer: request entered through the generic Nina surface could reach Web Research; "
+            "the repository alone cannot prove which historical surface handled a specific old request."
+        )
+    analysis = {
+        "problem": "Explain the requested repository behavior from verified code evidence.",
+        "repository_evidence": cited,
+        "architecture_boundary": (
+            "Company WhatsApp bridge, authenticated Web intake, and the shared ONE NINA message service"
+            if kind == "company_whatsapp_flow" else (
+                "Shared ONE NINA message contract across Web and media/channel consumers"
+                if kind == "send_message_risk_analysis" else "ONE NINA Developer repository capability"
+            )
+        ),
+        "affected_modules": sorted({item["path"] for item in cited}),
+        "call_chain_dependencies": [item["symbol"] for item in cited],
+        "risks": {
+            "classification": "HIGH" if kind in {"company_whatsapp_flow", "send_message_risk_analysis"} else "LOW",
+            "items": ([
+                "Changing send_message_to_nina can affect every channel sharing the canonical Nina reply path.",
+                "Workspace, contact, conversation, and delivery-recipient context must remain intact.",
+                "Bridge acknowledgement and outbound reply behavior depend on the Web result contract.",
+            ] if kind in {"company_whatsapp_flow", "send_message_risk_analysis"} else [
+                "Repository claims must remain limited to cited evidence.",
+            ]),
+        },
+        "Relevant previous lessons": [],
+        "Evidence precedence": "Current repository evidence is authoritative; historical lessons never override it.",
+        "alternatives": ["No code change was requested; retain the current architecture and report evidence only."],
+        "chosen_solution": "Provide a repository-grounded explanation without generating or applying a patch.",
+        "why": "A descriptive investigation does not justify a code change.",
+        "focused_validation_plan": ["Verify every stated file/function against the returned evidence."],
+    }
+    if kind == "target_architecture_analysis":
+        analysis["resolved_targets"] = list(_resolve_developer_targets(question).get("targets") or [])
+    analysis["Relevant previous lessons"] = (retrieve_developer_lessons(
+        question or analysis["problem"], analysis["affected_modules"]
+    ) or ["None found."])
+    return {"developer_analysis": analysis, "answer": answer, "evidence": cited,
+            "write_executed": False, "safety_notice": "WRITE NOT EXECUTED."}
+
+
+def _admin_developer_jobs_html():
+    rows, latest_status = [], ""
+    jobs = list(reversed(list_developer_jobs(25)))
+    investigations, display_order, approvals = {}, [], {}
+    for job in jobs:
+        if job.get("operation") == "apply_approved_patch":
+            source_id = str((job.get("arguments") or {}).get("source_investigation_id") or "")
+            if source_id:
+                approvals[source_id] = job
+    for job in jobs:
+        arguments = job.get("arguments") or {}
+        investigation_id = str(arguments.get("investigation_id") or "")
+        if not investigation_id:
+            display_order.append(("job", job))
+            continue
+        if investigation_id not in investigations:
+            investigations[investigation_id] = []
+            display_order.append(("investigation", investigation_id))
+        investigations[investigation_id].append(job)
+    for item_type, item in display_order:
+        if item_type == "investigation":
+            grouped = investigations[item]
+            statuses = {job["status"] for job in grouped}
+            status = "failed" if "failed" in statuses else ("pending" if statuses & {"pending", "claimed"} else "completed")
+            arguments = grouped[0].get("arguments") or {}
+            payload = (
+                _developer_investigation_answer(str(arguments.get("investigation_kind") or ""), grouped)
+                if status == "completed" else {"question": arguments.get("question"), "status": status}
+            )
+            label = "Repository investigation"
+            controls = ""
+            proposal = payload.get("proposed_change") if isinstance(payload, dict) else None
+            if status == "completed" and isinstance(proposal, dict):
+                review = _developer_quality_review(
+                    payload.get("developer_analysis"), proposal, payload.get("evidence")
+                )
+                approved_job = approvals.get(item)
+                if approved_job:
+                    controls = (
+                        "<div class='channel-message'>Approval " +
+                        html_escape(str((approved_job.get("arguments") or {}).get("approval_id") or "recorded")) +
+                        " — " + html_escape(str(approved_job.get("status") or "pending")) + "</div>"
+                    )
+                elif review["Verdict"] == "APPROVE FOR OWNER REVIEW":
+                    diff_hash = hashlib.sha256(str(proposal.get("diff") or "").encode("utf-8")).hexdigest()
+                    controls = (
+                        "<div class='developer-approval-actions'>"
+                        "<form method='post' action='/admin/developer'>"
+                        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('developer:approve')}'>"
+                        "<input type='hidden' name='action' value='approve_diff'>"
+                        "<input type='hidden' name='investigation_id' value='" + html_escape(item) + "'>"
+                        "<input type='hidden' name='diff_hash' value='" + html_escape(diff_hash) + "'>"
+                        "<button class='btn primary' type='submit'>Approve &amp; Apply Locally</button></form>"
+                        "<form method='post' action='/admin/developer'>"
+                        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('developer:reject')}'>"
+                        "<input type='hidden' name='action' value='reject_diff'>"
+                        "<input type='hidden' name='investigation_id' value='" + html_escape(item) + "'>"
+                        "<input name='rejection_reason' maxlength='500' required "
+                        "placeholder='Owner rejection reason'>"
+                        "<button class='btn' type='submit'>Reject</button></form></div>"
+                    )
+                else:
+                    controls = (
+                        "<div class='channel-message'>Owner approval unavailable: " +
+                        html_escape(review["Verdict"]) + ".</div>"
+                    )
+        else:
+            grouped, status = (), item["status"]
+            result = item.get("result") or {}
+            payload = result if result else (item.get("error_code") or status)
+            controls = ""
+            if item["operation"] == "apply_approved_patch":
+                label = ("LOCAL CHANGE READY" if status == "completed" else
+                         ("APPLYING → BACKUP → PATCH → VALIDATION" if status in {"pending", "claimed"} else
+                          "VALIDATION FAILED — ROLLBACK COMPLETE"))
+                if status == "completed" and result.get("write_executed"):
+                    validation = result.get("validation") or {}
+                    release_hash = hashlib.sha256(str(validation.get("git_diff") or "").encode("utf-8")).hexdigest()
+                    files = result.get("applied_files") or []
+                    services = select_developer_release_services(files)
+                    payload = {**result, "release_summary": {
+                        "exact_files": files,
+                        "git_diff_summary": {"bytes": len(str(validation.get("git_diff") or "").encode("utf-8")),
+                                             "files": len(files)},
+                        "tests_run": validation.get("checks") or [],
+                        "quality_verdict": str((item.get("arguments") or {}).get("lesson_context", {}).get("quality_verdict") or ""),
+                        "target_branch": "feature/web-chat-v1", "target_services": services,
+                        "risk_level": "LOW",
+                        "expected_deployment_impact": "Existing Railway webhook redeploys affected services only.",
+                    }}
+                    controls = (
+                        "<div class='developer-approval-actions'><form method='post' action='/admin/developer'>"
+                        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('developer:release')}'>"
+                        "<input type='hidden' name='action' value='approve_release'>"
+                        "<input type='hidden' name='source_patch_job_id' value='" + html_escape(item["job_id"]) + "'>"
+                        "<input type='hidden' name='release_hash' value='" + html_escape(release_hash) + "'>"
+                        "<input type='hidden' name='target_services' value='" + html_escape(",".join(services)) + "'>"
+                        "<button class='btn primary' type='submit'>Approve Release</button></form>"
+                        "<form method='post' action='/admin/developer'>"
+                        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('developer:release-discard')}'>"
+                        "<input type='hidden' name='action' value='discard_release'>"
+                        "<input type='hidden' name='source_patch_job_id' value='" + html_escape(item["job_id"]) + "'>"
+                        "<button class='btn' type='submit'>Discard</button></form></div>"
+                    )
+            elif item["operation"] == "execute_approved_release":
+                label = ("RELEASE VERIFIED" if status == "completed" and not result.get("failed_stage") else
+                         ("COMMIT - PUSH - DEPLOY - HEALTH - LIVE VERIFY" if status in {"pending", "claimed"}
+                          else "RELEASE FAILED - " + str(result.get("failed_stage") or item.get("error_code") or "unknown")))
+            else:
+                label = item["operation"]
+        latest_status = status
+        display_payload = payload
+        if isinstance(payload, dict) and isinstance(payload.get("developer_analysis"), dict):
+            display_payload = {
+                "DEVELOPER ANALYSIS": payload["developer_analysis"],
+                "ANSWER": payload.get("answer"),
+            }
+            if isinstance(payload.get("proposed_change"), dict):
+                display_payload["DIFF PREVIEW"] = payload["proposed_change"]
+                display_payload["QUALITY REVIEW"] = _developer_quality_review(
+                    payload.get("developer_analysis"), payload["proposed_change"], payload.get("evidence")
+                )
+            display_payload["WRITE NOT EXECUTED"] = not bool(payload.get("write_executed"))
+        rendered = (json.dumps(display_payload, ensure_ascii=False, indent=2)
+                    if isinstance(display_payload, dict) else str(display_payload))
+        rows.append(
+            "<div class='list-item developer-result' data-job-status='" + html_escape(status) + "'><div><b>" +
+            html_escape(label) + "</b><small>" + html_escape(status) +
+            "</small></div><pre>" + html_escape(rendered[:20000]) + "</pre>" + controls + "</div>"
+        )
+    return ("".join(rows) if rows else "<p>No developer jobs yet.</p>", latest_status)
+
+
+def _developer_connection_ready(connection):
+    return (connection["agent"] == "connected"
+            and connection["repository"] == "connected")
+
+def _admin_developer_body(notice=""):
+    connection = developer_connection_status()
+    developer_ready = _developer_connection_ready(connection)
+    statuses = (
+        ("Developer Console", "Online"),
+        ("Local Developer Agent", "Connected" if connection["agent"] == "connected" else "Not connected"),
+        ("Repository", "Connected" if connection["repository"] == "connected" else "Not connected"),
+        ("AI Coding Model", "Not configured"),
+        ("Write Access", "One-time approved" if developer_write_access_status() == "one_time_approved" else "Disabled"),
+        ("Deploy Access", "Disabled"),
+    )
+    status_cards = "".join(
+        "<div class='metric-mini'>"
+        f"<small>{html_escape(label)}</small><b>{html_escape(value)}</b>"
+        "</div>"
+        for label, value in statuses
+    )
+    message = (
+        "<div class='channel-message'>Developer Agent vēl nav pieslēgts. "
+        "Šobrīd šī konsole ir read-only setup režīmā.</div><br>"
+        if notice == "agent_not_connected" else
+        ("<div class='channel-message'>Šo Developer komandu vēl neatpazīstu.</div><br>"
+         if notice == "unsupported_developer_command" else
+        ("<div class='channel-message'>Komanda pieņemta drošai read-only izpildei.</div><br>"
+         if notice == "job_created" else ""))
+    )
+    job_rows, _ = _admin_developer_jobs_html()
+    jobs_html = (
+        "<section class='card card-pad developer-results-card'><h2>Read-only results</h2>"
+        "<div id='developer-results' class='list developer-results' aria-live='polite'>" +
+        job_rows + "</div></section><br>"
+    )
+    message_input = (
+        "<textarea id='developer-message' name='message' maxlength='2000' placeholder=''></textarea>"
+        if developer_ready else
+        "<textarea id='developer-message' name='message' maxlength='2000' "
+        "placeholder='Developer Agent is not connected' disabled></textarea>"
+    )
+    send_button = (
+        "<button class='btn primary' type='submit'>Send</button>"
+        if developer_ready else
+        "<button class='btn primary' type='submit' disabled>Send</button>"
+    )
+    console_html = (
+        "<section class='card card-pad developer-console'><h2>Developer Console</h2>"
+        "<form id='developer-form' method='post' action='/admin/developer' class='channel-form'>"
+        f"<input type='hidden' name='csrf_token' value='{_channel_csrf('developer:send')}'>"
+        "<label for='developer-message'>Message</label>"
+        + message_input + send_button + "</form>"
+        "<div id='developer-notice' aria-live='polite'></div>"
+        "<p class='safe-note'>Write access exists only for one exact owner-approved diff. "
+        "Shell, commit, push and deploy remain disabled.</p></section><br>"
+    )
+    ux = """<style>
+.developer-console{position:sticky;top:12px;z-index:20;box-shadow:0 18px 50px rgba(0,0,0,.32)}
+.developer-results{max-height:52vh;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.developer-result{scroll-margin-block:12px}.developer-console textarea{min-height:88px;resize:vertical}
+</style><script>(()=>{const form=document.getElementById('developer-form'),input=document.getElementById('developer-message'),results=document.getElementById('developer-results'),notice=document.getElementById('developer-notice');if(!form||!input||!results)return;const bottom=()=>{results.scrollTop=results.scrollHeight};const refresh=async()=>{const response=await fetch('/admin/developer?format=results',{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});if(!response.ok)throw new Error('results');const payload=await response.json();results.innerHTML=payload.html;bottom();return payload.latest_status};form.addEventListener('submit',async event=>{event.preventDefault();const button=form.querySelector('button[type="submit"]');button.disabled=true;notice.textContent='';try{const response=await fetch(form.action,{method:'POST',body:new FormData(form),credentials:'same-origin',headers:{Accept:'application/json'}});let payload={};try{payload=await response.json();}catch(parseError){}if(!response.ok){const failure=new Error('submit');failure.safeMessage=payload.message||payload.error||'';throw failure;}notice.textContent=payload.message||'';input.value='';let status=await refresh();for(let attempt=0;attempt<15&&['pending','claimed'].includes(status);attempt++){await new Promise(resolve=>setTimeout(resolve,1000));status=await refresh();}}catch(error){notice.textContent=error.safeMessage||'Developer command could not be completed.'}finally{button.disabled=false;input.focus();bottom();}});bottom();input.focus();})();</script>"""
+    return (
+        _admin_subnav()
+        + "<div class='page-title'><h1>NINA DEVELOPER</h1><p>Owner-only Developer Console setup shell for ONE NINA.</p></div><br>"
+        + f"<section class='card card-pad'><div class='metric-strip'>{status_cards}</div></section><br>"
+        + message + console_html + jobs_html
+        + "<section class='card card-pad'><h2>Planned capabilities</h2>"
+        "<div class='two-col'><div><h3>READ</h3><ul>"
+        "<li>List repository files</li><li>Read source file</li><li>Search code</li><li>Git status</li>"
+        "</ul></div><div><h3>LATER WITH OWNER APPROVAL</h3><ul>"
+        "<li>Prepare diff</li><li>Run tests</li><li>Apply patch</li><li>Commit</li><li>Push</li><li>Deploy</li>"
+        "</ul></div></div></section>" + ux
+    )
+
+
+@app.route("/admin/developer", methods=["GET", "POST"])
+@platform_admin_required
+def admin_developer():
+    notice = ""
+    if request.method == "GET" and request.args.get("format") == "results":
+        jobs_html, latest_status = _admin_developer_jobs_html()
+        return jsonify({"ok": True, "html": jobs_html, "latest_status": latest_status})
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        if action in {"approve_release", "discard_release"}:
+            csrf_action = "developer:release" if action == "approve_release" else "developer:release-discard"
+            if not _valid_channel_csrf(csrf_action):
+                return Response("Forbidden", status=403)
+            source_job_id = (request.form.get("source_patch_job_id") or "").strip()
+            if action == "discard_release":
+                discard_developer_release(source_job_id, "platform_admin_session")
+                return redirect(q("/admin/developer"))
+            services = [value for value in (request.form.get("target_services") or "").split(",") if value]
+            try:
+                create_developer_release_job(
+                    source_job_id, request.form.get("release_hash"),
+                    "feature/web-chat-v1", services, owner_identity="platform_admin_session",
+                )
+            except ValueError as exc:
+                return Response(str(exc), status=409)
+            return redirect(q("/admin/developer"))
+        if action in {"approve_diff", "reject_diff"}:
+            csrf_action = "developer:approve" if action == "approve_diff" else "developer:reject"
+            if not _valid_channel_csrf(csrf_action):
+                return Response("Forbidden", status=403)
+            investigation_id = (request.form.get("investigation_id") or "").strip()
+            if action == "reject_diff":
+                reason = (request.form.get("rejection_reason") or "").strip()
+                if not reason:
+                    return Response("Owner rejection reason required", status=400)
+                grouped = [job for job in list_developer_jobs(25)
+                           if str((job.get("arguments") or {}).get("investigation_id") or "") == investigation_id]
+                if grouped and all(job.get("status") == "completed" for job in grouped):
+                    kind = str((grouped[0].get("arguments") or {}).get("investigation_kind") or "")
+                    payload = _developer_investigation_answer(kind, grouped)
+                    proposal = payload.get("proposed_change") if isinstance(payload, dict) else None
+                    analysis = payload.get("developer_analysis") if isinstance(payload, dict) else None
+                    if isinstance(proposal, dict) and isinstance(analysis, dict):
+                        record_developer_lesson("owner_rejection", {
+                            "problem_pattern": analysis.get("problem"),
+                            "affected_modules": proposal.get("files") or [],
+                            "root_cause": payload.get("answer"),
+                            "attempted_solution": proposal.get("reason"),
+                            "outcome": "Owner rejected the reviewed proposal.",
+                            "failure_reason": reason,
+                            "regression_risk": proposal.get("risk") or "MEDIUM",
+                            "tests_that_caught_it": proposal.get("focused_tests") or [],
+                            "architecture_rule": analysis.get("architecture_boundary"),
+                        }, {"developer_job_id": str(grouped[0].get("job_id") or investigation_id)})
+                return redirect(q("/admin/developer"))
+            approval_status = developer_connection_status()
+            if not _developer_connection_ready(approval_status):
+                return Response("Developer Agent unavailable", status=409)
+            grouped = [job for job in list_developer_jobs(25)
+                       if str((job.get("arguments") or {}).get("investigation_id") or "") == investigation_id]
+            if not grouped or any(job.get("status") != "completed" for job in grouped):
+                return Response("Approval unavailable", status=409)
+            kind = str((grouped[0].get("arguments") or {}).get("investigation_kind") or "")
+            payload = _developer_investigation_answer(kind, grouped)
+            proposal = payload.get("proposed_change") if isinstance(payload, dict) else None
+            if not isinstance(proposal, dict):
+                return Response("Approval unavailable", status=409)
+            review = _developer_quality_review(
+                payload.get("developer_analysis"), proposal, payload.get("evidence")
+            )
+            if review["Verdict"] != "APPROVE FOR OWNER REVIEW":
+                analysis = payload.get("developer_analysis") if isinstance(payload, dict) else {}
+                record_developer_lesson("rejected_quality_review", {
+                    "problem_pattern": analysis.get("problem"),
+                    "affected_modules": proposal.get("files") or [],
+                    "root_cause": payload.get("answer") or "Quality Review rejected the proposal.",
+                    "attempted_solution": proposal.get("reason") or "Proposed diff",
+                    "outcome": review["Verdict"],
+                    "failure_reason": review["Verdict"],
+                    "regression_risk": proposal.get("risk") or "MEDIUM",
+                    "tests_that_caught_it": proposal.get("focused_tests") or [],
+                    "architecture_rule": analysis.get("architecture_boundary"),
+                }, {"developer_job_id": str(grouped[0].get("job_id") or investigation_id)})
+                return Response("Quality review blocks owner approval", status=409)
+            try:
+                create_developer_approval_job(
+                    investigation_id,
+                    proposal.get("diff"),
+                    request.form.get("diff_hash"),
+                    proposal.get("files"),
+                    proposal.get("expected_source_hashes"),
+                    proposal.get("validation"),
+                    owner_identity="platform_admin_session",
+                    lesson_context={
+                        "problem_pattern": payload.get("developer_analysis", {}).get("problem"),
+                        "root_cause": payload.get("answer"),
+                        "attempted_solution": proposal.get("reason"),
+                        "successful_pattern": proposal.get("reason"),
+                        "regression_risk": proposal.get("risk") or "MEDIUM",
+                        "tests_that_caught_it": proposal.get("focused_tests") or [],
+                        "architecture_rule": payload.get("developer_analysis", {}).get("architecture_boundary"),
+                        "quality_verdict": review.get("Verdict"),
+                    },
+                )
+            except ValueError as exc:
+                return Response(str(exc), status=409)
+            return redirect(q("/admin/developer"))
+        if not _valid_channel_csrf("developer:send"):
+            return Response("Forbidden", status=403)
+        status = developer_connection_status()
+        command = (request.form.get("message") or "").strip()
+        investigation_kind, investigation_steps = _developer_investigation_plan(command)
+        operation, arguments = _developer_command(command)
+        intents = _developer_intents(command)
+        if not _developer_connection_ready(status):
+            notice = "agent_not_connected"
+        elif investigation_steps:
+            investigation_id = "devinvest_" + secrets.token_hex(12)
+            for evidence_role, query, path in investigation_steps:
+                create_developer_job("search_text", {
+                    "query": query, "path": path,
+                    "investigation_id": investigation_id,
+                    "investigation_kind": investigation_kind,
+                    "question": command,
+                    "evidence_role": evidence_role,
+                })
+            notice = "job_created"
+        elif not operation:
+            notice = ("developer_release_requires_owner_approval"
+                      if "release_request" in intents else
+                      ("developer_intent_requires_context" if intents else "unsupported_developer_command"))
+        else:
+            create_developer_job(operation, arguments)
+            notice = "job_created"
+        if request.accept_mimetypes.best == "application/json":
+            messages = {
+                "agent_not_connected": "Developer Agent vēl nav pieslēgts. Šobrīd šī konsole ir read-only setup režīmā.",
+                "unsupported_developer_command": "Šo Developer komandu vēl neatpazīstu.",
+                "developer_intent_requires_context": "Developer nodoms ir atpazīts, bet drošai analīzei vajag precīzāku moduļa vai problēmas kontekstu.",
+                "developer_release_requires_owner_approval": "Release pieprasījums ir atpazīts, bet to drīkst turpināt tikai ar esošo one-time owner approval plūsmu.",
+                "job_created": "Komanda pieņemta drošai read-only izpildei.",
+            }
+            return jsonify({"ok": notice == "job_created", "notice": notice,
+                            "message": messages.get(notice, "")}), (200 if notice == "job_created" else 409)
+    return Response(
+        page("Nina Developer", _admin_developer_body(notice), active="admin"),
+        mimetype="text/html",
+    )
+
+
+@app.post("/channels/telegram/connect")
+@platform_admin_required
+def channels_telegram_connect():
+    if not _valid_channel_csrf("telegram_connect"):
+        return Response("Invalid request", status=400)
+    bot_username = _telegram_bot_username()
+    try:
+        setup = create_telegram_token(NINA_WEB_WORKSPACE_ID, bot_username=bot_username)
+    except ValueError as exc:
+        if str(exc) == "telegram_already_connected":
+            return redirect(q("/admin/channels"))
+        raise
+    logger.info("Platform admin channel action=telegram_connect")
+    return Response(page("Admin Channels", _admin_subnav() + channels_body(telegram_setup=setup), active="admin"), mimetype="text/html")
+
+
+@app.post("/channels/telegram/disconnect")
+@platform_admin_required
+def channels_telegram_disconnect():
+    if not _valid_channel_csrf("telegram_disconnect"):
+        return Response("Invalid request", status=400)
+    disconnect_channel(NINA_WEB_WORKSPACE_ID, "telegram")
+    logger.info("Platform admin channel action=telegram_disconnect")
+    return redirect(q("/admin/channels"))
+
+
+@app.post("/channels/whatsapp-personal/connect")
+@platform_admin_required
+def channels_personal_whatsapp_connect():
+    if not _valid_channel_csrf("whatsapp_personal_connect"):
+        return Response("Invalid request", status=400)
+    try:
+        workspace_id = current_workspace_id()
+        pairing = create_personal_whatsapp_pairing(workspace_id)
+        personal_whatsapp_bridge_request("/v1/sessions", {"workspace_id": workspace_id, "session_token": pairing["session_token"]})
+    except Exception:
+        workspace_id = current_workspace_id()
+        logger.warning("Personal WhatsApp pairing could not start workspace=%s", workspace_id)
+        set_connection_for_test(workspace_id, PERSONAL_WHATSAPP_CHANNEL, "error", {"error_code": "bridge_unavailable"})
+    logger.info("Platform admin channel action=personal_whatsapp_connect")
+    return redirect(q("/admin/channels"))
+
+
+@app.get("/channels/whatsapp-personal/status")
+@platform_admin_required
+def channels_personal_whatsapp_status():
+    workspace_id = current_workspace_id()
+    connection = get_connection(workspace_id, PERSONAL_WHATSAPP_CHANNEL)
+    if connection["status"] == "connected":
+        return jsonify({"status": "connected"})
+    if connection["status"] == "pending" and not personal_whatsapp_pairing_is_active(workspace_id):
+        set_connection_for_test(workspace_id, PERSONAL_WHATSAPP_CHANNEL, "error", {"error_code": "pairing_expired"})
+        return jsonify({"status": "connection_lost", "qr_svg": ""})
+    try:
+        state = personal_whatsapp_bridge_request("/v1/status", {"workspace_id": workspace_id})
+    except Exception:
+        return jsonify({"status": connection["status"], "qr_svg": ""})
+    svg = str(state.get("qr_svg") or "")
+    if len(svg) > 250000 or not svg.lstrip().startswith("<svg") or "<script" in svg.lower() or "onload=" in svg.lower():
+        svg = ""
+    return jsonify({"status": str(state.get("status") or connection["status"]), "qr_svg": svg})
+
+
+@app.post("/channels/whatsapp-personal/disconnect")
+@platform_admin_required
+def channels_personal_whatsapp_disconnect():
+    if not _valid_channel_csrf("whatsapp_personal_disconnect"):
+        return Response("Invalid request", status=400)
+    try:
+        workspace_id = current_workspace_id()
+        personal_whatsapp_bridge_request("/v1/disconnect", {"workspace_id": workspace_id})
+    except Exception:
+        workspace_id = current_workspace_id()
+        logger.warning("Personal WhatsApp bridge logout unavailable workspace=%s", workspace_id)
+    disconnect_personal_whatsapp(workspace_id)
+    logger.info("Platform admin channel action=personal_whatsapp_disconnect")
+    return redirect(q("/admin/channels"))
+
+
+@app.post("/channels/whatsapp-company/connect")
+@platform_admin_required
+def channels_company_whatsapp_connect():
+    if not _valid_channel_csrf("whatsapp_company_connect"):
+        return Response("Invalid request", status=400)
+    try:
+        workspace_id = configured_company_whatsapp_workspace()
+        if not configured_company_whatsapp_number():
+            raise ValueError("company_number_missing")
+        pairing = create_company_whatsapp_pairing(workspace_id)
+        personal_whatsapp_bridge_request("/v1/company/sessions", {"workspace_id": workspace_id, "session_token": pairing["session_token"]})
+    except Exception:
+        logger.warning("Company WhatsApp pairing could not start")
+        try:
+            set_connection_for_test(configured_company_whatsapp_workspace(), COMPANY_WHATSAPP_CHANNEL, "error", {"error_code": "bridge_unavailable"})
+        except ValueError:
+            pass
+    logger.info("Platform admin channel action=company_whatsapp_connect")
+    return redirect(q("/admin/channels"))
+
+
+@app.get("/channels/whatsapp-company/status")
+@platform_admin_required
+def channels_company_whatsapp_status():
+    workspace_id = configured_company_whatsapp_workspace()
+    connection = get_connection(workspace_id, COMPANY_WHATSAPP_CHANNEL)
+    state = {}
+    try:
+        state = personal_whatsapp_bridge_request("/v1/company/status", {"workspace_id": workspace_id})
+    except Exception:
+        state = {"status": "unavailable", "qr_svg": ""}
+    bridge_status = str(state.get("status") or "unavailable")
+    if bridge_status == "connected" and connection["status"] != "disconnected":
+        reconciled = mark_company_whatsapp_runtime_state(workspace_id, "connected")
+        if reconciled:
+            connection = get_connection(workspace_id, COMPANY_WHATSAPP_CHANNEL)
+            logger.info("Company WhatsApp status reconciled bridge=connected persistence=connected")
+    runtime_state = str((connection.get("metadata") or {}).get("runtime_state") or "")
+    if connection["status"] == "pending" and runtime_state not in {"reconnecting", "temporary_failure", "backend_unavailable"} and not company_whatsapp_pairing_is_active(workspace_id):
+        set_connection_for_test(workspace_id, COMPANY_WHATSAPP_CHANNEL, "error", {"error_code": "pairing_expired"})
+        logger.info("Company WhatsApp status write status=error runtime_state=pairing_expired")
+        connection = get_connection(workspace_id, COMPANY_WHATSAPP_CHANNEL)
+        bridge_status = "unavailable"
+    svg = str(state.get("qr_svg") or "")
+    if len(svg) > 250000 or not svg.lstrip().startswith("<svg") or "<script" in svg.lower() or "onload=" in svg.lower():
+        svg = ""
+    truth = resolve_channel_connection_truth(
+        workspace_id,
+        COMPANY_WHATSAPP_CHANNEL,
+        connection,
+        {"state": bridge_status, "qr_available": bool(svg)},
+    )
+    return jsonify({
+        "status": truth["state"],
+        "qr_svg": svg if truth["state"] == "qr_pending" else "",
+        "reason_code": truth["reason_code"],
+    })
+
+
+@app.post("/channels/whatsapp-company/disconnect")
+@platform_admin_required
+def channels_company_whatsapp_disconnect():
+    if not _valid_channel_csrf("whatsapp_company_disconnect"):
+        return Response("Invalid request", status=400)
+    workspace_id = configured_company_whatsapp_workspace()
+    try:
+        personal_whatsapp_bridge_request("/v1/company/disconnect", {"workspace_id": workspace_id})
+    except Exception:
+        logger.warning("Company WhatsApp bridge logout unavailable")
+    disconnect_company_whatsapp(workspace_id)
+    logger.info("Platform admin channel action=company_whatsapp_disconnect")
+    return redirect(q("/admin/channels"))
+
+
+def _bridge_json():
+    if not authorize_bridge(request.headers.get("Authorization")):
+        return None
+    payload = request.get_json(silent=True)
+    return payload if isinstance(payload, dict) else None
+
+
+def _agent_assignment_error_response(exc):
+    if isinstance(exc, AgentAssignmentNotFoundError):
+        return jsonify({"ok": False, "error": "agent_assignment_not_found"}), 404
+    if isinstance(exc, AgentAssignmentTransitionError):
+        return jsonify({"ok": False, "error": "invalid_status_transition"}), 409
+    if isinstance(exc, AgentAssignmentConflictError):
+        return jsonify({"ok": False, "error": "assignment_conflict"}), 409
+    if isinstance(exc, AgentAssignmentValidationError):
+        code = str(exc).split(":", 1)[0]
+        return jsonify({"ok": False, "error": code}), 400
+    logger.error(
+        "Agent Assignment request failed error_class=%s",
+        type(exc).__name__,
+    )
+    return jsonify({"ok": False, "error": "agent_assignment_unavailable"}), 503
+
+
+def _assignment_payload(allowed):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise AgentAssignmentValidationError(
+            "agent_assignment_json_object_required"
+        )
+    unknown = set(payload) - set(allowed)
+    if unknown:
+        raise AgentAssignmentValidationError(
+            "agent_assignment_request_field_forbidden:"
+            + sorted(unknown)[0]
+        )
+    return payload
+
+
+def _billing_reserve(workspace_id, metric, source_type):
+    key = (request.headers.get("Idempotency-Key") or
+           f"{source_type}_{secrets.token_hex(16)}")
+    return reserve_usage(workspace_id, metric, key,
+                         source_type=source_type, source_id=key)
+
+
+def _billing_limit_response(metric):
+    return jsonify({"ok": False, "error": "billing_limit_reached",
+                    "metric": metric, "upgrade_required": True}), 429
+
+
+@app.post("/agent-assignments")
+def create_agent_assignment_api():
+    try:
+        payload = _assignment_payload({
+            "ready_worker_definition_id",
+            "definition_version",
+            "display_name",
+            "configuration",
+            "permissions",
+        })
+        workspace_id = current_workspace_id()
+        if payload.get("ready_worker_definition_id") and payload.get("display_name"):
+            _billing_reserve(workspace_id, "workers", "agent_assignment")
+        assignment = create_assignment(
+            workspace_id,
+            payload.get("ready_worker_definition_id"),
+            payload.get("definition_version"),
+            payload.get("display_name"),
+            payload.get("configuration"),
+            payload.get("permissions"),
+            assigned_by="workspace_client",
+        )
+        return jsonify({"ok": True, "assignment": assignment.as_dict()}), 201
+    except BillingLimitError:
+        return _billing_limit_response("workers")
+    except AgentAssignmentError as exc:
+        return _agent_assignment_error_response(exc)
+
+
+@app.get("/agent-assignments")
+def list_agent_assignments_api():
+    try:
+        assignments = list_tenant_assignments(
+            current_workspace_id(),
+            status=request.args.get("status"),
+            limit=request.args.get("limit", 200),
+        )
+        return jsonify({
+            "ok": True,
+            "assignments": [item.as_dict() for item in assignments],
+        })
+    except AgentAssignmentError as exc:
+        return _agent_assignment_error_response(exc)
+
+
+@app.get("/agent-assignments/<assignment_id>")
+def get_agent_assignment_api(assignment_id):
+    try:
+        assignment = get_assignment(current_workspace_id(), assignment_id)
+        return jsonify({"ok": True, "assignment": assignment.as_dict()})
+    except AgentAssignmentError as exc:
+        return _agent_assignment_error_response(exc)
+
+
+@app.patch("/agent-assignments/<assignment_id>")
+def update_agent_assignment_api(assignment_id):
+    try:
+        payload = _assignment_payload({
+            "display_name", "configuration", "permissions",
+        })
+        if not payload:
+            raise AgentAssignmentValidationError(
+                "agent_assignment_update_required"
+            )
+        assignment = update_assignment(
+            current_workspace_id(),
+            assignment_id,
+            display_name=payload.get("display_name")
+            if "display_name" in payload else None,
+            configuration=payload.get("configuration")
+            if "configuration" in payload else None,
+            permissions=payload.get("permissions")
+            if "permissions" in payload else None,
+        )
+        return jsonify({"ok": True, "assignment": assignment.as_dict()})
+    except AgentAssignmentError as exc:
+        return _agent_assignment_error_response(exc)
+
+
+def _transition_agent_assignment_api(assignment_id, operation):
+    try:
+        _assignment_payload(set())
+        assignment = operation(current_workspace_id(), assignment_id)
+        return jsonify({"ok": True, "assignment": assignment.as_dict()})
+    except AgentAssignmentError as exc:
+        return _agent_assignment_error_response(exc)
+
+
+@app.post("/agent-assignments/<assignment_id>/activate")
+def activate_agent_assignment_api(assignment_id):
+    return _transition_agent_assignment_api(assignment_id, activate_assignment)
+
+
+@app.post("/agent-assignments/<assignment_id>/suspend")
+def suspend_agent_assignment_api(assignment_id):
+    return _transition_agent_assignment_api(assignment_id, suspend_assignment)
+
+
+@app.post("/agent-assignments/<assignment_id>/archive")
+def archive_agent_assignment_api(assignment_id):
+    return _transition_agent_assignment_api(assignment_id, archive_assignment)
+
+
+def _knowledge_error_response(exc):
+    if isinstance(exc, KnowledgeVaultNotFoundError):
+        return jsonify({"ok": False, "error": "knowledge_item_not_found"}), 404
+    if isinstance(exc, KnowledgeVaultTransitionError):
+        return jsonify({"ok": False, "error": "invalid_status_transition"}), 409
+    if isinstance(exc, KnowledgeVaultConflictError):
+        return jsonify({"ok": False, "error": "knowledge_conflict"}), 409
+    if isinstance(exc, KnowledgeVaultValidationError):
+        code = str(exc).split(":", 1)[0]
+        status = 413 if code in {
+            "knowledge_content_too_large", "knowledge_metadata_too_large",
+        } else 400
+        return jsonify({"ok": False, "error": code}), status
+    logger.error(
+        "Knowledge Vault request failed error_class=%s", type(exc).__name__
+    )
+    return jsonify({"ok": False, "error": "knowledge_vault_unavailable"}), 503
+
+
+def _knowledge_payload(allowed):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise KnowledgeVaultValidationError("knowledge_json_object_required")
+    unknown = set(payload) - set(allowed)
+    if unknown:
+        raise KnowledgeVaultValidationError(
+            "knowledge_request_field_forbidden:" + ",".join(sorted(unknown))
+        )
+    return payload
+
+
+def _knowledge_query_integer(name, default):
+    raw = request.args.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as exc:
+        raise KnowledgeVaultValidationError(
+            f"knowledge_{name}_invalid"
+        ) from exc
+
+
+@app.post("/knowledge-vault/items")
+def create_knowledge_item_api():
+    if not _knowledge_permission("knowledge_write"):
+        return jsonify({"ok": False, "error": "knowledge_permission_denied"}), 403
+    try:
+        payload = _knowledge_payload({
+            "title", "content", "knowledge_type", "source_type",
+            "source_reference", "tags",
+        })
+        workspace_id = current_workspace_id()
+        if payload.get("title") and payload.get("content"):
+            _billing_reserve(workspace_id, "knowledge_items", "knowledge_item")
+        item = create_knowledge_item(
+            workspace_id,
+            title=payload.get("title"),
+            content=payload.get("content"),
+            knowledge_type=payload.get("knowledge_type"),
+            source_type=payload.get("source_type"),
+            source_reference=payload.get("source_reference", ""),
+            tags=payload.get("tags"),
+            created_by="workspace_client",
+        )
+        return jsonify({"ok": True, "item": item.as_dict()}), 201
+    except BillingLimitError:
+        return _billing_limit_response("knowledge_items")
+    except KnowledgeVaultError as exc:
+        return _knowledge_error_response(exc)
+
+
+@app.get("/knowledge-vault/items")
+def list_knowledge_items_api():
+    if not _knowledge_permission("knowledge_read"):
+        return jsonify({"ok": False, "error": "knowledge_permission_denied"}), 403
+    try:
+        items = list_tenant_knowledge(
+            current_workspace_id(),
+            status=request.args.get("status") or "ACTIVE",
+            source_type=request.args.get("source_type"),
+            knowledge_type=request.args.get("knowledge_type"),
+            tag=request.args.get("tag"),
+            query=request.args.get("query"),
+            limit=_knowledge_query_integer("limit", DEFAULT_LIST_LIMIT),
+            offset=_knowledge_query_integer("offset", 0),
+        )
+        return jsonify({
+            "ok": True,
+            "items": [item.as_dict(include_content=False) for item in items],
+        })
+    except KnowledgeVaultError as exc:
+        return _knowledge_error_response(exc)
+
+
+@app.get("/knowledge-vault/items/<knowledge_id>")
+def get_knowledge_item_api(knowledge_id):
+    if not _knowledge_permission("knowledge_read"):
+        return jsonify({"ok": False, "error": "knowledge_permission_denied"}), 403
+    try:
+        item = get_knowledge_item(current_workspace_id(), knowledge_id)
+        return jsonify({"ok": True, "item": item.as_dict()})
+    except KnowledgeVaultError as exc:
+        return _knowledge_error_response(exc)
+
+
+@app.patch("/knowledge-vault/items/<knowledge_id>")
+def update_knowledge_item_api(knowledge_id):
+    if not _knowledge_permission("knowledge_write"):
+        return jsonify({"ok": False, "error": "knowledge_permission_denied"}), 403
+    try:
+        payload = _knowledge_payload({
+            "title", "content", "knowledge_type", "source_type",
+            "source_reference", "tags", "expected_version",
+        })
+        if not payload:
+            raise KnowledgeVaultValidationError("knowledge_update_required")
+        item = update_knowledge_item(
+            current_workspace_id(), knowledge_id,
+            title=payload.get("title") if "title" in payload else None,
+            content=payload.get("content") if "content" in payload else None,
+            knowledge_type=payload.get("knowledge_type")
+            if "knowledge_type" in payload else None,
+            source_type=payload.get("source_type")
+            if "source_type" in payload else None,
+            source_reference=payload.get("source_reference")
+            if "source_reference" in payload else None,
+            tags=payload.get("tags") if "tags" in payload else None,
+            expected_version=payload.get("expected_version"),
+            updated_by="workspace_client",
+        )
+        return jsonify({"ok": True, "item": item.as_dict()})
+    except KnowledgeVaultError as exc:
+        return _knowledge_error_response(exc)
+
+
+def _knowledge_transition_api(knowledge_id, operation, permission):
+    if not _knowledge_permission(permission):
+        return jsonify({"ok": False, "error": "knowledge_permission_denied"}), 403
+    try:
+        _knowledge_payload(set())
+        item = operation(current_workspace_id(), knowledge_id)
+        return jsonify({"ok": True, "item": item.as_dict()})
+    except KnowledgeVaultError as exc:
+        return _knowledge_error_response(exc)
+
+
+@app.post("/knowledge-vault/items/<knowledge_id>/activate")
+def activate_knowledge_item_api(knowledge_id):
+    return _knowledge_transition_api(
+        knowledge_id, activate_knowledge_item, "knowledge_write"
+    )
+
+
+@app.post("/knowledge-vault/items/<knowledge_id>/archive")
+def archive_knowledge_item_api(knowledge_id):
+    return _knowledge_transition_api(
+        knowledge_id, archive_knowledge_item, "knowledge_archive"
+    )
+
+
+@app.post("/knowledge-vault/items/<knowledge_id>/versions")
+def create_knowledge_version_api(knowledge_id):
+    if not _knowledge_permission("knowledge_write"):
+        return jsonify({"ok": False, "error": "knowledge_permission_denied"}), 403
+    try:
+        payload = _knowledge_payload({
+            "title", "content", "knowledge_type", "source_type",
+            "source_reference", "tags", "expected_version",
+        })
+        item = create_knowledge_version(
+            current_workspace_id(), knowledge_id,
+            title=payload.get("title"),
+            content=payload.get("content"),
+            knowledge_type=payload.get("knowledge_type"),
+            source_type=payload.get("source_type"),
+            source_reference=payload.get("source_reference"),
+            tags=payload.get("tags"),
+            expected_version=payload.get("expected_version"),
+            created_by="workspace_client",
+        )
+        return jsonify({"ok": True, "item": item.as_dict()}), 201
+    except KnowledgeVaultError as exc:
+        return _knowledge_error_response(exc)
+
+
+@app.get("/knowledge-vault/items/<knowledge_id>/versions")
+def list_knowledge_versions_api(knowledge_id):
+    if not _knowledge_permission("knowledge_audit_view"):
+        return jsonify({"ok": False, "error": "knowledge_permission_denied"}), 403
+    try:
+        versions = list_knowledge_versions(
+            current_workspace_id(), knowledge_id
+        )
+        return jsonify({
+            "ok": True,
+            "versions": [item.as_dict() for item in versions],
+        })
+    except KnowledgeVaultError as exc:
+        return _knowledge_error_response(exc)
+
+
+@app.post("/knowledge-vault/create")
+def create_knowledge_form():
+    if not _knowledge_permission("knowledge_write"):
+        return Response("knowledge_permission_denied", status=403)
+    if not _valid_channel_csrf("knowledge:create"):
+        return Response("knowledge_csrf_invalid", status=403)
+    try:
+        _billing_reserve(current_workspace_id(), "knowledge_items", "knowledge_item")
+        create_knowledge_item(
+            current_workspace_id(),
+            title=request.form.get("title"),
+            content=request.form.get("content"),
+            knowledge_type=request.form.get("knowledge_type"),
+            tags=request.form.get("tags"),
+            source_type=request.form.get("source_type"),
+            source_reference=request.form.get("source_reference", ""),
+            created_by=current_web_contact()["contact_id"],
+        )
+        status = "Knowledge created"
+    except (KnowledgeVaultError, BillingLimitError):
+        status = "Knowledge validation failed"
+    return redirect(q("/dashboard") + "&knowledge_status=" + quote_plus(status))
+
+
+@app.post("/knowledge-vault/<knowledge_id>/update")
+def update_knowledge_form(knowledge_id):
+    if not _knowledge_permission("knowledge_write"):
+        return Response("knowledge_permission_denied", status=403)
+    if not _valid_channel_csrf(f"knowledge:update:{knowledge_id}"):
+        return Response("knowledge_csrf_invalid", status=403)
+    try:
+        update_knowledge_item(
+            current_workspace_id(), knowledge_id,
+            title=request.form.get("title"),
+            content=request.form.get("content"),
+            expected_version=request.form.get("expected_version"),
+            updated_by=current_web_contact()["contact_id"],
+        )
+        status = "Knowledge updated"
+    except KnowledgeVaultError:
+        status = "Knowledge update failed"
+    return redirect(q("/dashboard") + "&knowledge_status=" + quote_plus(status))
+
+
+@app.post("/knowledge-vault/<knowledge_id>/archive")
+def archive_knowledge_form(knowledge_id):
+    if not _knowledge_permission("knowledge_archive"):
+        return Response("knowledge_permission_denied", status=403)
+    if not _valid_channel_csrf(f"knowledge:archive:{knowledge_id}"):
+        return Response("knowledge_csrf_invalid", status=403)
+    try:
+        archive_knowledge_item(
+            current_workspace_id(), knowledge_id,
+            actor=current_web_contact()["contact_id"],
+        )
+        status = "Knowledge archived"
+    except KnowledgeVaultError:
+        status = "Knowledge archive failed"
+    return redirect(q("/dashboard") + "&knowledge_status=" + quote_plus(status))
+
+
+def _work_error_response(exc):
+    if isinstance(exc, UniversalWorkNotFoundError):
+        return jsonify({"ok": False, "error": "work_object_not_found"}), 404
+    if isinstance(exc, UniversalWorkTransitionError):
+        return jsonify({"ok": False, "error": "invalid_status_transition"}), 409
+    if isinstance(exc, UniversalWorkConflictError):
+        return jsonify({"ok": False, "error": "work_object_conflict"}), 409
+    if isinstance(exc, UniversalWorkValidationError):
+        code = str(exc).split(":", 1)[0]
+        status = 413 if code in {
+            "work_description_too_large", "work_metadata_too_large",
+        } else 400
+        return jsonify({"ok": False, "error": code}), status
+    logger.error(
+        "Universal Work request failed error_class=%s", type(exc).__name__
+    )
+    return jsonify({"ok": False, "error": "work_objects_unavailable"}), 503
+
+
+def _work_payload(allowed):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise UniversalWorkValidationError("work_json_object_required")
+    unknown = set(payload) - set(allowed)
+    if unknown:
+        raise UniversalWorkValidationError(
+            "work_request_field_forbidden:" + ",".join(sorted(unknown))
+        )
+    return payload
+
+
+def _work_query_integer(name, default):
+    raw = request.args.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as exc:
+        raise UniversalWorkValidationError(f"work_{name}_invalid") from exc
+
+
+@app.post("/work-objects")
+def create_universal_work_object_api():
+    try:
+        payload = _work_payload({
+            "object_type", "title", "description", "priority", "owner_type",
+            "owner_id", "assigned_agent_assignment_id", "client_id",
+            "project_id", "parent_work_object_id", "source_type",
+            "owner_assignment_id", "worker_instance_id", "knowledge_refs",
+            "source_channel", "source_reference", "due_at", "metadata",
+        })
+        workspace_id = current_workspace_id()
+        if payload.get("object_type") and payload.get("title"):
+            _billing_reserve(workspace_id, "work_objects", "work_object")
+        item = create_universal_work_object(
+            workspace_id,
+            object_type=payload.get("object_type"),
+            title=payload.get("title"),
+            description=payload.get("description", ""),
+            priority=payload.get("priority", "normal"),
+            owner_type=payload.get("owner_type", "tenant"),
+            owner_id=payload.get("owner_id", ""),
+            assigned_agent_assignment_id=payload.get(
+                "assigned_agent_assignment_id", ""
+            ),
+            owner_assignment_id=payload.get("owner_assignment_id", ""),
+            worker_instance_id=payload.get("worker_instance_id", ""),
+            knowledge_refs=payload.get("knowledge_refs"),
+            client_id=payload.get("client_id", ""),
+            project_id=payload.get("project_id", ""),
+            parent_work_object_id=payload.get("parent_work_object_id", ""),
+            source_type=payload.get("source_type", "user"),
+            source_channel=payload.get("source_channel", ""),
+            source_reference=payload.get("source_reference", ""),
+            due_at=payload.get("due_at", ""),
+            metadata=payload.get("metadata"),
+            created_by="workspace_client",
+        )
+        return jsonify({"ok": True, "work_object": item.as_dict()}), 201
+    except BillingLimitError:
+        return _billing_limit_response("work_objects")
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
+
+
+@app.get("/work-objects")
+def list_universal_work_objects_api():
+    try:
+        items = list_universal_work_objects(
+            current_workspace_id(),
+            object_type=request.args.get("object_type"),
+            status=request.args.get("status"),
+            priority=request.args.get("priority"),
+            assigned_agent_assignment_id=request.args.get(
+                "assigned_agent_assignment_id"
+            ),
+            client_id=request.args.get("client_id"),
+            project_id=request.args.get("project_id"),
+            due_before=request.args.get("due_before"),
+            due_after=request.args.get("due_after"),
+            query=request.args.get("query"),
+            limit=_work_query_integer("limit", WORK_DEFAULT_LIST_LIMIT),
+            offset=_work_query_integer("offset", 0),
+        )
+        return jsonify({
+            "ok": True,
+            "work_objects": [item.as_dict() for item in items],
+        })
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
+
+
+@app.get("/work-objects/<work_object_id>")
+def get_universal_work_object_api(work_object_id):
+    try:
+        item = get_universal_work_object(
+            current_workspace_id(), work_object_id
+        )
+        return jsonify({"ok": True, "work_object": item.as_dict()})
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
+
+
+@app.patch("/work-objects/<work_object_id>")
+def update_universal_work_object_api(work_object_id):
+    try:
+        payload = _work_payload({
+            "title", "description", "owner_type", "owner_id", "client_id",
+            "project_id", "due_at", "metadata", "knowledge_refs",
+        })
+        if not payload:
+            raise UniversalWorkValidationError("work_update_required")
+        item = update_universal_work_object(
+            current_workspace_id(), work_object_id,
+            title=payload.get("title") if "title" in payload else None,
+            description=payload.get("description")
+            if "description" in payload else None,
+            owner_type=payload.get("owner_type")
+            if "owner_type" in payload else None,
+            owner_id=payload.get("owner_id") if "owner_id" in payload else None,
+            client_id=payload.get("client_id")
+            if "client_id" in payload else None,
+            project_id=payload.get("project_id")
+            if "project_id" in payload else None,
+            due_at=payload.get("due_at") if "due_at" in payload else None,
+            metadata=payload.get("metadata") if "metadata" in payload else None,
+            knowledge_refs=payload.get("knowledge_refs")
+            if "knowledge_refs" in payload else None,
+        )
+        return jsonify({"ok": True, "work_object": item.as_dict()})
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
+
+
+def _work_operation(work_object_id, operation, allowed):
+    try:
+        payload = _work_payload(allowed)
+        item = operation(payload)
+        return jsonify({"ok": True, "work_object": item.as_dict()})
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
+
+
+@app.post("/work-objects/<work_object_id>/transition")
+def transition_universal_work_object_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda payload: transition_work_object(
+            current_workspace_id(), work_object_id, payload.get("status")
+        ),
+        {"status"},
+    )
+
+
+@app.post("/work-objects/<work_object_id>/assign")
+def assign_universal_work_object_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda payload: assign_work_object(
+            current_workspace_id(), work_object_id,
+            payload.get("assigned_agent_assignment_id"),
+        ),
+        {"assigned_agent_assignment_id"},
+    )
+
+
+@app.post("/work-objects/<work_object_id>/unassign")
+def unassign_universal_work_object_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda _payload: unassign_work_object(
+            current_workspace_id(), work_object_id
+        ),
+        set(),
+    )
+
+
+@app.post("/work-objects/<work_object_id>/complete")
+def complete_universal_work_object_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda _payload: complete_work_object(
+            current_workspace_id(), work_object_id
+        ),
+        set(),
+    )
+
+
+@app.post("/work-objects/<work_object_id>/cancel")
+def cancel_universal_work_object_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda _payload: cancel_work_object(
+            current_workspace_id(), work_object_id
+        ),
+        set(),
+    )
+
+
+@app.post("/work-objects/<work_object_id>/archive")
+def archive_universal_work_object_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda _payload: archive_universal_work_object(
+            current_workspace_id(), work_object_id
+        ),
+        set(),
+    )
+
+
+@app.post("/work-objects/<work_object_id>/priority")
+def prioritize_universal_work_object_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda payload: set_priority(
+            current_workspace_id(), work_object_id, payload.get("priority")
+        ),
+        {"priority"},
+    )
+
+
+@app.post("/work-objects/<work_object_id>/parent")
+def attach_universal_work_parent_api(work_object_id):
+    return _work_operation(
+        work_object_id,
+        lambda payload: attach_parent(
+            current_workspace_id(), work_object_id,
+            payload.get("parent_work_object_id"),
+        ),
+        {"parent_work_object_id"},
+    )
+
+
+@app.delete("/work-objects/<work_object_id>/parent")
+def detach_universal_work_parent_api(work_object_id):
+    try:
+        item = detach_parent(current_workspace_id(), work_object_id)
+        return jsonify({"ok": True, "work_object": item.as_dict()})
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
+
+
+@app.get("/work-objects/<work_object_id>/children")
+def list_universal_work_children_api(work_object_id):
+    try:
+        items = list_children(current_workspace_id(), work_object_id)
+        return jsonify({
+            "ok": True,
+            "children": [item.as_dict() for item in items],
+        })
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
+
+
+@app.get("/work-objects/<work_object_id>/events")
+def list_universal_work_events_api(work_object_id):
+    try:
+        events = list_work_events(current_workspace_id(), work_object_id)
+        return jsonify({"ok": True, "events": list(events)})
+    except UniversalWorkError as exc:
+        return _work_error_response(exc)
+
+
+@app.post("/work-objects/create-form")
+def create_universal_work_object_form():
+    if not _valid_channel_csrf("work:create"):
+        return Response("work_csrf_invalid", status=403)
+    try:
+        _billing_reserve(current_workspace_id(), "work_objects", "work_object")
+        item = create_universal_work_object(
+            current_workspace_id(),
+            object_type=request.form.get("object_type"),
+            title=request.form.get("title"),
+            description=request.form.get("description", ""),
+            priority=request.form.get("priority", "NORMAL"),
+            source_type="user",
+            source_channel="web",
+            created_by=current_web_contact()["contact_id"],
+        )
+        transition_work_object(
+            current_workspace_id(), item.work_object_id, "open",
+            actor=current_web_contact()["contact_id"],
+        )
+        notice = "Work Object created"
+    except (UniversalWorkError, BillingLimitError):
+        notice = "Work Object create failed"
+    return redirect(q("/dashboard") + "&work_status=" + quote_plus(notice))
+
+
+@app.post("/work-objects/<work_object_id>/complete-form")
+def complete_universal_work_object_form(work_object_id):
+    if not _valid_channel_csrf(f"work:complete:{work_object_id}"):
+        return Response("work_csrf_invalid", status=403)
+    try:
+        complete_work_object(current_workspace_id(), work_object_id)
+    except UniversalWorkError:
+        return redirect(
+            q("/dashboard") + "&work_status=Work+Object+completion+failed"
+        )
+    return redirect(q("/dashboard") + "&work_status=Work+Object+completed")
+
+
+@app.post("/work-objects/<work_object_id>/update-form")
+def update_universal_work_object_form(work_object_id):
+    if not _valid_channel_csrf(f"work:update:{work_object_id}"):
+        return Response("work_csrf_invalid", status=403)
+    try:
+        update_universal_work_object(
+            current_workspace_id(),
+            work_object_id,
+            title=request.form.get("title"),
+            description=request.form.get("description", ""),
+            updated_by=current_web_contact()["contact_id"],
+        )
+    except UniversalWorkError:
+        return redirect(q("/dashboard") + "&work_status=Work+Object+update+failed")
+    return redirect(q("/dashboard") + "&work_status=Work+Object+updated")
+
+
+@app.post("/work-objects/<work_object_id>/archive-form")
+def archive_universal_work_object_form(work_object_id):
+    if not _valid_channel_csrf(f"work:archive:{work_object_id}"):
+        return Response("work_csrf_invalid", status=403)
+    try:
+        archive_universal_work_object(current_workspace_id(), work_object_id)
+    except UniversalWorkError:
+        return redirect(q("/dashboard") + "&work_status=Work+Object+archive+failed")
+    return redirect(q("/dashboard") + "&work_status=Work+Object+archived")
+
+
+@app.get("/channel-layer/connections")
+def channel_layer_connections_api():
+    if not _channel_permission("channel_read"):
+        return jsonify({"ok": False, "error": "channel_permission_denied"}), 403
+    try:
+        items = list_layer_connections(_channel_workspace_id(), limit=100)
+        return jsonify({
+            "ok": True,
+            "channel_types": sorted(CHANNEL_TYPES),
+            "connections": [item.as_dict() for item in items],
+        })
+    except ChannelLayerError:
+        return jsonify({"ok": False, "error": "channel_layer_unavailable"}), 503
+
+
+@app.get("/channel-layer/messages")
+def channel_layer_messages_api():
+    if not _channel_permission("channel_message_read"):
+        return jsonify({"ok": False, "error": "channel_permission_denied"}), 403
+    try:
+        items = list_channel_messages(_channel_workspace_id(), limit=100)
+        return jsonify({
+            "ok": True,
+            "messages": [item.as_dict() for item in items],
+        })
+    except ChannelLayerError:
+        return jsonify({"ok": False, "error": "channel_layer_unavailable"}), 503
+
+
+@app.post("/channel-layer/create")
+def channel_layer_create_form():
+    if not _channel_permission("channel_manage"):
+        return Response("channel_permission_denied", status=403)
+    if not _valid_channel_csrf("channel:create"):
+        return Response("channel_csrf_invalid", status=403)
+    try:
+        _billing_reserve(_channel_workspace_id(), "channels", "channel_connection")
+        create_layer_connection(
+            _channel_workspace_id(),
+            channel_type=request.form.get("channel_type"),
+            display_name=request.form.get("display_name"),
+            external_account_id=request.form.get("external_account_id", ""),
+            status="DISCONNECTED",
+            created_by=current_web_contact()["contact_id"],
+        )
+        notice = "Channel connection added"
+    except (ChannelLayerError, BillingLimitError):
+        notice = "Channel connection failed"
+    return redirect(q("/dashboard") + "&channel_status=" + quote_plus(notice))
+
+
+@app.post("/channel-layer/<channel_connection_id>/update")
+def channel_layer_update_form(channel_connection_id):
+    if not _channel_permission("channel_manage"):
+        return Response("channel_permission_denied", status=403)
+    if not _valid_channel_csrf(f"channel:update:{channel_connection_id}"):
+        return Response("channel_csrf_invalid", status=403)
+    try:
+        update_layer_connection(
+            _channel_workspace_id(), channel_connection_id,
+            display_name=request.form.get("display_name"),
+            updated_by=current_web_contact()["contact_id"],
+        )
+        notice = "Channel updated"
+    except ChannelLayerError:
+        notice = "Channel update failed"
+    return redirect(q("/dashboard") + "&channel_status=" + quote_plus(notice))
+
+
+def _channel_connection_transition_form(channel_connection_id, target):
+    if not _channel_permission("channel_manage"):
+        return Response("channel_permission_denied", status=403)
+    action = f"channel:{target.lower()}:{channel_connection_id}"
+    if not _valid_channel_csrf(action):
+        return Response("channel_csrf_invalid", status=403)
+    try:
+        update_layer_connection(
+            _channel_workspace_id(), channel_connection_id,
+            target_status=target,
+            updated_by=current_web_contact()["contact_id"],
+        )
+        notice = f"Channel {target.lower()}"
+    except ChannelLayerError:
+        notice = "Channel transition failed"
+    return redirect(q("/dashboard") + "&channel_status=" + quote_plus(notice))
+
+
+@app.post("/channel-layer/<channel_connection_id>/suspend")
+def channel_layer_suspend_form(channel_connection_id):
+    return _channel_connection_transition_form(
+        channel_connection_id, "SUSPENDED"
+    )
+
+
+@app.post("/channel-layer/<channel_connection_id>/disconnect")
+def channel_layer_disconnect_form(channel_connection_id):
+    return _channel_connection_transition_form(
+        channel_connection_id, "DISCONNECTED"
+    )
+
+
+@app.post("/internal/runtime/compatibility")
+def internal_runtime_compatibility():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    return jsonify({
+        "ok": True,
+        "runtime": WEB_DEPLOYMENT_COMPATIBILITY.identity(),
+        "bridge_requirement": {
+            "service_role": "happy-education:whatsapp-bridge",
+            "internal_api_compatibility_version": 1,
+        },
+    })
+
+
+def _developer_agent_json():
+    if not authorize_developer_agent(request.headers.get("Authorization")):
+        return None
+    payload = request.get_json(silent=True)
+    return payload if isinstance(payload, dict) else {}
+
+
+@app.post("/internal/developer-agent/heartbeat")
+def internal_developer_agent_heartbeat():
+    payload = _developer_agent_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    developer_heartbeat(str(payload.get("repository") or "nina7727")[:80])
+    return jsonify({"ok": True})
+
+
+@app.post("/internal/developer-agent/jobs/claim")
+def internal_developer_agent_jobs_claim():
+    if _developer_agent_json() is None:
+        return jsonify({"ok": False}), 401
+    return jsonify({"ok": True, "job": claim_developer_job()})
+
+
+@app.post("/internal/developer-agent/jobs/result")
+def internal_developer_agent_jobs_result():
+    payload = _developer_agent_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    accepted = complete_developer_job(
+        str(payload.get("job_id") or ""), payload.get("result"),
+        str(payload.get("error_code") or "")[:80],
+    )
+    return (jsonify({"ok": True}) if accepted else (jsonify({"ok": False}), 409))
+
+
+@app.get("/internal/developer-release/verify")
+def internal_developer_release_verify():
+    if not authorize_developer_agent(request.headers.get("Authorization")):
+        return jsonify({"ok": False}), 401
+    status = developer_connection_status()
+    return jsonify({
+        "ok": _developer_connection_ready(status),
+        "developer_agent": status["agent"], "repository": status["repository"],
+        "write_access": "disabled", "deploy_access": "disabled",
+    })
+
+
+@app.post("/internal/personal-whatsapp/auth/load")
+def internal_personal_whatsapp_auth_load():
+    payload = _bridge_json()
+    if payload is None: return jsonify({"ok": False}), 401
+    workspace_id = str(payload.get("workspace_id") or "")
+    try: records = load_personal_whatsapp_auth(workspace_id)
+    except ValueError: return jsonify({"ok": False}), 400
+    return jsonify({"ok": True, "records": records})
+
+
+@app.post("/internal/personal-whatsapp/active")
+def internal_personal_whatsapp_active():
+    payload = _bridge_json()
+    if payload is None: return jsonify({"ok": False}), 401
+    return jsonify({"ok": True, "workspace_ids": list_connected_personal_whatsapp_workspaces()})
+
+
+@app.post("/internal/personal-whatsapp/auth/store")
+def internal_personal_whatsapp_auth_store():
+    payload = _bridge_json()
+    if payload is None: return jsonify({"ok": False}), 401
+    workspace_id, records = str(payload.get("workspace_id") or ""), payload.get("records")
+    if not isinstance(records, dict) or len(records) > 1000: return jsonify({"ok": False}), 400
+    try:
+        if any(value is not None and len(json.dumps(value)) > 1024 * 1024 for value in records.values()):
+            return jsonify({"ok": False}), 413
+        stored = store_personal_whatsapp_auth_records(workspace_id, records)
+    except ValueError: return jsonify({"ok": False}), 400
+    return jsonify({"ok": True, "auth_record_count": stored})
+
+
+@app.post("/internal/personal-whatsapp/linked")
+def internal_personal_whatsapp_linked():
+    payload = _bridge_json()
+    if payload is None: return jsonify({"ok": False}), 401
+    connected = mark_personal_whatsapp_connected(str(payload.get("workspace_id") or ""), payload.get("session_token"), payload.get("identity"))
+    return (jsonify({"ok": True}) if connected else (jsonify({"ok": False}), 409))
+
+
+@app.post("/internal/personal-whatsapp/inbound")
+def internal_personal_whatsapp_inbound():
+    payload = _bridge_json()
+    if payload is None: return jsonify({"ok": False}), 401
+    workspace_id = str(payload.get("workspace_id") or "")
+    allowed = accept_personal_whatsapp_inbound(workspace_id, payload.get("message_id"), str(payload.get("chat_jid") or ""), payload.get("text"), bool(payload.get("is_group")))
+    if not allowed: return jsonify({"ok": True, "accepted": False, "reply": ""})
+    contact = resolve_contact_identity(
+        workspace_id, "personal_whatsapp", str(payload.get("chat_jid") or ""),
+        {"relationship_type": "owner"},
+    )
+    result = send_message_to_nina(
+        str(payload.get("text") or ""), workspace_id=workspace_id,
+        channel=PERSONAL_WHATSAPP_CHANNEL, conversation_id=contact["conversation_id"],
+        contact_id=contact["contact_id"], contact_context=compact_contact_context(contact),
+        delivery_recipient=str(payload.get("chat_jid") or ""),
+    )
+    return jsonify({"ok": True, "accepted": True, "reply": str(result.get("text") or "")})
+
+
+@app.post("/internal/personal-whatsapp/outbound-receipt")
+def internal_personal_whatsapp_outbound_receipt():
+    payload = _bridge_json()
+    if payload is None: return jsonify({"ok": False}), 401
+    accepted = record_personal_whatsapp_outbound_receipt(
+        str(payload.get("workspace_id") or ""), payload.get("message_id")
+    )
+    return jsonify({"ok": True, "accepted": accepted})
+
+
+@app.post("/internal/company-whatsapp/auth/load")
+def internal_company_whatsapp_auth_load():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    workspace_id = str(payload.get("workspace_id") or "")
+    try:
+        if workspace_id != configured_company_whatsapp_workspace():
+            raise ValueError("invalid_workspace")
+        records, diagnostics = load_company_whatsapp_auth_with_diagnostics(workspace_id)
+    except ValueError:
+        return jsonify({"ok": False}), 400
+    if diagnostics["result_class"] == "no_auth_records":
+        return jsonify({"ok": False, "error": "no_auth_records", "diagnostics": diagnostics}), 404
+    if diagnostics["result_class"] == "invalid_auth":
+        return jsonify({"ok": False, "error": "invalid_auth", "diagnostics": diagnostics}), 409
+    return jsonify({"ok": True, "records": records, "diagnostics": diagnostics})
+
+
+@app.post("/internal/company-whatsapp/auth/store")
+def internal_company_whatsapp_auth_store():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    workspace_id, records = str(payload.get("workspace_id") or ""), payload.get("records")
+    if workspace_id != configured_company_whatsapp_workspace() or not isinstance(records, dict) or len(records) > 1000:
+        return jsonify({"ok": False}), 400
+    try:
+        for key, value in records.items():
+            if value is None:
+                delete_company_whatsapp_auth(workspace_id, key)
+            elif len(json.dumps(value)) <= 1024 * 1024:
+                store_company_whatsapp_auth(workspace_id, key, value)
+            else:
+                return jsonify({"ok": False}), 413
+    except ValueError:
+        return jsonify({"ok": False}), 400
+    return jsonify({"ok": True})
+
+
+@app.post("/internal/company-whatsapp/active")
+def internal_company_whatsapp_active():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    return jsonify({"ok": True, "workspace_ids": list_connected_company_whatsapp_workspaces()})
+
+
+@app.post("/internal/company-whatsapp/linked")
+def internal_company_whatsapp_linked():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    connected = mark_company_whatsapp_connected(str(payload.get("workspace_id") or ""), payload.get("session_token"), payload.get("identity"))
+    return jsonify({"ok": bool(connected)}), (200 if connected else 409)
+
+
+@app.post("/internal/company-whatsapp/runtime-state")
+def internal_company_whatsapp_runtime_state():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    updated = mark_company_whatsapp_runtime_state(
+        str(payload.get("workspace_id") or ""),
+        str(payload.get("state") or ""),
+    )
+    return jsonify({"ok": bool(updated)}), (200 if updated else 400)
+
+
+@app.post("/internal/company-whatsapp/inbound")
+def internal_company_whatsapp_inbound():
+    payload = _bridge_json()
+    if payload is None:
+        return jsonify({"ok": False}), 401
+    workspace_id = str(payload.get("workspace_id") or "")
+    sender_jid = str(payload.get("sender_jid") or "")
+    text = str(payload.get("text") or "")
+    media = payload.get("media") if isinstance(payload.get("media"), dict) else None
+    if request.content_length and request.content_length > 28 * 1024 * 1024:
+        return jsonify({"ok": False, "error": "media_too_large"}), 413
+    if not accept_company_whatsapp_inbound(
+        workspace_id, payload.get("message_id"), sender_jid, text, has_media=bool(media)
+    ):
+        return jsonify({"ok": True, "accepted": False, "reply": ""})
+    sender = company_whatsapp_sender_digits(sender_jid)
+    identity = resolve_ninaos_channel_identity(COMPANY_WHATSAPP_CHANNEL, workspace_id, sender)
+    contact = resolve_contact_identity(
+        workspace_id, "company_whatsapp", sender_jid,
+        {"relationship_type": "client"},
+    )
+    mapping = get_or_create_client_mapping(workspace_id, contact["contact_id"])
+    if media:
+        try:
+            encoded = str(media.get("data_base64") or "")
+            raw = base64.b64decode(encoded, validate=True)
+            if int(media.get("size") or len(raw)) != len(raw):
+                raise MediaValidationError("media_size_mismatch")
+            result = process_media_message(
+                kind=str(media.get("kind") or ""),
+                data=raw,
+                mime_type=str(media.get("mime_type") or ""),
+                filename=str(media.get("filename") or ""),
+                caption=str(media.get("caption") or ""),
+                quoted_text=str(payload.get("quoted_text") or ""),
+                workspace_id=identity["workspace_id"],
+                conversation_id=identity["conversation_id"],
+                channel=COMPANY_WHATSAPP_CHANNEL,
+                origin_user_id=contact["contact_id"],
+                message_id=str(payload.get("message_id") or ""),
+                contact_id=contact["contact_id"],
+                contact_context=compact_contact_context(contact),
+                canonical_client_id=mapping["canonical_client_id"],
+                canonical_work_workspace_id=workspace_id,
+            )
+        except (MediaValidationError, ValueError, binascii.Error) as exc:
+            error = str(exc)
+            return jsonify({"ok": True, "accepted": True, "reply": "Šo failu nevarēju droši apstrādāt.", "error": error})
+        except Exception as exc:
+            logger.error(
+                "Company WhatsApp media processing failed: error_class=%s",
+                type(exc).__name__,
+            )
+            return jsonify({"ok": True, "accepted": True, "reply": "Multividi saņēmu, bet šobrīd nevarēju to apstrādāt."})
+    else:
+        quoted = str(payload.get("quoted_text") or "").strip()[:1000]
+        result = route_nina_message(NinaMessageEnvelope(
+            text=(f"Citētā ziņa: {quoted}\n\n{text}" if quoted else text),
+            workspace_id=identity["workspace_id"],
+            channel=COMPANY_WHATSAPP_CHANNEL,
+            conversation_id=identity["conversation_id"],
+            contact_id=contact["contact_id"],
+            contact_context=compact_contact_context(contact),
+            canonical_client_id=mapping["canonical_client_id"],
+            canonical_work_workspace_id=workspace_id,
+            delivery_recipient=sender_jid,
+        ))
+    return jsonify({"ok": True, "accepted": True, "reply": str(result.get("text") or "")})
+
+
+@app.post("/channels/whatsapp/start")
+@platform_admin_required
+def channels_whatsapp_start():
+    payload = request.get_json(silent=True) or {}
+    if not hmac.compare_digest(str(payload.get("csrf_token") or ""), _channel_csrf("whatsapp_start")):
+        return jsonify({"ok": False}), 400
+    try:
+        provider = embedded_signup_public_config()
+        state = create_whatsapp_onboarding_state(NINA_WEB_WORKSPACE_ID)
+    except (ValueError, WhatsAppProviderError):
+        return jsonify({"ok": False}), 503
+    logger.info("Platform admin channel action=whatsapp_business_start")
+    return jsonify({"ok": True, "state": state["state"], "expires_at": state["expires_at"], "app_id": provider["app_id"], "config_id": provider["config_id"], "gv": os.environ.get("WHATSAPP_GRAPH_API_VERSION", "v25.0")})
+
+
+@app.post("/channels/whatsapp/callback")
+@platform_admin_required
+def channels_whatsapp_callback():
+    payload = request.get_json(silent=True) or {}
+    if not hmac.compare_digest(str(payload.get("csrf_token") or ""), _channel_csrf("whatsapp_callback")):
+        return jsonify({"ok": False}), 400
+    workspace_id = consume_whatsapp_onboarding_state(payload.get("state"), expected_workspace_id=NINA_WEB_WORKSPACE_ID)
+    if not workspace_id:
+        return jsonify({"ok": False}), 400
+    try:
+        complete_embedded_signup(
+            workspace_id,
+            payload.get("code"),
+            payload.get("phone_number_id"),
+            payload.get("business_account_id"),
+            payload.get("business_portfolio_id"),
+        )
+    except WhatsAppProviderError:
+        update_whatsapp_verification(workspace_id, False, error_code="onboarding_failed")
+        return jsonify({"ok": False}), 400
+    logger.info("Platform admin channel action=whatsapp_business_callback")
+    return jsonify({"ok": True})
+
+
+@app.post("/channels/whatsapp/attention")
+@platform_admin_required
+def channels_whatsapp_attention():
+    payload = request.get_json(silent=True) or {}
+    if not hmac.compare_digest(str(payload.get("csrf_token") or ""), _channel_csrf("whatsapp_callback")):
+        return jsonify({"ok": False}), 400
+    workspace_id = consume_whatsapp_onboarding_state(payload.get("state"), expected_workspace_id=NINA_WEB_WORKSPACE_ID)
+    if not workspace_id:
+        return jsonify({"ok": False}), 400
+    update_whatsapp_verification(workspace_id, False, error_code="coexistence_not_completed")
+    return jsonify({"ok": True})
+
+
+@app.post("/channels/whatsapp/disconnect")
+@platform_admin_required
+def channels_whatsapp_disconnect():
+    if not _valid_channel_csrf("whatsapp_disconnect"):
+        return Response("Invalid request", status=400)
+    disconnect_channel(NINA_WEB_WORKSPACE_ID, "whatsapp")
+    logger.info("Platform admin channel action=whatsapp_business_disconnect")
+    return redirect(q("/admin/channels"))
+
+
+@app.get("/webhooks/whatsapp")
+def whatsapp_webhook_verify():
+    mode = (request.args.get("hub.mode") or "").strip()
+    token = request.args.get("hub.verify_token") or ""
+    challenge = request.args.get("hub.challenge") or ""
+    try:
+        official_verified = verify_ninaos_number_token(mode, token)
+    except ValueError:
+        official_verified = False
+    if not challenge or len(challenge) > 256 or not (official_verified or resolve_webhook_verification(mode, token)):
+        return Response("Verification rejected", status=403)
+    return Response(challenge, status=200, mimetype="text/plain")
+
+
+@app.post("/webhooks/whatsapp")
+def whatsapp_webhook_receive():
+    if request.content_length and request.content_length > 1024 * 1024:
+        return jsonify({"ok": False, "error": "payload_too_large"}), 413
+    raw_body = request.get_data(cache=True)
+    try:
+        payload = request.get_json(force=False, silent=False)
+        messages = parse_inbound_text(payload)
+    except Exception:
+        return jsonify({"ok": False, "error": "invalid_payload"}), 400
+    official_numbers = {item["phone_number_id"]: ninaos_number_for_phone_id(item["phone_number_id"]) for item in messages}
+    if all(official_numbers.values()):
+        if len({item["phone_number_id"] for item in messages}) != 1:
+            return jsonify({"ok": False, "error": "connection_not_resolved"}), 403
+        number = next(iter(official_numbers.values()))
+        try:
+            signature_ok = verify_ninaos_number_signature(number, raw_body, request.headers.get("X-Hub-Signature-256"))
+        except WhatsAppProviderError:
+            return jsonify({"ok": False, "error": "signature_not_configured"}), 503
+        if not signature_ok:
+            return jsonify({"ok": False, "error": "invalid_signature"}), 403
+        sent = 0
+        processed = 0
+        for item in messages:
+            identity = resolve_ninaos_sender_identity(number, item["sender"])
+            if not claim_channel_message(identity["workspace_id"], NINAOS_NUMBER_CHANNEL, item["message_id"]):
+                continue
+            processed += 1
+            nina_result = send_message_to_nina(
+                item["text"],
+                workspace_id=identity["workspace_id"],
+                channel=NINAOS_NUMBER_CHANNEL,
+                conversation_id=identity["conversation_id"],
+            )
+            reply_text = str(nina_result.get("text") or "").strip()
+            if reply_text:
+                try:
+                    send_ninaos_number_reply(number, item["sender"], reply_text)
+                    sent += 1
+                except WhatsAppProviderError:
+                    pass
+        return jsonify({"ok": True, "processed": processed, "replies_sent": sent})
+    if any(official_numbers.values()):
+        return jsonify({"ok": False, "error": "connection_not_resolved"}), 403
+    workspaces = {resolve_workspace_for_phone_number(item["phone_number_id"]) for item in messages}
+    if None in workspaces or len(workspaces) != 1:
+        return jsonify({"ok": False, "error": "connection_not_resolved"}), 403
+    workspace_id = next(iter(workspaces))
+    try:
+        signature_ok = verify_webhook_signature(workspace_id, raw_body, request.headers.get("X-Hub-Signature-256"))
+    except WhatsAppProviderError:
+        return jsonify({"ok": False, "error": "signature_not_configured"}), 503
+    if not signature_ok:
+        return jsonify({"ok": False, "error": "invalid_signature"}), 403
+    sent = 0
+    processed = 0
+    for item in messages:
+        if not claim_channel_message(workspace_id, "whatsapp", item["message_id"]):
+            continue
+        processed += 1
+        nina_result = send_message_to_nina(item["text"], workspace_id=workspace_id, channel="whatsapp")
+        reply_text = str(nina_result.get("text") or "").strip()
+        if reply_text:
+            try:
+                send_whatsapp_message(workspace_id, item["sender"], reply_text)
+                sent += 1
+            except WhatsAppProviderError:
+                pass
+    return jsonify({"ok": True, "processed": processed, "replies_sent": sent})
+
+
+@app.get("/nina/contact.vcf")
+def nina_contact_vcard():
+    try:
+        contact = public_ninaos_contact(primary_ninaos_number(request.args.get("region") or ""))
+    except ValueError:
+        contact = None
+    if not contact:
+        return Response("Contact unavailable", status=404)
+    phone = contact["display_number"]
+    body = f"BEGIN:VCARD\r\nVERSION:3.0\r\nFN:{contact['name']}\r\nTEL;TYPE=CELL:{phone}\r\nEND:VCARD\r\n"
+    return Response(body, mimetype="text/vcard", headers={"Content-Disposition": 'attachment; filename="Nina.vcf"', "Cache-Control": "public, max-age=300"})
+
+
+@app.get("/manifest.webmanifest")
+def web_manifest():
+    return jsonify({
+        "name": "NinaOS", "short_name": "Nina", "start_url": "/nina",
+        "scope": "/", "display": "standalone", "background_color": "#080910",
+        "theme_color": "#080910",
+    })
+
+
+@app.get("/service-worker.js")
+def web_push_service_worker():
+    script = """
+self.addEventListener('push', event => {
+  let data = {}; try { data = event.data ? event.data.json() : {}; } catch (_) {}
+  event.waitUntil(self.registration.showNotification(data.title || 'Nina reminder', {
+    body: data.body || 'You have a reminder from Nina.',
+    tag: data.tag || ('nina-reminder-' + Date.now()),
+    renotify: true,
+    vibrate: [200, 100, 200],
+    data: {url: '/nina'}
+  }));
+});
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  event.waitUntil(clients.matchAll({type:'window', includeUncontrolled:true}).then(items => {
+    for (const client of items) { if ('focus' in client) { client.navigate('/nina'); return client.focus(); } }
+    return clients.openWindow ? clients.openWindow('/nina') : undefined;
+  }));
+});
+""".strip()
+    return Response(script, mimetype="application/javascript", headers={
+        "Service-Worker-Allowed": "/", "Cache-Control": "no-cache, no-store",
+    })
+
+
+def _push_request_owner():
+    browser_workspace = _verified_workspace_cookie(request.cookies.get(_WORKSPACE_COOKIE))
+    if not browser_workspace:
+        return None
+    return resolve_contact_identity(
+        NINA_WEB_WORKSPACE_ID, "web", browser_workspace,
+        {"relationship_type": "client"},
+    )
+
+
+def _valid_push_csrf(action):
+    supplied = (request.headers.get("X-CSRF-Token") or "").strip()
+    return bool(supplied) and hmac.compare_digest(supplied, _channel_csrf(action))
+
+
+@app.post("/nina/push/subscribe")
+def web_push_subscribe():
+    from web_push import WebPushError, configuration_status, register_subscription
+    if not _valid_push_csrf("web-push:subscribe"):
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+    owner = _push_request_owner()
+    if owner is None:
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+    if not configuration_status()["available"]:
+        return jsonify({"ok": False, "error": "web_push_unavailable"}), 503
+    payload = request.get_json(silent=True) or {}
+    try:
+        result = register_subscription(
+            NINA_WEB_WORKSPACE_ID, owner["contact_id"], payload.get("subscription"),
+            request.headers.get("User-Agent") or "",
+        )
+    except WebPushError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify({"ok": True, "subscription_id": result["subscription_id"]})
+
+
+@app.post("/nina/push/unsubscribe")
+def web_push_unsubscribe():
+    from web_push import WebPushError, unsubscribe
+    if not _valid_push_csrf("web-push:unsubscribe"):
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+    owner = _push_request_owner()
+    if owner is None:
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+    payload = request.get_json(silent=True) or {}
+    try:
+        removed = unsubscribe(NINA_WEB_WORKSPACE_ID, owner["contact_id"], payload.get("endpoint"))
+    except WebPushError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify({"ok": True, "disabled": removed})
+
+
+@app.get("/nina/contact-qr.svg")
+def nina_contact_qr():
+    try:
+        contact = public_ninaos_contact(primary_ninaos_number(request.args.get("region") or ""))
+    except ValueError:
+        contact = None
+    if not contact:
+        return Response("Contact unavailable", status=404)
+    import qrcode
+    import qrcode.image.svg
+    image = qrcode.make(contact["whatsapp_url"], image_factory=qrcode.image.svg.SvgPathImage, box_size=8, border=3)
+    output = __import__("io").BytesIO()
+    image.save(output)
+    return Response(output.getvalue(), mimetype="image/svg+xml", headers={"Cache-Control": "public, max-age=300", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
+
+
+@app.route("/nina", methods=["GET", "POST"])
+@app.route("/chat", methods=["GET", "POST"])
+def nina_chat():
+    contact = current_web_contact()
+    if request.method == "POST":
+        user_text = (request.form.get("message") or "").strip()
+        if user_text:
+            inbound = None
+            if initialize_channel_layer(require_schema=True):
+                connection = ensure_web_connection(
+                    NINA_WEB_WORKSPACE_ID, actor="system"
+                )
+                inbound, _ = ingest_channel_inbound(
+                    NINA_WEB_WORKSPACE_ID,
+                    connection.channel_connection_id,
+                    external_message_id=(
+                        request.headers.get("Idempotency-Key")
+                        or "web_" + secrets.token_hex(16)
+                    ),
+                    thread_reference=contact["conversation_id"],
+                    external_sender_id=current_workspace_id(),
+                    message_type="TEXT", text_content=user_text,
+                    safe_metadata={"surface": "web_chat"},
+                    actor=contact["contact_id"],
+                )
+            nina_result = None
+            try:
+                from file_intelligence import answer_file_question
+                explicit = ""
+                match = re.search(r"\b(file_[a-f0-9]{32})\b", user_text)
+                if match: explicit = match.group(1)
+                file_answer = answer_file_question(
+                    NINA_WEB_WORKSPACE_ID, contact["contact_id"], contact["conversation_id"],
+                    user_text, generate_with_nina, explicit,
+                )
+                nina_result = {"ok": True, "text": file_answer["answer"], "source": "shared_file_context"}
+                save_channel_turn(NINA_WEB_WORKSPACE_ID, user_text, file_answer["answer"], conversation_id=contact["conversation_id"], channel="web")
+            except Exception as file_exc:
+                if type(file_exc).__name__ == "FileIntelligenceError" and str(file_exc) == "file_selection_required":
+                    nina_result = {"ok": True, "text": "Please select the file you want me to use.", "source": "shared_file_context"}
+            if nina_result is None:
+                nina_result = route_nina_message(NinaMessageEnvelope(
+                    text=user_text, workspace_id=NINA_WEB_WORKSPACE_ID, channel="web",
+                    conversation_id=contact["conversation_id"], contact_id=contact["contact_id"],
+                    contact_context=compact_contact_context(contact),
+                ))
+            nina_text = (
+                nina_result.get("text", "")
+                if isinstance(nina_result, dict) else nina_result
+            )
+            if inbound is not None and isinstance(nina_text, str) and nina_text.strip():
+                create_channel_outbound(
+                    NINA_WEB_WORKSPACE_ID,
+                    inbound.channel_connection_id,
+                    contact_id=contact["contact_id"],
+                    text_content=nina_text,
+                    related_inbound_message_id=inbound.message_id,
+                    status="DRAFT",
+                    safe_metadata={"surface": "web_chat"},
+                    created_by="nina_message_service",
+                )
+        return redirect(q("/nina"))
+    messages = load_channel_conversation(contact["conversation_id"], limit=30)
+    messages.extend(_web_reminder_notifications(contact))
+    messages = _canonical_conversation_timeline(messages, limit=30)
+    return Response(page(tx("talk_to_nina"), nina_chat_body(messages), active="nina"), mimetype="text/html")
+
+
+@app.post("/nina/files")
+def nina_file_upload():
+    if not _valid_channel_csrf("file:upload"):
+        return Response("file_csrf_invalid", status=403)
+    contact = current_web_contact()
+    upload = request.files.get("file")
+    if upload is None:
+        return Response("file_required", status=400)
+    from file_intelligence import (
+        DOCUMENT_MAX, FileIntelligenceError, VisionProvider, create_file,
+        process_file,
+    )
+    data = upload.stream.read(max(DOCUMENT_MAX, 40 * 1024 * 1024) + 1)
+    try:
+        item, created = create_file(
+            workspace_id=NINA_WEB_WORKSPACE_ID,
+            contact_id=contact["contact_id"],
+            conversation_id=contact["conversation_id"],
+            source_channel="web", filename=upload.filename or "file",
+            mime_type=upload.content_type or upload.mimetype or "",
+            data=data, created_by=contact["contact_id"],
+        )
+        if created or item.status != "READY":
+            client = None
+            if (os.environ.get("OPENAI_API_KEY") or "").strip():
+                from openai import OpenAI
+                client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+            result = process_file(NINA_WEB_WORKSPACE_ID, contact["contact_id"], item.file_id, VisionProvider(client))
+            from file_intelligence import document_action_summary
+            save_channel_turn(NINA_WEB_WORKSPACE_ID, "[File] " + item.safe_filename,
+                              document_action_summary(result),
+                              conversation_id=contact["conversation_id"], channel="web")
+        return redirect(q("/nina"))
+    except FileIntelligenceError as exc:
+        return Response(str(exc), status=400)
+    except Exception as exc:
+        return Response("file_processing_failed", status=503)
+
+
+@app.get("/nina/files/<file_id>")
+def nina_file_detail(file_id):
+    contact = current_web_contact()
+    from file_intelligence import get_extraction
+    try:
+        return jsonify(get_extraction(NINA_WEB_WORKSPACE_ID, contact["contact_id"], file_id))
+    except Exception:
+        return Response("file_not_found", status=404)
+
+
+@app.post("/nina/files/<file_id>/archive")
+def nina_file_archive(file_id):
+    if not _valid_channel_csrf("file:archive:" + file_id):
+        return Response("file_csrf_invalid", status=403)
+    contact = current_web_contact()
+    from file_intelligence import archive_file
+    try:
+        archive_file(NINA_WEB_WORKSPACE_ID, contact["contact_id"], file_id, contact["contact_id"])
+    except Exception:
+        return Response("file_not_found", status=404)
+    return redirect(q("/nina"))
+
+
+@app.post("/nina/files/<file_id>/action")
+def nina_file_action(file_id):
+    action_id = str(request.form.get("action_id") or "").strip()
+    if not _valid_channel_csrf("file:action:" + file_id + ":" + action_id):
+        return Response("file_csrf_invalid", status=403)
+    contact = current_web_contact()
+    from file_intelligence import FileIntelligenceError, get_document_action, get_extraction
+    from work_objects import save_or_get_work_object
+    try:
+        extraction = get_extraction(NINA_WEB_WORKSPACE_ID, contact["contact_id"], file_id)
+        action = get_document_action(extraction, action_id)
+    except FileIntelligenceError as exc:
+        code = str(exc)
+        return Response(code, status=404 if code == "file_not_found" else 409)
+    title = str(extraction.get("title") or "Analyzed document")[:180]
+    if action_id in {"create_work_object", "create_reminder"}:
+        due_date = ""
+        metadata = {"source": "document_action_recommendations_v1", "file_id": file_id,
+                    "action_id": action_id, "user_approved": True}
+        if action_id == "create_reminder":
+            dates = extraction.get("dates") or []
+            if not dates:
+                return Response("document_action_missing_date", status=409)
+            raw_date = str(dates[0])
+            try:
+                parsed = datetime.strptime(raw_date, "%Y-%m-%d").replace(hour=9, tzinfo=ZoneInfo("Europe/Riga")).astimezone(timezone.utc)
+            except ValueError:
+                try:
+                    parsed = datetime.strptime(raw_date, "%d.%m.%Y").replace(hour=9, tzinfo=ZoneInfo("Europe/Riga")).astimezone(timezone.utc)
+                except ValueError:
+                    return Response("document_action_invalid_date", status=409)
+            due_date = parsed.isoformat(timespec="seconds")
+            metadata.update({"planned_at": due_date, "reminder_at": due_date})
+        save_or_get_work_object(
+            object_type="reminder" if action_id == "create_reminder" else "task",
+            title="Document deadline reminder" if action_id == "create_reminder" else "Review: " + title,
+            source_key=f"vision-action:{file_id}:{action_id}",
+            workspace_id=NINA_WEB_WORKSPACE_ID,
+            due_date=due_date,
+            linked_files=[file_id],
+            metadata=metadata,
+            origin_channel="web", origin_user_id=contact["contact_id"],
+        )
+    else:
+        evidence = extraction.get("risks") if action_id == "find_risks" else extraction.get("important_facts")
+        response = (
+            "Pasaki, kurus materiālus vai tirgus kritērijus salīdzināt publiskajos avotos."
+            if action_id == "research_public_market"
+            else action["label"] + ": " + "; ".join(str(x)[:240] for x in (evidence or ())[:5])
+        )
+        save_channel_turn(NINA_WEB_WORKSPACE_ID, action["label"], response[:1600],
+                          conversation_id=contact["conversation_id"], channel="web")
+    return redirect(q("/nina"))
+
+
+@app.post("/nina/files/<file_id>/work")
+def nina_file_create_work(file_id):
+    """Legacy bulk endpoint is fail-closed; explicit action approval is required."""
+    return Response("explicit_document_action_required", status=400)
+
+
+@app.post("/nina/research/<session_id>/save")
+def nina_research_save(session_id):
+    if not _valid_channel_csrf("research:save:" + session_id):
+        return Response("research_csrf_invalid", status=403)
+    contact = current_web_contact()
+    from web_research import WebResearchError, save_search
+    try:
+        save_search(NINA_WEB_WORKSPACE_ID, contact["contact_id"], session_id)
+    except WebResearchError:
+        return Response("research_session_not_found", status=404)
+    return redirect(q("/nina"))
+
+
+def _timeline_datetime(value):
+    text = str(value or "").strip()
+    if not text:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _effective_timeline_timestamp(item):
+    metadata = item.get("safe_metadata") if isinstance(item.get("safe_metadata"), dict) else {}
+    for field in ("delivered_at", "sent_at", "created_at"):
+        value = item.get(field) or metadata.get(field)
+        if str(value or "").strip():
+            return _timeline_datetime(value)
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _canonical_conversation_timeline(messages, limit=30):
+    timeline = []
+    for index, source in enumerate(messages or ()):
+        item = dict(source or {})
+        timestamp = _effective_timeline_timestamp(item)
+        message_id = str(item.get("message_id") or f"timeline:{index:08d}")
+        item["message_id"] = message_id
+        item["effective_timestamp"] = timestamp.isoformat()
+        item["timeline_key"] = timestamp.isoformat() + "|" + message_id
+        timeline.append(item)
+    timeline.sort(key=lambda item: (item["effective_timestamp"], item["message_id"]))
+    return timeline[-max(1, min(int(limit or 30), 100)):]
+
+
+def _web_reminder_notifications(contact):
+    """Read recipient-bound Web reminders from canonical channel persistence."""
+    contact_id = str((contact or {}).get("contact_id") or "").strip()
+    if not contact_id:
+        return []
+    notifications = []
+    try:
+        messages = list_channel_messages(NINA_WEB_WORKSPACE_ID, limit=100)
+    except Exception:
+        # Readiness remains fail-closed for production schema compatibility;
+        # customer chat rendering itself must not disclose or raise DB details.
+        return []
+    for message in messages:
+        metadata = message.safe_metadata if isinstance(message.safe_metadata, dict) else {}
+        if (
+            message.direction != "OUTBOUND"
+            or message.channel_type != "WEB"
+            or message.delivery_status != "DELIVERED"
+            or message.contact_id != contact_id
+            or metadata.get("notification_type") != "reminder"
+        ):
+            continue
+        notifications.append({
+            "role": "nina",
+            "text": message.text_content,
+            "created_at": message.created_at,
+            "sent_at": metadata.get("sent_at") or "",
+            "delivered_at": metadata.get("delivered_at") or "",
+            "safe_metadata": metadata,
+            "message_id": message.message_id,
+        })
+    return _canonical_conversation_timeline(notifications, limit=100)
+
+
+@app.get("/nina/notifications")
+def nina_notifications():
+    contact = current_web_contact()
+    items = _canonical_conversation_timeline(
+        _web_reminder_notifications(contact), limit=100,
+    )
+    return jsonify({
+        "notifications": [
+            {"message_id": item["message_id"], "text": item["text"],
+             "effective_timestamp": item["effective_timestamp"],
+             "timeline_key": item["timeline_key"]}
+            for item in items
+        ],
+    })
+
 
 @app.route("/")
 def home():
@@ -4955,6 +9723,158 @@ def home():
 def dashboard():
     data = load_workspace_data()
     return Response(page(tx("dashboard"), dashboard_body(data), active="dashboard"), mimetype="text/html")
+
+
+@app.post("/approvals/decision")
+def approval_decision():
+    # The Dashboard renders its canonical Initiative/Reply queue for the
+    # server-configured ONE NINA workspace. Validate and persist the decision
+    # against that same server authority; never derive it from form input or a
+    # newly issued browser workspace cookie.
+    workspace_id = NINA_WEB_WORKSPACE_ID
+    initiative_id = str(request.form.get("initiative_id") or "").strip()
+    reply_id = str(request.form.get("reply_id") or "").strip()
+    requested = str(request.form.get("decision") or "").strip()
+    decision = "snoozed" if requested.startswith("snoozed_") else requested
+    csrf_action = f"approval:{requested}:{reply_id}"
+    if not _valid_channel_csrf(csrf_action):
+        return Response("approval_csrf_invalid", status=403)
+    try:
+        initiatives = initiative_queue(workspace_id, limit=100)
+        initiative = next(
+            (item for item in initiatives if item.initiative_id == initiative_id),
+            None,
+        )
+        if initiative is None:
+            raise ApprovalValidationError("approval_initiative_invalid_or_stale")
+        reply = next(
+            (
+                item for item in build_reply_queue((initiative,))
+                if item.reply_id == reply_id
+            ),
+            None,
+        )
+        if reply is None or reply.workspace_id != workspace_id:
+            raise ApprovalValidationError("approval_reply_invalid")
+        ensure_approval(
+            workspace_id, initiative.initiative_id, reply.reply_id,
+            initiative.work_object_id,
+        )
+        snoozed_until = ""
+        if requested == "snoozed_1h":
+            snoozed_until = snooze_one_hour()
+        elif requested == "snoozed_tomorrow":
+            snoozed_until = snooze_tomorrow()
+        elif decision not in {"approved", "dismissed"}:
+            raise ApprovalValidationError("approval_decision_invalid")
+        decide_approval(
+            workspace_id, initiative.initiative_id, reply.reply_id, decision,
+            decided_by=current_web_contact()["contact_id"],
+            decision_reason="dashboard_owner_decision",
+            snoozed_until=snoozed_until,
+        )
+        status = decision
+    except ApprovalError as exc:
+        status = str(exc)
+    return redirect(q("/dashboard") + "&approval_status=" + quote_plus(status))
+
+
+@app.post("/executions/run")
+def execution_run():
+    workspace_id = NINA_WEB_WORKSPACE_ID
+    approval_id = str(request.form.get("approval_id") or "").strip()
+    csrf_action = f"execution:run:{approval_id}"
+    if not _valid_channel_csrf(csrf_action):
+        return Response("execution_csrf_invalid", status=403)
+    try:
+        result = execute_approved(
+            workspace_id,
+            approval_id,
+            requested_by=current_web_contact()["contact_id"],
+        )
+        status = result.status
+    except ExecutionError as exc:
+        status = str(exc)
+    return redirect(q("/dashboard") + "&execution_status=" + quote_plus(status))
+
+
+@app.post("/settings/autonomy")
+def autonomy_mode_update():
+    if not _valid_channel_csrf("autonomy:mode"):
+        return Response("autonomy_csrf_invalid", status=403)
+    mode = str(request.form.get("mode") or "").strip().upper()
+    try:
+        if mode not in AUTONOMY_MODES:
+            raise AutonomyError("autonomy_mode_invalid")
+        profile = set_autonomy_mode(
+            NINA_WEB_WORKSPACE_ID, mode,
+            updated_by=current_web_contact()["contact_id"],
+        )
+        status = profile.mode
+    except AutonomyError as exc:
+        status = str(exc)
+    return redirect(q("/dashboard") + "&autonomy_status=" + quote_plus(status))
+
+
+@app.post("/settings/rolepack")
+def rolepack_update():
+    if not _valid_channel_csrf("rolepack:change"):
+        return Response("rolepack_csrf_invalid", status=403)
+    rolepack_id = str(
+        request.form.get("rolepack_id") or ""
+    ).strip()
+    try:
+        selection = set_workspace_rolepack(
+            NINA_WEB_WORKSPACE_ID, rolepack_id,
+            updated_by=current_web_contact()["contact_id"],
+        )
+        status = selection.rolepack_id
+    except RolePackError as exc:
+        status = str(exc)
+    return redirect(
+        q("/dashboard") + "&rolepack_status=" + quote_plus(status)
+    )
+
+
+@app.post("/settings/worker")
+def worker_update():
+    if not _valid_channel_csrf("worker:change"):
+        return Response("worker_csrf_invalid", status=403)
+    worker_id = str(request.form.get("worker_id") or "").strip()
+    try:
+        selection = set_workspace_worker(
+            NINA_WEB_WORKSPACE_ID, worker_id,
+            updated_by=current_web_contact()["contact_id"],
+        )
+        status = selection.worker_id
+    except WorkerCatalogError as exc:
+        status = str(exc)
+    return redirect(
+        q("/dashboard") + "&worker_status=" + quote_plus(status)
+    )
+
+
+@app.post("/reminders/<object_id>/done")
+def reminder_done(object_id):
+    action = f"reminder:done:{object_id}"
+    if not _valid_channel_csrf(action):
+        return Response("Forbidden", status=403)
+    contact = current_web_contact()
+    if not complete_reminder(object_id, contact["contact_id"]):
+        return Response("Not found", status=404)
+    return redirect(q("/dashboard"))
+
+
+@app.post("/reminders/<object_id>/snooze")
+def reminder_snooze(object_id):
+    action = f"reminder:snooze:{object_id}"
+    if not _valid_channel_csrf(action):
+        return Response("Forbidden", status=403)
+    contact = current_web_contact()
+    planned_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(timespec="seconds")
+    if not snooze_reminder(object_id, contact["contact_id"], planned_at):
+        return Response("Not found", status=404)
+    return redirect(q("/dashboard"))
 
 
 @app.route("/inbox", methods=["GET", "POST"])
@@ -5139,19 +10059,45 @@ def exchange():
 def diagnostics_telegram_sync():
     return telegram_bridge_db_diagnostics()
 
+
+@app.route("/live")
+def live():
+    return WEB_RUNTIME_READINESS.liveness(), 200
+
+
+@app.route("/ready")
+def ready():
+    if not WEB_RUNTIME_READINESS.ready:
+        try:
+            initialize_web_runtime()
+        except Exception:
+            # The readiness snapshot below reports the failed required check.
+            # Health probes must receive a 503 without crashing the worker.
+            pass
+    status = WEB_RUNTIME_READINESS.snapshot()
+    return status, 200 if status["ready"] else 503
+
+
 @app.route("/health")
 def health():
-    
+    from web_push import deliver_reminder_push, readiness_status
+    push_readiness = readiness_status(
+        service_worker_present=True,
+        adapter_present=callable(deliver_reminder_push),
+    )
     diag = telegram_bridge_db_diagnostics()
+    from file_intelligence import readiness_status as vision_readiness_status
     return {
         "ok": True,
         "runtime": "web_app.py",
+        "web_push": push_readiness,
+        "vision_document_intelligence": vision_readiness_status(),
         "version": WEB_APP_VERSION,
         "language": current_language(),
         "preview_objects": len(WORKSPACE_ACTION_PREVIEWS),
         "approved_preview_objects": len(approved_preview_items()),
         "approved_client_threads": len(approved_client_thread_items()),
-        "active_workspace_work_count": approved_workspace_work_count(),
+        "active_workspace_work_count": approved_workspace_object_count(),
         "pending_or_held_preview_objects": len(pending_or_held_preview_items()),
         "rejected_preview_objects": len(rejected_preview_items()),
         "telegram_intake_sync_items": len(load_existing_telegram_intake_sync()),
@@ -5173,5 +10119,6 @@ def health():
 
 
 if __name__ == "__main__":
+    initialize_web_runtime()
     port = safe_int(os.environ.get("PORT"), 8080)
     app.run(host="0.0.0.0", port=port)

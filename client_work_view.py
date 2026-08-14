@@ -11,6 +11,14 @@ V1.1:
 
 CLIENT_WORK_VIEW_VERSION = "Client Work View V1.1 + Sales Pipeline bridge"
 
+
+def canonical_client_work(tenant_id, client_id, limit=100):
+    """Client Work View projection from the canonical work table."""
+    from universal_work_objects import list_work_objects
+    return list_work_objects(
+        tenant_id, client_id=client_id, limit=limit, offset=0
+    )
+
 try:
     from sales_pipeline import (
         format_client_crm_view,

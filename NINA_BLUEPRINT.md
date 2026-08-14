@@ -1,167 +1,78 @@
+# NinaOS Platform Blueprint V6
 
-# NinaOS Blueprint 1.0
+Status labels describe repository evidence at Constitution V6 adoption.
+Existing partial functionality does not make a future platform-wide layer
+complete.
 
-## Vīzija
+## ONE NINA architecture
 
-NinaOS nav čatbots. Tā ir AI operētājsistēma, uz kuras darbojas AI darbinieki, uzņēmumu automatizācija un AI pakalpojumu tirgus.
+ONE NINA is the highest principle:
 
-Mērķis:
-izveidot infrastruktūru, kur cilvēks var uzticēt AI rutīnas darbus, bet uzņēmumi var būvēt savus AI darbiniekus uz NinaOS.
+`One customer relationship -> one Nina identity -> many governed workers, models, tools, channels, and future devices`
 
----
+The customer-facing identity is unified; the implementation remains modular,
+provider-neutral, tenant-isolated, and resilient. Infinite Workforce expands
+through RolePacks, Ready Worker definitions, and customer-owned Agent
+Assignments. It never bypasses permission, lifecycle, approval, cost, or audit.
 
-# Platformas slāņi
+Status vocabulary:
 
-## 1. Nina Core
-Universālais kodols:
-- Employee Brain
-- Think Engine
-- Learning Engine
-- Quality Engine
-- Initiative Engine
-- Reply Builder
-- Context Engine
-- Memory Intelligence
+- **Implemented** — code exists for the stated scope.
+- **Experimental** — limited learning or validation path exists.
+- **Planned** — agreed future delivery layer.
+- **Long-Term Vision** — strategic direction, not a current capability.
 
-## 2. Kopīgie servisi
-- Identity
-- Memory
-- Vision
-- Voice
-- Documents
-- Calendar
-- Email
-- Payments
-- Analytics
-- Security
-- API Gateway
+| Block | Status | Governing purpose |
+|---|---|---|
+| Platform Core V1 | Implemented | Capability graph, initialization, readiness |
+| RolePack System V1 | Implemented | Versioned jobs, boundaries, permissions |
+| Ready Worker Layer | Implemented | Reviewed versioned worker definitions |
+| Agent Assignment Layer | Implemented | Tenant-scoped customer worker instances and lifecycle |
+| Knowledge Vault V1 | Implemented | Tenant-owned versioned authorized knowledge items and basic search |
+| Universal Work Objects V1 | Implemented | One tenant-scoped canonical work registry, lifecycle, assignment, hierarchy, scheduling, and audit |
+| Channel Layer | Planned — next; limited channel implementations exist | Neutral channel contracts and coherent identity/work |
+| Billing | Planned | Entitlements, usage, budgets, charging |
+| Nina Exchange | Planned | Governed worker and service ecosystem |
+| Nina Experience Layer | Long-Term Vision; current surfaces implemented in limited scope | One Nina-centered customer experience |
+| Voice Layer | Long-Term Vision; current input experimental | Provider-neutral speech experience and controls |
+| AI Provider Hub | Long-Term Vision; OpenAI integration implemented in limited scope | Governed provider adapters and policy |
+| Model Router | Long-Term Vision | Quality/risk/privacy/cost-aware selection |
+| Model Evaluation | Long-Term Vision | Evidence-based model and route performance |
+| Nina Trust Layer | Long-Term Vision as consolidated layer; principles mandatory now | Identity, permission, transparency, approvals, safety |
+| Connector Layer | Long-Term Vision; channel adapters implemented in limited scope | Stable external-system contracts |
+| Human Approval | Long-Term Vision; isolated concepts implemented in limited scope | Policy and risk gates |
+| Audit | Long-Term Vision; existing logs/records implemented in limited scope | Customer- and operator-useful action history |
+| Device and Robot Layer | Long-Term Vision | Device identity, authorization, telemetry |
+| Fleet Orchestration | Long-Term Vision | Hierarchical assignment and fleet policy |
+| Global Control Plane | Long-Term Vision | Regional, resilient, tenant-safe coordination |
 
-## 3. AI darbinieki
+## Customer flow
 
-Katrs AI ir neatkarīgs darbinieks ar:
-- identitāti;
-- atmiņu;
-- specializāciju;
-- reputāciju;
-- darba vēsturi;
-- piekļuves tiesībām.
+`Customer objective -> Nina Experience -> Trust policy -> Agent Assignment -> worker/model/tool selection -> governed work -> validation -> outcome and audit`
 
-Piemēri:
-- Nina
-- Tāmētājs
-- Grāmatvedis
-- Jurists
-- Pārdošanas AI
-- Klientu atbalsts
-- CEO Assistant
-- Programmētājs
+The customer remains Nina-centered. Providers, channels, and devices attach as
+replaceable resources through stable contracts.
 
-## 4. Enterprise
+## Current implementation order
 
-AI automatizē:
-- e-pastus;
-- dokumentus;
-- grāmatvedību;
-- tāmēšanu;
-- CRM;
-- klientu komunikāciju;
-- uzdevumu plānošanu;
-- analīzi.
+1. Platform Core V1 — Implemented
+2. RolePack System V1 — Implemented
+3. Ready Worker Catalog V1 — Implemented
+4. Agent Assignment V1 — Implemented
+5. Knowledge Vault V1 — Implemented
+6. Universal Work Objects V1 — Implemented
+7. Channel Layer V1 — Planned, next platform layer
+8. Billing V1 — Planned
+9. Nina Exchange V1 — Planned
+10. Mobile and extended interfaces — Planned
 
-## 5. Nina Exchange
+Knowledge Vault V1 manages tenant-owned structured knowledge and version
+history only. Its search is keyword-based; binary ingestion, parsing,
+embeddings, semantic retrieval, RAG, and autonomous knowledge use remain
+Planned. The architecture ledger must record any future sequence change.
 
-AI tirgus, kur:
-- AI darbinieki piedāvā pakalpojumus;
-- uzņēmumi algo AI;
-- cilvēki pērk AI risinājumus;
-- izstrādātāji publicē jaunus AI moduļus.
-
----
-
-# Biznesa modelis
-
-## Ienākumu plūsmas
-
-1. Abonementi
-- Personīgais AI
-- Biznesa AI
-- Enterprise
-
-2. Komisijas
-- AI pakalpojumu darījumi
-- Freelancer AI
-- Uzņēmumu darījumi
-
-3. Marketplace
-- AI moduļi
-- Prompti
-- Automatizācijas
-- Zināšanu pakotnes
-
-4. API
-- Maksas API piekļuve
-- Partneru integrācijas
-
-5. Enterprise licences
-
-6. White-label NinaOS
-
-7. AI konsultācijas
-
-8. Premium atmiņa un datu glabāšana
-
----
-
-# Naudas plūsma
-
-Klients
-↓
-NinaOS
-↓
-AI darbinieks izpilda darbu
-↓
-Klients samaksā
-↓
-Nina Pay sadala:
-- AI īpašniekam
-- Platformas komisijai
-- Partneriem (ja ir)
-
----
-
-# Galvenie KPI
-
-- Aktīvie lietotāji
-- Aktīvie AI darbinieki
-- Uzņēmumu skaits
-- Mēneša darījumu apjoms (GMV)
-- Platformas komisiju ieņēmumi
-- MRR (abonementi)
-- AI uzdevumu skaits dienā
-- Klientu noturēšana
-- AI kvalitātes reitings
-
----
-
-# Arhitektūras noteikumi
-
-- Telegram ir tikai adapters.
-- Nina ir pirmais AI darbinieks.
-- Produkts ir NinaOS.
-- Visi AI izmanto kopīgo Core.
-- Biznesa loģika dzīvo moduļos, nevis app.py.
-- Pirms katras funkcijas nosaka atbildīgo moduli.
-- Dokumentācija ir tikpat svarīga kā kods.
-
----
-
-# Ceļš līdz platformai
-
-1. Stabils Nina Core
-2. Pilna Memory sistēma
-3. Enterprise automatizācija
-4. Nina Exchange
-5. Nina Pay
-6. API ekosistēma
-7. AI darbinieku ražotne
-8. Starptautiska platforma
+Universal Work Objects V1 extends the existing `nina_work_objects` registry;
+it does not introduce a competing task database. Its assignment reference is
+optional and tenant-bound to an active Agent Assignment. It manages work
+state, not autonomous worker execution. Specialized reminder and daily-goal
+stores remain bounded supporting domains, not alternative work truth.

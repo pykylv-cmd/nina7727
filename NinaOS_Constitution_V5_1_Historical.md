@@ -1,6 +1,15 @@
-# NinaOS Constitution V5
+# NinaOS Constitution V5.1
+
+> Historical constitution retained as a decision record. Superseded by
+> `NINAOS_CONSTITUTION_V5.md`.
 ## AI Workforce Operating System Constitution
 ### Fresh master constitution for GitHub + new chat handoff
+
+---
+
+## Version history
+
+- **V5.1** — Added the binding ChatGPT ↔ Codex artifact-first workflow constitution.
 
 ---
 
@@ -376,23 +385,182 @@ At the time of this constitution update, the official checkpoint is:
 
 ## Telegram
 - `app.py`
-- **V116.0 + Core 2.5.2 — Sprint B.2 Safe Reconnect**
+- Separate Telegram/Core runtime remains preserved; Client Bridge V1 does not import or start it from Web.
 
 ## Web
 - `web_app.py`
-- **V42 CLEAN MERGE — V40 Console + V41 Actions**
+- NinaOS Web/Admin with Contact Identity, canonical Work Objects, Company WhatsApp and **ONE NINA Client Bridge V1**.
 
 ## Railway structure
-- Telegram service → `python app.py`
-- Web service → `python web_app.py`
-- Postgres service → connected persistence layer
+- Staging project: `confident-expression`
+- Python Web/Core: `secure-rebirth` → `python web_app.py`
+- Company WhatsApp bridge: `happy-education` → Node bridge startup
+- PostgreSQL → shared persistent identity, channel auth and canonical work truth
+
+## Verified capabilities
+- **Company WhatsApp Persistent Session Restore:** production verified; an ordinary
+  `happy-education` restart restores stored Company credentials without a new QR.
+- **Contact Identity V1:** stable tenant-scoped channel identity, with raw provider
+  identifiers excluded from customer/admin surfaces.
+- **ONE NINA Client Bridge V1:** implemented and regression verified. A persistent
+  tenant-scoped Contact Identity mapping supplies a stable canonical `client_id`
+  to Company WhatsApp-created Work Objects. `nina_work_objects` remains the only
+  work truth; legacy `client_id` values are preserved without destructive rewrite.
+- Client Bridge production success still requires staging deployment and the
+  user-visible validation described by the operational deployment safety rule.
+
+## Persistence incident checkpoint
+- After the first Client Bridge staging deployment, Python-owned Contact Identity
+  and Company channel state became empty at the same Web restart. The governing
+  code defect was independent, fail-open backend selection in multiple modules:
+  missing `DATABASE_URL` or unavailable `psycopg2` silently selected ephemeral
+  `nina_memory.db`.
+- **PostgreSQL is mandatory in every hosted/Railway NinaOS Python runtime.**
+  Hosted startup must fail clearly when `DATABASE_URL` is missing, malformed or
+  unreachable, or when the PostgreSQL driver is unavailable.
+- SQLite is permitted only for explicit local development and test execution.
+  Hosted code must never create or use `nina_memory.db`.
+- Channel state, Company auth, Contact Identity, Client Identity mappings,
+  conversations and Work Objects must use the same shared persistence decision.
+- Admin System must expose only safe backend identity, reachability and row-count
+  diagnostics; database URLs, credentials and provider identities remain secret.
+- No empty SQLite data is to be copied into PostgreSQL. Existing PostgreSQL rows
+  and encrypted Company credentials must remain untouched.
+- **ONE NINA Client Bridge V1 remains pending staging validation** until persistent
+  contacts, Company connection state and linked Work Objects survive a complete
+  `secure-rebirth` restart on the selected PostgreSQL database.
 
 ## Current next target
-- **V43 — Form Save / Workspace Preview / DB Bridge**
+- **ONE NINA Verified Client Merge V1** — only verified evidence may merge multiple
+  channel contacts into one canonical client. No automatic name or phone matching.
 
 ---
 
-# 18. Final constitutional statement
+# 18. Railway architecture constitution (mandatory)
+
+The following service topology is the governing Railway architecture for the current NinaOS staging environment.
+
+## Railway scope
+
+- **Project:** `confident-expression`
+- **Environment:** `staging`
+
+These services are parts of one NinaOS project and one operating architecture. They must never be described as separate NinaOS projects.
+
+## Service: `secure-rebirth`
+
+`secure-rebirth` is the Python Web/Core service. It owns:
+
+- NinaOS Web UI;
+- Dashboard;
+- Admin;
+- authentication;
+- Contact Identity;
+- Work Objects and business logic;
+- internal backend APIs.
+
+Public Web URL:
+
+- `https://secure-rebirth-staging.up.railway.app`
+
+## Service: `happy-education`
+
+`happy-education` is the Node Company WhatsApp bridge. It owns:
+
+- Baileys transport;
+- QR pairing;
+- credential and key persistence transport;
+- reconnect and session restoration.
+
+It does **not** serve the NinaOS Web UI.
+
+## Mandatory diagnostic routing
+
+- Web, Admin and API problems must be investigated first in `secure-rebirth`.
+- Company WhatsApp socket, QR and reconnect problems must be investigated first in `happy-education`.
+- Before requesting logs or proposing a fix, always identify the Railway project, environment and service.
+- Never describe `secure-rebirth` and `happy-education` as separate NinaOS projects.
+- Never ask the operator to search unrelated Railway projects or services without repository or production evidence.
+- The operator is not responsible for programming-level diagnosis. Diagnostic requests must be minimized, specific and limited to the evidence needed.
+
+## Operational deployment safety
+
+- Before claiming **SAFE TO REDEPLOY**, state exactly which Railway services must deploy.
+- When a change touches both Python and Node, verify that both services are built from the same target commit.
+- Automated tests alone do not confirm production success.
+- Production success is confirmed only when the requested user-visible behavior works in the deployed environment.
+
+---
+
+# 19. ChatGPT ↔ Codex Workflow Constitution V1
+
+## 1. CODEX TASK FIRST RULE
+
+When the user requests:
+
+- a Codex task;
+- text for Codex;
+- “send to Codex”;
+- “prepare Codex work”;
+
+ChatGPT must immediately return one complete copy-paste-ready CODEX TASK.
+
+No explanations may appear before the task.
+
+## 2. ARTIFACT FIRST RULE
+
+When the user requests an artifact, the requested artifact must be provided first.
+
+Examples:
+
+- Codex request → complete CODEX TASK;
+- Python request → complete Python file;
+- SQL request → complete SQL script;
+- Constitution request → complete Constitution amendment.
+
+## 3. NO LOOP RULE
+
+ChatGPT must not repeat explanations when the user has already requested the same artifact.
+
+It must stop explaining and produce the requested artifact immediately.
+
+## 4. NINAOS CODEX WORKFLOW LOCK
+
+The mandatory NinaOS implementation workflow is:
+
+ChatGPT prepares a CODEX TASK
+→ User copies it into Codex
+→ Codex works directly in the repository
+→ Codex returns the result
+→ User sends the result back to ChatGPT
+→ ChatGPT prepares the next CODEX TASK
+
+ChatGPT must not replace this workflow with:
+
+- GitHub issue creation;
+- direct GitHub write attempts;
+- requests for files already available to Codex;
+- unrelated permission troubleshooting;
+
+unless the user explicitly requests another workflow.
+
+## 5. CONTEXT CONTINUITY RULE
+
+Before preparing the next NinaOS task, ChatGPT must preserve:
+
+- the current build phase;
+- the completed work;
+- the next planned step;
+- the governing NinaOS Constitution;
+- the active branch.
+
+## 6. VIOLATION RULE
+
+Failure to provide the requested artifact first is a workflow failure and must be corrected immediately without further explanation.
+
+---
+
+# 20. Final constitutional statement
 
 NinaOS is being built to become a serious AI business operating platform with real revenue, real workers, real work objects and real business utility.
 

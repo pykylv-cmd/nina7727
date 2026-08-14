@@ -14,6 +14,18 @@ piektdien jāpajautā Andrim par atbildi
 FOLLOWUP_ENGINE_VERSION = "Follow-up Engine V1.2"
 
 
+def create_canonical_followup(tenant_id, title, **values):
+    """Follow-up is a canonical Work Object type, never a second store."""
+    from universal_work_objects import create_work_object
+    return create_work_object(
+        tenant_id,
+        object_type="follow_up",
+        title=title,
+        source_type=values.pop("source_type", "nina"),
+        **values,
+    )
+
+
 def _clean(text):
     return (text or "").strip()
 
